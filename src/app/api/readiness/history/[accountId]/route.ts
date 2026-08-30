@@ -3,6 +3,7 @@ import {
   OperatorUnauthorizedError,
   requireOperatorId,
 } from "@/lib/auth/operator.server";
+import { createServerLogger } from "@/lib/observability/logger.server";
 import {
   ReadinessHistoryStoreUnavailableError,
   listReadinessAuditRuns,
@@ -20,6 +21,7 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ accountId: string }> },
 ) {
+  const log = createServerLogger("api.readiness.history");
   try {
     const [operatorId, { accountId }] = await Promise.all([
       requireOperatorId(),
@@ -64,7 +66,7 @@ export async function GET(
         { status: 503, headers: NO_STORE_HEADERS },
       );
     }
-    console.error("Readiness history load failed", error);
+    log.error("readiness.history_load.failed", { error, status: 400 });
     return Response.json(
       { error: "Readiness history could not be loaded." },
       { status: 400, headers: NO_STORE_HEADERS },

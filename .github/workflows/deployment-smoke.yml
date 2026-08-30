@@ -1,0 +1,55 @@
+name: Hosted deployment smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Exact deployed Git revision
+        required: true
+        type: string
+      stage:
+        description: Expected release stage
+        required: true
+        default: demo
+        type: choice
+        options:
+          - demo
+          - private_read
+          - live_write
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-smoke-staging
+  cancel-in-progress: false
+
+jobs:
+  deployment-smoke:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: staging
+      url: ${{ vars.MAINTAINFLOW_STAGING_ORIGIN }}
+    env:
+      MAINTAINFLOW_PROBE_ORIGIN: ${{ vars.MAINTAINFLOW_STAGING_ORIGIN }}
+      MAINTAINFLOW_EXPECTED_BUILD_SHA: ${{ inputs.revision }}
+      MAINTAINFLOW_EXPECTED_RELEASE_STAGE: ${{ inputs.stage }}
+    steps:
+      - name: Check out the exact repository state
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Probe exact revision and dependencies
+        run: npm run probe:deployment
+        env:
+          MAINTAINFLOW_READINESS_PROBE_SECRET: ${{ secrets.MAINTAINFLOW_STAGING_READINESS_PROBE_SECRET }}
+          CRON_SECRET: ${{ secrets.MAINTAINFLOW_STAGING_CRON_SECRET }}

@@ -185,6 +185,25 @@ describe("customer workspace onboarding", () => {
     expect(testState.bootstrapWorkspace).not.toHaveBeenCalled();
   });
 
+  it("does not expose unexpected workspace persistence errors", async () => {
+    testState.bootstrapWorkspace.mockRejectedValue(
+      new Error("duplicate key value violates internal_customer_constraint"),
+    );
+
+    const response = await POST(
+      request({
+        organizationName: "Northstar Agency",
+        organizationType: "agency",
+        adsApiKey: "ads_client_secret_123",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unable to create workspace safely.",
+    });
+  });
+
   it("does not let a non-bootstrap user claim the environment account", async () => {
     const response = await POST(
       request({

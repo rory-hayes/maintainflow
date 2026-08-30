@@ -43,6 +43,18 @@ describe("customer tenancy roles", () => {
     ).toBe("owner");
   });
 
+  it("prefers an effective writer over a stronger account role blocked by membership", () => {
+    expect(
+      selectBestAccountAccess([
+        access("analyst", "owner"),
+        access("admin", "manager"),
+      ]),
+    ).toMatchObject({
+      membershipRole: "admin",
+      accountRole: "manager",
+    });
+  });
+
   it("returns one strongest access record for every advertiser account", () => {
     const secondAccount = {
       ...access("owner", "manager"),

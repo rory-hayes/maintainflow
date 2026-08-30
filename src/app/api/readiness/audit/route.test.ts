@@ -78,6 +78,8 @@ function request(body: unknown, contentType = "application/json") {
 
 describe("readiness audit route", () => {
   beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
     auditStorefrontMock.mockReset();
     requireOperatorIdMock.mockReset();
     requireAccountAccessMock.mockReset();
@@ -221,6 +223,22 @@ describe("readiness audit route", () => {
         "The scan completed, but its account history could not be saved.",
     });
     expect(payload).not.toHaveProperty("historyEntry");
+  });
+
+  it("keeps unexpected network details out of the public response and logs", async () => {
+    const plantedSecret = "PLANTED_READINESS_SECRET_91a74";
+    auditStorefrontMock.mockRejectedValue(
+      new Error(`socket failure for https://${plantedSecret}.example`),
+    );
+
+    const response = await POST(request({ url: "https://shop.example/item" }));
+    const body = await response.text();
+    const logged = JSON.stringify(vi.mocked(console.warn).mock.calls);
+
+    expect(response.status).toBe(422);
+    expect(body).toContain("could not be audited safely");
+    expect(body).not.toContain(plantedSecret);
+    expect(logged).not.toContain(plantedSecret);
   });
 
   it("returns 429 without an outbound fetch when the shared quota is exhausted", async () => {

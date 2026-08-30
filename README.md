@@ -92,8 +92,9 @@ change and rollback, and requires approval before any external write.
   active account from desktop or mobile. Every read, approval, rollback, and
   reconciliation resolves that account independently.
 - Every live request is written to the approval store with its evidence and
-  rollback payload before the Ads API is contacted. Ambiguous network outcomes
-  are marked for manual reconciliation and must not be retried automatically.
+  rollback payload before the Ads API is contacted. Network failures, timeouts,
+  HTTP 408, and 5xx outcomes are marked for manual reconciliation and must not
+  be retried automatically.
 - Live recommendation dismissals require a reason and persist the account,
   operator, organization roles, full recommendation snapshot, and a stable
   fingerprint of the exact proposed change. Dismissals can be restored, and a
@@ -115,6 +116,10 @@ change and rollback, and requires approval before any external write.
   `MAINTAINFLOW_READINESS_PROBE_SECRET`-protected `/api/ready` separately fails
   closed on missing revision provenance, migration drift, or required storage.
   Neither endpoint contacts OpenAI.
+- Server operations emit allowlisted one-line JSON events that exclude raw error
+  messages, stacks, customer identifiers, URLs, payloads, and secrets. A manual
+  hosted-smoke workflow proves the exact revision, readiness authentication,
+  complete dependency checks, and one protected maintenance run.
 
 The account-free demo, first read-only pilot, and controlled live-write release
 are separated by explicit deployment gates documented in
@@ -128,7 +133,8 @@ npm run dev
 ```
 
 Open `http://localhost:3000` for the public site or
-`http://localhost:3000/app` for the product.
+`http://localhost:3000/app?tab=review` for the product, or
+`http://localhost:3000/app?tab=readiness` for the no-key commerce audit.
 
 ## Verification
 
@@ -194,5 +200,8 @@ The advertiser/agency access model is documented in
 [`docs/customer-tenancy.md`](docs/customer-tenancy.md).
 The post-approval lifecycle is documented in
 [`docs/monitoring-lifecycle.md`](docs/monitoring-lifecycle.md).
+The secret-safe event contract, exact-revision smoke probe, alert policy, and
+incident containment sequence are documented in
+[`docs/production-operations.md`](docs/production-operations.md).
 The account-side conversion checks are documented in
 [`docs/conversion-measurement-readiness.md`](docs/conversion-measurement-readiness.md).

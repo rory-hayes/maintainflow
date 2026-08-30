@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { BarChart3, Check, ShieldCheck, Sparkles } from "lucide-react";
 import { MaintainFlowBrand } from "@/components/maintainflow/brand";
+import { buildAppHref } from "@/lib/app-navigation";
 
 const HomePage = () => {
   useEffect(() => {
@@ -48,13 +49,15 @@ const HomePage = () => {
           </p>
           <div className="mt-8 flex w-full flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild>
-              <Link href="/app">
+              <Link href={buildAppHref({ tab: "readiness" })}>
                 <Sparkles data-icon="inline-start" />
-                Open interactive demo
+                Audit your store · no Ads key
               </Link>
             </Button>
             <Button asChild variant="outline">
-              <Link href="#workflow">See how it works</Link>
+              <Link href={buildAppHref({ tab: "review" })}>
+                Open interactive demo
+              </Link>
             </Button>
           </div>
         </div>

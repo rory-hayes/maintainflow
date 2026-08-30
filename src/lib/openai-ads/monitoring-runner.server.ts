@@ -8,6 +8,7 @@ import {
   recordMonitoringOutcome,
   releaseMonitoringClaim,
 } from "../audit/approval-store.server";
+import { createServerLogger } from "../observability/logger.server";
 import { getAdsApiKeyForAccount } from "../tenancy/store.server";
 import type { AdsApiCredential } from "./client.server";
 import { evaluateLiveMonitoringWindow } from "./monitoring.server";
@@ -18,6 +19,7 @@ export async function evaluateDueMonitoringWindows(options: {
   now?: Date;
   limit?: number;
 }) {
+  const log = createServerLogger("monitoring.runner");
   const now = options.now ?? new Date();
   const claimId = randomUUID();
   const dueRecords = await claimDueMonitoringRecords({
@@ -58,9 +60,7 @@ export async function evaluateDueMonitoringWindows(options: {
           });
           return recorded ? ("evaluated" as const) : ("unchanged" as const);
         } catch (error) {
-          console.error("Monitoring evaluation failed", {
-            name: error instanceof Error ? error.name : "UnknownError",
-          });
+          log.error("monitoring.evaluation.failed", { error });
           try {
             const released = await releaseMonitoringClaim({
               id: record.id,
@@ -68,16 +68,11 @@ export async function evaluateDueMonitoringWindows(options: {
               claimId,
             });
             if (!released) {
-              console.error(
-                "Monitoring evaluation claim release was not confirmed",
-              );
+              log.warn("monitoring.claim_release.unconfirmed");
             }
           } catch (releaseError) {
-            console.error("Monitoring evaluation claim release failed", {
-              name:
-                releaseError instanceof Error
-                  ? releaseError.name
-                  : "UnknownError",
+            log.error("monitoring.claim_release.failed", {
+              error: releaseError,
             });
           }
           return "failed" as const;
@@ -98,6 +93,7 @@ export async function evaluateScheduledMonitoringWindows(options: {
   maxAccounts?: number;
   windowsPerAccount?: number;
 } = {}) {
+  const log = createServerLogger("monitoring.runner");
   const now = options.now ?? new Date();
   const maxAccounts = Math.max(
     1,
@@ -134,9 +130,7 @@ export async function evaluateScheduledMonitoringWindows(options: {
           });
           return { ok: true as const, result };
         } catch (error) {
-          console.error("Scheduled monitoring account evaluation failed", {
-            name: error instanceof Error ? error.name : "UnknownError",
-          });
+          log.error("monitoring.account_evaluation.failed", { error });
           return { ok: false as const };
         }
       }),

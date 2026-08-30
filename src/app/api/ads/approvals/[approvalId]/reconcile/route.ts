@@ -17,6 +17,7 @@ import {
   readJsonBodyWithLimit,
   RequestBodyTooLargeError,
 } from "@/lib/http/request-security.server";
+import { createServerLogger } from "@/lib/observability/logger.server";
 import {
   AccountAccessForbiddenError,
   requireAccountAccess,
@@ -34,6 +35,7 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ approvalId: string }> },
 ) {
+  const log = createServerLogger("api.ads.reconcile");
   try {
     if (!isSecureSameOriginRequest(request)) {
       return Response.json(
@@ -62,6 +64,7 @@ export async function POST(
       note: body.note,
       access,
     });
+    log.info("ads.reconcile.completed");
     return Response.json({
       reconciled: true,
       status: record.status,
@@ -78,6 +81,7 @@ export async function POST(
       return Response.json({ error: error.message }, { status: 401 });
     }
     if (error instanceof AccountAccessForbiddenError) {
+      log.warn("ads.reconcile.failed", { error, status: 403 });
       return Response.json({ error: error.message }, { status: 403 });
     }
     if (error instanceof ApprovalTransitionError) {
@@ -94,10 +98,13 @@ export async function POST(
       error instanceof ApprovalStoreUnavailableError ||
       error instanceof TenancyStoreUnavailableError
     ) {
+      log.error("ads.reconcile.unavailable", { error, status: 503 });
       return Response.json({ error: error.message }, { status: 503 });
     }
-    const message =
-      error instanceof Error ? error.message : "Unable to reconcile approval.";
-    return Response.json({ error: message }, { status: 400 });
+    log.error("ads.reconcile.failed", { error, status: 400 });
+    return Response.json(
+      { error: "Unable to reconcile approval safely." },
+      { status: 400 },
+    );
   }
 }

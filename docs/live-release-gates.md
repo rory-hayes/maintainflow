@@ -113,16 +113,17 @@ Each record stores:
   rolled-back, rollback-failed, or rollback-reconciliation-required status;
 - provider response or error and relevant timestamps.
 
-The pending record is inserted before the OpenAI Ads request. If the provider
-returns an HTTP error, the record is failed. If the request times out or loses
-its connection, the record is marked `reconciliation_required`: the operation
-must not be retried automatically because the provider may already have applied
-it.
+The pending record is inserted before the OpenAI Ads request. A definitive HTTP
+4xx rejection is failed. A network error, lost connection, timeout, HTTP 408,
+or 5xx response is marked `reconciliation_required`: the operation must not be
+retried automatically because the provider or an intermediary may have returned
+an uncertain response after the change was applied.
 
 An applied record can be rolled back only after an authorized operator confirms
 the stored request in the product. The record is atomically claimed before the
-rollback is sent, so two operators cannot send it concurrently. HTTP failures
-remain eligible for a deliberate retry; a timeout or lost connection becomes
+rollback is sent, so two operators cannot send it concurrently. A definitive
+4xx rollback rejection remains eligible for a deliberate retry. A timeout,
+lost connection, HTTP 408, or 5xx response becomes
 `rollback_reconciliation_required` and must not be retried automatically.
 
 For uncertain apply or rollback outcomes, an operator first verifies the live
@@ -212,6 +213,9 @@ Clerk tenant must also disable unrestricted hosted sign-up; that external
 setting is verified separately from this application gate.
 
 ## Still required before public production
+
+Use [`production-operations.md`](production-operations.md) for the exact-revision
+hosted smoke, alert, containment, and recovery procedure.
 
 - Configure Clerk and apply the database migration in a non-production test
   environment.

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
 const state = vi.hoisted(() => {
   class OperatorAuthUnavailableError extends Error {}
   class OperatorUnauthorizedError extends Error {}

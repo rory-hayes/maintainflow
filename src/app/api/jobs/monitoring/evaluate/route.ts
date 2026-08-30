@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 
 import { verifyApprovalStore } from "@/lib/audit/approval-store.server";
+import { createServerLogger } from "@/lib/observability/logger.server";
 import { evaluateScheduledMonitoringWindows } from "@/lib/openai-ads/monitoring-runner.server";
 import {
   pruneExpiredLiveSyncSnapshots,
@@ -39,8 +40,11 @@ function hasAuthorizedCronHeader(request: Request, secret: string) {
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
+  const log = createServerLogger("api.monitoring.cron");
   const secret = process.env.CRON_SECRET;
   if (!secret || secret.length < 32) {
+    log.error("monitoring.run.unconfigured", { status: 503 });
     return Response.json(
       { ok: false, error: "Scheduled monitoring is not configured." },
       { status: 503, headers: { "Cache-Control": "no-store" } },
@@ -72,8 +76,8 @@ export async function GET(request: Request) {
       } else {
         summary = await evaluateScheduledMonitoringWindows();
       }
-    } catch {
-      console.error("Scheduled monitoring evaluation unavailable");
+    } catch (error) {
+      log.error("monitoring.evaluation.unavailable", { error });
       monitoringUnavailable = true;
     }
 
@@ -86,14 +90,14 @@ export async function GET(request: Request) {
           RATE_LIMIT_CLEANUP_LIMIT,
         );
         maintenanceBacklog ||= pruned === RATE_LIMIT_CLEANUP_LIMIT;
-      } catch {
-        console.error("Readiness rate-limit cleanup failed");
+      } catch (error) {
+        log.error("monitoring.readiness_cleanup.failed", { error });
         maintenanceFailed = true;
       }
     }
     const liveSyncStoreReady = await verifyLiveSyncStore().catch(() => false);
     if (!liveSyncStoreReady) {
-      console.error("Live snapshot storage is not ready for cleanup");
+      log.error("monitoring.snapshot_cleanup.unavailable");
       maintenanceFailed = true;
     } else {
       try {
@@ -103,8 +107,8 @@ export async function GET(request: Request) {
           limit: LIVE_SNAPSHOT_CLEANUP_LIMIT,
         });
         maintenanceBacklog ||= pruned === LIVE_SNAPSHOT_CLEANUP_LIMIT;
-      } catch {
-        console.error("Live snapshot cleanup failed");
+      } catch (error) {
+        log.error("monitoring.snapshot_cleanup.failed", { error });
         maintenanceFailed = true;
       }
     }
@@ -114,16 +118,20 @@ export async function GET(request: Request) {
       summary.failed > 0 ||
       maintenanceFailed ||
       maintenanceBacklog;
-    if (hasFailures) {
-      console.error("Scheduled monitoring completed with failures", {
+    const logFields = {
+      status: hasFailures ? 503 : 200,
+      durationMs: Date.now() - startedAt,
+      counts: {
         accountsSelected: summary.accountsSelected,
         accountsProcessed: summary.accountsProcessed,
         accountsFailed: summary.accountsFailed,
         due: summary.due,
         evaluated: summary.evaluated,
         failed: summary.failed,
-      });
-    }
+      },
+    };
+    if (hasFailures) log.error("monitoring.run.completed_with_failures", logFields);
+    else log.info("monitoring.run.completed", logFields);
     return Response.json(
       {
         ok: !hasFailures,
@@ -140,8 +148,12 @@ export async function GET(request: Request) {
         },
       },
     );
-  } catch {
-    console.error("Scheduled monitoring run failed");
+  } catch (error) {
+    log.error("monitoring.run.failed", {
+      error,
+      status: 500,
+      durationMs: Date.now() - startedAt,
+    });
     return Response.json(
       { ok: false, error: "Scheduled monitoring could not complete." },
       { status: 500, headers: { "Cache-Control": "no-store" } },

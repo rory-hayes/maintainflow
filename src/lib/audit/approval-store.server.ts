@@ -13,6 +13,7 @@ import {
   type MonitoringOutcome,
 } from "../openai-ads/monitoring";
 import type { AccountAccess } from "../tenancy/schema";
+import { lockCurrentAccountWriteAccess } from "../tenancy/store.server";
 import { recommendationFingerprint } from "./recommendation-decision";
 import {
   approvalRecordSchema,
@@ -569,6 +570,14 @@ export async function reconcileApprovalRecord(options: {
 }) {
   const sql = getDatabase();
   return sql.begin(async (transaction) => {
+    const authorized = await lockCurrentAccountWriteAccess({
+      transaction,
+      operatorId: options.operatorId,
+      accountId: options.accountId,
+      access: options.access,
+      forbiddenMessage:
+        "Write access changed while this approval was being reconciled. Refresh before trying again.",
+    });
     const rows = await transaction<ApprovalRow[]>`
       select ${transaction(approvalColumns)} from ads_approval_records
       where id = ${options.id} and account_id = ${options.accountId}
@@ -582,9 +591,9 @@ export async function reconcileApprovalRecord(options: {
     const updated = await transaction<ApprovalRow[]>`
       update ads_approval_records set
         status = ${nextStatus}, reconciled_by = ${options.operatorId},
-        reconciled_organization_id = ${options.access.organizationId},
-        reconciled_membership_role = ${options.access.membershipRole},
-        reconciled_account_role = ${options.access.accountRole},
+        reconciled_organization_id = ${authorized.access.organizationId},
+        reconciled_membership_role = ${authorized.access.membershipRole},
+        reconciled_account_role = ${authorized.access.accountRole},
         reconciled_at = now(), reconciliation_note = ${options.note},
         monitoring_started_at = case
           when ${nextStatus} = 'applied' and monitoring_plan is not null

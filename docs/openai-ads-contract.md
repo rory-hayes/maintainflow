@@ -176,7 +176,9 @@ CRON_SECRET=<server-only scheduled monitoring bearer secret>
 
 `OPENAI_ADS_DATA_MODE=live` first verifies the account, campaigns, ad groups,
 ads, delivery insights, and click-attributed conversions. If that sync fails,
-the UI returns to clearly labelled demo data and disables writes. The final
+the connected workspace shows no live metrics or recommendations, retains its
+account identity for credential recovery, and disables writes; it never
+substitutes demo fixtures under a real advertiser name. The final
 write flag only applies to recommendations generated from live resource IDs and
 is not sufficient by itself. MaintainFlow also requires an authenticated
 operator with database-backed organization/account access and verified approval
@@ -186,8 +188,9 @@ never be sent to the Ads API.
 
 Before a live request, MaintainFlow stores the exact request, rollback payload,
 evidence, safeguard, account, operator, and recommendation in PostgreSQL. An HTTP
-error is recorded as failed; a network error or timeout is marked
-`reconciliation_required` because the external outcome may be ambiguous.
+4xx rejection is recorded as failed. A network error, timeout, HTTP 408, or 5xx
+response is marked `reconciliation_required` because the provider may have
+committed the non-idempotent request before the response became uncertain.
 Applied records retain an exact account-scoped rollback request. The rollback is
 claimed atomically before it is sent; uncertain rollback outcomes are marked
 `rollback_reconciliation_required`, and an operator must verify Ads Manager and

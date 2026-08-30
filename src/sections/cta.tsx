@@ -2,6 +2,7 @@ import Image from "next/image";
 
 import ctaImage from "@/assets/images/cta-img.png";
 import { Button } from "@/components/ui/button";
+import { buildAppHref } from "@/lib/app-navigation";
 import Link from "next/link";
 
 const Cta = () => {
@@ -19,7 +20,9 @@ const Cta = () => {
 
           <div className=" w-full flex flex-col gap-4 mt-12">
             <Button asChild className=" w-full" variant="secondary">
-              <Link href="/app">Open the interactive demo</Link>
+              <Link href={buildAppHref({ tab: "review" })}>
+                Open the interactive demo
+              </Link>
             </Button>
             <Button className=" w-full" variant="transparent" disabled>
               Human approval built in

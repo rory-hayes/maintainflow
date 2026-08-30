@@ -16,6 +16,7 @@ import {
   RequestBodyTooLargeError,
 } from "@/lib/http/request-security.server";
 import { fetchLiveAdAccount } from "@/lib/openai-ads/data.server";
+import { createServerLogger } from "@/lib/observability/logger.server";
 import {
   AccountAccessForbiddenError,
   rotateAdsApiCredential,
@@ -39,6 +40,7 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ accountId: string }> },
 ) {
+  const log = createServerLogger("api.connection.ads");
   try {
     if (!isSecureSameOriginRequest(request)) {
       return Response.json(
@@ -81,6 +83,7 @@ export async function POST(
       credential,
       verifiedAt: new Date(),
     });
+    log.info("connection.ads.rotated");
 
     return Response.json({
       rotated: true,
@@ -105,6 +108,9 @@ export async function POST(
       error instanceof SyntaxError ||
       error instanceof CredentialAccountMismatchError
     ) {
+      if (error instanceof CredentialAccountMismatchError) {
+        log.warn("connection.ads.account_mismatch", { error });
+      }
       return Response.json(
         {
           error:
@@ -120,8 +126,10 @@ export async function POST(
       error instanceof TenancyStoreUnavailableError ||
       error instanceof CredentialVaultUnavailableError
     ) {
+      log.error("connection.ads.unavailable", { error });
       return Response.json({ error: error.message }, { status: 503 });
     }
+    log.error("connection.ads.failed", { error });
     return Response.json(
       { error: "The client account key could not be replaced." },
       { status: 400 },

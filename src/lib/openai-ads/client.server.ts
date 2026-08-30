@@ -33,6 +33,8 @@ import {
   type AccountAccess,
 } from "../tenancy/schema";
 import { withAuthorizedAdsWriteFence } from "../tenancy/store.server";
+import { resolveReleaseStage } from "../release/stage";
+import { createServerLogger } from "../observability/logger.server";
 
 const OPENAI_ADS_BASE_URL = "https://api.ads.openai.com/v1";
 const ADS_READ_TIMEOUT_MS = 15_000;
@@ -76,7 +78,7 @@ export function getAdsRuntimeMode(
   const hasKey = options.hasAccountKey ?? Boolean(process.env.OPENAI_ADS_API_KEY);
   const liveDataRequested = process.env.OPENAI_ADS_DATA_MODE === "live";
   const liveWritesRequested = process.env.OPENAI_ADS_LIVE_WRITES_ENABLED === "true";
-  const releaseStage = process.env.MAINTAINFLOW_RELEASE_STAGE;
+  const releaseStage = resolveReleaseStage();
   const liveWriteStage = releaseStage === "live_write";
   const liveReadStage = releaseStage === "private_read" || liveWriteStage;
   const dataSource =
@@ -217,6 +219,10 @@ export class AdsMutationRejectedError extends Error {
     this.approvalId = approvalId;
     this.providerStatus = providerStatus;
   }
+}
+
+function isAmbiguousMutationStatus(status: number) {
+  return status === 408 || status >= 500;
 }
 
 function parseRetryAfterMs(
@@ -591,6 +597,7 @@ export async function applyAdsMutation(
     credentialGeneration?: string;
   },
 ) {
+  const log = createServerLogger("api.ads.apply");
   const body = validateAdsMutation(recommendation.mutation);
   const runtime = getAdsRuntimeMode({
     hasAccountKey: hasAdsCredential(options.credential),
@@ -681,6 +688,7 @@ export async function applyAdsMutation(
     } catch {
       persistenceWarning = true;
     }
+    log.error("ads.apply.reconciliation_required", { error });
     throw new AdsMutationReconciliationRequiredError(
       approvalId,
       "apply",
@@ -691,11 +699,33 @@ export async function applyAdsMutation(
 
   const payload = await response.json().catch(() => null);
 
+  if (!response.ok && isAmbiguousMutationStatus(response.status)) {
+    let persistenceWarning = false;
+    try {
+      await updateApprovalRecord(approvalId, "reconciliation_required", {
+        response: payload,
+        error: `OpenAI Ads API returned an uncertain HTTP ${response.status} mutation outcome.`,
+      });
+    } catch {
+      persistenceWarning = true;
+    }
+    log.error("ads.apply.reconciliation_required", {
+      status: response.status,
+    });
+    throw new AdsMutationReconciliationRequiredError(
+      approvalId,
+      "apply",
+      `The Ads API returned an uncertain HTTP ${response.status} outcome. Approval ${approvalId} requires manual reconciliation and must not be retried automatically.`,
+      { persistenceWarning },
+    );
+  }
+
   if (!response.ok) {
     await updateApprovalRecord(approvalId, "failed", {
       response: payload,
       error: `OpenAI Ads API returned HTTP ${response.status}.`,
     });
+    log.warn("ads.apply.rejected", { status: response.status });
     throw new AdsMutationRejectedError(approvalId, response.status);
   }
 
@@ -709,6 +739,9 @@ export async function applyAdsMutation(
     } catch {
       persistenceWarning = true;
     }
+    log.error("ads.apply.reconciliation_required", {
+      status: response.status,
+    });
     throw new AdsMutationReconciliationRequiredError(
       approvalId,
       "apply",
@@ -738,6 +771,7 @@ export async function applyAdsMutation(
     } catch {
       persistenceWarning = true;
     }
+    log.error("ads.apply.reconciliation_required", { error });
     throw new AdsMutationReconciliationRequiredError(
       approvalId,
       "apply",
@@ -751,6 +785,7 @@ export async function applyAdsMutation(
       response: confirmation,
     });
   } catch {
+    log.error("ads.apply.audit_persistence_failed");
     return {
       mode: "live" as const,
       applied: true,
@@ -763,6 +798,7 @@ export async function applyAdsMutation(
     };
   }
 
+  log.info("ads.apply.completed");
   return {
     mode: "live" as const,
     applied: true,
@@ -781,6 +817,7 @@ export async function applyStoredRollback(options: {
   credential?: AdsApiCredential;
   credentialGeneration?: string;
 }) {
+  const log = createServerLogger("api.ads.rollback");
   const runtime = getAdsRuntimeMode({
     hasAccountKey: hasAdsCredential(options.credential),
   });
@@ -841,6 +878,7 @@ export async function applyStoredRollback(options: {
           ? error.message
           : "The stored rollback request is invalid.",
     });
+    log.warn("ads.rollback.invalid_stored_request", { error });
     throw error;
   }
 
@@ -867,6 +905,7 @@ export async function applyStoredRollback(options: {
     } catch {
       persistenceWarning = true;
     }
+    log.error("ads.rollback.reconciliation_required", { error });
     throw new AdsMutationReconciliationRequiredError(
       approval.id,
       "rollback",
@@ -876,11 +915,37 @@ export async function applyStoredRollback(options: {
   }
 
   const payload = await response.json().catch(() => null);
+  if (!response.ok && isAmbiguousMutationStatus(response.status)) {
+    let persistenceWarning = false;
+    try {
+      await updateRollbackRecord(
+        approval.id,
+        "rollback_reconciliation_required",
+        {
+          response: payload,
+          error: `OpenAI Ads API returned an uncertain HTTP ${response.status} rollback outcome.`,
+        },
+      );
+    } catch {
+      persistenceWarning = true;
+    }
+    log.error("ads.rollback.reconciliation_required", {
+      status: response.status,
+    });
+    throw new AdsMutationReconciliationRequiredError(
+      approval.id,
+      "rollback",
+      `The Ads API returned an uncertain HTTP ${response.status} rollback outcome. Approval ${approval.id} requires manual reconciliation and must not be retried automatically.`,
+      { persistenceWarning },
+    );
+  }
+
   if (!response.ok) {
     await updateRollbackRecord(approval.id, "rollback_failed", {
       response: payload,
       error: `OpenAI Ads API returned HTTP ${response.status}.`,
     });
+    log.warn("ads.rollback.rejected", { status: response.status });
     throw new AdsMutationRejectedError(approval.id, response.status);
   }
 
@@ -898,6 +963,9 @@ export async function applyStoredRollback(options: {
     } catch {
       persistenceWarning = true;
     }
+    log.error("ads.rollback.reconciliation_required", {
+      status: response.status,
+    });
     throw new AdsMutationReconciliationRequiredError(
       approval.id,
       "rollback",
@@ -931,6 +999,7 @@ export async function applyStoredRollback(options: {
     } catch {
       persistenceWarning = true;
     }
+    log.error("ads.rollback.reconciliation_required", { error });
     throw new AdsMutationReconciliationRequiredError(
       approval.id,
       "rollback",
@@ -944,6 +1013,7 @@ export async function applyStoredRollback(options: {
       response: confirmation,
     });
   } catch {
+    log.error("ads.rollback.audit_persistence_failed");
     return {
       mode: "live" as const,
       applied: true,
@@ -956,6 +1026,7 @@ export async function applyStoredRollback(options: {
     };
   }
 
+  log.info("ads.rollback.completed");
   return {
     mode: "live" as const,
     applied: true,

@@ -54,6 +54,8 @@ function request(authorization?: string) {
 
 describe("scheduled monitoring route", () => {
   beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
     process.env.CRON_SECRET = "cron-secret-at-least-32-characters";
     verifyApprovalStoreMock.mockReset();
     verifyCredentialStoreMock.mockReset();
@@ -83,6 +85,7 @@ describe("scheduled monitoring route", () => {
   afterEach(() => {
     if (originalSecret === undefined) delete process.env.CRON_SECRET;
     else process.env.CRON_SECRET = originalSecret;
+    vi.restoreAllMocks();
   });
 
   it("rejects missing or incorrect bearer authorization before any database read", async () => {
@@ -124,6 +127,14 @@ describe("scheduled monitoring route", () => {
       retentionMs: 86_400_000,
       limit: 5_000,
     });
+    expect(console.info).toHaveBeenCalledOnce();
+    expect(
+      JSON.parse(String(vi.mocked(console.info).mock.calls[0][0])),
+    ).toMatchObject({
+      event: "monitoring.run.completed",
+      status: 200,
+      counts: { accountsProcessed: 2, evaluated: 3 },
+    });
   });
 
   it("surfaces partial account failures to the scheduler without discarding successful work", async () => {
@@ -145,6 +156,14 @@ describe("scheduled monitoring route", () => {
       ok: false,
       accountsFailed: 1,
       evaluated: 1,
+    });
+    const log = JSON.parse(
+      String(vi.mocked(console.error).mock.calls.at(-1)?.[0]),
+    );
+    expect(log).toMatchObject({
+      event: "monitoring.run.completed_with_failures",
+      status: 503,
+      counts: { accountsFailed: 1, evaluated: 1 },
     });
   });
 

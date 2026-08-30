@@ -51,8 +51,19 @@ const testState = vi.hoisted(() => {
     rotateConversionsApiCredential: vi.fn(),
     isSecureSameOriginRequest: vi.fn(),
     readJsonBodyWithLimit: vi.fn(),
+    logInfo: vi.fn(),
+    logWarn: vi.fn(),
+    logError: vi.fn(),
   };
 });
+
+vi.mock("@/lib/observability/logger.server", () => ({
+  createServerLogger: () => ({
+    info: testState.logInfo,
+    warn: testState.logWarn,
+    error: testState.logError,
+  }),
+}));
 
 vi.mock("@/lib/auth/operator.server", () => ({
   OperatorAuthUnavailableError: testState.OperatorAuthUnavailableError,
@@ -214,6 +225,9 @@ describe("per-account conversion credential connection", () => {
     expect(JSON.stringify(payload)).not.toContain("pixel_private_123");
     expect(JSON.stringify(payload)).not.toContain("capi_private_secret_456");
     expect(JSON.stringify(payload)).not.toContain("private_event_id");
+    expect(testState.logInfo).toHaveBeenCalledWith(
+      "connection.conversions.rotated",
+    );
   });
 
   it("rejects insecure requests before reading credentials", async () => {
@@ -280,6 +294,10 @@ describe("per-account conversion credential connection", () => {
     });
     expect(testState.encryptConversionsApiCredential).not.toHaveBeenCalled();
     expect(testState.rotateConversionsApiCredential).not.toHaveBeenCalled();
+    expect(testState.logWarn).toHaveBeenCalledWith(
+      "connection.conversions.provider_rejected",
+      { error: expect.any(Error), status: 401 },
+    );
   });
 
   it("does not store a locally invalid dry-run payload", async () => {
@@ -315,6 +333,10 @@ describe("per-account conversion credential connection", () => {
     expect(response.status).toBe(502);
     expect(testState.encryptConversionsApiCredential).not.toHaveBeenCalled();
     expect(testState.rotateConversionsApiCredential).not.toHaveBeenCalled();
+    expect(testState.logError).toHaveBeenCalledWith(
+      "connection.conversions.transport_unconfirmed",
+      { error: expect.any(Error) },
+    );
   });
 
   it("rejects an oversized request before account access or provider validation", async () => {

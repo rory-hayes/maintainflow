@@ -143,8 +143,9 @@ export async function POST(request: Request) {
     ) {
       return Response.json({ error: error.message }, { status: 503 });
     }
-    const message =
-      error instanceof Error ? error.message : "Unable to create workspace.";
-    return Response.json({ error: message }, { status: 400 });
+    return Response.json(
+      { error: "Unable to create workspace safely." },
+      { status: 400 },
+    );
   }
 }

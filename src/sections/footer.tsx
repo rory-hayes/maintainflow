@@ -6,6 +6,7 @@ import Link from "next/link";
 import { MaintainFlowBrand } from "@/components/maintainflow/brand";
 import NavLink from "@/components/common/nav-link";
 import { Separator } from "@/components/ui/separator";
+import { buildAppHref } from "@/lib/app-navigation";
 import { ArrowRight } from "lucide-react";
 
 import one from "@/assets/images/1.png";
@@ -46,22 +47,30 @@ const Footer = () => {
               <div className=" inline-flex items-center gap-2 w-[200px] group">
                 <ArrowRight className=" group-hover:text-primary" />
 
-                <NavLink link="/app">Interactive demo</NavLink>
+                <NavLink link={buildAppHref({ tab: "review" })}>
+                  Interactive demo
+                </NavLink>
               </div>
 
               <div className=" inline-flex items-center gap-2 w-[200px] group">
                 <ArrowRight className=" group-hover:text-primary" />
-                <NavLink link="/app">Recommendations</NavLink>
+                <NavLink link={buildAppHref({ tab: "review" })}>
+                  Recommendations
+                </NavLink>
               </div>
 
               <div className=" inline-flex items-center gap-2 w-[200px] group">
                 <ArrowRight className=" group-hover:text-primary" />
-                <NavLink link="/app">Campaigns</NavLink>
+                <NavLink link={buildAppHref({ tab: "campaigns" })}>
+                  Campaigns
+                </NavLink>
               </div>
 
               <div className=" inline-flex items-center gap-2 w-[200px] group">
                 <ArrowRight className=" group-hover:text-primary" />
-                <NavLink link="/app">Experiments</NavLink>
+                <NavLink link={buildAppHref({ tab: "experiments" })}>
+                  Experiments
+                </NavLink>
               </div>
             </div>
 
@@ -73,17 +82,19 @@ const Footer = () => {
 
               <div className=" inline-flex items-center gap-2 w-[200px] group">
                 <ArrowRight className=" group-hover:text-primary" />
-                <NavLink link="/app">Product</NavLink>
+                <NavLink link={buildAppHref({ tab: "review" })}>Product</NavLink>
               </div>
 
               <div className=" inline-flex items-center gap-2 w-[200px] group">
                 <ArrowRight className=" group-hover:text-primary" />
-                <NavLink link="/app">API readiness</NavLink>
+                <NavLink link={buildAppHref({ tab: "readiness" })}>
+                  API readiness
+                </NavLink>
               </div>
 
               <div className=" inline-flex items-center gap-2 w-[200px] group">
                 <ArrowRight className=" group-hover:text-primary" />
-                <NavLink link="/app">Demo mode</NavLink>
+                <NavLink link={buildAppHref({ tab: "review" })}>Demo mode</NavLink>
               </div>
             </div>
           </div>

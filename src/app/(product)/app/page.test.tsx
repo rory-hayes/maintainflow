@@ -111,9 +111,12 @@ describe("MaintainFlow app page live failure boundary", () => {
   it("clears demo fixtures when account discovery fails in a live-read stage", async () => {
     listAccountAccessesMock.mockRejectedValue(new Error("private database detail"));
 
-    const element = await MaintainFlowAppPage({ searchParams: Promise.resolve({}) });
+    const element = await MaintainFlowAppPage({
+      searchParams: Promise.resolve({ tab: "readiness" }),
+    });
     const props = element.props;
 
+    expect(props.initialTab).toBe("readiness");
     expect(props.dataSource).toBe("live");
     expect(props.writeMode).toBe("demo");
     expect(props.snapshotAvailable).toBe(false);
@@ -134,10 +137,14 @@ describe("MaintainFlow app page live failure boundary", () => {
     );
 
     const element = await MaintainFlowAppPage({
-      searchParams: Promise.resolve({ account: access.accountId }),
+      searchParams: Promise.resolve({
+        account: access.accountId,
+        tab: "experiments",
+      }),
     });
     const props = element.props;
 
+    expect(props.initialTab).toBe("experiments");
     expect(props.workspaceSetupState).toBe("connection_error");
     expect(props.workspaceAccess).toEqual(access);
     expect(props.availableAccounts).toEqual([access]);

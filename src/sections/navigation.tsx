@@ -3,6 +3,7 @@
 import NavLink from "@/components/common/nav-link";
 import { MaintainFlowBrand } from "@/components/maintainflow/brand";
 import { Button } from "@/components/ui/button";
+import { buildAppHref } from "@/lib/app-navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -35,14 +36,16 @@ const Navigation = () => {
           <div className=" w-full flex flex-col items-center">
             <ul className=" inline-flex items-center gap-8">
               <NavLink link="/#workflow">How it works</NavLink>
-              <NavLink link="/app">Product</NavLink>
-              <NavLink link="/app">API readiness</NavLink>
+              <NavLink link={buildAppHref({ tab: "review" })}>Product</NavLink>
+              <NavLink link={buildAppHref({ tab: "readiness" })}>
+                API readiness
+              </NavLink>
             </ul>
           </div>
         </aside>
 
         <div className=" w-full flex items-center justify-end gap-4">
-          <Link href="/app">
+          <Link href={buildAppHref({ tab: "review" })}>
             <Button>Open demo</Button>
           </Link>
         </div>

@@ -21,8 +21,19 @@ const testState = vi.hoisted(() => {
     fetchLiveAdAccount: vi.fn(),
     encryptAdsApiKey: vi.fn(),
     rotateAdsApiCredential: vi.fn(),
+    logInfo: vi.fn(),
+    logWarn: vi.fn(),
+    logError: vi.fn(),
   };
 });
+
+vi.mock("@/lib/observability/logger.server", () => ({
+  createServerLogger: () => ({
+    info: testState.logInfo,
+    warn: testState.logWarn,
+    error: testState.logError,
+  }),
+}));
 
 vi.mock("@/lib/auth/operator.server", () => ({
   OperatorAuthUnavailableError: testState.OperatorAuthUnavailableError,
@@ -129,6 +140,7 @@ describe("advertiser credential rotation", () => {
       }),
     );
     expect(JSON.stringify(payload)).not.toContain("ads_replacement_secret_456");
+    expect(testState.logInfo).toHaveBeenCalledWith("connection.ads.rotated");
   });
 
   it("rejects a key belonging to another advertiser account", async () => {
@@ -142,6 +154,10 @@ describe("advertiser credential rotation", () => {
     expect(response.status).toBe(422);
     expect(testState.encryptAdsApiKey).not.toHaveBeenCalled();
     expect(testState.rotateAdsApiCredential).not.toHaveBeenCalled();
+    expect(testState.logWarn).toHaveBeenCalledWith(
+      "connection.ads.account_mismatch",
+      { error: expect.any(Error) },
+    );
   });
 
   it("keeps the current credential active when provider validation fails", async () => {

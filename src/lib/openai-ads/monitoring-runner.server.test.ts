@@ -94,6 +94,7 @@ describe("scheduled monitoring runner", () => {
     recordMonitoringOutcomeMock.mockResolvedValue(true);
     releaseMonitoringClaimMock.mockResolvedValue(true);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
 
   afterEach(() => {

@@ -20,6 +20,7 @@
     "test:db-migrations": "vitest run scripts/run-database-migrations.test.mjs",
     "test:db": "node scripts/run-database-integration.mjs",
     "check:production-config": "node scripts/check-production-config.mjs",
+    "probe:deployment": "node scripts/probe-deployment.mjs",
     "audit:production": "npm audit --omit=dev --audit-level=high",
     "verify": "npm run lint && npm run typecheck && npm test && npm run test:ads-contract && npm run test:openai-ads-contract-checker && npm run test:production-config && npm run build"
   },

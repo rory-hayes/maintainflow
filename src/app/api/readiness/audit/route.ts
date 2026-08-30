@@ -10,6 +10,7 @@ import {
   readJsonBodyWithLimit,
   RequestBodyTooLargeError,
 } from "@/lib/http/request-security.server";
+import { createServerLogger } from "@/lib/observability/logger.server";
 import {
   auditStorefront,
   normalizeAuditUrl,
@@ -47,6 +48,7 @@ function quotaHeaders(decision: ReadinessRateLimitDecision) {
 }
 
 export async function POST(request: Request) {
+  const log = createServerLogger("api.readiness.audit");
   if (!isSecureSameOriginRequest(request)) {
     return Response.json(
       { error: "Secure same-origin readiness requests are required." },
@@ -123,7 +125,10 @@ export async function POST(request: Request) {
           { status: 503, headers: NO_STORE_HEADERS },
         );
       }
-      console.error("Readiness history authorization failed", error);
+      log.error("readiness.history_authorization.failed", {
+        error,
+        status: 503,
+      });
       return Response.json(
         { error: "Readiness history authorization is unavailable." },
         { status: 503, headers: NO_STORE_HEADERS },
@@ -146,7 +151,7 @@ export async function POST(request: Request) {
         hostname: normalizedUrl.hostname,
       });
     } catch (error) {
-      console.error("Readiness rate-limit check failed", error);
+      log.error("readiness.capacity_check.failed", { error, status: 503 });
       return Response.json(
         { error: "The readiness audit capacity check is unavailable." },
         { status: 503, headers: NO_STORE_HEADERS },
@@ -192,7 +197,7 @@ export async function POST(request: Request) {
         headers: quota ? quotaHeaders(quota) : NO_STORE_HEADERS,
       });
     } catch (error) {
-      console.error("Readiness audit history save failed", error);
+      log.error("readiness.history_save.failed", { error, status: 200 });
       return Response.json(
         {
           ...audit,
@@ -203,12 +208,11 @@ export async function POST(request: Request) {
       );
     }
   } catch (error) {
+    log.warn("readiness.audit.failed", { error, status: 422 });
     const message =
       error instanceof ZodError
         ? "Enter a valid public landing-page URL."
-        : error instanceof Error
-          ? error.message
-          : "The landing page could not be audited.";
+        : "The landing page could not be audited safely. Confirm it is public and try again.";
 
     return Response.json(
       { error: message },

@@ -53,6 +53,9 @@ export function canWriteAccount(access: AccountAccess) {
 
 export function selectBestAccountAccess(accesses: AccountAccess[]) {
   return accesses.toSorted((left, right) => {
+    const writeDifference =
+      Number(canWriteAccount(right)) - Number(canWriteAccount(left));
+    if (writeDifference !== 0) return writeDifference;
     const accountDifference =
       accountRank[right.accountRole] - accountRank[left.accountRole];
     if (accountDifference !== 0) return accountDifference;

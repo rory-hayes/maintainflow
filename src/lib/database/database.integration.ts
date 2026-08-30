@@ -116,6 +116,7 @@ const database = postgres(databaseUrl, {
 });
 const ownerOperatorId = "user_integration_owner";
 const viewerOperatorId = "user_integration_viewer";
+const mixedAccessOperatorId = "user_integration_mixed_access";
 const unknownOperatorId = "user_integration_unknown";
 const advertiserAccountId = "adacct_integration_alpha";
 const agencyAccountId = "adacct_integration_beta";
@@ -178,6 +179,39 @@ async function addReviewOnlyAccess(accountId: string) {
   });
 }
 
+async function addMixedCapabilityAccess(accountId: string) {
+  const blockedOrganizationId = randomUUID();
+  const writableOrganizationId = randomUUID();
+  const [account] = await database<{ id: string }[]>`
+    select id from maintainflow_advertiser_accounts
+    where external_account_id = ${accountId}
+  `;
+  if (!account) throw new Error("The integration account was not created.");
+
+  await database.begin(async (transaction) => {
+    await transaction`
+      insert into maintainflow_organizations (id, name, customer_type)
+      values
+        (${blockedOrganizationId}, 'Owner Role Reviewers', 'agency'),
+        (${writableOrganizationId}, 'Client Account Operators', 'agency')
+    `;
+    await transaction`
+      insert into maintainflow_organization_memberships (
+        organization_id, clerk_user_id, role
+      ) values
+        (${blockedOrganizationId}, ${mixedAccessOperatorId}, 'analyst'),
+        (${writableOrganizationId}, ${mixedAccessOperatorId}, 'admin')
+    `;
+    await transaction`
+      insert into maintainflow_account_access (
+        organization_id, advertiser_account_id, role, granted_by
+      ) values
+        (${blockedOrganizationId}, ${account.id}, 'owner', ${ownerOperatorId}),
+        (${writableOrganizationId}, ${account.id}, 'manager', ${ownerOperatorId})
+    `;
+  });
+}
+
 describe("PostgreSQL customer and approval boundary", () => {
   beforeAll(async () => {
     await applyMigrations(database);
@@ -212,6 +246,7 @@ describe("PostgreSQL customer and approval boundary", () => {
       },
     });
     await addReviewOnlyAccess(advertiserAccountId);
+    await addMixedCapabilityAccess(advertiserAccountId);
   }, 20_000);
 
   afterAll(async () => {
@@ -262,6 +297,16 @@ describe("PostgreSQL customer and approval boundary", () => {
     await expect(
       requireAccountAccess(viewerOperatorId, advertiserAccountId, "write"),
     ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
+    await expect(
+      requireAccountAccess(
+        mixedAccessOperatorId,
+        advertiserAccountId,
+        "write",
+      ),
+    ).resolves.toMatchObject({
+      membershipRole: "admin",
+      accountRole: "manager",
+    });
     await expect(
       requireAccountAccess(unknownOperatorId, advertiserAccountId, "read"),
     ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
@@ -1660,6 +1705,133 @@ describe("PostgreSQL customer and approval boundary", () => {
         }),
       ]),
     );
+  });
+
+  it("waits for an in-flight role change and reauthorizes before reconciliation", async () => {
+    const source = getDemoRecommendation("rec_bid_20");
+    if (!source) throw new Error("The reconciliation fixture is missing.");
+    const recommendation = {
+      ...source,
+      id: "rec_reconciliation_authorization_fence",
+    };
+    const approvalId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation,
+      access: advertiserAccess,
+    });
+    await updateApprovalRecord(approvalId, "reconciliation_required", {
+      error: "The provider response was ambiguous.",
+    });
+
+    let releaseDowngrade!: () => void;
+    let markDowngradeStarted!: () => void;
+    const downgradeRelease = new Promise<void>((resolve) => {
+      releaseDowngrade = resolve;
+    });
+    const downgradeStarted = new Promise<void>((resolve) => {
+      markDowngradeStarted = resolve;
+    });
+    const downgrade = database.begin(async (transaction) => {
+      await transaction`
+        update maintainflow_organization_memberships set
+          role = 'analyst', updated_at = now()
+        where organization_id = ${advertiserAccess.organizationId}
+          and clerk_user_id = ${ownerOperatorId}
+      `;
+      markDowngradeStarted();
+      await downgradeRelease;
+    });
+    await downgradeStarted;
+
+    const reconciliation = reconcileApprovalRecord({
+      id: approvalId,
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      action: "mark_not_applied",
+      note: "Verified that the change was not applied.",
+      access: advertiserAccess,
+    });
+    let earlyOutcome: "blocked" | "settled" = "blocked";
+    try {
+      earlyOutcome = await Promise.race([
+        reconciliation.then(
+          () => "settled" as const,
+          () => "settled" as const,
+        ),
+        new Promise<"blocked">((resolve) =>
+          setTimeout(() => resolve("blocked"), 100),
+        ),
+      ]);
+    } finally {
+      releaseDowngrade();
+      await downgrade;
+    }
+
+    try {
+      expect(earlyOutcome).toBe("blocked");
+      await expect(reconciliation).rejects.toBeInstanceOf(
+        AccountAccessForbiddenError,
+      );
+      const [blockedRecord] = await database<
+        {
+          status: string;
+          reconciled_by: string | null;
+          reconciled_organization_id: string | null;
+          reconciled_membership_role: string | null;
+          reconciled_account_role: string | null;
+        }[]
+      >`
+        select status, reconciled_by, reconciled_organization_id,
+          reconciled_membership_role, reconciled_account_role
+        from ads_approval_records
+        where id = ${approvalId}
+      `;
+      expect(blockedRecord).toEqual({
+        status: "reconciliation_required",
+        reconciled_by: null,
+        reconciled_organization_id: null,
+        reconciled_membership_role: null,
+        reconciled_account_role: null,
+      });
+    } finally {
+      await database`
+        update maintainflow_organization_memberships set
+          role = 'owner', updated_at = now()
+        where organization_id = ${advertiserAccess.organizationId}
+          and clerk_user_id = ${ownerOperatorId}
+      `;
+    }
+
+    await expect(
+      reconcileApprovalRecord({
+        id: approvalId,
+        accountId: advertiserAccountId,
+        operatorId: ownerOperatorId,
+        action: "mark_not_applied",
+        note: "Verified that the change was not applied.",
+        access: advertiserAccess,
+      }),
+    ).resolves.toMatchObject({ status: "failed" });
+    const [reconciledRecord] = await database<
+      {
+        reconciled_by: string | null;
+        reconciled_organization_id: string | null;
+        reconciled_membership_role: string | null;
+        reconciled_account_role: string | null;
+      }[]
+    >`
+      select reconciled_by, reconciled_organization_id,
+        reconciled_membership_role, reconciled_account_role
+      from ads_approval_records
+      where id = ${approvalId}
+    `;
+    expect(reconciledRecord).toEqual({
+      reconciled_by: ownerOperatorId,
+      reconciled_organization_id: advertiserAccess.organizationId,
+      reconciled_membership_role: "owner",
+      reconciled_account_role: "owner",
+    });
   });
 
   it("evaluates each completed monitoring window once and keeps it account scoped", async () => {

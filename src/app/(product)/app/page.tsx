@@ -27,8 +27,10 @@ import {
   isBootstrapOperator,
   isWorkspaceAdmissionAllowed,
 } from "@/lib/auth/config";
+import { parseAppTab, type AppTab } from "@/lib/app-navigation";
 import { getOptionalOperator } from "@/lib/auth/operator.server";
 import { isCredentialVaultConfigured } from "@/lib/credentials/crypto.server";
+import { createServerLogger } from "@/lib/observability/logger.server";
 import {
   getAdsRuntimeMode,
   type AdsApiCredential,
@@ -85,7 +87,10 @@ import {
 } from "@/lib/tenancy/schema";
 
 type AppPageProps = {
-  searchParams: Promise<{ account?: string | string[] }>;
+  searchParams: Promise<{
+    account?: string | string[];
+    tab?: string | string[];
+  }>;
 };
 
 export default async function MaintainFlowAppPage({
@@ -95,6 +100,8 @@ export default async function MaintainFlowAppPage({
   const query = await searchParams;
   const requestedAccountId =
     typeof query.account === "string" ? query.account : undefined;
+  const requestedTab = parseAppTab(query.tab);
+  const log = createServerLogger("app.workspace");
   const authenticatedOperator = await getOptionalOperator();
   const operator = authenticatedOperator ?? {
     id: "demo-operator",
@@ -256,7 +263,7 @@ export default async function MaintainFlowAppPage({
                   },
                 );
               } catch (error) {
-                console.error("Readiness history load failed", error);
+                log.error("workspace.readiness_history_load_failed", { error });
                 readinessHistoryError =
                   "Saved readiness scans could not be loaded for this account.";
               }
@@ -267,7 +274,9 @@ export default async function MaintainFlowAppPage({
             const [resolvedConversionsConnection, adsCredential] = await Promise.all([
               getConversionsApiConnectionStatus(workspaceAccess.accountId).catch(
                 (error) => {
-                  console.error("Conversion credential status failed", error);
+                  log.error("workspace.conversion_credential_status_failed", {
+                    error,
+                  });
                   return {
                     ...previewConversionsConnectionStatus,
                     state: "unavailable" as const,
@@ -335,7 +344,7 @@ export default async function MaintainFlowAppPage({
                     live.account.id,
                   );
                 } catch (error) {
-                  console.error("Creative review history sync failed", error);
+                  log.error("workspace.creative_history_sync_failed", { error });
                   creativeHistoryError =
                     "The current creative data is available, but its durable change history could not be updated.";
                 }
@@ -358,7 +367,7 @@ export default async function MaintainFlowAppPage({
                     }
                   }
                 } catch (error) {
-                  console.error("Monitoring evaluation sync failed", error);
+                  log.error("workspace.monitoring_evaluation_failed", { error });
                   monitoringEvaluationError =
                     "Completed monitoring windows could not be checked during this sync. No rollback was sent.";
                 }
@@ -378,7 +387,7 @@ export default async function MaintainFlowAppPage({
                     new Date(live.syncedAt),
                   );
                 } catch (error) {
-                  console.error("Approval history sync failed", error);
+                  log.error("workspace.approval_history_sync_failed", { error });
                   approvalHistoryError =
                     "The durable approval history could not be loaded. Live writes are locked until it is available.";
                 }
@@ -398,7 +407,9 @@ export default async function MaintainFlowAppPage({
                     toRecommendationDecisionHistoryDto,
                   );
                 } catch (error) {
-                  console.error("Recommendation dismissal sync failed", error);
+                  log.error("workspace.recommendation_decision_sync_failed", {
+                    error,
+                  });
                   recommendationDecisionError =
                     "Saved recommendation dismissals could not be loaded, so dismissal actions are locked.";
                 }
@@ -419,13 +430,7 @@ export default async function MaintainFlowAppPage({
           }
         }
       } catch (error) {
-        console.error("OpenAI Ads live sync failed", {
-          name: error instanceof Error ? error.name : "UnknownError",
-          code:
-            error && typeof error === "object" && "code" in error
-              ? String(error.code)
-              : undefined,
-        });
+        log.error("workspace.live_sync_failed", { error });
         if (runtime.liveDataRequested && runtime.liveReadStage) {
           workspaceSetupState = workspaceAccess
             ? "connection_error"
@@ -478,9 +483,18 @@ export default async function MaintainFlowAppPage({
     ...(syncError ? ["confirmed live Ads snapshot"] : []),
     ...(syncWarning ? ["fresh live Ads snapshot"] : []),
   ];
+  const initialTab: AppTab =
+    requestedTab ??
+    (workspaceSetupState === "needs_setup" ||
+    workspaceSetupState === "unavailable" ||
+    workspaceSetupState === "connection_error"
+      ? "workspace"
+      : "review");
 
   return (
     <MaintainFlowWorkbench
+      key={`${account.id}:${initialTab}`}
+      initialTab={initialTab}
       account={account}
       ads={ads}
       creativeReviewHistory={creativeReviewHistory}

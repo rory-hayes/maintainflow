@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -49,8 +49,15 @@ vi.mock("@/lib/release/revision", () => ({
 
 import { GET } from "./route";
 
+function lastErrorRecord() {
+  const line = vi.mocked(console.error).mock.calls.at(-1)?.[0];
+  return JSON.parse(String(line));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  vi.spyOn(console, "info").mockImplementation(() => undefined);
   vi.stubEnv("MAINTAINFLOW_RELEASE_STAGE", "demo");
   vi.stubEnv("MAINTAINFLOW_READINESS_PROBE_SECRET", "p".repeat(32));
   vi.stubEnv("CRON_SECRET", "c".repeat(32));
@@ -69,6 +76,10 @@ beforeEach(() => {
   ]) {
     check.mockResolvedValue(true);
   }
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("deployment readiness route", () => {
@@ -92,12 +103,18 @@ describe("deployment readiness route", () => {
       checks: { passed: 5, total: 5 },
     });
     expect(state.verifyTenancyStore).not.toHaveBeenCalled();
+    expect(console.info).toHaveBeenCalledOnce();
+    expect(
+      JSON.parse(String(vi.mocked(console.info).mock.calls[0][0])),
+    ).toMatchObject({
+      event: "deployment.readiness.completed",
+      status: 200,
+      counts: { checksPassed: 5, checksTotal: 5 },
+    });
   });
 
   it("fails a demo when the live snapshot store is unavailable", async () => {
     state.verifyLiveSyncStore.mockResolvedValue(false);
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-
     const response = await GET(request());
 
     expect(response.status).toBe(503);
@@ -107,15 +124,13 @@ describe("deployment readiness route", () => {
       checks: { passed: 4, total: 5 },
     });
     expect(state.verifyLiveSyncStore).toHaveBeenCalledTimes(1);
-    expect(error).toHaveBeenCalledWith(
-      "Deployment readiness checks failed",
-      expect.objectContaining({ failedChecks: ["live_sync"] }),
-    );
-    error.mockRestore();
+    expect(lastErrorRecord()).toMatchObject({
+      event: "deployment.readiness.failed",
+      failedChecks: ["live_sync"],
+    });
   });
 
   it("fails closed without revision provenance or a current migration ledger", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
     state.resolveBuildRevision.mockReturnValue(null);
     state.verifyDatabaseMigrationLedger.mockResolvedValue({ ready: false });
 
@@ -129,20 +144,15 @@ describe("deployment readiness route", () => {
       revision: "unknown",
       checks: { passed: 3, total: 5 },
     });
-    expect(error).toHaveBeenCalledWith(
-      "Deployment readiness checks failed",
-      expect.objectContaining({
-        failedChecks: ["build_revision", "database_migrations"],
-      }),
-    );
-    error.mockRestore();
+    expect(lastErrorRecord()).toMatchObject({
+      event: "deployment.readiness.failed",
+      failedChecks: ["build_revision", "database_migrations"],
+    });
   });
 
   it("checks every live store without contacting OpenAI", async () => {
     vi.stubEnv("MAINTAINFLOW_RELEASE_STAGE", "private_read");
     state.verifyCreativeHistoryStore.mockRejectedValue(new Error("offline"));
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-
     const response = await GET(request());
     const payload = await response.json();
 
@@ -154,11 +164,10 @@ describe("deployment readiness route", () => {
     });
     expect(state.verifyTenancyStore).toHaveBeenCalledTimes(1);
     expect(state.verifyApprovalStore).toHaveBeenCalledTimes(1);
-    expect(error).toHaveBeenCalledWith(
-      "Deployment readiness checks failed",
-      expect.objectContaining({ failedChecks: ["creative_history"] }),
-    );
-    error.mockRestore();
+    expect(lastErrorRecord()).toMatchObject({
+      event: "deployment.readiness.failed",
+      failedChecks: ["creative_history"],
+    });
   });
 
   it("rejects an unauthenticated probe before touching the database", async () => {

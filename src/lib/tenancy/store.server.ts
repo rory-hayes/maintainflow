@@ -483,7 +483,12 @@ export async function getConversionsApiCredentialMetadataForAccount(
   };
 }
 
-async function authorizeCredentialRotation(options: {
+/**
+ * Locks and re-checks the exact organization/account authorization path used
+ * by a pending durable write. Callers must perform their write in the same
+ * transaction so a concurrent role change cannot race the final commit.
+ */
+export async function lockCurrentAccountWriteAccess(options: {
   transaction: postgres.TransactionSql;
   operatorId: string;
   accountId: string;
@@ -546,7 +551,7 @@ export async function rotateAdsApiCredential(options: {
   }
   const sql = getDatabase();
   return sql.begin(async (transaction) => {
-    const authorized = await authorizeCredentialRotation({
+    const authorized = await lockCurrentAccountWriteAccess({
       transaction,
       operatorId: options.operatorId,
       accountId: options.accountId,
@@ -624,7 +629,7 @@ export async function rotateConversionsApiCredential(options: {
 
   const sql = getDatabase();
   return sql.begin(async (transaction) => {
-    const authorized = await authorizeCredentialRotation({
+    const authorized = await lockCurrentAccountWriteAccess({
       transaction,
       operatorId: options.operatorId,
       accountId: options.accountId,

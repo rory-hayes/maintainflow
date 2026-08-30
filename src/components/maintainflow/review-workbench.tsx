@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import {
@@ -99,6 +99,12 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  buildAppHref,
+  parseAppTab,
+  replaceAppTabInUrl,
+  type AppTab,
+} from "@/lib/app-navigation";
 import type { AdAccount, Campaign, ScopedAd } from "@/lib/openai-ads/schema";
 import type { ApprovalRecordDto } from "@/lib/audit/approval-schema";
 import type { RecommendationDecisionHistoryDto } from "@/lib/audit/recommendation-decision";
@@ -116,6 +122,7 @@ import type {
 import { cn } from "@/lib/utils";
 
 type WorkbenchProps = {
+  initialTab: AppTab;
   account: AdAccount;
   ads: ScopedAd[];
   creativeReviewHistory: CreativeReviewEvent[];
@@ -190,6 +197,7 @@ function statusBadge(status: RecommendationStatus) {
 }
 
 export function MaintainFlowWorkbench({
+  initialTab,
   account,
   ads,
   creativeReviewHistory,
@@ -232,6 +240,8 @@ export function MaintainFlowWorkbench({
   readinessHistoryCanSave,
 }: WorkbenchProps) {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState<AppTab>(initialTab);
+  const tabListRef = useRef<HTMLDivElement>(null);
   const [demoRecommendations, setDemoRecommendations] = useState(
     initialRecommendations,
   );
@@ -260,6 +270,28 @@ export function MaintainFlowWorkbench({
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(
     initialAuditEvent ? [initialAuditEvent] : [],
   );
+
+  useEffect(() => {
+    tabListRef.current
+      ?.querySelector<HTMLElement>('[data-state="active"]')
+      ?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [activeTab]);
+
+  function changeTab(value: string) {
+    const nextTab = parseAppTab(value);
+    if (!nextTab) return;
+    setActiveTab(nextTab);
+
+    window.history.replaceState(
+      null,
+      "",
+      replaceAppTabInUrl(window.location, nextTab),
+    );
+  }
+
+  function openAccount(accountId: string) {
+    router.push(buildAppHref({ tab: activeTab, accountId }));
+  }
 
   const selected =
     recommendations.find((recommendation) => recommendation.id === selectedId) ??
@@ -557,7 +589,7 @@ export function MaintainFlowWorkbench({
                       (item) => item.accountId === accountId,
                     )
                   ) {
-                    router.push(`/app?account=${encodeURIComponent(accountId)}`);
+                    openAccount(accountId);
                   }
                 }}
               >
@@ -629,11 +661,7 @@ export function MaintainFlowWorkbench({
                       {availableAccounts.map((item) => (
                         <DropdownMenuItem
                           key={item.accountId}
-                          onSelect={() =>
-                            router.push(
-                              `/app?account=${encodeURIComponent(item.accountId)}`,
-                            )
-                          }
+                          onSelect={() => openAccount(item.accountId)}
                         >
                           {item.accountId === workspaceAccess?.accountId ? (
                             <Check data-icon="inline-start" />
@@ -697,17 +725,16 @@ export function MaintainFlowWorkbench({
       ) : null}
 
       <Tabs
-        defaultValue={
-          workspaceSetupState === "needs_setup" ||
-          workspaceSetupState === "unavailable" ||
-          workspaceSetupState === "connection_error"
-            ? "workspace"
-            : "review"
-        }
+        value={activeTab}
+        onValueChange={changeTab}
         className="w-full"
       >
         <div className="overflow-x-auto border-b bg-background px-4 md:px-6">
-          <TabsList className="h-12 w-max justify-start gap-1 rounded-none bg-transparent p-0">
+          <TabsList
+            ref={tabListRef}
+            aria-label="MaintainFlow workspace"
+            className="h-12 w-max justify-start gap-1 rounded-none bg-transparent p-0"
+          >
             <TabsTrigger
               value="review"
               className="h-12 rounded-none border-b-2 border-transparent px-3 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"

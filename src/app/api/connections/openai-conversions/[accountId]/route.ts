@@ -23,6 +23,7 @@ import {
   validateConversionsApiPayload,
 } from "@/lib/openai-ads/conversions.server";
 import { CONVERSIONS_PAYLOAD_MAX_BYTES } from "@/lib/readiness/conversions-api";
+import { createServerLogger } from "@/lib/observability/logger.server";
 import {
   AccountAccessForbiddenError,
   ConversionsCredentialUnavailableError,
@@ -52,6 +53,7 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ accountId: string }> },
 ) {
+  const log = createServerLogger("api.connection.conversions");
   try {
     if (!isSecureSameOriginRequest(request)) {
       return json(
@@ -104,6 +106,7 @@ export async function POST(
         eventCount: validation.eventCount,
       },
     });
+    log.info("connection.conversions.rotated");
 
     return json({
       connected: true,
@@ -148,6 +151,10 @@ export async function POST(
       );
     }
     if (error instanceof ConversionsApiProviderRejectedError) {
+      log.warn("connection.conversions.provider_rejected", {
+        error,
+        status: error.providerStatus,
+      });
       return json(
         { error: error.message, providerStatus: error.providerStatus },
         {
@@ -159,6 +166,7 @@ export async function POST(
       );
     }
     if (error instanceof ConversionsApiTransportUnconfirmedError) {
+      log.error("connection.conversions.transport_unconfirmed", { error });
       return json({ error: error.message }, { status: 502 });
     }
     if (
@@ -168,8 +176,10 @@ export async function POST(
       error instanceof ConversionsCredentialUnavailableError ||
       error instanceof ConversionsApiValidationUnavailableError
     ) {
+      log.error("connection.conversions.unavailable", { error });
       return json({ error: error.message }, { status: 503 });
     }
+    log.error("connection.conversions.failed", { error });
     return json(
       { error: "The conversion credentials could not be connected." },
       { status: 400 },

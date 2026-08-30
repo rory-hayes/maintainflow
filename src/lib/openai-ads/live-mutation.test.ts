@@ -3,6 +3,16 @@ import { z } from "zod";
 
 vi.mock("server-only", () => ({}));
 
+const logMocks = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
+
+vi.mock("../observability/logger.server", () => ({
+  createServerLogger: () => logMocks,
+}));
+
 const approvalMocks = vi.hoisted(() => ({
   create: vi.fn(async () => "approval-test-123"),
   update: vi.fn(async () => undefined),
@@ -35,6 +45,7 @@ vi.mock("../tenancy/store.server", () => ({
 
 import {
   AdsMutationReconciliationRequiredError,
+  AdsMutationRejectedError,
   adsApiRequest,
   applyAdsMutation,
   applyStoredRollback,
@@ -109,6 +120,9 @@ beforeEach(() => {
   approvalMocks.updateRollback.mockClear();
   approvalMocks.verify.mockClear();
   writeFenceMocks.run.mockReset();
+  logMocks.info.mockClear();
+  logMocks.warn.mockClear();
+  logMocks.error.mockClear();
   writeFenceMocks.run.mockImplementation(async (options, operation) => {
     const credentialMaterial = {
       apiKey: process.env.OPENAI_ADS_API_KEY ?? "ads-vault-key",
@@ -187,6 +201,7 @@ describe("guarded live mutations", () => {
         },
       },
     );
+    expect(logMocks.info).toHaveBeenCalledWith("ads.apply.completed");
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
     expect(String(vi.mocked(globalThis.fetch).mock.calls[1][0])).toContain(
       `/ad_groups/${recommendation.entityId}`,
@@ -425,6 +440,108 @@ describe("guarded live mutations", () => {
     );
   });
 
+  it.each([408, 500, 502, 503, 504])(
+    "treats HTTP %s after an apply request as uncertain and must-not-retry",
+    async (status) => {
+      armLiveInfrastructure();
+      const recommendation = {
+        ...demoRecommendations[0],
+        source: "live" as const,
+      };
+      const providerPayload = { error: "upstream response unavailable" };
+      vi.mocked(globalThis.fetch).mockResolvedValue(
+        new Response(JSON.stringify(providerPayload), { status }),
+      );
+
+      const outcome = await applyAdsMutation(recommendation, {
+        accountId: "account-test",
+        operatorId: "user_founder",
+        access: accountAccess,
+        credentialGeneration,
+      }).catch((error: unknown) => error);
+
+      expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+      expect(outcome).toMatchObject({
+        approvalId: "approval-test-123",
+        operation: "apply",
+        mustNotRetry: true,
+        persistenceWarning: false,
+      });
+      expect(approvalMocks.update).toHaveBeenCalledWith(
+        "approval-test-123",
+        "reconciliation_required",
+        {
+          response: providerPayload,
+          error: `OpenAI Ads API returned an uncertain HTTP ${status} mutation outcome.`,
+        },
+      );
+      expect(logMocks.error).toHaveBeenCalledWith(
+        "ads.apply.reconciliation_required",
+        { status },
+      );
+      expect(globalThis.fetch).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("keeps a definitive HTTP 4xx provider rejection retryable only through a new approval", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    const providerPayload = { error: "invalid bid" };
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify(providerPayload), { status: 422 }),
+    );
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationRejectedError);
+    expect(outcome).toMatchObject({
+      approvalId: "approval-test-123",
+      providerStatus: 422,
+    });
+    expect(approvalMocks.update).toHaveBeenCalledWith(
+      "approval-test-123",
+      "failed",
+      {
+        response: providerPayload,
+        error: "OpenAI Ads API returned HTTP 422.",
+      },
+    );
+    expect(logMocks.warn).toHaveBeenCalledWith("ads.apply.rejected", {
+      status: 422,
+    });
+  });
+
+  it("preserves must-not-retry semantics when an uncertain HTTP outcome cannot be persisted", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ error: "gateway failure" }), {
+        status: 503,
+      }),
+    );
+    approvalMocks.update.mockRejectedValueOnce(new Error("database unavailable"));
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      operation: "apply",
+      mustNotRetry: true,
+      persistenceWarning: true,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+  });
+
   it("preserves must-not-retry semantics when reconciliation persistence also fails", async () => {
     armLiveInfrastructure();
     const recommendation = { ...demoRecommendations[0], source: "live" as const };
@@ -568,6 +685,60 @@ describe("guarded live mutations", () => {
       { error: "socket closed" },
     );
   });
+
+  it.each([408, 502])(
+    "treats HTTP %s after a rollback request as uncertain and must-not-retry",
+    async (status) => {
+      armLiveInfrastructure();
+      const approvalId = "00000000-0000-4000-8000-000000000001";
+      approvalMocks.claim.mockResolvedValue({
+        id: approvalId,
+        rollback: {
+          method: "POST",
+          path: "/ad_groups/adgrp_live",
+          body: {
+            bidding_config: {
+              billing_event_type: "click",
+              max_bid_micros: 250_000_000,
+            },
+          },
+        },
+      });
+      const providerPayload = { error: "upstream response unavailable" };
+      vi.mocked(globalThis.fetch).mockResolvedValue(
+        new Response(JSON.stringify(providerPayload), { status }),
+      );
+
+      const outcome = await applyStoredRollback({
+        approvalId,
+        accountId: "account-test",
+        operatorId: "user_founder",
+        access: accountAccess,
+        credentialGeneration,
+      }).catch((error: unknown) => error);
+
+      expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+      expect(outcome).toMatchObject({
+        approvalId,
+        operation: "rollback",
+        mustNotRetry: true,
+        persistenceWarning: false,
+      });
+      expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
+        approvalId,
+        "rollback_reconciliation_required",
+        {
+          response: providerPayload,
+          error: `OpenAI Ads API returned an uncertain HTTP ${status} rollback outcome.`,
+        },
+      );
+      expect(logMocks.error).toHaveBeenCalledWith(
+        "ads.rollback.reconciliation_required",
+        { status },
+      );
+      expect(globalThis.fetch).toHaveBeenCalledOnce();
+    },
+  );
 
   it("keeps rollback must-not-retry semantics when audit persistence fails", async () => {
     armLiveInfrastructure();

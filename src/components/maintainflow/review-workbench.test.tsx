@@ -39,6 +39,7 @@ describe("CampaignsView", () => {
   it("does not invent a completed review event when live sync has no snapshot", () => {
     const markup = renderToStaticMarkup(
       <MaintainFlowWorkbench
+        initialTab="workspace"
         account={{ ...demoAccount, id: "adacct_live", name: "Live account" }}
         ads={[]}
         creativeReviewHistory={[]}
@@ -85,6 +86,7 @@ describe("CampaignsView", () => {
     );
 
     expect(markup).toContain("Live sync failed");
+    expect(markup).toContain("Workspace and account access");
     expect(markup).not.toContain("Account review completed");
     expect(markup).not.toContain("Demo snapshot");
     expect(markup).not.toContain("0 recommendations prepared");

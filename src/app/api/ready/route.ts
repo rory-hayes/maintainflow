@@ -3,11 +3,13 @@ import { timingSafeEqual } from "node:crypto";
 import { verifyApprovalStore } from "@/lib/audit/approval-store.server";
 import { verifyRecommendationDecisionStore } from "@/lib/audit/recommendation-decision-store.server";
 import { verifyDatabaseMigrationLedger } from "@/lib/database/readiness.server";
+import { createServerLogger } from "@/lib/observability/logger.server";
 import { verifyCreativeHistoryStore } from "@/lib/openai-ads/creative-history.server";
 import { verifyLiveSyncStore } from "@/lib/openai-ads/live-sync-store.server";
 import { verifyReadinessHistoryStore } from "@/lib/readiness/history.server";
 import { verifyReadinessRateLimitStore } from "@/lib/readiness/rate-limit.server";
 import { resolveBuildRevision } from "@/lib/release/revision";
+import { resolveReleaseStage } from "@/lib/release/stage";
 import {
   verifyConversionCredentialStore,
   verifyCredentialStore,
@@ -18,7 +20,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
-const RELEASE_STAGES = new Set(["demo", "private_read", "live_write"]);
 
 type ReadinessCheck = readonly [string, () => Promise<boolean>];
 
@@ -28,11 +29,6 @@ function hasAuthorizedProbeHeader(request: Request, secret: string) {
   return (
     supplied.length === expected.length && timingSafeEqual(supplied, expected)
   );
-}
-
-function releaseStage() {
-  const configured = process.env.MAINTAINFLOW_RELEASE_STAGE ?? "demo";
-  return RELEASE_STAGES.has(configured) ? configured : "invalid";
 }
 
 function dependencyChecks(stage: string): ReadinessCheck[] {
@@ -69,8 +65,14 @@ async function runCheck([name, check]: ReadinessCheck) {
 }
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
+  const log = createServerLogger("api.deployment.ready");
   const secret = process.env.MAINTAINFLOW_READINESS_PROBE_SECRET;
   if (!secret || secret.length < 32) {
+    log.error("deployment.readiness.unconfigured", {
+      status: 503,
+      durationMs: Date.now() - startedAt,
+    });
     return Response.json(
       {
         ok: false,
@@ -93,7 +95,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const stage = releaseStage();
+  const stage = resolveReleaseStage();
   const revision = resolveBuildRevision();
   const results = await Promise.all(
     dependencyChecks(stage).map((check) => runCheck(check)),
@@ -105,12 +107,19 @@ export async function GET(request: Request) {
   if (stage === "invalid") failedChecks.unshift("release_stage");
 
   const ok = failedChecks.length === 0;
-  if (!ok) {
-    console.error("Deployment readiness checks failed", {
-      stage,
-      failedChecks,
-    });
-  }
+  const passed =
+    results.filter((result) => result.ready).length +
+    (revision ? 1 : 0) +
+    (stage === "invalid" ? 0 : 1);
+  const total = results.length + 2;
+  const logFields = {
+    status: ok ? 200 : 503,
+    durationMs: Date.now() - startedAt,
+    failedChecks,
+    counts: { checksPassed: passed, checksTotal: total },
+  };
+  if (ok) log.info("deployment.readiness.completed", logFields);
+  else log.error("deployment.readiness.failed", logFields);
 
   return Response.json(
     {
@@ -120,11 +129,8 @@ export async function GET(request: Request) {
       stage,
       revision: revision ?? "unknown",
       checks: {
-        passed:
-          results.filter((result) => result.ready).length +
-          (revision ? 1 : 0) +
-          (stage === "invalid" ? 0 : 1),
-        total: results.length + 2,
+        passed,
+        total,
       },
     },
     {
