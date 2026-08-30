@@ -1,0 +1,444 @@
+{
+  "manifestVersion": 1,
+  "source": {
+    "url": "https://developers.openai.com/ads/openapi.json",
+    "retrievedAt": "2026-08-30",
+    "sha256": "3e310aeaf81e5d5f7f2dc357f35cc28e3f4eae7115f14809b7eb6a616321650f"
+  },
+  "expected": {
+    "openapiVersion": "3.1.0",
+    "documentVersion": "2.3.0",
+    "baseUrl": "https://api.ads.openai.com/v1",
+    "operationCount": 88,
+    "advertiserOperationResponseCodesExact": [
+      "200"
+    ],
+    "openAiAdAccountHeaderOperationCount": 79,
+    "security": {
+      "apiKeyScheme": "ApiKeyAuth",
+      "oauthScheme": "AdsOAuth",
+      "oauthAuthorizationUrl": "https://auth.openai.com/api/accounts/authorize",
+      "oauthTokenUrl": "https://auth.openai.com/api/accounts/oauth/token",
+      "oauthScopes": [
+        "ads.admin.all.read",
+        "ads.admin.all.write",
+        "offline_access",
+        "openid",
+        "profile"
+      ]
+    },
+    "idempotencyKeyOperations": [
+      "POST /ad_account_creation_sessions",
+      "POST /ad_groups",
+      "POST /ads",
+      "POST /campaigns",
+      "POST /custom_audiences/merge",
+      "POST /custom_audiences/{custom_audience_id}/add",
+      "POST /custom_audiences/{custom_audience_id}/remove",
+      "POST /custom_audiences/{custom_audience_id}/replace",
+      "POST /lead_forms/{lead_form_id}/test_submissions",
+      "POST /lead_sync_subscriptions"
+    ],
+    "criticalOperations": [
+      {
+        "key": "GET /ad_account",
+        "operationId": "GetAdAccountMethod"
+      },
+      {
+        "key": "GET /campaigns",
+        "operationId": "ListCampaignsMethod"
+      },
+      {
+        "key": "GET /ad_groups",
+        "operationId": "ListAdGroupsMethod"
+      },
+      {
+        "key": "GET /ads",
+        "operationId": "ListAdsMethod"
+      },
+      {
+        "key": "GET /ad_account/insights",
+        "operationId": "GetAdAccountInsightsMethod"
+      },
+      {
+        "key": "POST /conversions/insights",
+        "operationId": "PostConversionInsightsMethod"
+      },
+      {
+        "key": "GET /conversions/event_settings",
+        "operationId": "ListConversionEventSettingsMethod"
+      },
+      {
+        "key": "POST /campaigns",
+        "operationId": "CreateCampaignMethod"
+      },
+      {
+        "key": "PATCH /feeds/{feed_id}/products",
+        "operationId": "PatchProductFeedProductsMethod"
+      },
+      {
+        "key": "POST /custom_audiences/{custom_audience_id}/add",
+        "operationId": "AddCustomAudienceMembersMethod"
+      }
+    ],
+    "schemas": [
+      {
+        "name": "AdAccountResource",
+        "requiredExact": [
+          "id",
+          "name",
+          "url",
+          "preview_url",
+          "timezone",
+          "currency_code",
+          "review"
+        ],
+        "propertiesInclude": [
+          "status",
+          "negative_keywords",
+          "account_integrity_review"
+        ]
+      },
+      {
+        "name": "BudgetBody",
+        "requiredExact": [],
+        "propertiesExact": [
+          "daily_spend_limit_micros",
+          "lifetime_spend_limit_micros"
+        ]
+      },
+      {
+        "name": "BudgetParams",
+        "requiredExact": [],
+        "propertiesExact": [
+          "daily_spend_limit_micros",
+          "lifetime_spend_limit_micros"
+        ],
+        "propertyConstraints": {
+          "daily_spend_limit_micros": {
+            "minimum": 1000000
+          },
+          "lifetime_spend_limit_micros": {
+            "minimum": 1000000
+          }
+        }
+      },
+      {
+        "name": "CampaignModeParam",
+        "enumExact": [
+          "business_agent",
+          "product_feed"
+        ]
+      },
+      {
+        "name": "CampaignItemBody",
+        "requiredExact": [
+          "id",
+          "created_at",
+          "updated_at",
+          "name",
+          "description",
+          "status",
+          "product_feed_id",
+          "start_time",
+          "end_time",
+          "budget",
+          "bidding_type"
+        ],
+        "propertiesInclude": [
+          "billing_event_type",
+          "business_agent_id",
+          "conversion_event_setting_ids",
+          "landing_page_configuration",
+          "mode",
+          "objective",
+          "serving_issues",
+          "targeting"
+        ]
+      },
+      {
+        "name": "BiddingConfigBody",
+        "requiredExact": [
+          "billing_event_type"
+        ],
+        "propertiesInclude": [
+          "custom_audience_bid_multipliers",
+          "max_bid_micros",
+          "strategy"
+        ]
+      },
+      {
+        "name": "AdGroupItemBody",
+        "requiredExact": [
+          "id",
+          "created_at",
+          "updated_at",
+          "name",
+          "description",
+          "context_hints",
+          "status",
+          "bidding_config"
+        ],
+        "propertiesInclude": [
+          "landing_page_configuration",
+          "product_set",
+          "serving_issues"
+        ]
+      },
+      {
+        "name": "ConversationalBottomOtmSpecBody",
+        "requiredExact": [
+          "type",
+          "title",
+          "body",
+          "target_url"
+        ],
+        "nullableProperties": [
+          "image_url",
+          "target_url"
+        ]
+      },
+      {
+        "name": "CreateAdCreativeParams",
+        "requiredExact": [
+          "type",
+          "title",
+          "body"
+        ],
+        "propertyConstraints": {
+          "title": {
+            "minLength": 3,
+            "maxLength": 50
+          }
+        }
+      },
+      {
+        "name": "UpdateAdCreativeParams",
+        "requiredExact": [
+          "type",
+          "title",
+          "body"
+        ],
+        "propertyConstraints": {
+          "title": {
+            "minLength": 1,
+            "maxLength": 50
+          }
+        }
+      },
+      {
+        "name": "AdItemBody",
+        "requiredExact": [
+          "id",
+          "name",
+          "created_at",
+          "updated_at",
+          "creative",
+          "status",
+          "review_status",
+          "review"
+        ],
+        "propertiesInclude": [
+          "appeal",
+          "landing_page_configuration",
+          "serving_issues"
+        ]
+      },
+      {
+        "name": "ReviewBody",
+        "requiredExact": [
+          "status"
+        ],
+        "propertiesExact": [
+          "reason",
+          "screenshot_url",
+          "status"
+        ]
+      },
+      {
+        "name": "ReviewReasonCode",
+        "enumIncludes": [
+          "crawl_failed",
+          "crawler_bot_blocked",
+          "crawler_captcha",
+          "crawler_login_required",
+          "landing_page_unusable",
+          "missing_favicon",
+          "robots_txt",
+          "unsupported_content_type"
+        ]
+      },
+      {
+        "name": "ConversionSummaryRowBody",
+        "requiredExact": [
+          "entity_id",
+          "conversions"
+        ],
+        "propertiesInclude": [
+          "click_through_conversions",
+          "view_through_conversions"
+        ]
+      },
+      {
+        "name": "CampaignsResource",
+        "requiredExact": [
+          "object",
+          "data",
+          "first_id",
+          "last_id",
+          "has_more"
+        ]
+      },
+      {
+        "name": "InsightsResource",
+        "requiredExact": [
+          "object",
+          "data",
+          "count",
+          "first_id",
+          "last_id",
+          "has_more"
+        ]
+      }
+    ]
+  },
+  "operationCoverage": [
+    {
+      "status": "implemented",
+      "reason": "Used by the current live read, monitoring, or approved mutation adapter.",
+      "operations": [
+        "GET /ad_account",
+        "GET /ad_account/insights",
+        "GET /ad_groups",
+        "GET /ad_groups/{ad_group_id}",
+        "GET /ad_groups/{ad_group_id}/insights",
+        "GET /ads",
+        "GET /ads/{ad_id}",
+        "GET /campaigns",
+        "GET /campaigns/{campaign_id}",
+        "GET /conversions/event_settings",
+        "POST /ad_groups/{ad_group_id}",
+        "POST /ad_groups/{ad_group_id}/activate",
+        "POST /ad_groups/{ad_group_id}/pause",
+        "POST /ads/{ad_id}",
+        "POST /ads/{ad_id}/activate",
+        "POST /ads/{ad_id}/pause",
+        "POST /campaigns/{campaign_id}",
+        "POST /campaigns/{campaign_id}/activate",
+        "POST /campaigns/{campaign_id}/pause",
+        "POST /conversions/insights"
+      ]
+    },
+    {
+      "status": "capability_gated",
+      "reason": "OpenAI documents these operations as enabled per ad account; MaintainFlow must not present them as available before a real account confirms access.",
+      "operations": [
+        "GET /conversions/events",
+        "GET /conversions/pixels",
+        "POST /ad_account/brand",
+        "POST /conversions/api_keys",
+        "POST /conversions/event_settings",
+        "POST /conversions/pixels"
+      ]
+    },
+    {
+      "status": "capability_gated",
+      "reason": "Unverified official-document conflict: OpenAPI exposes these feed-management operations while the Product Feeds guide says the public Advertiser API does not create or list feed connections or transfer full catalogues.",
+      "operations": [
+        "GET /feeds",
+        "GET /feeds/uploads",
+        "GET /feeds/{feed_id}/sftp_access",
+        "POST /feeds",
+        "POST /feeds/{feed_id}/archive",
+        "POST /feeds/{feed_id}/products/query",
+        "POST /feeds/{feed_id}/sftp_access",
+        "POST /feeds/{feed_id}/sftp_access/activate",
+        "POST /feeds/{feed_id}/sftp_access/pause"
+      ]
+    },
+    {
+      "status": "capability_gated",
+      "reason": "The Delta Feeds API is enabled per ad account and accepted updates only confirm queued processing, not downstream indexing or serving.",
+      "operations": [
+        "PATCH /feeds/{feed_id}/products"
+      ]
+    },
+    {
+      "status": "not_implemented",
+      "reason": "Documented by OpenAI but outside the current MaintainFlow MVP adapter.",
+      "operations": [
+        "DELETE /lead_sync_subscriptions/{subscription_id}",
+        "GET /ad_account/spend_limit_windows",
+        "GET /ad_accounts",
+        "GET /ads/{ad_id}/insights",
+        "GET /business_agent_tools",
+        "GET /business_agents",
+        "GET /business_agents/{business_agent_id}",
+        "GET /campaigns/{campaign_id}/insights",
+        "GET /custom_audiences",
+        "GET /custom_audiences/{custom_audience_id}",
+        "GET /custom_audiences/{custom_audience_id}/operations/{operation_id}",
+        "GET /geo_lookup/search",
+        "GET /lead_forms",
+        "GET /lead_forms/{lead_form_id}",
+        "GET /lead_sync_subscriptions",
+        "GET /lead_sync_subscriptions/{subscription_id}",
+        "GET /me",
+        "GET /partner_data/uploads/{upload_id}",
+        "POST /ad_account/activate",
+        "POST /ad_account/negative_keywords",
+        "POST /ad_account/pause",
+        "POST /ad_account/spend_limit_windows",
+        "POST /ad_account/spend_limit_windows/{window_id}",
+        "POST /ad_account/spend_limit_windows/{window_id}/delete",
+        "POST /ad_account_creation_sessions",
+        "POST /ad_groups",
+        "POST /ad_groups/{ad_group_id}/archive",
+        "POST /ads",
+        "POST /ads/{ad_id}/archive",
+        "POST /ads/{ad_id}/preview",
+        "POST /api_keys",
+        "POST /business_agents",
+        "POST /business_agents/{business_agent_id}",
+        "POST /business_agents/{business_agent_id}/preview",
+        "POST /business_agents/{business_agent_id}/publish",
+        "POST /campaigns",
+        "POST /campaigns/{campaign_id}/archive",
+        "POST /custom_audiences",
+        "POST /custom_audiences/merge",
+        "POST /custom_audiences/{custom_audience_id}/add",
+        "POST /custom_audiences/{custom_audience_id}/archive",
+        "POST /custom_audiences/{custom_audience_id}/remove",
+        "POST /custom_audiences/{custom_audience_id}/replace",
+        "POST /lead_forms",
+        "POST /lead_forms/{lead_form_id}",
+        "POST /lead_forms/{lead_form_id}/archive",
+        "POST /lead_forms/{lead_form_id}/publish",
+        "POST /lead_forms/{lead_form_id}/test_submissions",
+        "POST /lead_sync_subscriptions",
+        "POST /partner_data/uploads",
+        "POST /upload",
+        "POST /uploads"
+      ]
+    }
+  ],
+  "guideOnlyOperations": [
+    {
+      "status": "capability_gated",
+      "reason": "Limited preview and intentionally excluded from the downloadable OpenAPI specification.",
+      "operations": [
+        "POST /bulk_mutation_jobs",
+        "GET /bulk_mutation_jobs/{job_id}",
+        "GET /bulk_mutation_jobs/{job_id}/operations"
+      ],
+      "source": "https://developers.openai.com/ads/bulk-api"
+    }
+  ],
+  "officialSources": {
+    "overview": "https://developers.openai.com/ads/api-overview",
+    "authentication": "https://developers.openai.com/ads/api-reference/authentication",
+    "productFeeds": "https://developers.openai.com/ads/product-feeds",
+    "deltaFeeds": "https://developers.openai.com/ads/delta-feeds",
+    "conversionSetup": "https://developers.openai.com/ads/api-reference/conversion-setup"
+  }
+}

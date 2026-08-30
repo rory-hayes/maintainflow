@@ -1,0 +1,1440 @@
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
+import postgres, { type Sql } from "postgres";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+import {
+  ApprovalTransitionError,
+  claimApprovalRollback,
+  claimDueMonitoringRecords,
+  createApprovalRecord,
+  getApprovalAccountId,
+  listActiveApprovalRecords,
+  listApprovalRecords,
+  listDueMonitoringAccountIds,
+  listDueMonitoringRecords,
+  reconcileApprovalRecord,
+  recordMonitoringOutcome,
+  updateApprovalRecord,
+  updateRollbackRecord,
+  verifyApprovalStore,
+} from "../audit/approval-store.server";
+import {
+  RecommendationDecisionTransitionError,
+  dismissRecommendation,
+  listActiveRecommendationDismissals,
+  listRecommendationDecisionHistory,
+  restoreRecommendation,
+  verifyRecommendationDecisionStore,
+} from "../audit/recommendation-decision-store.server";
+import { applyRecommendationDismissals } from "../audit/recommendation-decision";
+import {
+  encryptAdsApiKey,
+  encryptConversionsApiCredential,
+} from "../credentials/crypto.server";
+import {
+  listCreativeReviewEvents,
+  recordCreativeReviewSnapshot,
+  verifyCreativeHistoryStore,
+} from "../openai-ads/creative-history.server";
+import {
+  getConversionsApiConnectionStatus,
+  validateConversionsApiPayload,
+} from "../openai-ads/conversions.server";
+import { demoAds, getDemoRecommendation } from "../openai-ads/demo-data";
+import {
+  consumeReadinessAuditQuota,
+  pruneExpiredReadinessRateLimitBuckets,
+  verifyReadinessRateLimitStore,
+} from "../readiness/rate-limit.server";
+import {
+  listReadinessAuditRuns,
+  ReadinessHistoryTransitionError,
+  recordReadinessAuditRun,
+  verifyReadinessHistoryStore,
+} from "../readiness/history.server";
+import type { ReadinessAudit } from "../readiness/schema";
+import type { AccountAccess } from "../tenancy/schema";
+import {
+  AccountAccessForbiddenError,
+  bootstrapWorkspace,
+  getAccountAccess,
+  getAdsApiKeyForAccount,
+  getConversionsApiCredentialForAccount,
+  listAccountAccesses,
+  requireAccountAccess,
+  rotateAdsApiCredential,
+  rotateConversionsApiCredential,
+  verifyConversionCredentialStore,
+  verifyCredentialStore,
+  verifyTenancyStore,
+} from "../tenancy/store.server";
+
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error("DATABASE_URL is required for the database integration suite.");
+}
+
+const database = postgres(databaseUrl, {
+  connect_timeout: 5,
+  idle_timeout: 5,
+  max: 3,
+  prepare: false,
+});
+const ownerOperatorId = "user_integration_owner";
+const viewerOperatorId = "user_integration_viewer";
+const unknownOperatorId = "user_integration_unknown";
+const advertiserAccountId = "adacct_integration_alpha";
+const agencyAccountId = "adacct_integration_beta";
+const initialAdvertiserKey = "ads-integration-alpha-initial";
+const replacementAdvertiserKey = "ads-integration-alpha-replacement";
+const agencyKey = "ads-integration-beta-initial";
+let advertiserAccess: AccountAccess;
+let agencyAccess: AccountAccess;
+
+async function applyMigrations(sql: Sql) {
+  const migrationFiles = [
+    "docs/database/001_ads_approval_records.sql",
+    "docs/database/002_customer_tenancy.sql",
+    "docs/database/003_advertiser_credentials.sql",
+    "docs/database/004_creative_review_history.sql",
+    "docs/database/005_durable_monitoring_windows.sql",
+    "docs/database/006_monitoring_outcomes.sql",
+    "docs/database/007_monitoring_evaluation_leases.sql",
+    "docs/database/008_readiness_rate_limits.sql",
+    "docs/database/009_recommendation_dismissals.sql",
+    "docs/database/010_conversion_credentials.sql",
+    "docs/database/011_readiness_audit_history.sql",
+  ];
+  await sql.begin(async (transaction) => {
+    for (const migrationFile of migrationFiles) {
+      const migration = await readFile(
+        path.join(process.cwd(), migrationFile),
+        "utf8",
+      );
+      await transaction.unsafe(migration);
+    }
+  });
+}
+
+async function addReviewOnlyAccess(accountId: string) {
+  const organizationId = randomUUID();
+  const [account] = await database<{ id: string }[]>`
+    select id from maintainflow_advertiser_accounts
+    where external_account_id = ${accountId}
+  `;
+  if (!account) throw new Error("The integration account was not created.");
+  await database.begin(async (transaction) => {
+    await transaction`
+      insert into maintainflow_organizations (id, name, customer_type)
+      values (${organizationId}, 'Review Partners', 'agency')
+    `;
+    await transaction`
+      insert into maintainflow_organization_memberships (
+        organization_id, clerk_user_id, role
+      ) values (${organizationId}, ${viewerOperatorId}, 'analyst')
+    `;
+    await transaction`
+      insert into maintainflow_account_access (
+        organization_id, advertiser_account_id, role, granted_by
+      ) values (
+        ${organizationId}, ${account.id}, 'viewer', ${ownerOperatorId}
+      )
+    `;
+  });
+}
+
+describe("PostgreSQL customer and approval boundary", () => {
+  beforeAll(async () => {
+    await applyMigrations(database);
+    advertiserAccess = await bootstrapWorkspace({
+      operatorId: ownerOperatorId,
+      organizationName: "Alpine Retail",
+      organizationType: "advertiser",
+      accountId: advertiserAccountId,
+      accountName: "Alpine Home",
+      connection: {
+        mode: "vault",
+        credential: encryptAdsApiKey({
+          apiKey: initialAdvertiserKey,
+          externalAccountId: advertiserAccountId,
+        }),
+        verifiedAt: new Date("2026-08-30T08:00:00.000Z"),
+      },
+    });
+    agencyAccess = await bootstrapWorkspace({
+      operatorId: ownerOperatorId,
+      organizationName: "Beacon Agency",
+      organizationType: "agency",
+      accountId: agencyAccountId,
+      accountName: "Beacon Client",
+      connection: {
+        mode: "vault",
+        credential: encryptAdsApiKey({
+          apiKey: agencyKey,
+          externalAccountId: agencyAccountId,
+        }),
+        verifiedAt: new Date("2026-08-30T08:05:00.000Z"),
+      },
+    });
+    await addReviewOnlyAccess(advertiserAccountId);
+  }, 20_000);
+
+  afterAll(async () => {
+    await database.end({ timeout: 5 });
+  });
+
+  it("applies every migration and enforces multi-account roles", async () => {
+    await expect(verifyApprovalStore()).resolves.toBe(true);
+    await expect(verifyTenancyStore()).resolves.toBe(true);
+    await expect(verifyCredentialStore()).resolves.toBe(true);
+    await expect(verifyConversionCredentialStore()).resolves.toBe(true);
+    await expect(verifyReadinessRateLimitStore()).resolves.toBe(true);
+    await expect(verifyRecommendationDecisionStore()).resolves.toBe(true);
+    await expect(verifyReadinessHistoryStore()).resolves.toBe(true);
+
+    expect(advertiserAccess).toMatchObject({
+      organizationType: "advertiser",
+      accountId: advertiserAccountId,
+      connectionMode: "vault",
+      membershipRole: "owner",
+      accountRole: "owner",
+    });
+    expect(agencyAccess).toMatchObject({
+      organizationType: "agency",
+      accountId: agencyAccountId,
+      connectionMode: "vault",
+      membershipRole: "owner",
+      accountRole: "manager",
+    });
+
+    const accounts = await listAccountAccesses(ownerOperatorId);
+    expect(accounts.map((account) => account.accountId)).toEqual([
+      advertiserAccountId,
+      agencyAccountId,
+    ]);
+    await expect(
+      requireAccountAccess(viewerOperatorId, advertiserAccountId, "read"),
+    ).resolves.toMatchObject({
+      membershipRole: "analyst",
+      accountRole: "viewer",
+    });
+    await expect(
+      requireAccountAccess(viewerOperatorId, advertiserAccountId, "write"),
+    ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
+    await expect(
+      requireAccountAccess(unknownOperatorId, advertiserAccountId, "read"),
+    ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
+    await expect(
+      getAccountAccess(unknownOperatorId, advertiserAccountId),
+    ).resolves.toBeNull();
+
+    await expect(
+      bootstrapWorkspace({
+        operatorId: unknownOperatorId,
+        organizationName: "Duplicate Claim",
+        organizationType: "advertiser",
+        accountId: advertiserAccountId,
+        accountName: "Alpine Home",
+        connection: { mode: "environment" },
+      }),
+    ).rejects.toThrow("already claimed");
+  });
+
+  it("keeps recommendation dismissals account scoped, auditable, and reversible", async () => {
+    const recommendation = getDemoRecommendation("rec_bid_20");
+    if (!recommendation) {
+      throw new Error("The recommendation dismissal fixture is missing.");
+    }
+    const reason = "Keep the current bid until the seasonal test completes.";
+
+    const duplicateAttempts = await Promise.all([
+      dismissRecommendation({
+        accountId: advertiserAccountId,
+        operatorId: ownerOperatorId,
+        access: advertiserAccess,
+        recommendation,
+        reason,
+      }),
+      dismissRecommendation({
+        accountId: advertiserAccountId,
+        operatorId: ownerOperatorId,
+        access: advertiserAccess,
+        recommendation,
+        reason,
+      }),
+    ]);
+    expect(duplicateAttempts.filter((result) => result.created)).toHaveLength(1);
+    expect(duplicateAttempts.filter((result) => !result.created)).toHaveLength(1);
+
+    const dismissals = await listActiveRecommendationDismissals(
+      advertiserAccountId,
+    );
+    expect(dismissals).toEqual([
+      expect.objectContaining({
+        accountId: advertiserAccountId,
+        operatorId: ownerOperatorId,
+        organizationId: advertiserAccess.organizationId,
+        membershipRole: "owner",
+        accountRole: "owner",
+        recommendationId: recommendation.id,
+        entityId: recommendation.entityId,
+        reason,
+      }),
+    ]);
+    await expect(
+      listActiveRecommendationDismissals(agencyAccountId),
+    ).resolves.toEqual([]);
+    await expect(
+      listRecommendationDecisionHistory(agencyAccountId),
+    ).resolves.toEqual([]);
+    const historyBeforeRestore = await listRecommendationDecisionHistory(
+      advertiserAccountId,
+    );
+    expect(historyBeforeRestore).toEqual([
+      expect.objectContaining({
+        id: dismissals[0].id,
+        organizationName: "Alpine Retail",
+        restoredBy: null,
+        restoredAt: null,
+      }),
+    ]);
+    expect(
+      applyRecommendationDismissals([recommendation], dismissals)[0],
+    ).toMatchObject({ status: "dismissed", dismissal: { reason } });
+
+    const [stored] = await database<
+      {
+        recommendation_payload: unknown;
+        reason: string;
+        actor_membership_role: string;
+        actor_account_role: string;
+      }[]
+    >`
+      select recommendation_payload, reason,
+        actor_membership_role, actor_account_role
+      from maintainflow_recommendation_dismissals
+      where id = ${dismissals[0].id}
+    `;
+    expect(stored).toEqual({
+      recommendation_payload: recommendation,
+      reason,
+      actor_membership_role: "owner",
+      actor_account_role: "owner",
+    });
+
+    const viewerAccess = await requireAccountAccess(
+      viewerOperatorId,
+      advertiserAccountId,
+      "read",
+    );
+    await expect(
+      restoreRecommendation({
+        accountId: advertiserAccountId,
+        operatorId: viewerOperatorId,
+        access: viewerAccess,
+        recommendation,
+      }),
+    ).rejects.toBeInstanceOf(RecommendationDecisionTransitionError);
+
+    await expect(
+      restoreRecommendation({
+        accountId: advertiserAccountId,
+        operatorId: ownerOperatorId,
+        access: advertiserAccess,
+        recommendation,
+      }),
+    ).resolves.toEqual({ id: dismissals[0].id });
+    await expect(
+      listActiveRecommendationDismissals(advertiserAccountId),
+    ).resolves.toEqual([]);
+    await expect(
+      listRecommendationDecisionHistory(advertiserAccountId),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: dismissals[0].id,
+        organizationName: "Alpine Retail",
+        restoredBy: ownerOperatorId,
+        restoredOrganizationName: "Alpine Retail",
+        restoredMembershipRole: "owner",
+        restoredAccountRole: "owner",
+        restoredAt: expect.any(Date),
+      }),
+    ]);
+    await expect(
+      listRecommendationDecisionHistory(advertiserAccountId, 101),
+    ).rejects.toBeInstanceOf(RecommendationDecisionTransitionError);
+
+    const [restored] = await database<
+      {
+        restored_by: string;
+        restored_organization_id: string;
+        restored_membership_role: string;
+        restored_account_role: string;
+        restored_at: Date;
+      }[]
+    >`
+      select restored_by, restored_organization_id,
+        restored_membership_role, restored_account_role, restored_at
+      from maintainflow_recommendation_dismissals
+      where id = ${dismissals[0].id}
+    `;
+    expect(restored).toMatchObject({
+      restored_by: ownerOperatorId,
+      restored_organization_id: advertiserAccess.organizationId,
+      restored_membership_role: "owner",
+      restored_account_role: "owner",
+      restored_at: expect.any(Date),
+    });
+  });
+
+  it("enforces shared readiness quotas atomically without storing raw subjects", async () => {
+    const now = new Date("2026-08-30T12:15:00.000Z");
+    const sameClient = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        consumeReadinessAuditQuota({
+          clientIp: "203.0.113.20",
+          hostname: "shop-rate-limit.example",
+          now,
+        }),
+      ),
+    );
+    expect(sameClient.filter((decision) => decision.allowed)).toHaveLength(6);
+    expect(sameClient.filter((decision) => !decision.allowed)).toHaveLength(4);
+    expect(sameClient.at(-1)).toMatchObject({ limit: 6 });
+
+    await expect(
+      consumeReadinessAuditQuota({
+        clientIp: "203.0.113.21",
+        hostname: "shop-rate-limit.example",
+        now,
+      }),
+    ).resolves.toMatchObject({ allowed: true, remaining: 5 });
+    await expect(
+      consumeReadinessAuditQuota({
+        clientIp: "203.0.113.20",
+        hostname: "shop-rate-limit.example",
+        now: new Date("2026-08-30T13:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ allowed: true, remaining: 5 });
+
+    const hostCap = await Promise.all(
+      Array.from({ length: 31 }, (_, index) =>
+        consumeReadinessAuditQuota({
+          clientIp: `198.51.100.${index + 1}`,
+          hostname: "shared-target.example",
+          now,
+        }),
+      ),
+    );
+    expect(hostCap.filter((decision) => decision.allowed)).toHaveLength(30);
+    expect(hostCap.filter((decision) => !decision.allowed)).toHaveLength(1);
+
+    const buckets = await database<
+      { subject_hash: string; window_started_at: Date }[]
+    >`
+      select subject_hash, window_started_at
+      from maintainflow_rate_limit_buckets
+    `;
+    expect(buckets.length).toBeGreaterThan(0);
+    expect(buckets.every((bucket) => bucket.subject_hash.length === 64)).toBe(
+      true,
+    );
+    expect(JSON.stringify(buckets)).not.toContain("203.0.113.20");
+    expect(JSON.stringify(buckets)).not.toContain("shop-rate-limit.example");
+
+    await database`
+      update maintainflow_rate_limit_buckets
+      set window_started_at = ${new Date("2026-08-20T00:00:00.000Z")}
+      where (scope, subject_hash) = (
+        select scope, subject_hash
+        from maintainflow_rate_limit_buckets
+        limit 1
+      )
+    `;
+    await expect(
+      pruneExpiredReadinessRateLimitBuckets(now, 1),
+    ).resolves.toBe(1);
+  });
+
+  it("retains sanitized readiness evidence with account and actor provenance", async () => {
+    function readinessAudit(options: {
+      url: string;
+      score: number;
+      scannedAt: string;
+    }): ReadinessAudit {
+      return {
+        requestedUrl: options.url,
+        finalUrl: options.url,
+        scannedAt: options.scannedAt,
+        score: options.score,
+        verdict: options.score >= 90 ? "ready" : "needs_work",
+        checks: [
+          {
+            id: "oai_searchbot",
+            title: "OAI-SearchBot is allowed",
+            status: "pass",
+            weight: 15,
+            evidence: "No blocking rule applies.",
+            recommendation: "Keep public crawler access available.",
+          },
+        ],
+        measurement: {
+          status: "not_detected",
+          sdkDetected: false,
+          initializationDetected: false,
+          pixelIdDetected: false,
+          imageTagDetected: false,
+          consentSignalDetected: false,
+          eventNames: [],
+          csp: { present: false, compatible: false, missingSources: [] },
+          checks: [],
+        },
+        limitations: ["Static evidence only; no runtime events were fired."],
+      };
+    }
+
+    const baseline = readinessAudit({
+      url: "https://shop.example/products/bench",
+      score: 72,
+      scannedAt: "2026-08-29T15:00:00.000Z",
+    });
+    const improved = readinessAudit({
+      url: baseline.finalUrl,
+      score: 94,
+      scannedAt: "2026-08-30T15:00:00.000Z",
+    });
+    const agencyAudit = readinessAudit({
+      url: "https://agency-client.example/products/lamp",
+      score: 81,
+      scannedAt: "2026-08-30T15:05:00.000Z",
+    });
+
+    await expect(
+      recordReadinessAuditRun({
+        accountId: advertiserAccountId,
+        operatorId: ownerOperatorId,
+        access: agencyAccess,
+        audit: baseline,
+      }),
+    ).rejects.toBeInstanceOf(ReadinessHistoryTransitionError);
+
+    const first = await recordReadinessAuditRun({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      access: advertiserAccess,
+      audit: baseline,
+    });
+    const second = await recordReadinessAuditRun({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      access: advertiserAccess,
+      audit: improved,
+    });
+    await recordReadinessAuditRun({
+      accountId: agencyAccountId,
+      operatorId: ownerOperatorId,
+      access: agencyAccess,
+      audit: agencyAudit,
+    });
+
+    await expect(listReadinessAuditRuns({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      access: advertiserAccess,
+    })).resolves.toEqual([
+      expect.objectContaining({ id: second.id, audit: improved }),
+      expect.objectContaining({ id: first.id, audit: baseline }),
+    ]);
+    await expect(listReadinessAuditRuns({
+      accountId: agencyAccountId,
+      operatorId: ownerOperatorId,
+      access: agencyAccess,
+    })).resolves.toEqual([
+      expect.objectContaining({ accountId: agencyAccountId, audit: agencyAudit }),
+    ]);
+    await expect(
+      listReadinessAuditRuns({
+        accountId: advertiserAccountId,
+        operatorId: ownerOperatorId,
+        access: advertiserAccess,
+        limit: 51,
+      }),
+    ).rejects.toBeInstanceOf(ReadinessHistoryTransitionError);
+
+    const viewerAccess = await requireAccountAccess(
+      viewerOperatorId,
+      advertiserAccountId,
+      "read",
+    );
+    await expect(
+      recordReadinessAuditRun({
+        accountId: advertiserAccountId,
+        operatorId: viewerOperatorId,
+        access: viewerAccess,
+        audit: improved,
+      }),
+    ).rejects.toBeInstanceOf(ReadinessHistoryTransitionError);
+
+    const rows = await database<
+      {
+        account_id: string;
+        operator_id: string;
+        acting_organization_id: string;
+        actor_membership_role: string;
+        actor_account_role: string;
+        audit_payload: unknown;
+      }[]
+    >`
+      select account.external_account_id as account_id,
+        run.operator_id, run.acting_organization_id,
+        run.actor_membership_role, run.actor_account_role,
+        run.audit_payload
+      from maintainflow_readiness_audit_runs run
+      join maintainflow_advertiser_accounts account
+        on account.id = run.advertiser_account_id
+      where run.id = ${second.id}
+    `;
+    expect(rows).toEqual([
+      {
+        account_id: advertiserAccountId,
+        operator_id: ownerOperatorId,
+        acting_organization_id: advertiserAccess.organizationId,
+        actor_membership_role: "owner",
+        actor_account_role: "owner",
+        audit_payload: improved,
+      },
+    ]);
+    expect(JSON.stringify(rows)).not.toContain("apiKey");
+    expect(JSON.stringify(rows)).not.toContain("cookie");
+    expect(JSON.stringify(rows)).not.toContain("<html");
+  });
+
+  it("stores ciphertext and rotates credentials atomically", async () => {
+    await expect(
+      getAdsApiKeyForAccount(advertiserAccountId),
+    ).resolves.toBe(initialAdvertiserKey);
+    const [initialRow] = await database<
+      { id: string; ciphertext: Buffer; credential_version: number; status: string }[]
+    >`
+      select credential.id, credential.ciphertext,
+        credential.credential_version, credential.status
+      from maintainflow_advertiser_credentials credential
+      join maintainflow_advertiser_accounts account
+        on account.id = credential.advertiser_account_id
+      where account.external_account_id = ${advertiserAccountId}
+    `;
+    expect(initialRow).toMatchObject({ credential_version: 1, status: "active" });
+    expect(initialRow?.ciphertext.toString("utf8")).not.toContain(
+      initialAdvertiserKey,
+    );
+
+    const replacement = encryptAdsApiKey({
+      apiKey: replacementAdvertiserKey,
+      externalAccountId: advertiserAccountId,
+    });
+    await expect(
+      rotateAdsApiCredential({
+        operatorId: ownerOperatorId,
+        accountId: advertiserAccountId,
+        credential: { ...replacement, id: initialRow!.id },
+        verifiedAt: new Date("2026-08-30T09:00:00.000Z"),
+      }),
+    ).rejects.toThrow();
+    await expect(
+      getAdsApiKeyForAccount(advertiserAccountId),
+    ).resolves.toBe(initialAdvertiserKey);
+
+    await expect(
+      rotateAdsApiCredential({
+        operatorId: ownerOperatorId,
+        accountId: advertiserAccountId,
+        credential: replacement,
+        verifiedAt: new Date("2026-08-30T09:05:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ credentialVersion: 2 });
+    await expect(
+      getAdsApiKeyForAccount(advertiserAccountId),
+    ).resolves.toBe(replacementAdvertiserKey);
+
+    const versions = await database<
+      {
+        credential_version: number;
+        status: string;
+        revoked: boolean;
+      }[]
+    >`
+      select credential.credential_version, credential.status,
+        credential.revoked_at is not null as revoked
+      from maintainflow_advertiser_credentials credential
+      join maintainflow_advertiser_accounts account
+        on account.id = credential.advertiser_account_id
+      where account.external_account_id = ${advertiserAccountId}
+      order by credential.credential_version
+    `;
+    expect(versions).toEqual([
+      { credential_version: 1, status: "revoked", revoked: true },
+      { credential_version: 2, status: "active", revoked: false },
+    ]);
+  });
+
+  it("encrypts, scopes, and atomically rotates conversion credentials", async () => {
+    const initialCredential = {
+      pixelId: "pixel-integration-alpha-initial",
+      apiKey: "capi-integration-alpha-initial",
+    };
+    const replacementCredential = {
+      pixelId: "pixel-integration-alpha-replacement",
+      apiKey: "capi-integration-alpha-replacement",
+    };
+    const agencyCredential = {
+      pixelId: "pixel-integration-beta-initial",
+      apiKey: "capi-integration-beta-initial",
+    };
+
+    await expect(
+      getConversionsApiCredentialForAccount(advertiserAccountId),
+    ).rejects.toThrow("unavailable");
+    await expect(
+      rotateConversionsApiCredential({
+        operatorId: ownerOperatorId,
+        accountId: advertiserAccountId,
+        access: agencyAccess,
+        credential: encryptConversionsApiCredential({
+          credential: initialCredential,
+          externalAccountId: advertiserAccountId,
+        }),
+        validatedAt: new Date("2026-08-30T09:10:00.000Z"),
+        validation: { providerStatus: 204, eventCount: 1 },
+      }),
+    ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
+    await expect(
+      rotateConversionsApiCredential({
+        operatorId: ownerOperatorId,
+        accountId: advertiserAccountId,
+        access: advertiserAccess,
+        credential: encryptConversionsApiCredential({
+          credential: initialCredential,
+          externalAccountId: advertiserAccountId,
+        }),
+        validatedAt: new Date("2026-08-30T09:12:00.000Z"),
+        validation: { providerStatus: 199, eventCount: 0 },
+      }),
+    ).rejects.toThrow("Valid dry-run evidence");
+
+    const initialEncrypted = encryptConversionsApiCredential({
+      credential: initialCredential,
+      externalAccountId: advertiserAccountId,
+    });
+    await expect(
+      rotateConversionsApiCredential({
+        operatorId: ownerOperatorId,
+        accountId: advertiserAccountId,
+        access: advertiserAccess,
+        credential: initialEncrypted,
+        validatedAt: new Date("2026-08-30T09:15:00.000Z"),
+        validation: { providerStatus: 204, eventCount: 1 },
+      }),
+    ).resolves.toMatchObject({ credentialVersion: 1 });
+    await expect(
+      getConversionsApiCredentialForAccount(advertiserAccountId),
+    ).resolves.toEqual(initialCredential);
+
+    const [initialRow] = await database<
+      {
+        id: string;
+        ciphertext: Buffer;
+        credential_version: number;
+        status: string;
+        acting_organization_id: string;
+        actor_membership_role: string;
+        actor_account_role: string;
+        validation_provider_status: number;
+        validation_event_count: number;
+      }[]
+    >`
+      select credential.id, credential.ciphertext,
+        credential.credential_version, credential.status,
+        credential.acting_organization_id,
+        credential.actor_membership_role,
+        credential.actor_account_role,
+        credential.validation_provider_status,
+        credential.validation_event_count
+      from maintainflow_conversion_credentials credential
+      join maintainflow_advertiser_accounts account
+        on account.id = credential.advertiser_account_id
+      where account.external_account_id = ${advertiserAccountId}
+    `;
+    expect(initialRow).toMatchObject({
+      credential_version: 1,
+      status: "active",
+      acting_organization_id: advertiserAccess.organizationId,
+      actor_membership_role: "owner",
+      actor_account_role: "owner",
+      validation_provider_status: 204,
+      validation_event_count: 1,
+    });
+    expect(initialRow.ciphertext.toString("utf8")).not.toContain(
+      initialCredential.pixelId,
+    );
+    expect(initialRow.ciphertext.toString("utf8")).not.toContain(
+      initialCredential.apiKey,
+    );
+
+    const replacementEncrypted = encryptConversionsApiCredential({
+      credential: replacementCredential,
+      externalAccountId: advertiserAccountId,
+    });
+    await expect(
+      rotateConversionsApiCredential({
+        operatorId: ownerOperatorId,
+        accountId: advertiserAccountId,
+        access: advertiserAccess,
+        credential: { ...replacementEncrypted, id: initialRow.id },
+        validatedAt: new Date("2026-08-30T09:20:00.000Z"),
+        validation: { providerStatus: 204, eventCount: 1 },
+      }),
+    ).rejects.toThrow();
+    await expect(
+      getConversionsApiCredentialForAccount(advertiserAccountId),
+    ).resolves.toEqual(initialCredential);
+
+    await expect(
+      rotateConversionsApiCredential({
+        operatorId: ownerOperatorId,
+        accountId: advertiserAccountId,
+        access: advertiserAccess,
+        credential: replacementEncrypted,
+        validatedAt: new Date("2026-08-30T09:25:00.000Z"),
+        validation: { providerStatus: 204, eventCount: 1 },
+      }),
+    ).resolves.toMatchObject({ credentialVersion: 2 });
+    await expect(
+      getConversionsApiCredentialForAccount(advertiserAccountId),
+    ).resolves.toEqual(replacementCredential);
+
+    const originalFetch = globalThis.fetch;
+    const originalValidationEnabled =
+      process.env.OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED;
+    const originalReleaseStage = process.env.MAINTAINFLOW_RELEASE_STAGE;
+    process.env.MAINTAINFLOW_RELEASE_STAGE = "private_read";
+    process.env.OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED = "true";
+    globalThis.fetch = vi.fn(async (input, init) => {
+      const url = new URL(
+        typeof input === "string" || input instanceof URL
+          ? input.toString()
+          : input.url,
+      );
+      const headers = new Headers(init?.headers);
+      expect(url.searchParams.get("pid")).toBe(
+        replacementCredential.pixelId,
+      );
+      expect(headers.get("Authorization")).toBe(
+        `Bearer ${replacementCredential.apiKey}`,
+      );
+      return new Response(null, { status: 204 });
+    });
+    try {
+      const connectionStatus =
+        await getConversionsApiConnectionStatus(advertiserAccountId);
+      expect(connectionStatus).toEqual({
+        state: "connected",
+        source: "vault",
+        validationEnabled: true,
+        credentialVersion: 2,
+        validatedAt: "2026-08-30T09:25:00.000Z",
+        providerStatus: 204,
+        eventCount: 1,
+      });
+      expect(JSON.stringify(connectionStatus)).not.toContain(
+        replacementCredential.pixelId,
+      );
+      expect(JSON.stringify(connectionStatus)).not.toContain(
+        replacementCredential.apiKey,
+      );
+
+      await expect(
+        validateConversionsApiPayload({
+          accountId: advertiserAccountId,
+          now: new Date("2026-08-30T09:26:00.000Z"),
+          payload: {
+            validate_only: true,
+            events: [
+              {
+                id: "order_database_integration",
+                type: "order_created",
+                timestamp_ms: new Date("2026-08-30T09:26:00.000Z").getTime(),
+                source_url: "https://shop.example/orders/integration",
+                action_source: "web",
+                data: {
+                  type: "contents",
+                  amount: 2500,
+                  currency: "EUR",
+                  contents: [
+                    {
+                      id: "sku_database_integration",
+                      content_type: "product",
+                      quantity: 1,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        }),
+      ).resolves.toMatchObject({
+        status: "validated",
+        mode: "validate_only",
+        providerStatus: 204,
+      });
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalValidationEnabled === undefined) {
+        delete process.env.OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED;
+      } else {
+        process.env.OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED =
+          originalValidationEnabled;
+      }
+      if (originalReleaseStage === undefined) {
+        delete process.env.MAINTAINFLOW_RELEASE_STAGE;
+      } else {
+        process.env.MAINTAINFLOW_RELEASE_STAGE = originalReleaseStage;
+      }
+    }
+
+    await expect(
+      rotateConversionsApiCredential({
+        operatorId: ownerOperatorId,
+        accountId: agencyAccountId,
+        access: agencyAccess,
+        credential: encryptConversionsApiCredential({
+          credential: agencyCredential,
+          externalAccountId: agencyAccountId,
+        }),
+        validatedAt: new Date("2026-08-30T09:30:00.000Z"),
+        validation: { providerStatus: 204, eventCount: 1 },
+      }),
+    ).resolves.toMatchObject({ credentialVersion: 1 });
+    await expect(
+      getConversionsApiCredentialForAccount(agencyAccountId),
+    ).resolves.toEqual(agencyCredential);
+
+    const versions = await database<
+      {
+        account_id: string;
+        credential_version: number;
+        status: string;
+        revoked: boolean;
+        actor_account_role: string;
+      }[]
+    >`
+      select account.external_account_id as account_id,
+        credential.credential_version, credential.status,
+        credential.revoked_at is not null as revoked,
+        credential.actor_account_role
+      from maintainflow_conversion_credentials credential
+      join maintainflow_advertiser_accounts account
+        on account.id = credential.advertiser_account_id
+      order by account.external_account_id, credential.credential_version
+    `;
+    expect(versions).toEqual([
+      {
+        account_id: advertiserAccountId,
+        credential_version: 1,
+        status: "revoked",
+        revoked: true,
+        actor_account_role: "owner",
+      },
+      {
+        account_id: advertiserAccountId,
+        credential_version: 2,
+        status: "active",
+        revoked: false,
+        actor_account_role: "owner",
+      },
+      {
+        account_id: agencyAccountId,
+        credential_version: 1,
+        status: "active",
+        revoked: false,
+        actor_account_role: "manager",
+      },
+    ]);
+  });
+
+  it("records creative review transitions once and keeps them account scoped", async () => {
+    await expect(verifyCreativeHistoryStore()).resolves.toBe(true);
+    const source = demoAds.find((ad) => ad.id === "ad_503");
+    if (!source) throw new Error("The creative-history fixture is missing.");
+    const baseline = {
+      ...source,
+      id: "ad_history_integration",
+      ad_group_id: "adgrp_history_integration",
+      name: "Integration review creative",
+    };
+
+    await expect(
+      recordCreativeReviewSnapshot({
+        accountId: advertiserAccountId,
+        ads: [baseline],
+        observedAt: new Date("2026-08-30T10:00:00.000Z"),
+      }),
+    ).resolves.toEqual([]);
+
+    const approved = {
+      ...baseline,
+      updated_at: baseline.updated_at + 60,
+      status: "active" as const,
+      review_status: "approved" as const,
+    };
+    const concurrentResults = await Promise.all([
+      recordCreativeReviewSnapshot({
+        accountId: advertiserAccountId,
+        ads: [approved],
+        observedAt: new Date("2026-08-30T10:05:00.000Z"),
+      }),
+      recordCreativeReviewSnapshot({
+        accountId: advertiserAccountId,
+        ads: [approved],
+        observedAt: new Date("2026-08-30T10:05:01.000Z"),
+      }),
+    ]);
+    expect(concurrentResults.flat()).toHaveLength(1);
+
+    const events = await listCreativeReviewEvents(advertiserAccountId);
+    expect(events).toEqual([
+      expect.objectContaining({
+        accountId: advertiserAccountId,
+        adId: approved.id,
+        eventType: "review_and_delivery_changed",
+        previousReviewStatus: "in_review",
+        reviewStatus: "approved",
+        previousDeliveryStatus: "paused",
+        deliveryStatus: "active",
+      }),
+    ]);
+    await expect(listCreativeReviewEvents(agencyAccountId)).resolves.toEqual([]);
+
+    const stale = {
+      ...baseline,
+      review_status: "rejected" as const,
+    };
+    await expect(
+      recordCreativeReviewSnapshot({
+        accountId: advertiserAccountId,
+        ads: [stale],
+        observedAt: new Date("2026-08-30T10:10:00.000Z"),
+      }),
+    ).resolves.toEqual([]);
+    const [state] = await database<
+      { review_status: string; delivery_status: string }[]
+    >`
+      select state.review_status, state.delivery_status
+      from maintainflow_creative_review_state state
+      join maintainflow_advertiser_accounts account
+        on account.id = state.advertiser_account_id
+      where account.external_account_id = ${advertiserAccountId}
+        and state.ad_id = ${approved.id}
+    `;
+    expect(state).toEqual({
+      review_status: "approved",
+      delivery_status: "active",
+    });
+    await expect(listCreativeReviewEvents(advertiserAccountId)).resolves.toHaveLength(
+      1,
+    );
+  });
+
+  it("persists approval, rollback, and reconciliation transitions", async () => {
+    const recommendation = getDemoRecommendation("rec_bid_20");
+    if (!recommendation) throw new Error("The integration recommendation is missing.");
+
+    const rollbackApprovalId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation,
+      access: advertiserAccess,
+    });
+    const [storedPayloads] = await database<
+      {
+        evidence_payload: unknown;
+        request_payload: unknown;
+        rollback_payload: unknown;
+      }[]
+    >`
+      select request_payload, rollback_payload, evidence_payload
+      from ads_approval_records
+      where id = ${rollbackApprovalId}
+    `;
+    expect(storedPayloads).toEqual({
+      request_payload: recommendation.mutation,
+      rollback_payload: recommendation.rollback,
+      evidence_payload: recommendation.evidence,
+    });
+    await updateApprovalRecord(rollbackApprovalId, "applied", {
+      response: { id: recommendation.entityId },
+    });
+    const appliedRecord = (await listApprovalRecords(advertiserAccountId)).find(
+      (record) => record.id === rollbackApprovalId,
+    );
+    expect(appliedRecord).toMatchObject({
+      monitoringPlan: recommendation.monitoringPlan,
+      monitoringStartedAt: expect.any(Date),
+      monitoringEndsAt: expect.any(Date),
+    });
+    expect(
+      appliedRecord!.monitoringEndsAt!.getTime() -
+        appliedRecord!.monitoringStartedAt!.getTime(),
+    ).toBe(7 * 24 * 60 * 60 * 1_000);
+    const [storedResponse] = await database<{ response_payload: unknown }[]>`
+      select response_payload from ads_approval_records
+      where id = ${rollbackApprovalId}
+    `;
+    expect(storedResponse?.response_payload).toEqual({
+      id: recommendation.entityId,
+    });
+    await expect(getApprovalAccountId(rollbackApprovalId)).resolves.toBe(
+      advertiserAccountId,
+    );
+
+    const rollbackClaims = await Promise.allSettled([
+      claimApprovalRollback(
+        rollbackApprovalId,
+        advertiserAccountId,
+        ownerOperatorId,
+        advertiserAccess,
+      ),
+      claimApprovalRollback(
+        rollbackApprovalId,
+        advertiserAccountId,
+        ownerOperatorId,
+        advertiserAccess,
+      ),
+    ]);
+    const rollbackDiagnostics = rollbackClaims
+      .map((result) =>
+        result.status === "fulfilled"
+          ? "fulfilled"
+          : result.reason instanceof Error
+            ? `${result.reason.name}: ${result.reason.message}`
+            : String(result.reason),
+      )
+      .join("\n");
+    expect(
+      rollbackClaims.filter((result) => result.status === "fulfilled"),
+      rollbackDiagnostics,
+    ).toHaveLength(1);
+    expect(
+      rollbackClaims.filter((result) => result.status === "rejected"),
+    ).toHaveLength(1);
+    expect(
+      rollbackClaims.find((result) => result.status === "rejected"),
+    ).toMatchObject({ reason: expect.any(ApprovalTransitionError) });
+    await updateRollbackRecord(rollbackApprovalId, "rolled_back", {
+      response: { id: recommendation.entityId },
+    });
+    const [storedRollbackResponse] = await database<
+      { rollback_response_payload: unknown }[]
+    >`
+      select rollback_response_payload from ads_approval_records
+      where id = ${rollbackApprovalId}
+    `;
+    expect(storedRollbackResponse?.rollback_response_payload).toEqual({
+      id: recommendation.entityId,
+    });
+
+    const reconciliationApprovalId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation,
+      access: advertiserAccess,
+    });
+    await updateApprovalRecord(
+      reconciliationApprovalId,
+      "reconciliation_required",
+      { error: "The provider response was ambiguous." },
+    );
+    const reconciled = await reconcileApprovalRecord({
+      id: reconciliationApprovalId,
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      action: "mark_applied",
+      note: "Verified as applied in the advertiser account.",
+      access: advertiserAccess,
+    });
+    expect(reconciled).toMatchObject({
+      status: "applied",
+      reconciliationNote: "Verified as applied in the advertiser account.",
+      monitoringPlan: recommendation.monitoringPlan,
+      monitoringStartedAt: expect.any(Date),
+      monitoringEndsAt: expect.any(Date),
+    });
+
+    const records = await listApprovalRecords(advertiserAccountId);
+    expect(records).toHaveLength(2);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: rollbackApprovalId,
+          organizationName: "Alpine Retail",
+          membershipRole: "owner",
+          accountRole: "owner",
+          status: "rolled_back",
+        }),
+        expect.objectContaining({
+          id: reconciliationApprovalId,
+          status: "applied",
+        }),
+      ]),
+    );
+
+    const concurrentRecommendation = {
+      ...recommendation,
+      id: "rec_concurrent_monitoring",
+    };
+    const duplicateAttempts = await Promise.allSettled([
+      createApprovalRecord({
+        accountId: advertiserAccountId,
+        operatorId: ownerOperatorId,
+        recommendation: concurrentRecommendation,
+        access: advertiserAccess,
+      }),
+      createApprovalRecord({
+        accountId: advertiserAccountId,
+        operatorId: ownerOperatorId,
+        recommendation: concurrentRecommendation,
+        access: advertiserAccess,
+      }),
+    ]);
+    expect(
+      duplicateAttempts.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      duplicateAttempts.filter((result) => result.status === "rejected"),
+    ).toHaveLength(1);
+    expect(
+      duplicateAttempts.find((result) => result.status === "rejected"),
+    ).toMatchObject({ reason: expect.any(ApprovalTransitionError) });
+    const [duplicateCount] = await database<{ count: number }[]>`
+      select count(*)::int as count
+      from ads_approval_records
+      where account_id = ${advertiserAccountId}
+        and recommendation_id = ${concurrentRecommendation.id}
+    `;
+    expect(duplicateCount?.count).toBe(1);
+    await expect(
+      listActiveApprovalRecords(advertiserAccountId),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          recommendationId: recommendation.id,
+          status: "applied",
+        }),
+        expect.objectContaining({
+          recommendationId: concurrentRecommendation.id,
+          status: "pending",
+        }),
+      ]),
+    );
+  });
+
+  it("evaluates each completed monitoring window once and keeps it account scoped", async () => {
+    const source = getDemoRecommendation("rec_bid_20");
+    if (!source) throw new Error("The monitoring fixture is missing.");
+    const recommendation = {
+      ...source,
+      id: "rec_monitoring_outcome_integration",
+    };
+    const approvalId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation,
+      access: advertiserAccess,
+    });
+    await updateApprovalRecord(approvalId, "applied");
+    const startedAt = new Date("2026-08-20T00:00:00.000Z");
+    const endsAt = new Date("2026-08-27T00:00:00.000Z");
+    const evaluatedAt = new Date("2026-08-30T12:00:00.000Z");
+    await database`
+      update ads_approval_records set
+        monitoring_started_at = ${startedAt},
+        monitoring_ends_at = ${endsAt}
+      where id = ${approvalId}
+    `;
+
+    await expect(
+      listDueMonitoringRecords(agencyAccountId, evaluatedAt),
+    ).resolves.toEqual([]);
+    await expect(
+      listDueMonitoringRecords(advertiserAccountId, evaluatedAt),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: approvalId,
+        monitoringOutcome: null,
+        monitoringEvaluatedAt: null,
+      }),
+    ]);
+    await expect(listDueMonitoringAccountIds(evaluatedAt)).resolves.toContain(
+      advertiserAccountId,
+    );
+    await expect(listDueMonitoringAccountIds(evaluatedAt)).resolves.not.toContain(
+      agencyAccountId,
+    );
+
+    const firstClaimId = randomUUID();
+    const secondClaimId = randomUUID();
+    const [firstClaim, secondClaim] = await Promise.all([
+      claimDueMonitoringRecords({
+        accountId: advertiserAccountId,
+        claimId: firstClaimId,
+        now: evaluatedAt,
+        limit: 1,
+      }),
+      claimDueMonitoringRecords({
+        accountId: advertiserAccountId,
+        claimId: secondClaimId,
+        now: evaluatedAt,
+        limit: 1,
+      }),
+    ]);
+    const claimedRecords = [...firstClaim, ...secondClaim].filter(
+      (record) => record.id === approvalId,
+    );
+    expect(claimedRecords).toHaveLength(1);
+    const winningClaimId = firstClaim.some((record) => record.id === approvalId)
+      ? firstClaimId
+      : secondClaimId;
+    await expect(
+      listDueMonitoringRecords(advertiserAccountId, evaluatedAt),
+    ).resolves.not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: approvalId })]),
+    );
+
+    const observation = {
+      rangeStart: Math.floor(startedAt.getTime() / 1_000),
+      rangeEnd: Math.floor(endsAt.getTime() / 1_000),
+      spend: 4_100,
+      clickAttributedConversions: 12,
+      cpa: 341.6667,
+      conversionChangePercent: -20,
+      baselineClickAttributedConversions:
+        recommendation.monitoringPlan!.baseline.clickAttributedConversions,
+      thresholdPercent: 15,
+      evidenceState: "complete" as const,
+    };
+    await expect(
+      recordMonitoringOutcome({
+        id: approvalId,
+        accountId: agencyAccountId,
+        outcome: "safeguard_triggered",
+        observation,
+        claimId: winningClaimId,
+        evaluatedAt,
+      }),
+    ).resolves.toBe(false);
+
+    const writes = await Promise.all([
+      recordMonitoringOutcome({
+        id: approvalId,
+        accountId: advertiserAccountId,
+        outcome: "safeguard_triggered",
+        observation,
+        claimId: winningClaimId,
+        evaluatedAt,
+      }),
+      recordMonitoringOutcome({
+        id: approvalId,
+        accountId: advertiserAccountId,
+        outcome: "safeguard_triggered",
+        observation,
+        claimId: winningClaimId,
+        evaluatedAt,
+      }),
+    ]);
+    expect(writes.filter(Boolean)).toHaveLength(1);
+
+    const stored = (await listApprovalRecords(advertiserAccountId)).find(
+      (record) => record.id === approvalId,
+    );
+    expect(stored).toMatchObject({
+      monitoringOutcome: "safeguard_triggered",
+      monitoringObservation: observation,
+      monitoringEvaluatedAt: evaluatedAt,
+    });
+    await expect(
+      listDueMonitoringRecords(advertiserAccountId, evaluatedAt),
+    ).resolves.not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: approvalId })]),
+    );
+
+    const leaseRecommendation = {
+      ...source,
+      id: "rec_monitoring_lease_recovery_integration",
+    };
+    const leaseApprovalId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: leaseRecommendation,
+      access: advertiserAccess,
+    });
+    await updateApprovalRecord(leaseApprovalId, "applied");
+    await database`
+      update ads_approval_records set
+        monitoring_started_at = ${startedAt},
+        monitoring_ends_at = ${endsAt}
+      where id = ${leaseApprovalId}
+    `;
+    const abandonedClaimId = randomUUID();
+    await expect(
+      claimDueMonitoringRecords({
+        accountId: advertiserAccountId,
+        claimId: abandonedClaimId,
+        now: evaluatedAt,
+        limit: 1,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: leaseApprovalId }),
+    ]);
+    await expect(
+      claimDueMonitoringRecords({
+        accountId: advertiserAccountId,
+        claimId: randomUUID(),
+        now: new Date(evaluatedAt.getTime() + 14 * 60 * 1_000),
+        limit: 1,
+      }),
+    ).resolves.toEqual([]);
+    const recoveryClaimId = randomUUID();
+    await expect(
+      claimDueMonitoringRecords({
+        accountId: advertiserAccountId,
+        claimId: recoveryClaimId,
+        now: new Date(evaluatedAt.getTime() + 16 * 60 * 1_000),
+        limit: 1,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: leaseApprovalId }),
+    ]);
+    await expect(
+      recordMonitoringOutcome({
+        id: leaseApprovalId,
+        accountId: advertiserAccountId,
+        outcome: "safeguard_triggered",
+        observation,
+        claimId: recoveryClaimId,
+        evaluatedAt: new Date(evaluatedAt.getTime() + 16 * 60 * 1_000),
+      }),
+    ).resolves.toBe(true);
+  });
+});
