@@ -17,6 +17,16 @@ describe("OpenAI Ads account read-only acceptance", () => {
     if (!process.env.OPENAI_ADS_API_KEY) {
       throw new Error("OPENAI_ADS_API_KEY is required for the live acceptance suite.");
     }
+    if (process.env.OPENAI_ADS_DATA_MODE !== "live") {
+      throw new Error(
+        "OPENAI_ADS_DATA_MODE=live is required for the live acceptance suite.",
+      );
+    }
+    if (process.env.MAINTAINFLOW_RELEASE_STAGE !== "private_read") {
+      throw new Error(
+        "MAINTAINFLOW_RELEASE_STAGE=private_read is required for read-only acceptance.",
+      );
+    }
     if (process.env.OPENAI_ADS_LIVE_WRITES_ENABLED === "true") {
       throw new Error(
         "Disable OPENAI_ADS_LIVE_WRITES_ENABLED before running the read-only acceptance suite.",
@@ -45,6 +55,8 @@ describe("OpenAI Ads account read-only acceptance", () => {
     expect(workbench.recommendations).toEqual(expect.any(Array));
 
     const runtime = getAdsRuntimeMode({ hasAccountKey: true });
+    expect(runtime.dataSource).toBe("live");
+    expect(runtime.liveReadStage).toBe(true);
     expect(runtime.liveWritesRequested).toBe(false);
     expect(runtime.writeInfrastructureConfigured).toBe(false);
   });

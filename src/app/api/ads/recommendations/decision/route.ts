@@ -7,7 +7,6 @@ import {
 } from "@/lib/auth/operator.server";
 import {
   ApprovalStoreUnavailableError,
-  listActiveApprovalRecords,
 } from "@/lib/audit/approval-store.server";
 import {
   RecommendationDecisionStoreUnavailableError,
@@ -19,6 +18,7 @@ import {
 import {
   recommendationDecisionActionSchema,
   recommendationDismissalReasonSchema,
+  recommendationFingerprint,
 } from "@/lib/audit/recommendation-decision";
 import {
   RequestBodyTooLargeError,
@@ -30,21 +30,26 @@ import {
   type AdsApiCredential,
 } from "@/lib/openai-ads/client.server";
 import {
-  fetchLiveAdAccount,
-  fetchLiveWorkbenchData,
-} from "@/lib/openai-ads/data.server";
+  getLiveWorkbench,
+  LiveSyncUnavailableError,
+} from "@/lib/openai-ads/live-sync.server";
 import {
   AccountAccessForbiddenError,
   AdvertiserCredentialUnavailableError,
-  getAdsApiKeyForAccount,
+  getAdsCredentialMaterialForAccount,
   requireAccountAccess,
   TenancyStoreUnavailableError,
+  withAuthorizedAdsWriteFence,
 } from "@/lib/tenancy/store.server";
 
 const requestSchema = z
   .object({
     accountId: z.string().min(1).max(200),
     recommendationId: z.string().min(1).max(200),
+    recommendationFingerprint: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     action: recommendationDecisionActionSchema,
     reason: recommendationDismissalReasonSchema.optional(),
   })
@@ -92,9 +97,11 @@ export async function POST(request: Request) {
       );
     }
 
+    const credentialMaterial =
+      await getAdsCredentialMaterialForAccount(input.accountId);
     const credential: AdsApiCredential = {
       kind: "account_api_key",
-      secret: await getAdsApiKeyForAccount(input.accountId),
+      secret: credentialMaterial.apiKey,
       expectedAccountId: input.accountId,
     };
     const runtime = getAdsRuntimeMode({ hasAccountKey: true });
@@ -102,13 +109,14 @@ export async function POST(request: Request) {
       throw new LiveRecommendationDecisionUnavailableError();
     }
 
-    const account = await fetchLiveAdAccount(credential);
-    if (account.id !== input.accountId) {
-      throw new AccountAccessForbiddenError(
-        "The stored credential does not match the selected Ads account.",
-      );
-    }
-    const live = await fetchLiveWorkbenchData(account, credential);
+    const live = (
+      await getLiveWorkbench({
+        accountId: input.accountId,
+        credentialGeneration: credentialMaterial.credentialGeneration,
+        credential,
+        policy: "dashboard",
+      })
+    ).data;
     const recommendation = live.recommendations.find(
       (item) => item.id === input.recommendationId,
     );
@@ -118,27 +126,39 @@ export async function POST(request: Request) {
         { status: 404 },
       );
     }
+    if (
+      input.recommendationFingerprint !==
+      recommendationFingerprint(recommendation)
+    ) {
+      return Response.json(
+        {
+          error:
+            "This recommendation changed after it was displayed. Refresh and review the exact proposed change before recording a decision.",
+        },
+        { status: 409 },
+      );
+    }
 
     if (input.action === "dismiss") {
-      const activeApproval = (await listActiveApprovalRecords(
-        input.accountId,
-      )).find(
-        (record) =>
-          record.recommendationId === recommendation.id &&
-          record.entityId === recommendation.entityId,
+      const fenced = await withAuthorizedAdsWriteFence(
+        {
+          accountId: input.accountId,
+          operatorId,
+          access,
+          expectedCredentialGeneration:
+            credentialMaterial.credentialGeneration,
+        },
+        async ({ transaction, access: currentAccess }) =>
+          dismissRecommendation({
+            accountId: input.accountId,
+            operatorId,
+            access: currentAccess,
+            recommendation,
+            reason: input.reason!,
+            transaction,
+          }),
       );
-      if (activeApproval) {
-        throw new RecommendationDecisionTransitionError(
-          "This recommendation already has an active or unresolved approval and cannot be dismissed.",
-        );
-      }
-      const result = await dismissRecommendation({
-        accountId: input.accountId,
-        operatorId,
-        access,
-        recommendation,
-        reason: input.reason!,
-      });
+      const result = fenced.value;
       return Response.json({
         action: "dismissed",
         created: result.created,
@@ -148,12 +168,22 @@ export async function POST(request: Request) {
       });
     }
 
-    await restoreRecommendation({
-      accountId: input.accountId,
-      operatorId,
-      access,
-      recommendation,
-    });
+    await withAuthorizedAdsWriteFence(
+      {
+        accountId: input.accountId,
+        operatorId,
+        access,
+        expectedCredentialGeneration: credentialMaterial.credentialGeneration,
+      },
+      async ({ transaction, access: currentAccess }) =>
+        restoreRecommendation({
+          accountId: input.accountId,
+          operatorId,
+          access: currentAccess,
+          recommendation,
+          transaction,
+        }),
+    );
     return Response.json({
       action: "restored",
       message: "Recommendation restored for review.",
@@ -186,6 +216,33 @@ export async function POST(request: Request) {
     if (error instanceof LiveRecommendationDecisionUnavailableError) {
       return Response.json({ error: error.message }, { status: 409 });
     }
+    if (error instanceof LiveSyncUnavailableError) {
+      if (error.refreshFailure === "account_mismatch") {
+        return Response.json(
+          {
+            error:
+              "The stored credential does not match the selected Ads account.",
+          },
+          { status: 403 },
+        );
+      }
+      const retryAfterSeconds = error.retryAfter
+        ? Math.max(
+            1,
+            Math.ceil((error.retryAfter.getTime() - Date.now()) / 1_000),
+          )
+        : 30;
+      return Response.json(
+        {
+          error:
+            "A current cached OpenAI Ads snapshot is required before recording this decision. Retry after live sync recovers.",
+        },
+        {
+          status: 503,
+          headers: { "Retry-After": String(retryAfterSeconds) },
+        },
+      );
+    }
     if (
       error instanceof OperatorAuthUnavailableError ||
       error instanceof TenancyStoreUnavailableError ||
@@ -195,10 +252,9 @@ export async function POST(request: Request) {
     ) {
       return Response.json({ error: error.message }, { status: 503 });
     }
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Unable to record the recommendation decision.";
-    return Response.json({ error: message }, { status: 400 });
+    return Response.json(
+      { error: "Unable to record the recommendation decision safely." },
+      { status: 400 },
+    );
   }
 }

@@ -2,9 +2,10 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import postgres, { type Sql } from "postgres";
+import type postgres from "postgres";
 
 import type { Recommendation } from "../openai-ads/demo-data";
+import { getRuntimeDatabase } from "../database/client.server";
 import {
   monitoringObservationSchema,
   monitoringOutcomeSchema,
@@ -12,6 +13,7 @@ import {
   type MonitoringOutcome,
 } from "../openai-ads/monitoring";
 import type { AccountAccess } from "../tenancy/schema";
+import { recommendationFingerprint } from "./recommendation-decision";
 import {
   approvalRecordSchema,
   type ApprovalRecord,
@@ -87,8 +89,6 @@ const approvalColumns = [
   "rolled_back_at",
 ] as const;
 
-let database: Sql | undefined;
-
 export class ApprovalStoreUnavailableError extends Error {
   constructor(message = "Durable approval storage is not configured.") {
     super(message);
@@ -162,14 +162,7 @@ export async function verifyApprovalStore() {
 function getDatabase() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new ApprovalStoreUnavailableError();
-
-  database ??= postgres(connectionString, {
-    connect_timeout: 10,
-    idle_timeout: 20,
-    max: 2,
-    prepare: false,
-  });
-  return database;
+  return getRuntimeDatabase(connectionString);
 }
 
 function parseApprovalRow(row: ApprovalRow): ApprovalRecord {
@@ -207,13 +200,34 @@ export async function createApprovalRecord({
   operatorId,
   recommendation,
   access,
-}: ApprovalRecordInput) {
-  const sql = getDatabase();
+}: ApprovalRecordInput, transaction?: postgres.TransactionSql) {
+  const sql = transaction ?? getDatabase();
   const id = randomUUID();
   const monitoringPlan = recommendation.monitoringPlan
     ? sql.json(recommendation.monitoringPlan as postgres.JSONValue)
     : null;
   const monitoringWindowDays = recommendation.monitoringPlan?.windowDays ?? null;
+
+  const [activeDismissal] = await sql<{ id: string }[]>`
+    select dismissal.id
+    from maintainflow_recommendation_dismissals dismissal
+    join maintainflow_advertiser_accounts account
+      on account.id = dismissal.advertiser_account_id
+    where account.external_account_id = ${accountId}
+      and account.status = 'active'
+      and dismissal.recommendation_id = ${recommendation.id}
+      and dismissal.entity_id = ${recommendation.entityId}
+      and dismissal.recommendation_fingerprint = ${recommendationFingerprint(
+        recommendation,
+      )}
+      and dismissal.restored_at is null
+    limit 1
+  `;
+  if (activeDismissal) {
+    throw new ApprovalTransitionError(
+      "This recommendation is actively dismissed. Restore it through the audited review action before applying it.",
+    );
+  }
 
   const inserted = await sql<{ id: string }[]>`
     insert into ads_approval_records (
@@ -486,8 +500,9 @@ export async function claimApprovalRollback(
   accountId: string,
   operatorId: string,
   access: AccountAccess,
+  transaction?: postgres.TransactionSql,
 ) {
-  const sql = getDatabase();
+  const sql = transaction ?? getDatabase();
   const rows = await sql<ApprovalRow[]>`
     update ads_approval_records set
       status = 'rollback_pending', rollback_operator_id = ${operatorId},

@@ -51,7 +51,8 @@ describe("OpenAI Ads runtime gates", () => {
 
     const runtime = getAdsRuntimeMode();
 
-    expect(runtime.dataSource).toBe("live");
+    expect(runtime.dataSource).toBe("demo");
+    expect(runtime.liveReadStage).toBe(false);
     expect(runtime.writeInfrastructureConfigured).toBe(false);
     expect(runtime.writeBlockers).toEqual([
       "live-write release stage",
@@ -73,6 +74,10 @@ describe("OpenAI Ads runtime gates", () => {
 
       const runtime = getAdsRuntimeMode();
 
+      expect(runtime.dataSource).toBe(
+        stage === "private_read" ? "live" : "demo",
+      );
+      expect(runtime.liveReadStage).toBe(stage === "private_read");
       expect(runtime.writeInfrastructureConfigured).toBe(false);
       expect(runtime.writeBlockers).toEqual(["live-write release stage"]);
     },
@@ -90,6 +95,7 @@ describe("OpenAI Ads runtime gates", () => {
     const runtime = getAdsRuntimeMode();
 
     expect(runtime.dataSource).toBe("live");
+    expect(runtime.liveReadStage).toBe(true);
     expect(runtime.writeInfrastructureConfigured).toBe(true);
     expect(runtime.writeBlockers).toEqual([]);
   });

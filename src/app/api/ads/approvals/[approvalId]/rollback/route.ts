@@ -14,6 +14,8 @@ import {
   RequestBodyTooLargeError,
 } from "@/lib/http/request-security.server";
 import {
+  AdsMutationReconciliationRequiredError,
+  AdsMutationRejectedError,
   applyStoredRollback,
   getAdsRuntimeMode,
 } from "@/lib/openai-ads/client.server";
@@ -21,7 +23,7 @@ import { fetchLiveAdAccount } from "@/lib/openai-ads/data.server";
 import {
   AccountAccessForbiddenError,
   AdvertiserCredentialUnavailableError,
-  getAdsApiKeyForAccount,
+  getAdsCredentialMaterialForAccount,
   requireAccountAccess,
   TenancyStoreUnavailableError,
 } from "@/lib/tenancy/store.server";
@@ -44,9 +46,11 @@ export async function POST(
     ]);
     const accountId = await getApprovalAccountId(approvalId);
     const access = await requireAccountAccess(operatorId, accountId, "write");
+    const credentialMaterial =
+      await getAdsCredentialMaterialForAccount(accountId);
     const credential = {
       kind: "account_api_key" as const,
-      secret: await getAdsApiKeyForAccount(accountId),
+      secret: credentialMaterial.apiKey,
       expectedAccountId: accountId,
     };
     const runtime = getAdsRuntimeMode({ hasAccountKey: true });
@@ -70,6 +74,7 @@ export async function POST(
       operatorId,
       access,
       credential,
+      credentialGeneration: credentialMaterial.credentialGeneration,
     });
     return Response.json(result);
   } catch (error) {
@@ -88,6 +93,31 @@ export async function POST(
     if (error instanceof ApprovalTransitionError) {
       return Response.json({ error: error.message }, { status: 409 });
     }
+    if (error instanceof AdsMutationReconciliationRequiredError) {
+      return Response.json(
+        {
+          error:
+            "The Ads API rollback outcome is uncertain and requires manual reconciliation. Do not retry this action.",
+          code: "reconciliation_required",
+          approvalId: error.approvalId,
+          operation: error.operation,
+          mustNotRetry: true,
+          persistenceWarning: error.persistenceWarning,
+        },
+        { status: 409 },
+      );
+    }
+    if (error instanceof AdsMutationRejectedError) {
+      return Response.json(
+        {
+          error:
+            "OpenAI Ads rejected the rollback. No successful rollback was recorded.",
+          code: "provider_rejected",
+          approvalId: error.approvalId,
+        },
+        { status: 502 },
+      );
+    }
     if (
       error instanceof OperatorAuthUnavailableError ||
       error instanceof ApprovalStoreUnavailableError ||
@@ -96,8 +126,9 @@ export async function POST(
     ) {
       return Response.json({ error: error.message }, { status: 503 });
     }
-    const message =
-      error instanceof Error ? error.message : "Unable to apply rollback.";
-    return Response.json({ error: message }, { status: 400 });
+    return Response.json(
+      { error: "Unable to apply rollback safely." },
+      { status: 400 },
+    );
   }
 }

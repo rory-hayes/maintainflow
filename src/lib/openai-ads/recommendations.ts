@@ -2,6 +2,7 @@ import type {
   CampaignPerformance,
   Recommendation,
 } from "./demo-data";
+import { buildAdsResourcePath } from "./resource-path";
 import type { AdGroup, Campaign } from "./schema";
 
 export type ScopedAdGroup = AdGroup & { campaign_id: string };
@@ -154,7 +155,7 @@ export function buildLiveRecommendations({
         ],
         mutation: {
           method: "POST" as const,
-          path: `/ad_groups/${adGroup.id}`,
+          path: buildAdsResourcePath("ad_groups", adGroup.id),
           body: {
             bidding_config: {
               ...adGroup.bidding_config,
@@ -164,7 +165,7 @@ export function buildLiveRecommendations({
         },
         rollback: {
           method: "POST" as const,
-          path: `/ad_groups/${adGroup.id}`,
+          path: buildAdsResourcePath("ad_groups", adGroup.id),
           body: {
             bidding_config: adGroup.bidding_config,
           },

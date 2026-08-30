@@ -139,7 +139,9 @@ The local validator currently checks:
 - lowercase 64-character SHA-256 user identifiers, user matching list limits,
   country/postal/location formats, GAID UUID format, and basic IP formatting;
 - credential-like fields anywhere a documented or first-level custom field is
-  inspected.
+  inspected;
+- MaintainFlow local-processing safety limits of 50,000 inspected validation
+  steps and 200 diagnostics per payload.
 
 Unknown first-level fields remain valid inside `data.type: "custom"`, because
 custom event payloads need application-specific attributes. Credential-like
@@ -147,11 +149,15 @@ field names are still blocked there.
 
 ## Privacy and evidence boundary
 
-The input is capped locally at 1 MB; the current OpenAI documentation specifies
-at most 1,000 events but does not publish this byte limit. The audit result contains only issue categories,
-documented field paths, severity counts, event positions, and event-type counts;
-it never contains event IDs, URLs, hashes, `oppref` values, user values, or
-credential values.
+The input is capped locally at 1 MB. MaintainFlow also stops after 50,000
+inspected validation steps or 200 diagnostics, retains only bounded and
+privacy-safe partial audit facts, adds a `payload_complexity` blocker, and
+reports zero ready events. These byte, work, and diagnostic caps are
+MaintainFlow safety limits, not OpenAI limits. The current
+OpenAI documentation separately specifies at most 1,000 events. The audit
+result contains only issue categories, documented field paths, severity counts,
+event positions, and event-type counts; it never contains event IDs, URLs,
+hashes, `oppref` values, user values, or credential values.
 
 A clean local result means only that the body is ready for a real OpenAI
 `validate_only` request under the documentation snapshot above. It does not

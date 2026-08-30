@@ -57,10 +57,9 @@ export async function evaluateDueMonitoringWindows(options: {
           });
           return recorded ? ("evaluated" as const) : ("unchanged" as const);
         } catch (error) {
-          console.error(
-            `Monitoring evaluation failed for approval ${record.id}`,
-            error,
-          );
+          console.error("Monitoring evaluation failed", {
+            name: error instanceof Error ? error.name : "UnknownError",
+          });
           return "failed" as const;
         }
       }),
@@ -115,7 +114,9 @@ export async function evaluateScheduledMonitoringWindows(options: {
           });
           return { ok: true as const, result };
         } catch (error) {
-          console.error("Scheduled monitoring account evaluation failed", error);
+          console.error("Scheduled monitoring account evaluation failed", {
+            name: error instanceof Error ? error.name : "UnknownError",
+          });
           return { ok: false as const };
         }
       }),

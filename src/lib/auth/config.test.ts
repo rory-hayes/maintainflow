@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getBootstrapOperatorIds,
   getWorkspaceAdmissionMode,
+  isPublicSignUpEnabled,
   isWorkspaceAdmissionAllowed,
 } from "./config";
 
@@ -36,6 +37,14 @@ describe("workspace admission configuration", () => {
     vi.stubEnv("MAINTAINFLOW_ADMISSION_MODE", "open");
 
     expect(isWorkspaceAdmissionAllowed("user_any_customer")).toBe(true);
+  });
+
+  it("requires both open admission and an explicit flag for public sign-up", () => {
+    vi.stubEnv("MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED", "true");
+    expect(isPublicSignUpEnabled()).toBe(false);
+
+    vi.stubEnv("MAINTAINFLOW_ADMISSION_MODE", "open");
+    expect(isPublicSignUpEnabled()).toBe(true);
   });
 
   it("does not silently reuse the removed legacy allowlist", () => {

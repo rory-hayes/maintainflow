@@ -54,7 +54,7 @@ export async function POST(
         requestSchema.parse(value),
       ),
     ]);
-    await requireAccountAccess(operatorId, accountId, "write");
+    const access = await requireAccountAccess(operatorId, accountId, "write");
     if (
       !isCredentialVaultConfigured() ||
       !(await verifyCredentialStore())
@@ -77,6 +77,7 @@ export async function POST(
     const result = await rotateAdsApiCredential({
       operatorId,
       accountId,
+      access,
       credential,
       verifiedAt: new Date(),
     });

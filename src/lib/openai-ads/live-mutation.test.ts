@@ -11,6 +11,10 @@ const approvalMocks = vi.hoisted(() => ({
   verify: vi.fn(async () => true),
 }));
 
+const writeFenceMocks = vi.hoisted(() => ({
+  run: vi.fn(),
+}));
+
 vi.mock("../audit/approval-store.server", () => ({
   ApprovalStoreUnavailableError: class ApprovalStoreUnavailableError extends Error {},
   createApprovalRecord: approvalMocks.create,
@@ -21,7 +25,16 @@ vi.mock("../audit/approval-store.server", () => ({
   verifyApprovalStore: approvalMocks.verify,
 }));
 
+vi.mock("../audit/recommendation-decision-store.server", () => ({
+  verifyRecommendationDecisionStore: vi.fn(async () => true),
+}));
+
+vi.mock("../tenancy/store.server", () => ({
+  withAuthorizedAdsWriteFence: writeFenceMocks.run,
+}));
+
 import {
+  AdsMutationReconciliationRequiredError,
   adsApiRequest,
   applyAdsMutation,
   applyStoredRollback,
@@ -29,6 +42,7 @@ import {
   OpenAIAdsApiError,
 } from "./client.server";
 import { demoRecommendations } from "./demo-data";
+import { buildAdsResourcePath } from "./resource-path";
 import type { AccountAccess } from "../tenancy/schema";
 
 const accountAccess: AccountAccess = {
@@ -54,6 +68,7 @@ const environmentKeys = [
 
 const originalEnvironment = new Map<string, string | undefined>();
 const originalFetch = globalThis.fetch;
+const credentialGeneration = "vault:test-credential:1";
 
 function adGroupResponse(id: string, maxBidMicros: number) {
   return {
@@ -86,11 +101,26 @@ beforeEach(() => {
     originalEnvironment.set(key, process.env[key]);
     delete process.env[key];
   });
+  process.env.OPENAI_ADS_DATA_MODE = "live";
+  process.env.MAINTAINFLOW_RELEASE_STAGE = "private_read";
   approvalMocks.create.mockClear();
   approvalMocks.update.mockClear();
   approvalMocks.claim.mockReset();
   approvalMocks.updateRollback.mockClear();
   approvalMocks.verify.mockClear();
+  writeFenceMocks.run.mockReset();
+  writeFenceMocks.run.mockImplementation(async (options, operation) => {
+    const credentialMaterial = {
+      apiKey: process.env.OPENAI_ADS_API_KEY ?? "ads-vault-key",
+      credentialGeneration: options.expectedCredentialGeneration,
+    };
+    const value = await operation({
+      transaction: { test: "transaction" },
+      access: accountAccess,
+      credentialMaterial,
+    });
+    return { value, access: accountAccess, credentialMaterial };
+  });
   globalThis.fetch = vi.fn();
 });
 
@@ -135,6 +165,7 @@ describe("guarded live mutations", () => {
       accountId: "account-test",
       operatorId: "user_founder",
       access: accountAccess,
+      credentialGeneration,
     });
 
     expect(result).toMatchObject({
@@ -179,6 +210,7 @@ describe("guarded live mutations", () => {
         operatorId: "user_founder",
         access: accountAccess,
         credential: { apiKey: "ads-vault-key" },
+        credentialGeneration,
       }),
     ).resolves.toMatchObject({ mode: "live", applied: true });
     const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0];
@@ -186,6 +218,62 @@ describe("guarded live mutations", () => {
     expect(new Headers(init?.headers).get("Authorization")).toBe(
       "Bearer ads-vault-key",
     );
+  });
+
+  it("keeps provider resource IDs encoded through mutation and readback", async () => {
+    armLiveInfrastructure();
+    const entityId = "adgrp/season?phase#one%";
+    const path = buildAdsResourcePath("ad_groups", entityId);
+    const recommendation = {
+      ...demoRecommendations[0],
+      id: "live_encoded_resource",
+      source: "live" as const,
+      entityId,
+      mutation: { ...demoRecommendations[0].mutation, path },
+      rollback: { ...demoRecommendations[0].rollback, path },
+    };
+    const confirmed = adGroupResponse(entityId, 216_000_000);
+    vi.mocked(globalThis.fetch).mockImplementation(async () =>
+      new Response(JSON.stringify(confirmed), { status: 200 }),
+    );
+
+    await expect(
+      applyAdsMutation(recommendation, {
+        accountId: "account-test",
+        operatorId: "user_founder",
+        access: accountAccess,
+        credentialGeneration,
+      }),
+    ).resolves.toMatchObject({ applied: true, mode: "live" });
+
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
+    for (const [input] of vi.mocked(globalThis.fetch).mock.calls) {
+      expect(String(input)).toBe(`https://api.ads.openai.com/v1${path}`);
+      expect(String(input)).not.toContain(entityId);
+    }
+  });
+
+  it("rejects noncanonical resource paths before approval or provider access", async () => {
+    armLiveInfrastructure();
+    const recommendation = {
+      ...demoRecommendations[0],
+      source: "live" as const,
+      mutation: {
+        ...demoRecommendations[0].mutation,
+        path: "/ad_groups/adgrp_live?account=other",
+      },
+    };
+
+    await expect(
+      applyAdsMutation(recommendation, {
+        accountId: "account-test",
+        operatorId: "user_founder",
+        access: accountAccess,
+        credentialGeneration,
+      }),
+    ).rejects.toThrow("not enabled");
+    expect(approvalMocks.create).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it("requires reconciliation when a successful response violates the resource schema", async () => {
@@ -202,6 +290,7 @@ describe("guarded live mutations", () => {
         accountId: "account-test",
         operatorId: "user_founder",
         access: accountAccess,
+        credentialGeneration,
       }),
     ).rejects.toThrow("resulting state is unconfirmed");
     expect(approvalMocks.update).toHaveBeenCalledWith(
@@ -239,6 +328,7 @@ describe("guarded live mutations", () => {
         accountId: "account-test",
         operatorId: "user_founder",
         access: accountAccess,
+        credentialGeneration,
       }),
     ).rejects.toThrow("resulting state is unconfirmed");
     expect(approvalMocks.update).toHaveBeenCalledWith(
@@ -276,6 +366,7 @@ describe("guarded live mutations", () => {
         accountId: "account-test",
         operatorId: "user_founder",
         access: accountAccess,
+        credentialGeneration,
       }),
     ).rejects.toThrow("typed monitoring baseline");
     expect(approvalMocks.create).not.toHaveBeenCalled();
@@ -292,6 +383,7 @@ describe("guarded live mutations", () => {
         accountId: "account-test",
         operatorId: "user_founder",
         access: accountAccess,
+        credentialGeneration,
       }),
     ).rejects.toThrow("migration is not ready");
     expect(approvalMocks.create).not.toHaveBeenCalled();
@@ -323,6 +415,7 @@ describe("guarded live mutations", () => {
         accountId: "account-test",
         operatorId: "user_founder",
         access: accountAccess,
+        credentialGeneration,
       }),
     ).rejects.toThrow("must not be retried automatically");
     expect(approvalMocks.update).toHaveBeenCalledWith(
@@ -330,6 +423,72 @@ describe("guarded live mutations", () => {
       "reconciliation_required",
       { error: "socket closed" },
     );
+  });
+
+  it("preserves must-not-retry semantics when reconciliation persistence also fails", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    vi.mocked(globalThis.fetch).mockRejectedValue(new Error("socket closed"));
+    approvalMocks.update.mockRejectedValueOnce(new Error("database unavailable"));
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId: "approval-test-123",
+      operation: "apply",
+      mustNotRetry: true,
+      persistenceWarning: true,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+  });
+
+  it("does not claim or send when the final authority or credential fence fails", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    writeFenceMocks.run.mockRejectedValueOnce(
+      new Error("Write access or credential generation changed."),
+    );
+
+    await expect(
+      applyAdsMutation(recommendation, {
+        accountId: "account-test",
+        operatorId: "user_founder",
+        access: accountAccess,
+        credentialGeneration,
+      }),
+    ).rejects.toThrow("changed");
+    expect(writeFenceMocks.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedCredentialGeneration: credentialGeneration,
+      }),
+      expect.any(Function),
+    );
+    expect(approvalMocks.create).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not send an actively dismissed recommendation through direct apply", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    approvalMocks.create.mockRejectedValueOnce(
+      new Error("This recommendation is actively dismissed. Restore it first."),
+    );
+
+    await expect(
+      applyAdsMutation(recommendation, {
+        accountId: "account-test",
+        operatorId: "user_founder",
+        access: accountAccess,
+        credentialGeneration,
+      }),
+    ).rejects.toThrow("actively dismissed");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it("claims a rollback before sending its stored request", async () => {
@@ -359,6 +518,7 @@ describe("guarded live mutations", () => {
         accountId: "account-test",
         operatorId: "user_founder",
         access: accountAccess,
+        credentialGeneration,
       }),
     ).resolves.toMatchObject({ applied: true });
     expect(approvalMocks.claim.mock.invocationCallOrder[0]).toBeLessThan(
@@ -399,6 +559,7 @@ describe("guarded live mutations", () => {
         accountId: "account-test",
         operatorId: "user_founder",
         access: accountAccess,
+        credentialGeneration,
       }),
     ).rejects.toThrow("must not be retried automatically");
     expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
@@ -406,6 +567,43 @@ describe("guarded live mutations", () => {
       "rollback_reconciliation_required",
       { error: "socket closed" },
     );
+  });
+
+  it("keeps rollback must-not-retry semantics when audit persistence fails", async () => {
+    armLiveInfrastructure();
+    approvalMocks.claim.mockResolvedValue({
+      id: "00000000-0000-4000-8000-000000000001",
+      rollback: {
+        method: "POST",
+        path: "/ad_groups/adgrp_live",
+        body: {
+          bidding_config: {
+            billing_event_type: "click",
+            max_bid_micros: 250_000_000,
+          },
+        },
+      },
+    });
+    vi.mocked(globalThis.fetch).mockRejectedValue(new Error("socket closed"));
+    approvalMocks.updateRollback.mockRejectedValueOnce(
+      new Error("database unavailable"),
+    );
+
+    const outcome = await applyStoredRollback({
+      approvalId: "00000000-0000-4000-8000-000000000001",
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId: "00000000-0000-4000-8000-000000000001",
+      operation: "rollback",
+      mustNotRetry: true,
+      persistenceWarning: true,
+    });
   });
 
   it("does not contact the API when a stored rollback is invalid", async () => {
@@ -425,6 +623,7 @@ describe("guarded live mutations", () => {
         accountId: "account-test",
         operatorId: "user_founder",
         access: accountAccess,
+        credentialGeneration,
       }),
     ).rejects.toThrow("not enabled");
     expect(globalThis.fetch).not.toHaveBeenCalled();
@@ -450,6 +649,16 @@ describe("guarded live mutations", () => {
 });
 
 describe("guarded live reads", () => {
+  it("refuses live reads outside an account-backed release stage before fetch", async () => {
+    process.env.OPENAI_ADS_API_KEY = "ads-test-key";
+    delete process.env.MAINTAINFLOW_RELEASE_STAGE;
+
+    await expect(
+      adsApiRequest("/ad_account", z.object({ id: z.string() })),
+    ).rejects.toThrow("private_read or live_write");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
   it("honors a bounded Retry-After delay before retrying a safe read", async () => {
     vi.useFakeTimers();
     process.env.OPENAI_ADS_API_KEY = "ads-test-key";

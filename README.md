@@ -63,9 +63,19 @@ change and rollback, and requires approval before any external write.
   fetch: six per client per hour and 30 per target host. Identifiers are HMACed,
   oversized streams are rejected, and production fails closed if the quota or
   trusted client-address boundary is unavailable.
+- A production demo therefore requires authenticated PostgreSQL transport, a
+  strong readiness-quota secret, identified legal/privacy/support contacts, and
+  closed public workspace admission even though it needs no Ads credential.
 - The app runs in truthful demo mode when no Ads API key is configured.
-- Live reads require `OPENAI_ADS_DATA_MODE=live` and an account-scoped key from
-  either the encrypted customer vault or the server-managed pilot environment.
+- Live reads require `OPENAI_ADS_DATA_MODE=live`, an account-backed
+  `MAINTAINFLOW_RELEASE_STAGE` of `private_read` or `live_write`, and an
+  account-scoped key from either the encrypted customer vault or the
+  server-managed pilot environment.
+- Demo/provider-simulator and real-account reads converge on the same strict
+  workbench schema. Live snapshots are versioned by advertiser and credential
+  generation; concurrent requests share one refresh, dashboards may show a
+  clearly marked last-confirmed snapshot for at most 15 minutes, and mutation
+  routes always require a newly refreshed snapshot.
 - Live writes additionally require `OPENAI_ADS_LIVE_WRITES_ENABLED=true` and a
   recommendation generated from the synced live account. They also require a
   Clerk-authenticated operator with database-backed advertiser-account access

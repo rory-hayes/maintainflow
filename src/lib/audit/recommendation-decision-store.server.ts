@@ -2,9 +2,10 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import postgres, { type Sql } from "postgres";
+import type postgres from "postgres";
 
 import type { Recommendation } from "../openai-ads/demo-data";
+import { getRuntimeDatabase } from "../database/client.server";
 import {
   canWriteAccount,
   type AccountAccess,
@@ -43,8 +44,6 @@ type RecommendationDecisionHistoryRow = RecommendationDismissalRow & {
   restored_at: Date | null;
 };
 
-let database: Sql | undefined;
-
 export class RecommendationDecisionStoreUnavailableError extends Error {
   constructor(message = "Recommendation decision storage is not configured.") {
     super(message);
@@ -64,13 +63,7 @@ function getDatabase() {
   if (!connectionString) {
     throw new RecommendationDecisionStoreUnavailableError();
   }
-  database ??= postgres(connectionString, {
-    connect_timeout: 10,
-    idle_timeout: 20,
-    max: 2,
-    prepare: false,
-  });
-  return database;
+  return getRuntimeDatabase(connectionString);
 }
 
 function parseDismissal(
@@ -127,8 +120,11 @@ export async function verifyRecommendationDecisionStore() {
   return result?.ready === true;
 }
 
-export async function listActiveRecommendationDismissals(accountId: string) {
-  const sql = getDatabase();
+export async function listActiveRecommendationDismissals(
+  accountId: string,
+  transaction?: postgres.TransactionSql,
+) {
+  const sql = transaction ?? getDatabase();
   const rows = await sql<RecommendationDismissalRow[]>`
     select
       dismissal.id,
@@ -206,6 +202,7 @@ export async function dismissRecommendation(options: {
   access: AccountAccess;
   recommendation: Recommendation;
   reason: string;
+  transaction?: postgres.TransactionSql;
 }) {
   if (
     options.access.accountId !== options.accountId ||
@@ -215,10 +212,31 @@ export async function dismissRecommendation(options: {
       "Write access to this advertiser account is required to dismiss a recommendation.",
     );
   }
-  const sql = getDatabase();
+  const sql = options.transaction ?? getDatabase();
   const id = randomUUID();
   const fingerprint = recommendationFingerprint(options.recommendation);
   const reason = recommendationDismissalReasonSchema.parse(options.reason);
+  const [activeApproval] = await sql<{ id: string }[]>`
+    select id
+    from ads_approval_records
+    where account_id = ${options.accountId}
+      and recommendation_id = ${options.recommendation.id}
+      and entity_id = ${options.recommendation.entityId}
+      and status in (
+        'pending',
+        'applied',
+        'reconciliation_required',
+        'rollback_pending',
+        'rollback_failed',
+        'rollback_reconciliation_required'
+      )
+    limit 1
+  `;
+  if (activeApproval) {
+    throw new RecommendationDecisionTransitionError(
+      "This recommendation already has an active or unresolved approval and cannot be dismissed.",
+    );
+  }
   const inserted = await sql<{ id: string }[]>`
     insert into maintainflow_recommendation_dismissals (
       id,
@@ -263,6 +281,7 @@ export async function dismissRecommendation(options: {
   if (!inserted[0]) {
     const existing = (await listActiveRecommendationDismissals(
       options.accountId,
+      options.transaction,
     )).find(
       (dismissal) =>
         dismissal.recommendationId === options.recommendation.id &&
@@ -277,6 +296,7 @@ export async function dismissRecommendation(options: {
 
   const dismissal = (await listActiveRecommendationDismissals(
     options.accountId,
+    options.transaction,
   )).find((item) => item.id === inserted[0].id);
   if (!dismissal) {
     throw new RecommendationDecisionTransitionError(
@@ -291,6 +311,7 @@ export async function restoreRecommendation(options: {
   operatorId: string;
   access: AccountAccess;
   recommendation: Recommendation;
+  transaction?: postgres.TransactionSql;
 }) {
   if (
     options.access.accountId !== options.accountId ||
@@ -300,7 +321,7 @@ export async function restoreRecommendation(options: {
       "Write access to this advertiser account is required to restore a recommendation.",
     );
   }
-  const sql = getDatabase();
+  const sql = options.transaction ?? getDatabase();
   const fingerprint = recommendationFingerprint(options.recommendation);
   const restored = await sql<{ id: string }[]>`
     update maintainflow_recommendation_dismissals dismissal set

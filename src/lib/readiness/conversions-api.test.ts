@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CONVERSIONS_MAX_DIAGNOSTICS,
   CONVERSIONS_MAX_EVENTS,
   CONVERSIONS_PAYLOAD_MAX_BYTES,
+  CONVERSIONS_MAX_VALIDATION_STEPS,
   auditConversionsApiPayload,
   createConversionsApiSample,
   type ConversionPayloadAudit,
@@ -38,6 +40,7 @@ describe("OpenAI Conversions API local payload preflight", () => {
       warningCount: 0,
       validateOnly: true,
       integrationSourcePresent: true,
+      incomplete: false,
       eventTypes: [{ name: "order_created", count: 1 }],
       issues: [],
     });
@@ -260,6 +263,70 @@ describe("OpenAI Conversions API local payload preflight", () => {
 
     expect(duplicate).toMatchObject({ count: 1, affectedEvents: [2] });
     expect(JSON.stringify(result)).not.toContain(String(base.id));
+  });
+
+  it("stops nested validation work with bounded privacy-safe diagnostics", () => {
+    const payload = samplePayload();
+    const privateValue = "private-content-value";
+    payload.events[0].data = {
+      type: "contents",
+      contents: Array.from(
+        { length: CONVERSIONS_MAX_VALIDATION_STEPS + 1 },
+        () => ({}),
+      ),
+      privateValue,
+    };
+
+    const result = audit(payload);
+    const serialized = JSON.stringify(result);
+
+    expect(result).toMatchObject({
+      verdict: "invalid",
+      eventCount: 1,
+      readyEventCount: 0,
+      incomplete: true,
+      warningCount: 0,
+    });
+    expect(result.blockerCount).toBeGreaterThanOrEqual(1);
+    expect(result.blockerCount).toBeLessThanOrEqual(CONVERSIONS_MAX_DIAGNOSTICS);
+    expect(result.issues.find((issue) => issue.code === "payload_complexity")).toMatchObject({
+      code: "payload_complexity",
+      severity: "blocker",
+      field: "payload",
+      count: 1,
+      affectedEvents: [],
+    });
+    expect(
+      result.issues.find((issue) => issue.code === "payload_complexity")?.title,
+    ).toContain("MaintainFlow");
+    expect(serialized).not.toContain(privateValue);
+  });
+
+  it("bounds diagnostics while retaining safe partial audit facts", () => {
+    const payload = samplePayload();
+    const unknownFields = Object.fromEntries(
+      Array.from(
+        { length: CONVERSIONS_MAX_DIAGNOSTICS + 1 },
+        (_, index) => [`private_field_${index}`, index],
+      ),
+    );
+    payload.events[0].data = { type: "contents", ...unknownFields };
+
+    const result = audit(payload);
+    const serialized = JSON.stringify(result);
+
+    expect(result.verdict).toBe("invalid");
+    expect(result.eventCount).toBe(1);
+    expect(result.readyEventCount).toBe(0);
+    expect(result.blockerCount).toBe(CONVERSIONS_MAX_DIAGNOSTICS);
+    expect(issueCodes(result)).toEqual(
+      expect.arrayContaining(["unknown_field", "payload_complexity"]),
+    );
+    expect(result.issues.length).toBeLessThanOrEqual(
+      CONVERSIONS_MAX_DIAGNOSTICS,
+    );
+    expect(serialized).not.toContain("private_field_0");
+    expect(serialized).not.toContain("private_field_200");
   });
 
   it("rejects oversized local input before parsing it", () => {

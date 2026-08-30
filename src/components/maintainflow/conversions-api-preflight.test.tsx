@@ -48,7 +48,8 @@ describe("Conversions API preflight", () => {
     );
 
     expect(html).toContain("Credential-like field found");
-    expect(html).toContain("events[].data.api_key");
+    expect(html).toContain("events[].data.[field]");
+    expect(html).not.toContain("api_key");
     expect(html).not.toContain(secret);
   });
 });

@@ -12,6 +12,9 @@ import {
   verifyApprovalStore,
 } from "../audit/approval-store.server";
 import {
+  verifyRecommendationDecisionStore,
+} from "../audit/recommendation-decision-store.server";
+import {
   isClerkConfigured,
 } from "../auth/config";
 
@@ -23,11 +26,13 @@ import {
   campaignSchema,
   campaignUpdateSchema,
 } from "./schema";
+import { buildAdsResourcePath, parseAdsResourcePath } from "./resource-path";
 import type { AdsMutation, Recommendation } from "./demo-data";
 import {
   canWriteAccount,
   type AccountAccess,
 } from "../tenancy/schema";
+import { withAuthorizedAdsWriteFence } from "../tenancy/store.server";
 
 const OPENAI_ADS_BASE_URL = "https://api.ads.openai.com/v1";
 const ADS_READ_TIMEOUT_MS = 15_000;
@@ -36,19 +41,26 @@ const ADS_RATE_LIMIT_BACKOFF_MS = 100;
 const ADS_RATE_LIMIT_MAX_DELAY_MS = 2_000;
 
 export function validateAdsMutation(mutation: AdsMutation) {
-  if (/^\/ad_groups\/[^/]+$/.test(mutation.path)) {
+  let target: ReturnType<typeof parseAdsResourcePath>;
+  try {
+    target = parseAdsResourcePath(mutation.path);
+  } catch {
+    throw new Error("This mutation path is not enabled in the MVP.");
+  }
+
+  if (target.resource === "ad_groups" && !target.action) {
     return adGroupUpdateSchema.parse(mutation.body);
   }
 
-  if (/^\/ads\/[^/]+$/.test(mutation.path)) {
+  if (target.resource === "ads" && !target.action) {
     return adUpdateSchema.parse(mutation.body);
   }
 
-  if (/^\/campaigns\/[^/]+$/.test(mutation.path)) {
+  if (target.resource === "campaigns" && !target.action) {
     return campaignUpdateSchema.parse(mutation.body);
   }
 
-  if (/^\/(ads|ad_groups|campaigns)\/[^/]+\/(activate|pause)$/.test(mutation.path)) {
+  if (target.action) {
     if (mutation.body !== null) {
       throw new Error("State actions must not include a request body.");
     }
@@ -66,7 +78,9 @@ export function getAdsRuntimeMode(
   const liveWritesRequested = process.env.OPENAI_ADS_LIVE_WRITES_ENABLED === "true";
   const releaseStage = process.env.MAINTAINFLOW_RELEASE_STAGE;
   const liveWriteStage = releaseStage === "live_write";
-  const dataSource = hasKey && liveDataRequested ? "live" : "demo";
+  const liveReadStage = releaseStage === "private_read" || liveWriteStage;
+  const dataSource =
+    hasKey && liveDataRequested && liveReadStage ? "live" : "demo";
   const authConfigured = isClerkConfigured();
   const approvalStoreConfigured = isApprovalStoreConfigured();
   const writeInfrastructureConfigured =
@@ -89,6 +103,7 @@ export function getAdsRuntimeMode(
     liveDataRequested,
     liveWritesRequested,
     releaseStage,
+    liveReadStage,
     liveWriteStage,
     dataSource,
     authConfigured,
@@ -160,6 +175,47 @@ export class OpenAIAdsApiError extends Error {
     this.retryAfter = retryAfter;
     this.retryAfterMs = options.retryAfterMs ?? null;
     this.attempts = options.attempts ?? 1;
+  }
+}
+
+export class OpenAIAdsLiveReadUnavailableError extends Error {
+  constructor() {
+    super(
+      "Live OpenAI Ads reads require live data mode and a private_read or live_write release stage.",
+    );
+    this.name = "OpenAIAdsLiveReadUnavailableError";
+  }
+}
+
+export class AdsMutationReconciliationRequiredError extends Error {
+  readonly approvalId: string;
+  readonly operation: "apply" | "rollback";
+  readonly mustNotRetry = true;
+  readonly persistenceWarning: boolean;
+
+  constructor(
+    approvalId: string,
+    operation: "apply" | "rollback",
+    message: string,
+    options: { cause?: unknown; persistenceWarning?: boolean } = {},
+  ) {
+    super(message, options);
+    this.name = "AdsMutationReconciliationRequiredError";
+    this.approvalId = approvalId;
+    this.operation = operation;
+    this.persistenceWarning = options.persistenceWarning ?? false;
+  }
+}
+
+export class AdsMutationRejectedError extends Error {
+  readonly approvalId: string;
+  readonly providerStatus: number;
+
+  constructor(approvalId: string, providerStatus: number) {
+    super("OpenAI Ads rejected the requested change.");
+    this.name = "AdsMutationRejectedError";
+    this.approvalId = approvalId;
+    this.providerStatus = providerStatus;
   }
 }
 
@@ -385,14 +441,7 @@ function mutationConfirmationTarget(
   mutation: AdsMutation,
   body: unknown,
 ): MutationConfirmationTarget {
-  const match = mutation.path.match(
-    /^\/(campaigns|ad_groups|ads)\/([^/]+)(?:\/(activate|pause))?$/,
-  );
-  if (!match) {
-    throw new Error("This mutation path does not have a readback contract.");
-  }
-
-  const [, resource, entityId, action] = match;
+  const { resource, entityId, action } = parseAdsResourcePath(mutation.path);
   const schema =
     resource === "campaigns"
       ? campaignSchema
@@ -401,7 +450,7 @@ function mutationConfirmationTarget(
         : adSchema;
 
   return {
-    detailPath: `/${resource}/${entityId}`,
+    detailPath: buildAdsResourcePath(resource, entityId),
     entityId,
     expectedState: action
       ? { status: action === "activate" ? "active" : "paused" }
@@ -470,6 +519,13 @@ export async function adsApiRequest<T>(
   init: AdsRequestInit = {},
   credential?: AdsApiCredential,
 ) {
+  const runtime = getAdsRuntimeMode({
+    hasAccountKey: hasAdsCredential(credential),
+  });
+  if (runtime.dataSource !== "live") {
+    throw new OpenAIAdsLiveReadUnavailableError();
+  }
+
   const method = init.method ?? "GET";
   const rateLimitRetrySafe = method === "GET" || init.retryOnRateLimit === true;
 
@@ -532,6 +588,7 @@ export async function applyAdsMutation(
     operatorId?: string;
     access?: AccountAccess;
     credential?: AdsApiCredential;
+    credentialGeneration?: string;
   },
 ) {
   const body = validateAdsMutation(recommendation.mutation);
@@ -565,37 +622,70 @@ export async function applyAdsMutation(
   ) {
     throw new Error("Verified advertiser-account access is required for a live Ads change.");
   }
-
-  if (!(await verifyApprovalStore())) {
-    throw new ApprovalStoreUnavailableError(
-      "The durable approval database migration is not ready.",
+  if (!options.credentialGeneration) {
+    throw new Error(
+      "A generation-scoped live snapshot is required for a live Ads change.",
     );
   }
 
-  const approvalId = await createApprovalRecord({
-    accountId: options.accountId,
-    operatorId: options.operatorId,
-    recommendation,
-    access: options.access,
-  });
+  if (
+    !(await verifyApprovalStore()) ||
+    !(await verifyRecommendationDecisionStore())
+  ) {
+    throw new ApprovalStoreUnavailableError(
+      "A durable approval or recommendation-decision database migration is not ready.",
+    );
+  }
+
+  const prepared = await withAuthorizedAdsWriteFence(
+    {
+      accountId: options.accountId,
+      operatorId: options.operatorId,
+      access: options.access,
+      expectedCredentialGeneration: options.credentialGeneration,
+    },
+    async ({ transaction, access }) =>
+      createApprovalRecord(
+        {
+          accountId: options.accountId,
+          operatorId: options.operatorId!,
+          recommendation,
+          access,
+        },
+        transaction,
+      ),
+  );
+  const approvalId = prepared.value;
+  const credential: AdsApiCredential = {
+    kind: "account_api_key",
+    secret: prepared.credentialMaterial.apiKey,
+    expectedAccountId: options.accountId,
+  };
 
   let response: Response;
   try {
     response = await sendAdsMutation(
       recommendation.mutation,
       body,
-      options.credential,
+      credential,
     );
   } catch (error) {
-    await updateApprovalRecord(approvalId, "reconciliation_required", {
-      error:
-        error instanceof Error
-          ? error.message
-          : "The Ads API request ended without a confirmed response.",
-    });
-    throw new Error(
+    let persistenceWarning = false;
+    try {
+      await updateApprovalRecord(approvalId, "reconciliation_required", {
+        error:
+          error instanceof Error
+            ? error.message
+            : "The Ads API request ended without a confirmed response.",
+      });
+    } catch {
+      persistenceWarning = true;
+    }
+    throw new AdsMutationReconciliationRequiredError(
+      approvalId,
+      "apply",
       `The Ads API outcome is uncertain. Approval ${approvalId} requires manual reconciliation and must not be retried automatically.`,
-      { cause: error },
+      { cause: error, persistenceWarning },
     );
   }
 
@@ -606,19 +696,24 @@ export async function applyAdsMutation(
       response: payload,
       error: `OpenAI Ads API returned HTTP ${response.status}.`,
     });
-    throw new Error(
-      `OpenAI Ads API request failed with status ${response.status}.`,
-      { cause: payload },
-    );
+    throw new AdsMutationRejectedError(approvalId, response.status);
   }
 
   if (response.status !== 200) {
-    await updateApprovalRecord(approvalId, "reconciliation_required", {
-      response: payload,
-      error: `OpenAI Ads API returned unexpected success status ${response.status}.`,
-    });
-    throw new Error(
+    let persistenceWarning = false;
+    try {
+      await updateApprovalRecord(approvalId, "reconciliation_required", {
+        response: payload,
+        error: `OpenAI Ads API returned unexpected success status ${response.status}.`,
+      });
+    } catch {
+      persistenceWarning = true;
+    }
+    throw new AdsMutationReconciliationRequiredError(
+      approvalId,
+      "apply",
       `The Ads API returned an undocumented success status. Approval ${approvalId} requires manual reconciliation and must not be retried automatically.`,
+      { persistenceWarning },
     );
   }
 
@@ -628,19 +723,26 @@ export async function applyAdsMutation(
       recommendation.mutation,
       body,
       payload,
-      options.credential,
+      credential,
     );
   } catch (error) {
-    await updateApprovalRecord(approvalId, "reconciliation_required", {
-      response: payload,
-      error:
-        error instanceof Error
-          ? error.message
-          : "The Ads API response or readback could not be confirmed.",
-    });
-    throw new Error(
+    let persistenceWarning = false;
+    try {
+      await updateApprovalRecord(approvalId, "reconciliation_required", {
+        response: payload,
+        error:
+          error instanceof Error
+            ? error.message
+            : "The Ads API response or readback could not be confirmed.",
+      });
+    } catch {
+      persistenceWarning = true;
+    }
+    throw new AdsMutationReconciliationRequiredError(
+      approvalId,
+      "apply",
       `The Ads API acknowledged the request, but its resulting state is unconfirmed. Approval ${approvalId} requires manual reconciliation and must not be retried automatically.`,
-      { cause: error },
+      { cause: error, persistenceWarning },
     );
   }
 
@@ -677,6 +779,7 @@ export async function applyStoredRollback(options: {
   operatorId: string;
   access: AccountAccess;
   credential?: AdsApiCredential;
+  credentialGeneration?: string;
 }) {
   const runtime = getAdsRuntimeMode({
     hasAccountKey: hasAdsCredential(options.credential),
@@ -699,13 +802,34 @@ export async function applyStoredRollback(options: {
       "Verified advertiser-account write access is required for rollback.",
     );
   }
+  if (!options.credentialGeneration) {
+    throw new Error(
+      "A generation-scoped live account check is required for rollback.",
+    );
+  }
 
-  const approval = await claimApprovalRollback(
-    options.approvalId,
-    options.accountId,
-    options.operatorId,
-    options.access,
+  const prepared = await withAuthorizedAdsWriteFence(
+    {
+      accountId: options.accountId,
+      operatorId: options.operatorId,
+      access: options.access,
+      expectedCredentialGeneration: options.credentialGeneration,
+    },
+    async ({ transaction, access }) =>
+      claimApprovalRollback(
+        options.approvalId,
+        options.accountId,
+        options.operatorId,
+        access,
+        transaction,
+      ),
   );
+  const approval = prepared.value;
+  const credential: AdsApiCredential = {
+    kind: "account_api_key",
+    secret: prepared.credentialMaterial.apiKey,
+    expectedAccountId: options.accountId,
+  };
 
   let body: unknown;
   try {
@@ -725,22 +849,29 @@ export async function applyStoredRollback(options: {
     response = await sendAdsMutation(
       approval.rollback,
       body,
-      options.credential,
+      credential,
     );
   } catch (error) {
-    await updateRollbackRecord(
+    let persistenceWarning = false;
+    try {
+      await updateRollbackRecord(
+        approval.id,
+        "rollback_reconciliation_required",
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "The rollback request ended without a confirmed response.",
+        },
+      );
+    } catch {
+      persistenceWarning = true;
+    }
+    throw new AdsMutationReconciliationRequiredError(
       approval.id,
-      "rollback_reconciliation_required",
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "The rollback request ended without a confirmed response.",
-      },
-    );
-    throw new Error(
+      "rollback",
       `The rollback outcome is uncertain. Approval ${approval.id} requires manual reconciliation and must not be retried automatically.`,
-      { cause: error },
+      { cause: error, persistenceWarning },
     );
   }
 
@@ -750,23 +881,28 @@ export async function applyStoredRollback(options: {
       response: payload,
       error: `OpenAI Ads API returned HTTP ${response.status}.`,
     });
-    throw new Error(
-      `OpenAI Ads API rollback failed with status ${response.status}.`,
-      { cause: payload },
-    );
+    throw new AdsMutationRejectedError(approval.id, response.status);
   }
 
   if (response.status !== 200) {
-    await updateRollbackRecord(
+    let persistenceWarning = false;
+    try {
+      await updateRollbackRecord(
+        approval.id,
+        "rollback_reconciliation_required",
+        {
+          response: payload,
+          error: `OpenAI Ads API returned unexpected success status ${response.status}.`,
+        },
+      );
+    } catch {
+      persistenceWarning = true;
+    }
+    throw new AdsMutationReconciliationRequiredError(
       approval.id,
-      "rollback_reconciliation_required",
-      {
-        response: payload,
-        error: `OpenAI Ads API returned unexpected success status ${response.status}.`,
-      },
-    );
-    throw new Error(
+      "rollback",
       `The Ads API returned an undocumented rollback success status. Approval ${approval.id} requires manual reconciliation and must not be retried automatically.`,
+      { persistenceWarning },
     );
   }
 
@@ -776,23 +912,30 @@ export async function applyStoredRollback(options: {
       approval.rollback,
       body,
       payload,
-      options.credential,
+      credential,
     );
   } catch (error) {
-    await updateRollbackRecord(
+    let persistenceWarning = false;
+    try {
+      await updateRollbackRecord(
+        approval.id,
+        "rollback_reconciliation_required",
+        {
+          response: payload,
+          error:
+            error instanceof Error
+              ? error.message
+              : "The Ads API rollback response or readback could not be confirmed.",
+        },
+      );
+    } catch {
+      persistenceWarning = true;
+    }
+    throw new AdsMutationReconciliationRequiredError(
       approval.id,
-      "rollback_reconciliation_required",
-      {
-        response: payload,
-        error:
-          error instanceof Error
-            ? error.message
-            : "The Ads API rollback response or readback could not be confirmed.",
-      },
-    );
-    throw new Error(
+      "rollback",
       `The Ads API acknowledged the rollback, but its resulting state is unconfirmed. Approval ${approval.id} requires manual reconciliation and must not be retried automatically.`,
-      { cause: error },
+      { cause: error, persistenceWarning },
     );
   }
 

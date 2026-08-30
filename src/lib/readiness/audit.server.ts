@@ -17,6 +17,10 @@ import { analyzeMeasurementInstallation } from "./measurement";
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_BODY_BYTES = 1_500_000;
 const MAX_REDIRECTS = 4;
+const ROBOTS_MAX_DIRECTIVES = 5_000;
+const ROBOTS_MAX_RULES = 1_000;
+const ROBOTS_MAX_PATTERN_LENGTH = 2_048;
+const ROBOTS_MAX_WILDCARDS = 128;
 const AUDITOR_USER_AGENT =
   "MaintainFlow-Readiness/0.1 (+https://maintainflow.io)";
 
@@ -37,6 +41,13 @@ type RobotsGroup = {
   userAgents: string[];
   rules: RobotsRule[];
 };
+
+class RobotsComplexityExceededError extends Error {
+  constructor() {
+    super("robots.txt is too complex to evaluate safely.");
+    this.name = "RobotsComplexityExceededError";
+  }
+}
 
 type HtmlSignals = {
   hasTitle: boolean;
@@ -408,6 +419,8 @@ export function analyzeHtml(html: string, headers = new Headers()): HtmlSignals 
 export function parseRobotsTxt(text: string): RobotsGroup[] {
   const groups: RobotsGroup[] = [];
   let current: RobotsGroup | null = null;
+  let directiveCount = 0;
+  let ruleCount = 0;
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.replace(/#.*$/, "").trim();
@@ -416,8 +429,15 @@ export function parseRobotsTxt(text: string): RobotsGroup[] {
     if (separator === -1) continue;
     const directive = line.slice(0, separator).trim().toLowerCase();
     const value = line.slice(separator + 1).trim();
+    directiveCount += 1;
+    if (directiveCount > ROBOTS_MAX_DIRECTIVES) {
+      throw new RobotsComplexityExceededError();
+    }
 
     if (directive === "user-agent") {
+      if (value.length > ROBOTS_MAX_PATTERN_LENGTH) {
+        throw new RobotsComplexityExceededError();
+      }
       if (!current || current.rules.length > 0) {
         current = { userAgents: [], rules: [] };
         groups.push(current);
@@ -426,6 +446,15 @@ export function parseRobotsTxt(text: string): RobotsGroup[] {
       continue;
     }
     if ((directive === "allow" || directive === "disallow") && current) {
+      ruleCount += 1;
+      const wildcardCount = value.split("*").length - 1;
+      if (
+        ruleCount > ROBOTS_MAX_RULES ||
+        value.length > ROBOTS_MAX_PATTERN_LENGTH ||
+        wildcardCount > ROBOTS_MAX_WILDCARDS
+      ) {
+        throw new RobotsComplexityExceededError();
+      }
       current.rules.push({ directive, pattern: value });
     }
   }
@@ -436,20 +465,41 @@ export function parseRobotsTxt(text: string): RobotsGroup[] {
 function ruleMatches(path: string, pattern: string): boolean {
   if (!pattern) return false;
   const anchored = pattern.endsWith("$");
-  const source = pattern
-    .replace(/\$$/, "")
-    .split("*")
-    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join(".*");
-  return new RegExp(`^${source}${anchored ? "$" : ""}`).test(path);
+  const normalized = anchored ? pattern.slice(0, -1) : pattern;
+  const fragments = normalized.split("*");
+  let cursor = 0;
+  let fragmentIndex = 0;
+
+  if (!normalized.startsWith("*")) {
+    const first = fragments[0];
+    if (!path.startsWith(first)) return false;
+    cursor = first.length;
+    fragmentIndex = 1;
+  }
+
+  for (; fragmentIndex < fragments.length; fragmentIndex += 1) {
+    const fragment = fragments[fragmentIndex];
+    if (!fragment) continue;
+    const isLast = fragmentIndex === fragments.length - 1;
+
+    if (anchored && isLast && !normalized.endsWith("*")) {
+      const suffixStart = path.length - fragment.length;
+      return suffixStart >= cursor && path.startsWith(fragment, suffixStart);
+    }
+
+    const next = path.indexOf(fragment, cursor);
+    if (next === -1) return false;
+    cursor = next + fragment.length;
+  }
+
+  return !anchored || normalized.endsWith("*") || cursor === path.length;
 }
 
-export function isCrawlerAllowed(
-  robotsText: string,
+function isCrawlerAllowedByGroups(
+  groups: RobotsGroup[],
   userAgent: "oai-adsbot" | "oai-searchbot",
   pathname: string,
 ): boolean {
-  const groups = parseRobotsTxt(robotsText);
   const exact = groups.filter((group) => group.userAgents.includes(userAgent));
   const applicable = exact.length > 0
     ? exact
@@ -464,6 +514,54 @@ export function isCrawlerAllowed(
       return left.directive === "allow" ? -1 : 1;
     });
   return matches[0]?.directive !== "disallow";
+}
+
+export function isCrawlerAllowed(
+  robotsText: string,
+  userAgent: "oai-adsbot" | "oai-searchbot",
+  pathname: string,
+): boolean {
+  try {
+    return isCrawlerAllowedByGroups(
+      parseRobotsTxt(robotsText),
+      userAgent,
+      pathname,
+    );
+  } catch (error) {
+    if (error instanceof RobotsComplexityExceededError) return false;
+    throw error;
+  }
+}
+
+export function evaluateOpenAICrawlerAccess(
+  robotsText: string,
+  pathname: string,
+) {
+  try {
+    const groups = parseRobotsTxt(robotsText);
+    return {
+      adsBotAllowed: isCrawlerAllowedByGroups(
+        groups,
+        "oai-adsbot",
+        pathname,
+      ),
+      searchBotAllowed: isCrawlerAllowedByGroups(
+        groups,
+        "oai-searchbot",
+        pathname,
+      ),
+      evaluationLimited: false,
+    } as const;
+  } catch (error) {
+    if (error instanceof RobotsComplexityExceededError) {
+      return {
+        adsBotAllowed: false,
+        searchBotAllowed: false,
+        evaluationLimited: true,
+      } as const;
+    }
+    throw error;
+  }
 }
 
 function scoreChecks(checks: ReadinessCheck[]): number {
@@ -512,15 +610,20 @@ export async function auditStorefront(input: string): Promise<ReadinessAudit> {
   const signals = analyzeHtml(html, page.headers);
   const measurement = analyzeMeasurementInstallation(html, page.headers);
   const pageSucceeded = page.status >= 200 && page.status < 300 && Boolean(html);
-  const robotsAvailable = robots && robots.status >= 200 && robots.status < 300;
+  const robotsAvailable = Boolean(
+    robots && robots.status >= 200 && robots.status < 300,
+  );
   const robotsAbsent = robots?.status === 404;
-  const adsBotAllowed = robotsAvailable
-    ? isCrawlerAllowed(robots.body, "oai-adsbot", page.url.pathname)
-    : robotsAbsent;
-  const searchBotAllowed = robotsAvailable
-    ? isCrawlerAllowed(robots.body, "oai-searchbot", page.url.pathname)
-    : robotsAbsent;
-  const sitemapDeclared = robotsAvailable && /(?:^|\n)\s*sitemap\s*:/i.test(robots.body);
+  const crawlerAccess =
+    robotsAvailable && robots
+      ? evaluateOpenAICrawlerAccess(robots.body, page.url.pathname)
+      : null;
+  const robotsEvaluationLimited = crawlerAccess?.evaluationLimited ?? false;
+  const adsBotAllowed = crawlerAccess?.adsBotAllowed ?? robotsAbsent;
+  const searchBotAllowed = crawlerAccess?.searchBotAllowed ?? robotsAbsent;
+  const sitemapDeclared = Boolean(
+    robotsAvailable && robots && /(?:^|\n)\s*sitemap\s*:/i.test(robots.body),
+  );
   const sitemapReachable = Boolean(
     sitemap && sitemap.status >= 200 && sitemap.status < 300 && sitemap.body.trim(),
   );
@@ -541,7 +644,9 @@ export async function auditStorefront(input: string): Promise<ReadinessAudit> {
       "OAI-AdsBot is allowed",
       adsBotAllowed ? "pass" : robots ? "fail" : "warning",
       25,
-      robotsAvailable
+      robotsEvaluationLimited
+        ? "robots.txt exceeded MaintainFlow's safe evaluation limit, so crawler access was conservatively treated as blocked."
+        : robotsAvailable
         ? `${adsBotAllowed ? "No blocking rule applies" : "A blocking rule applies"} to ${page.url.pathname}.`
         : robotsAbsent
           ? "robots.txt returned 404, so no robots exclusion rules were found."
@@ -553,7 +658,9 @@ export async function auditStorefront(input: string): Promise<ReadinessAudit> {
       "OAI-SearchBot is allowed",
       searchBotAllowed ? "pass" : robots ? "fail" : "warning",
       15,
-      robotsAvailable
+      robotsEvaluationLimited
+        ? "robots.txt exceeded MaintainFlow's safe evaluation limit, so crawler access was conservatively treated as blocked."
+        : robotsAvailable
         ? `${searchBotAllowed ? "No blocking rule applies" : "A blocking rule applies"} to ${page.url.pathname}.`
         : robotsAbsent
           ? "robots.txt returned 404, so no robots exclusion rules were found."

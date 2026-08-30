@@ -25,6 +25,15 @@ FROM node:${NODE_VERSION} AS builder
 # Set working directory
 WORKDIR /app
 
+# Next.js inlines NEXT_PUBLIC values into the browser bundle at build time.
+# The Clerk publishable key is public, but must match the runtime Clerk tenant.
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""
+ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL="/auth/sign-in"
+ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL="/auth/sign-up"
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+ENV NEXT_PUBLIC_CLERK_SIGN_IN_URL=${NEXT_PUBLIC_CLERK_SIGN_IN_URL}
+ENV NEXT_PUBLIC_CLERK_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_SIGN_UP_URL}
+
 # Copy project dependencies from dependencies stage
 COPY --from=dependencies /app/node_modules ./node_modules
 
@@ -60,6 +69,15 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
+# Preserve the same public Clerk configuration used to compile the browser
+# bundle. Secret Clerk and provider credentials are supplied only at runtime.
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""
+ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL="/auth/sign-in"
+ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL="/auth/sign-up"
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+ENV NEXT_PUBLIC_CLERK_SIGN_IN_URL=${NEXT_PUBLIC_CLERK_SIGN_IN_URL}
+ENV NEXT_PUBLIC_CLERK_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_SIGN_UP_URL}
+
 # Next.js collects completely anonymous telemetry data about general usage.
 # Learn more here: https://nextjs.org/telemetry
 # Uncomment the following line in case you want to disable telemetry during the run time.
@@ -76,6 +94,10 @@ RUN chown node:node .next
 # https://nextjs.org/docs/advanced-features/output-file-tracing
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/.next/maintainflow-public-build-metadata.json ./.next/maintainflow-public-build-metadata.json
+COPY --from=builder --chown=node:node /app/scripts/check-production-config.mjs ./scripts/check-production-config.mjs
+COPY --from=builder --chown=node:node /app/scripts/public-build-metadata.mjs ./scripts/public-build-metadata.mjs
+COPY --from=builder --chown=node:node /app/scripts/start-standalone-production.mjs ./scripts/start-standalone-production.mjs
 
 # If you want to persist the fetch cache generated during the build so that
 # cached responses are available immediately on startup, uncomment this line:
@@ -92,5 +114,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((response) => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"]
 
-# Start Next.js standalone server
-CMD ["node", "server.js"]
+# Refuse to start with a partial or contradictory production configuration.
+CMD ["node", "scripts/start-standalone-production.mjs"]

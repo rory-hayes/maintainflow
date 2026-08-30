@@ -109,6 +109,39 @@ export function recommendationFingerprint(
     .digest("hex");
 }
 
+/**
+ * Exact consent boundary for an external write. Unlike a dismissal, approval
+ * depends on the evidence, confidence, monitoring baseline, safeguards, and
+ * every value presented alongside the proposed request and rollback.
+ */
+export function recommendationApprovalFingerprint(
+  recommendation: Recommendation,
+) {
+  const displayedDecision = canonicalize({
+    version: 1,
+    recommendationId: recommendation.id,
+    source: recommendation.source,
+    title: recommendation.title,
+    priority: recommendation.priority,
+    summary: recommendation.summary,
+    entityId: recommendation.entityId,
+    entityLabel: recommendation.entityLabel,
+    currentValue: recommendation.currentValue,
+    proposedValue: recommendation.proposedValue,
+    estimatedImpact: recommendation.estimatedImpact,
+    confidence: recommendation.confidence,
+    evidence: recommendation.evidence,
+    mutation: recommendation.mutation,
+    rollback: recommendation.rollback,
+    safeguard: recommendation.safeguard,
+    nextStep: recommendation.nextStep,
+    monitoringPlan: recommendation.monitoringPlan ?? null,
+  });
+  return createHash("sha256")
+    .update(JSON.stringify(displayedDecision))
+    .digest("hex");
+}
+
 export function applyRecommendationDismissals(
   recommendations: Recommendation[],
   dismissals: RecommendationDismissal[],

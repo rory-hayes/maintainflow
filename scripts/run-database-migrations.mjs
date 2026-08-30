@@ -23,13 +23,13 @@ export const REQUIRED_MIGRATION_NAMES = Object.freeze([
   "009_recommendation_dismissals.sql",
   "010_conversion_credentials.sql",
   "011_readiness_audit_history.sql",
+  "012_live_workbench_snapshots.sql",
 ]);
 
 const DEFAULT_MIGRATIONS_DIRECTORY = fileURLToPath(
   new URL("../docs/database/", import.meta.url),
 );
 const MIGRATION_NAME_PATTERN = /^(\d{3})_[a-z0-9][a-z0-9_-]*\.sql$/;
-const TLS_MODES = new Set(["require", "verify-ca", "verify-full"]);
 
 // First 64 bits of SHA-256("maintainflow-ads:database-migrations:v1"), split
 // into PostgreSQL's two-int advisory-lock namespace.
@@ -101,10 +101,10 @@ export function validateMigrationEnvironment(env) {
 
   const hosted = !isLocalHostname(parsed.hostname);
   if (hosted) {
-    const sslMode = parsed.searchParams.get("sslmode") ?? "";
-    if (!TLS_MODES.has(sslMode)) {
+    const sslModes = parsed.searchParams.getAll("sslmode");
+    if (sslModes.length !== 1 || sslModes[0] !== "verify-full") {
       throw new MigrationSafetyError(
-        "Hosted DATABASE_URL connections must require TLS with sslmode=require, verify-ca, or verify-full.",
+        "Hosted DATABASE_URL connections must include exactly one sslmode=verify-full parameter.",
       );
     }
     if (env[BACKUP_RESTORE_FLAG] !== "true") {

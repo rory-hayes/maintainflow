@@ -1,5 +1,7 @@
 export const CONVERSIONS_PAYLOAD_MAX_BYTES = 1_000_000;
 export const CONVERSIONS_MAX_EVENTS = 1_000;
+export const CONVERSIONS_MAX_VALIDATION_STEPS = 50_000;
+export const CONVERSIONS_MAX_DIAGNOSTICS = 200;
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1_000;
 const TEN_MINUTES_MS = 10 * 60 * 1_000;
@@ -116,6 +118,7 @@ export type ConversionPayloadAudit = {
   warningCount: number;
   validateOnly: boolean | null;
   integrationSourcePresent: boolean;
+  incomplete: boolean;
   eventTypes: Array<{ name: string; count: number }>;
   issues: ConversionPayloadIssue[];
   limitations: string[];
@@ -125,17 +128,51 @@ type RawIssue = Omit<ConversionPayloadIssue, "count" | "affectedEvents"> & {
   eventIndex?: number;
 };
 
+type ValidationState = {
+  issues: RawIssue[];
+  validationSteps: number;
+};
+
+class PayloadComplexityExceededError extends Error {
+  constructor() {
+    super("The payload exceeded MaintainFlow's local validation safety limits.");
+    this.name = "PayloadComplexityExceededError";
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function addIssue(
-  issues: RawIssue[],
+  state: ValidationState,
   issue: Omit<RawIssue, "severity"> & {
     severity?: ConversionPayloadIssueSeverity;
   },
 ) {
-  issues.push({ severity: issue.severity ?? "blocker", ...issue });
+  if (state.issues.length >= CONVERSIONS_MAX_DIAGNOSTICS) {
+    throw new PayloadComplexityExceededError();
+  }
+  state.issues.push({ severity: issue.severity ?? "blocker", ...issue });
+}
+
+function consumeValidationStep(state: ValidationState) {
+  if (state.validationSteps >= CONVERSIONS_MAX_VALIDATION_STEPS) {
+    throw new PayloadComplexityExceededError();
+  }
+  state.validationSteps += 1;
+}
+
+function someWithValidationBudget<T>(
+  values: T[],
+  state: ValidationState,
+  predicate: (value: T) => boolean,
+) {
+  for (const value of values) {
+    consumeValidationStep(state);
+    if (predicate(value)) return true;
+  }
+  return false;
 }
 
 function aggregateIssues(issues: RawIssue[]): ConversionPayloadIssue[] {
@@ -199,17 +236,19 @@ function isValidIpAddress(value: string): boolean {
 function validateKnownFields(
   record: Record<string, unknown>,
   allowed: Set<string>,
-  issues: RawIssue[],
+  state: ValidationState,
   options: { field: string; eventIndex?: number; customAllowed?: boolean },
 ) {
-  for (const key of Object.keys(record)) {
+  for (const key in record) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue;
+    consumeValidationStep(state);
     if (allowed.has(key)) continue;
     const looksSecret = /(?:authorization|api[_-]?key|secret|token)/i.test(key);
     if (options.customAllowed && !looksSecret) continue;
-    addIssue(issues, {
+    addIssue(state, {
       code: looksSecret ? "secret_field" : "unknown_field",
       title: looksSecret ? "Credential-like field found" : "Undocumented field",
-      field: `${options.field}.${key}`,
+      field: `${options.field}.[field]`,
       detail: looksSecret
         ? "Remove credentials from the JSON body. Keys belong only in the server-side Authorization header and are never needed for this local check."
         : "Remove the field or confirm a newer OpenAI schema before relying on it.",
@@ -222,12 +261,15 @@ function validateHashList(
   user: Record<string, unknown>,
   field: (typeof HASH_LIST_FIELDS)[number],
   eventIndex: number,
-  issues: RawIssue[],
+  state: ValidationState,
 ) {
   const value = user[field];
   if (value === undefined) return;
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    addIssue(issues, {
+  if (
+    !Array.isArray(value) ||
+    someWithValidationBudget(value, state, (item) => typeof item !== "string")
+  ) {
+    addIssue(state, {
       code: "hash_list_type",
       title: "Hashed identifier list is malformed",
       field: `events[].user.${field}`,
@@ -236,8 +278,8 @@ function validateHashList(
     });
     return;
   }
-  if (value.some((item) => !HASH_PATTERN.test(item))) {
-    addIssue(issues, {
+  if (someWithValidationBudget(value, state, (item) => !HASH_PATTERN.test(item))) {
+    addIssue(state, {
       code: "hash_format",
       title: "Hashed identifier is not normalized",
       field: `events[].user.${field}`,
@@ -246,7 +288,7 @@ function validateHashList(
     });
   }
   if (value.length > 3) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "hash_list_limit",
       severity: "warning",
       title: "Only the first three identifiers are used",
@@ -261,12 +303,15 @@ function validateRawStringList(
   user: Record<string, unknown>,
   field: (typeof RAW_LIST_FIELDS)[number],
   eventIndex: number,
-  issues: RawIssue[],
+  state: ValidationState,
 ) {
   const value = user[field];
   if (value === undefined) return;
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    addIssue(issues, {
+  if (
+    !Array.isArray(value) ||
+    someWithValidationBudget(value, state, (item) => typeof item !== "string")
+  ) {
+    addIssue(state, {
       code: "user_list_type",
       title: "User matching field is malformed",
       field: `events[].user.${field}`,
@@ -276,7 +321,7 @@ function validateRawStringList(
     return;
   }
   if (value.length > 3) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "user_list_limit",
       severity: "warning",
       title: "Only the first three matching values are used",
@@ -288,12 +333,24 @@ function validateRawStringList(
   if (
     field === "regions" ||
     field === "cities"
-      ? value.some((item) => item.trim().length === 0 || item.trim().length > 128)
+      ? someWithValidationBudget(
+          value,
+          state,
+          (item) => item.trim().length === 0 || item.trim().length > 128,
+        )
       : field === "postal_codes"
-        ? value.some((item) => !POSTAL_CODE_PATTERN.test(item))
-        : value.some((item) => !COUNTRY_PATTERN.test(item))
+        ? someWithValidationBudget(
+            value,
+            state,
+            (item) => !POSTAL_CODE_PATTERN.test(item),
+          )
+        : someWithValidationBudget(
+            value,
+            state,
+            (item) => !COUNTRY_PATTERN.test(item),
+          )
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "user_value_format",
       title: "User matching value has the wrong format",
       field: `events[].user.${field}`,
@@ -311,11 +368,11 @@ function validateRawStringList(
 function validateUser(
   value: unknown,
   eventIndex: number,
-  issues: RawIssue[],
+  state: ValidationState,
 ) {
   if (value === undefined) return;
   if (!isRecord(value)) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "user_object",
       title: "User data must be an object",
       field: "events[].user",
@@ -325,15 +382,15 @@ function validateUser(
     return;
   }
 
-  validateKnownFields(value, USER_FIELDS, issues, {
+  validateKnownFields(value, USER_FIELDS, state, {
     field: "events[].user",
     eventIndex,
   });
   HASH_LIST_FIELDS.forEach((field) =>
-    validateHashList(value, field, eventIndex, issues),
+    validateHashList(value, field, eventIndex, state),
   );
   RAW_LIST_FIELDS.forEach((field) =>
-    validateRawStringList(value, field, eventIndex, issues),
+    validateRawStringList(value, field, eventIndex, state),
   );
 
   const simpleStrings = ["obref", "user_agent"] as const;
@@ -342,7 +399,7 @@ function validateUser(
       value[field] !== undefined &&
       (typeof value[field] !== "string" || value[field].trim().length === 0)
     ) {
-      addIssue(issues, {
+      addIssue(state, {
         code: "user_string",
         title: "User matching value is empty",
         field: `events[].user.${field}`,
@@ -357,7 +414,7 @@ function validateUser(
     (typeof value.ip_address !== "string" ||
       !isValidIpAddress(value.ip_address))
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "ip_address",
       title: "IP address is malformed",
       field: "events[].user.ip_address",
@@ -370,7 +427,7 @@ function validateUser(
     (typeof value.android_advertising_id !== "string" ||
       !UUID_PATTERN.test(value.android_advertising_id))
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "android_id",
       title: "Android advertising ID is malformed",
       field: "events[].user.android_advertising_id",
@@ -385,10 +442,10 @@ function validateContentItem(
   eventIndex: number,
   itemIndex: number,
   eventCurrencyPresent: boolean,
-  issues: RawIssue[],
+  state: ValidationState,
 ) {
   if (!isRecord(value)) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "content_item",
       title: "Content item must be an object",
       field: "events[].data.contents[]",
@@ -397,7 +454,7 @@ function validateContentItem(
     });
     return;
   }
-  validateKnownFields(value, CONTENT_FIELDS, issues, {
+  validateKnownFields(value, CONTENT_FIELDS, state, {
     field: `events[].data.contents[${itemIndex}]`,
     eventIndex,
   });
@@ -408,7 +465,7 @@ function validateContentItem(
       (typeof value[field] !== "string" ||
         (field === "content_type" && value[field].trim().length === 0))
     ) {
-      addIssue(issues, {
+      addIssue(state, {
         code: "content_string",
         title: "Content field has the wrong type",
         field: `events[].data.contents[].${field}`,
@@ -419,7 +476,7 @@ function validateContentItem(
   }
   for (const field of ["quantity", "amount"] as const) {
     if (value[field] !== undefined && !Number.isInteger(value[field])) {
-      addIssue(issues, {
+      addIssue(state, {
         code: "content_integer",
         title: "Content amount must be an integer",
         field: `events[].data.contents[].${field}`,
@@ -432,7 +489,7 @@ function validateContentItem(
     value.currency !== undefined &&
     (typeof value.currency !== "string" || !CURRENCY_PATTERN.test(value.currency))
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "content_currency",
       title: "Item currency is malformed",
       field: "events[].data.contents[].currency",
@@ -441,7 +498,7 @@ function validateContentItem(
     });
   }
   if (value.amount !== undefined && !value.currency && !eventCurrencyPresent) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "content_currency_required",
       title: "Item amount has no currency",
       field: "events[].data.contents[].currency",
@@ -450,11 +507,19 @@ function validateContentItem(
     });
   }
   if (value.variant_dict !== undefined) {
-    if (
-      !isRecord(value.variant_dict) ||
-      Object.values(value.variant_dict).some((item) => typeof item !== "string")
-    ) {
-      addIssue(issues, {
+    let variantDictionaryMalformed = !isRecord(value.variant_dict);
+    if (isRecord(value.variant_dict)) {
+      for (const key in value.variant_dict) {
+        if (!Object.prototype.hasOwnProperty.call(value.variant_dict, key)) continue;
+        consumeValidationStep(state);
+        if (typeof value.variant_dict[key] !== "string") {
+          variantDictionaryMalformed = true;
+          break;
+        }
+      }
+    }
+    if (variantDictionaryMalformed) {
+      addIssue(state, {
         code: "variant_dict",
         title: "Variant dictionary is malformed",
         field: "events[].data.contents[].variant_dict",
@@ -469,10 +534,10 @@ function validateEventData(
   value: unknown,
   expectedType: DataType | undefined,
   eventIndex: number,
-  issues: RawIssue[],
+  state: ValidationState,
 ) {
   if (!isRecord(value)) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "data_object",
       title: "Event data is missing",
       field: "events[].data",
@@ -483,13 +548,13 @@ function validateEventData(
   }
 
   const dataType = typeof value.type === "string" ? value.type : undefined;
-  validateKnownFields(value, DATA_FIELDS, issues, {
+  validateKnownFields(value, DATA_FIELDS, state, {
     field: "events[].data",
     eventIndex,
     customAllowed: dataType === "custom",
   });
   if (!dataType || dataType !== expectedType) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "data_type",
       title: "Event data type does not match",
       field: "events[].data.type",
@@ -501,7 +566,7 @@ function validateEventData(
   }
 
   if (value.amount !== undefined && !Number.isInteger(value.amount)) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "event_amount",
       title: "Event amount must be an integer",
       field: "events[].data.amount",
@@ -510,7 +575,7 @@ function validateEventData(
     });
   }
   if (value.amount !== undefined && value.currency === undefined) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "event_currency_required",
       title: "Event amount has no currency",
       field: "events[].data.currency",
@@ -522,7 +587,7 @@ function validateEventData(
     value.currency !== undefined &&
     (typeof value.currency !== "string" || !CURRENCY_PATTERN.test(value.currency))
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "event_currency",
       title: "Event currency is malformed",
       field: "events[].data.currency",
@@ -534,7 +599,7 @@ function validateEventData(
     value.plan_id !== undefined &&
     (typeof value.plan_id !== "string" || value.plan_id.trim().length === 0)
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "plan_id",
       title: "Plan identifier is malformed",
       field: "events[].data.plan_id",
@@ -547,7 +612,7 @@ function validateEventData(
     dataType !== "plan_enrollment" &&
     dataType !== "custom"
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "plan_id_shape",
       title: "Plan identifier is not allowed for this shape",
       field: "events[].data.plan_id",
@@ -557,7 +622,7 @@ function validateEventData(
   }
   if (value.contents !== undefined) {
     if (dataType === "customer_action") {
-      addIssue(issues, {
+      addIssue(state, {
         code: "contents_shape",
         title: "Contents are not allowed for customer actions",
         field: "events[].data.contents",
@@ -565,7 +630,7 @@ function validateEventData(
         eventIndex,
       });
     } else if (!Array.isArray(value.contents)) {
-      addIssue(issues, {
+      addIssue(state, {
         code: "contents_array",
         title: "Contents must be an array",
         field: "events[].data.contents",
@@ -573,16 +638,17 @@ function validateEventData(
         eventIndex,
       });
     } else {
-      value.contents.forEach((item, itemIndex) =>
+      value.contents.forEach((item, itemIndex) => {
+        consumeValidationStep(state);
         validateContentItem(
           item,
           eventIndex,
           itemIndex,
           typeof value.currency === "string" &&
             CURRENCY_PATTERN.test(value.currency),
-          issues,
-        ),
-      );
+          state,
+        );
+      });
     }
   }
 }
@@ -591,12 +657,12 @@ function validateEvent(
   value: unknown,
   eventIndex: number,
   nowMs: number,
-  issues: RawIssue[],
+  state: ValidationState,
   eventTypeCounts: Map<string, number>,
   eventIds: Map<string, number>,
 ) {
   if (!isRecord(value)) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "event_object",
       title: "Event must be an object",
       field: "events[]",
@@ -605,13 +671,13 @@ function validateEvent(
     });
     return;
   }
-  validateKnownFields(value, EVENT_FIELDS, issues, {
+  validateKnownFields(value, EVENT_FIELDS, state, {
     field: "events[]",
     eventIndex,
   });
 
   if (typeof value.id !== "string" || value.id.trim().length === 0) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "event_id",
       title: "Event ID is missing",
       field: "events[].id",
@@ -628,7 +694,7 @@ function validateEvent(
     const duplicateKey = `${eventIdentity}:${value.id}`;
     const duplicateOf = eventIds.get(duplicateKey);
     if (duplicateOf !== undefined) {
-      addIssue(issues, {
+      addIssue(state, {
         code: "duplicate_event_id",
         severity: "warning",
         title: "Event ID is repeated in this batch",
@@ -646,7 +712,7 @@ function validateEvent(
       ? (value.type as EventName)
       : undefined;
   if (!eventType) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "event_type",
       title: "Event type is unsupported",
       field: "events[].type",
@@ -658,7 +724,7 @@ function validateEvent(
   }
 
   if (!Number.isInteger(value.timestamp_ms)) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "timestamp_type",
       title: "Timestamp must be an integer",
       field: "events[].timestamp_ms",
@@ -669,7 +735,7 @@ function validateEvent(
     (value.timestamp_ms as number) < nowMs - SEVEN_DAYS_MS ||
     (value.timestamp_ms as number) > nowMs + TEN_MINUTES_MS
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "timestamp_window",
       title: "Timestamp is outside OpenAI's window",
       field: "events[].timestamp_ms",
@@ -688,7 +754,7 @@ function validateEvent(
         value.custom_event_name.toLowerCase(),
       )
     ) {
-      addIssue(issues, {
+      addIssue(state, {
         code: "custom_event_name",
         title: "Custom event name is invalid",
         field: "events[].custom_event_name",
@@ -696,7 +762,7 @@ function validateEvent(
         eventIndex,
       });
     } else if (value.custom_event_name !== value.custom_event_name.toLowerCase()) {
-      addIssue(issues, {
+      addIssue(state, {
         code: "custom_event_case",
         severity: "warning",
         title: "Custom event name will be normalized",
@@ -706,7 +772,7 @@ function validateEvent(
       });
     }
   } else if (value.custom_event_name !== undefined) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "unexpected_custom_event_name",
       severity: "warning",
       title: "Custom event name is unnecessary",
@@ -721,7 +787,7 @@ function validateEvent(
       ? value.action_source
       : undefined;
   if (value.action_source !== undefined && !actionSource) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "action_source",
       title: "Action source is unsupported",
       field: "events[].action_source",
@@ -733,7 +799,7 @@ function validateEvent(
     (eventType === "app_installed" || eventType === "app_opened") &&
     actionSource !== "mobile_app"
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "app_action_source",
       title: "App lifecycle event needs mobile_app",
       field: "events[].action_source",
@@ -742,7 +808,7 @@ function validateEvent(
     });
   }
   if (actionSource === "web" && !isValidUrl(value.source_url)) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "source_url_required",
       title: "Web event needs a source URL",
       field: "events[].source_url",
@@ -750,7 +816,7 @@ function validateEvent(
       eventIndex,
     });
   } else if (value.source_url !== undefined && !isValidUrl(value.source_url)) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "source_url",
       title: "Source URL is malformed",
       field: "events[].source_url",
@@ -762,7 +828,7 @@ function validateEvent(
     value.oppref !== undefined &&
     (typeof value.oppref !== "string" || value.oppref.trim().length === 0)
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "oppref",
       title: "Attribution identifier is empty",
       field: "events[].oppref",
@@ -771,7 +837,7 @@ function validateEvent(
     });
   }
   if (value.opt_out !== undefined && typeof value.opt_out !== "boolean") {
-    addIssue(issues, {
+    addIssue(state, {
       code: "opt_out",
       title: "Opt-out flag must be boolean",
       field: "events[].opt_out",
@@ -780,12 +846,12 @@ function validateEvent(
     });
   }
 
-  validateUser(value.user, eventIndex, issues);
+  validateUser(value.user, eventIndex, state);
   validateEventData(
     value.data,
     eventType ? EVENT_DATA_TYPES[eventType] : undefined,
     eventIndex,
-    issues,
+    state,
   );
 }
 
@@ -798,9 +864,21 @@ function emptyAudit(issue: RawIssue): ConversionPayloadAudit {
     warningCount: 0,
     validateOnly: null,
     integrationSourcePresent: false,
+    incomplete: false,
     eventTypes: [],
     issues: aggregateIssues([issue]),
     limitations: [...conversionPayloadLimitations],
+  };
+}
+
+function payloadComplexityIssue(): RawIssue {
+  return {
+    code: "payload_complexity",
+    severity: "blocker",
+    title: "Payload exceeds MaintainFlow's local safety limits",
+    field: "payload",
+    detail:
+      "Reduce nested fields or items and retry. This MaintainFlow processing cap is separate from OpenAI's documented API limits.",
   };
 }
 
@@ -809,6 +887,61 @@ export const conversionPayloadLimitations = [
   "A clean result means the documented static contract is ready for an OpenAI validate_only request; it does not prove receipt, deduplication, matching, attribution, optimization, or billing.",
   "OpenAI remains the authority for currency registries, attribution identifiers, consent compliance, account enablement, and any schema change after this documentation snapshot.",
 ] as const;
+
+function finalizePayloadAudit(input: {
+  eventCount: number;
+  events: unknown[];
+  eventTypeCounts: Map<string, number>;
+  issues: RawIssue[];
+  validateOnly: boolean | null;
+  integrationSourcePresent: boolean;
+  incomplete?: boolean;
+  readyEventCountOverride?: number;
+}): ConversionPayloadAudit {
+  const blockerCount = input.issues.filter(
+    (issue) => issue.severity === "blocker",
+  ).length;
+  const warningCount = input.issues.filter(
+    (issue) => issue.severity === "warning",
+  ).length;
+  const topLevelBlocker = input.issues.some(
+    (issue) => issue.severity === "blocker" && issue.eventIndex === undefined,
+  );
+  const blockedEvents = new Set(
+    input.issues
+      .filter(
+        (issue) =>
+          issue.severity === "blocker" && issue.eventIndex !== undefined,
+      )
+      .map((issue) => issue.eventIndex),
+  );
+  const readyEventCount = input.readyEventCountOverride ??
+    (topLevelBlocker ? 0 : input.events.length - blockedEvents.size);
+
+  return {
+    verdict:
+      blockerCount > 0
+        ? "invalid"
+        : warningCount > 0
+          ? "needs_attention"
+          : "ready_for_validation",
+    eventCount: input.eventCount,
+    readyEventCount,
+    blockerCount,
+    warningCount,
+    validateOnly: input.validateOnly,
+    integrationSourcePresent: input.integrationSourcePresent,
+    incomplete: input.incomplete ?? false,
+    eventTypes: [...input.eventTypeCounts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort(
+        (left, right) =>
+          right.count - left.count || left.name.localeCompare(right.name),
+      ),
+    issues: aggregateIssues(input.issues),
+    limitations: [...conversionPayloadLimitations],
+  };
+}
 
 export function auditConversionsApiPayload(
   input: string,
@@ -846,19 +979,29 @@ export function auditConversionsApiPayload(
     });
   }
 
-  const issues: RawIssue[] = [];
-  validateKnownFields(parsed, TOP_LEVEL_FIELDS, issues, { field: "payload" });
+  const state: ValidationState = { issues: [], validationSteps: 0 };
+  const { issues } = state;
   const validateOnly =
     typeof parsed.validate_only === "boolean" ? parsed.validate_only : null;
+  const integrationSourcePresent = parsed.integration_source !== undefined;
+  const events = Array.isArray(parsed.events)
+    ? parsed.events.slice(0, CONVERSIONS_MAX_EVENTS)
+    : [];
+  const eventCount = Array.isArray(parsed.events) ? parsed.events.length : 0;
+  const eventTypeCounts = new Map<string, number>();
+  const eventIds = new Map<string, number>();
+
+  try {
+  validateKnownFields(parsed, TOP_LEVEL_FIELDS, state, { field: "payload" });
   if (parsed.validate_only !== undefined && validateOnly === null) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "validate_only_type",
       title: "validate_only must be boolean",
       field: "payload.validate_only",
       detail: "Use true for a no-save validation request or false for a production send.",
     });
   } else if (validateOnly !== true) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "validate_only_off",
       severity: "warning",
       title: "Dry-run mode is not enabled",
@@ -867,13 +1010,12 @@ export function auditConversionsApiPayload(
     });
   }
 
-  const integrationSourcePresent = parsed.integration_source !== undefined;
   if (
     integrationSourcePresent &&
     (typeof parsed.integration_source !== "string" ||
       !INTEGRATION_SOURCE_PATTERN.test(parsed.integration_source))
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "integration_source",
       title: "Integration source is malformed",
       field: "payload.integration_source",
@@ -883,7 +1025,7 @@ export function auditConversionsApiPayload(
     typeof parsed.integration_source === "string" &&
     parsed.integration_source !== parsed.integration_source.toLowerCase()
   ) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "integration_source_case",
       severity: "warning",
       title: "Integration source will be normalized",
@@ -893,14 +1035,14 @@ export function auditConversionsApiPayload(
   }
 
   if (!Array.isArray(parsed.events)) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "events_array",
       title: "Events array is missing",
       field: "payload.events",
       detail: "Add an events array containing at least one event.",
     });
   } else if (parsed.events.length === 0 || parsed.events.length > CONVERSIONS_MAX_EVENTS) {
-    addIssue(issues, {
+    addIssue(state, {
       code: "events_count",
       title: "Batch size is outside OpenAI's limit",
       field: "payload.events",
@@ -908,58 +1050,44 @@ export function auditConversionsApiPayload(
     });
   }
 
-  const events = Array.isArray(parsed.events)
-    ? parsed.events.slice(0, CONVERSIONS_MAX_EVENTS)
-    : [];
-  const eventTypeCounts = new Map<string, number>();
-  const eventIds = new Map<string, number>();
-  events.forEach((event, eventIndex) =>
+  events.forEach((event, eventIndex) => {
+    consumeValidationStep(state);
     validateEvent(
       event,
       eventIndex,
       now.getTime(),
-      issues,
+      state,
       eventTypeCounts,
       eventIds,
-    ),
-  );
+    );
+  });
 
-  const blockerCount = issues.filter((issue) => issue.severity === "blocker").length;
-  const warningCount = issues.filter((issue) => issue.severity === "warning").length;
-  const topLevelBlocker = issues.some(
-    (issue) => issue.severity === "blocker" && issue.eventIndex === undefined,
-  );
-  const blockedEvents = new Set(
-    issues
-      .filter(
-        (issue) =>
-          issue.severity === "blocker" && issue.eventIndex !== undefined,
-      )
-      .map((issue) => issue.eventIndex),
-  );
-  const readyEventCount = topLevelBlocker
-    ? 0
-    : events.length - blockedEvents.size;
-
-  return {
-    verdict:
-      blockerCount > 0
-        ? "invalid"
-        : warningCount > 0
-          ? "needs_attention"
-          : "ready_for_validation",
-    eventCount: Array.isArray(parsed.events) ? parsed.events.length : 0,
-    readyEventCount,
-    blockerCount,
-    warningCount,
+  return finalizePayloadAudit({
+    eventCount,
+    events,
+    eventTypeCounts,
+    issues,
     validateOnly,
     integrationSourcePresent,
-    eventTypes: [...eventTypeCounts.entries()]
-      .map(([name, count]) => ({ name, count }))
-      .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name)),
-    issues: aggregateIssues(issues),
-    limitations: [...conversionPayloadLimitations],
-  };
+  });
+  } catch (error) {
+    if (error instanceof PayloadComplexityExceededError) {
+      return finalizePayloadAudit({
+        eventCount,
+        events,
+        eventTypeCounts,
+        issues: [
+          ...issues.slice(0, CONVERSIONS_MAX_DIAGNOSTICS - 1),
+          payloadComplexityIssue(),
+        ],
+        validateOnly,
+        integrationSourcePresent,
+        incomplete: true,
+        readyEventCountOverride: 0,
+      });
+    }
+    throw error;
+  }
 }
 
 export function createConversionsApiSample(now = new Date()): string {

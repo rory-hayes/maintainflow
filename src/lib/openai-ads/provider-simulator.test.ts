@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -24,8 +24,14 @@ import {
 
 const originalFetch = globalThis.fetch;
 
+beforeEach(() => {
+  vi.stubEnv("OPENAI_ADS_DATA_MODE", "live");
+  vi.stubEnv("MAINTAINFLOW_RELEASE_STAGE", "private_read");
+});
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  vi.unstubAllEnvs();
 });
 
 function simulatorHeaders(

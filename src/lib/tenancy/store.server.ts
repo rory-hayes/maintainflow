@@ -1,8 +1,8 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
-import postgres, { type Sql } from "postgres";
+import type postgres from "postgres";
 
 import {
   accountAccessSchema,
@@ -20,6 +20,7 @@ import {
   type EncryptedCredential,
   type EncryptedConversionsApiCredential,
 } from "../credentials/crypto.server";
+import { getRuntimeDatabase } from "../database/client.server";
 
 type AccessRow = {
   organization_id: string;
@@ -32,9 +33,14 @@ type AccessRow = {
   account_role: AccountAccess["accountRole"];
 };
 
+type CredentialRotationAccessRow = AccessRow & {
+  advertiser_account_id: string;
+};
+
 type CredentialRow = {
   id: string;
   external_account_id: string;
+  credential_version: number;
   provider: "openai_ads";
   algorithm: "aes-256-gcm";
   key_id: string;
@@ -61,8 +67,6 @@ type ConversionCredentialMetadataRow = {
   validation_event_count: number;
 };
 
-let database: Sql | undefined;
-
 export class TenancyStoreUnavailableError extends Error {
   constructor(message = "Customer tenancy is not configured.") {
     super(message);
@@ -84,6 +88,15 @@ export class AdvertiserCredentialUnavailableError extends Error {
   }
 }
 
+export class AdvertiserCredentialChangedError extends AdvertiserCredentialUnavailableError {
+  constructor(
+    message = "The advertiser credential changed while live data was being reviewed. Refresh before trying again.",
+  ) {
+    super(message);
+    this.name = "AdvertiserCredentialChangedError";
+  }
+}
+
 export class ConversionsCredentialUnavailableError extends Error {
   constructor(message = "The advertiser conversion credential is unavailable.") {
     super(message);
@@ -94,13 +107,7 @@ export class ConversionsCredentialUnavailableError extends Error {
 function getDatabase() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new TenancyStoreUnavailableError();
-  database ??= postgres(connectionString, {
-    connect_timeout: 10,
-    idle_timeout: 20,
-    max: 2,
-    prepare: false,
-  });
-  return database;
+  return getRuntimeDatabase(connectionString);
 }
 
 function parseAccess(row: AccessRow) {
@@ -193,7 +200,18 @@ export async function listAccountAccesses(operatorId: string) {
   return selectBestAccessPerAccount(rows.map(parseAccess));
 }
 
-export async function getAdsApiKeyForAccount(accountId: string) {
+export type AdsCredentialMaterial = {
+  apiKey: string;
+  credentialGeneration: string;
+};
+
+function environmentCredentialGeneration(apiKey: string) {
+  return `environment:${createHash("sha256").update(apiKey, "utf8").digest("hex")}`;
+}
+
+export async function getAdsCredentialMaterialForAccount(
+  accountId: string,
+): Promise<AdsCredentialMaterial> {
   const sql = getDatabase();
   const [account] = await sql<
     { connection_mode: AccountConnectionMode }[]
@@ -208,13 +226,17 @@ export async function getAdsApiKeyForAccount(accountId: string) {
   if (account.connection_mode === "environment") {
     const key = process.env.OPENAI_ADS_API_KEY;
     if (!key) throw new AdvertiserCredentialUnavailableError();
-    return key;
+    return {
+      apiKey: key,
+      credentialGeneration: environmentCredentialGeneration(key),
+    };
   }
 
   const [row] = await sql<CredentialRow[]>`
     select
       credential.id,
       account.external_account_id,
+      credential.credential_version,
       credential.provider,
       credential.algorithm,
       credential.key_id,
@@ -231,18 +253,158 @@ export async function getAdsApiKeyForAccount(accountId: string) {
     limit 1
   `;
   if (!row) throw new AdvertiserCredentialUnavailableError();
-  return decryptAdsApiKey(
-    {
-      id: row.id,
-      provider: row.provider,
-      algorithm: row.algorithm,
-      keyId: row.key_id,
-      ciphertext: row.ciphertext,
-      initializationVector: row.initialization_vector,
-      authenticationTag: row.authentication_tag,
-    },
-    row.external_account_id,
-  );
+  return {
+    apiKey: decryptAdsApiKey(
+      {
+        id: row.id,
+        provider: row.provider,
+        algorithm: row.algorithm,
+        keyId: row.key_id,
+        ciphertext: row.ciphertext,
+        initializationVector: row.initialization_vector,
+        authenticationTag: row.authentication_tag,
+      },
+      row.external_account_id,
+    ),
+    credentialGeneration: `vault:${row.id}:${row.credential_version}`,
+  };
+}
+
+export async function getAdsApiKeyForAccount(accountId: string) {
+  return (await getAdsCredentialMaterialForAccount(accountId)).apiKey;
+}
+
+/**
+ * Re-checks live-write authority and the exact credential generation in one
+ * transaction. The callback must only claim the durable local action; provider
+ * I/O happens after the transaction commits.
+ */
+export async function withAuthorizedAdsWriteFence<T>(
+  options: {
+    operatorId: string;
+    accountId: string;
+    access: AccountAccess;
+    expectedCredentialGeneration: string;
+  },
+  operation: (context: {
+    transaction: postgres.TransactionSql;
+    access: AccountAccess;
+    credentialMaterial: AdsCredentialMaterial;
+  }) => Promise<T>,
+) {
+  if (
+    options.access.accountId !== options.accountId ||
+    !options.expectedCredentialGeneration
+  ) {
+    throw new AccountAccessForbiddenError(
+      "Fresh write access to this advertiser account is required.",
+    );
+  }
+
+  const sql = getDatabase();
+  return sql.begin(async (transaction) => {
+    const [row] = await transaction<CredentialRotationAccessRow[]>`
+      select
+        account.id as advertiser_account_id,
+        organization.id as organization_id,
+        organization.name as organization_name,
+        organization.customer_type as organization_type,
+        account.external_account_id as account_id,
+        account.name as account_name,
+        account.connection_mode as connection_mode,
+        membership.role as membership_role,
+        account_access.role as account_role
+      from maintainflow_organizations organization
+      join maintainflow_organization_memberships membership
+        on membership.organization_id = organization.id
+      join maintainflow_account_access account_access
+        on account_access.organization_id = organization.id
+      join maintainflow_advertiser_accounts account
+        on account.id = account_access.advertiser_account_id
+      where organization.id = ${options.access.organizationId}
+        and organization.status = 'active'
+        and membership.clerk_user_id = ${options.operatorId}
+        and membership.role in ('owner', 'admin')
+        and account.external_account_id = ${options.accountId}
+        and account.status = 'active'
+        and account_access.role in ('owner', 'manager')
+      for update of organization, membership, account_access, account
+    `;
+    if (!row) {
+      throw new AccountAccessForbiddenError(
+        "Write access changed while live data was being reviewed. Refresh before trying again.",
+      );
+    }
+
+    const access = parseAccess(row);
+    if (!canWriteAccount(access)) {
+      throw new AccountAccessForbiddenError(
+        "Write access changed while live data was being reviewed. Refresh before trying again.",
+      );
+    }
+
+    let credentialMaterial: AdsCredentialMaterial;
+    if (row.connection_mode === "environment") {
+      const apiKey = process.env.OPENAI_ADS_API_KEY;
+      if (!apiKey) throw new AdvertiserCredentialUnavailableError();
+      credentialMaterial = {
+        apiKey,
+        credentialGeneration: environmentCredentialGeneration(apiKey),
+      };
+    } else {
+      const [credential] = await transaction<CredentialRow[]>`
+        select
+          credential.id,
+          account.external_account_id,
+          credential.credential_version,
+          credential.provider,
+          credential.algorithm,
+          credential.key_id,
+          credential.ciphertext,
+          credential.initialization_vector,
+          credential.authentication_tag
+        from maintainflow_advertiser_credentials credential
+        join maintainflow_advertiser_accounts account
+          on account.id = credential.advertiser_account_id
+        where account.id = ${row.advertiser_account_id}
+          and account.status = 'active'
+          and credential.status = 'active'
+        order by credential.credential_version desc
+        limit 1
+        for update of credential
+      `;
+      if (!credential) throw new AdvertiserCredentialUnavailableError();
+      credentialMaterial = {
+        apiKey: decryptAdsApiKey(
+          {
+            id: credential.id,
+            provider: credential.provider,
+            algorithm: credential.algorithm,
+            keyId: credential.key_id,
+            ciphertext: credential.ciphertext,
+            initializationVector: credential.initialization_vector,
+            authenticationTag: credential.authentication_tag,
+          },
+          credential.external_account_id,
+        ),
+        credentialGeneration: `vault:${credential.id}:${credential.credential_version}`,
+      };
+    }
+
+    if (
+      credentialMaterial.credentialGeneration !==
+      options.expectedCredentialGeneration
+    ) {
+      throw new AdvertiserCredentialChangedError();
+    }
+
+    const value = await operation({
+      transaction,
+      access,
+      credentialMaterial,
+    });
+    return { value, access, credentialMaterial };
+  });
 }
 
 export async function getConversionsApiCredentialForAccount(
@@ -321,9 +483,59 @@ export async function getConversionsApiCredentialMetadataForAccount(
   };
 }
 
+async function authorizeCredentialRotation(options: {
+  transaction: postgres.TransactionSql;
+  operatorId: string;
+  accountId: string;
+  access: AccountAccess;
+  forbiddenMessage: string;
+}) {
+  if (options.access.accountId !== options.accountId) {
+    throw new AccountAccessForbiddenError(options.forbiddenMessage);
+  }
+
+  const [row] = await options.transaction<CredentialRotationAccessRow[]>`
+    select
+      account.id as advertiser_account_id,
+      organization.id as organization_id,
+      organization.name as organization_name,
+      organization.customer_type as organization_type,
+      account.external_account_id as account_id,
+      account.name as account_name,
+      account.connection_mode as connection_mode,
+      membership.role as membership_role,
+      account_access.role as account_role
+    from maintainflow_organizations organization
+    join maintainflow_organization_memberships membership
+      on membership.organization_id = organization.id
+    join maintainflow_account_access account_access
+      on account_access.organization_id = organization.id
+    join maintainflow_advertiser_accounts account
+      on account.id = account_access.advertiser_account_id
+    where organization.id = ${options.access.organizationId}
+      and organization.status = 'active'
+      and membership.clerk_user_id = ${options.operatorId}
+      and membership.role in ('owner', 'admin')
+      and account.external_account_id = ${options.accountId}
+      and account.status = 'active'
+      and account_access.role in ('owner', 'manager')
+    for update of organization, membership, account_access, account
+  `;
+  if (!row) {
+    throw new AccountAccessForbiddenError(options.forbiddenMessage);
+  }
+
+  const access = parseAccess(row);
+  if (!canWriteAccount(access)) {
+    throw new AccountAccessForbiddenError(options.forbiddenMessage);
+  }
+  return { advertiserAccountId: row.advertiser_account_id, access };
+}
+
 export async function rotateAdsApiCredential(options: {
   operatorId: string;
   accountId: string;
+  access: AccountAccess;
   credential: EncryptedCredential;
   verifiedAt: Date;
 }) {
@@ -334,26 +546,26 @@ export async function rotateAdsApiCredential(options: {
   }
   const sql = getDatabase();
   return sql.begin(async (transaction) => {
-    const [account] = await transaction<{ id: string }[]>`
-      select id
-      from maintainflow_advertiser_accounts
-      where external_account_id = ${options.accountId}
-        and status = 'active'
-      for update
-    `;
-    if (!account) throw new AdvertiserCredentialUnavailableError();
+    const authorized = await authorizeCredentialRotation({
+      transaction,
+      operatorId: options.operatorId,
+      accountId: options.accountId,
+      access: options.access,
+      forbiddenMessage:
+        "This operator cannot replace credentials for this Ads account.",
+    });
 
     const [versionRow] = await transaction<{ next_version: number }[]>`
       select coalesce(max(credential_version), 0)::int + 1 as next_version
       from maintainflow_advertiser_credentials
-      where advertiser_account_id = ${account.id}
+      where advertiser_account_id = ${authorized.advertiserAccountId}
     `;
     const nextVersion = versionRow?.next_version ?? 1;
 
     await transaction`
       update maintainflow_advertiser_credentials set
         status = 'revoked', revoked_at = now(), updated_at = now()
-      where advertiser_account_id = ${account.id}
+      where advertiser_account_id = ${authorized.advertiserAccountId}
         and status = 'active'
     `;
     await transaction`
@@ -362,7 +574,8 @@ export async function rotateAdsApiCredential(options: {
         credential_version, ciphertext, initialization_vector,
         authentication_tag, created_by, verified_at
       ) values (
-        ${options.credential.id}, ${account.id}, ${options.credential.provider},
+        ${options.credential.id}, ${authorized.advertiserAccountId},
+        ${options.credential.provider},
         ${options.credential.algorithm}, ${options.credential.keyId},
         ${nextVersion}, ${options.credential.ciphertext},
         ${options.credential.initializationVector},
@@ -373,7 +586,7 @@ export async function rotateAdsApiCredential(options: {
     await transaction`
       update maintainflow_advertiser_accounts set
         connection_mode = 'vault', updated_at = now()
-      where id = ${account.id}
+      where id = ${authorized.advertiserAccountId}
     `;
 
     return { credentialVersion: nextVersion, verifiedAt: options.verifiedAt };
@@ -391,14 +604,6 @@ export async function rotateConversionsApiCredential(options: {
     eventCount: number;
   };
 }) {
-  if (
-    options.access.accountId !== options.accountId ||
-    !canWriteAccount(options.access)
-  ) {
-    throw new AccountAccessForbiddenError(
-      "This operator cannot replace measurement credentials for this Ads account.",
-    );
-  }
   if (
     !Number.isInteger(options.validation.providerStatus) ||
     options.validation.providerStatus < 200 ||
@@ -419,26 +624,26 @@ export async function rotateConversionsApiCredential(options: {
 
   const sql = getDatabase();
   return sql.begin(async (transaction) => {
-    const [account] = await transaction<{ id: string }[]>`
-      select id
-      from maintainflow_advertiser_accounts
-      where external_account_id = ${options.accountId}
-        and status = 'active'
-      for update
-    `;
-    if (!account) throw new ConversionsCredentialUnavailableError();
+    const authorized = await authorizeCredentialRotation({
+      transaction,
+      operatorId: options.operatorId,
+      accountId: options.accountId,
+      access: options.access,
+      forbiddenMessage:
+        "This operator cannot replace measurement credentials for this Ads account.",
+    });
 
     const [versionRow] = await transaction<{ next_version: number }[]>`
       select coalesce(max(credential_version), 0)::int + 1 as next_version
       from maintainflow_conversion_credentials
-      where advertiser_account_id = ${account.id}
+      where advertiser_account_id = ${authorized.advertiserAccountId}
     `;
     const nextVersion = versionRow?.next_version ?? 1;
 
     await transaction`
       update maintainflow_conversion_credentials set
         status = 'revoked', revoked_at = now(), updated_at = now()
-      where advertiser_account_id = ${account.id}
+      where advertiser_account_id = ${authorized.advertiserAccountId}
         and status = 'active'
     `;
     await transaction`
@@ -449,13 +654,15 @@ export async function rotateConversionsApiCredential(options: {
         actor_membership_role, actor_account_role, validated_at,
         validation_provider_status, validation_event_count
       ) values (
-        ${options.credential.id}, ${account.id}, ${options.credential.provider},
+        ${options.credential.id}, ${authorized.advertiserAccountId},
+        ${options.credential.provider},
         ${options.credential.algorithm}, ${options.credential.keyId},
         ${nextVersion}, ${options.credential.ciphertext},
         ${options.credential.initializationVector},
         ${options.credential.authenticationTag}, ${options.operatorId},
-        ${options.access.organizationId}, ${options.access.membershipRole},
-        ${options.access.accountRole}, ${options.validatedAt},
+        ${authorized.access.organizationId},
+        ${authorized.access.membershipRole},
+        ${authorized.access.accountRole}, ${options.validatedAt},
         ${options.validation.providerStatus}, ${options.validation.eventCount}
       )
     `;

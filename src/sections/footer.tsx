@@ -158,8 +158,12 @@ const Footer = () => {
             <p>© 2026 MaintainFlow. All rights reserved.</p>
 
             <div className="flex flex-col md:flex-row items-center mt-4 md:mt-0 gap-4">
-              <p>Privacy Policy</p>
-              <p>Terms Of Service</p>
+              <Link className="hover:underline" href="/privacy">
+                Privacy notice
+              </Link>
+              <Link className="hover:underline" href="/terms">
+                Private beta terms
+              </Link>
             </div>
           </div>
         </div>

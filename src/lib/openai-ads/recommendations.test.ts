@@ -193,4 +193,23 @@ describe("buildLiveRecommendations", () => {
       bidding_config: configuredAdGroup.bidding_config,
     });
   });
+
+  it("encodes provider resource IDs in both the proposed change and rollback", () => {
+    const providerId = "adgrp/season?phase#one%";
+    const configuredAdGroup = { ...adGroup, id: providerId };
+    const [recommendation] = buildLiveRecommendations({
+      campaigns: [campaign],
+      adGroups: [configuredAdGroup],
+      performance: [metrics(campaign.id, 2_000, 7)],
+      adGroupPerformance: [metrics(providerId, 1_250, 4)],
+      currencyCode: "USD",
+      measurementWindow,
+    });
+
+    expect(recommendation.entityId).toBe(providerId);
+    expect(recommendation.mutation.path).toBe(
+      "/ad_groups/adgrp%2Fseason%3Fphase%23one%25",
+    );
+    expect(recommendation.rollback.path).toBe(recommendation.mutation.path);
+  });
 });

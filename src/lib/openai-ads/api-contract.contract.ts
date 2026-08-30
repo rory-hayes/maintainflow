@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -8,6 +8,11 @@ import { evaluateLiveMonitoringWindow } from "./monitoring.server";
 import type { MonitoringPlan } from "./monitoring";
 
 const originalFetch = globalThis.fetch;
+
+beforeEach(() => {
+  vi.stubEnv("OPENAI_ADS_DATA_MODE", "live");
+  vi.stubEnv("MAINTAINFLOW_RELEASE_STAGE", "private_read");
+});
 
 function json(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -38,6 +43,7 @@ function expectUnixRange(value: string, stringBounds: boolean) {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  vi.unstubAllEnvs();
 });
 
 describe("OpenAI Ads live-read wire contract", () => {

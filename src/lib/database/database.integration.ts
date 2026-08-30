@@ -15,6 +15,11 @@ import {
 vi.mock("server-only", () => ({}));
 
 import {
+  closeRuntimeDatabase,
+  getRuntimeDatabase,
+} from "./client.server";
+
+import {
   ApprovalTransitionError,
   claimApprovalRollback,
   claimDueMonitoringRecords,
@@ -52,7 +57,21 @@ import {
   getConversionsApiConnectionStatus,
   validateConversionsApiPayload,
 } from "../openai-ads/conversions.server";
-import { demoAds, getDemoRecommendation } from "../openai-ads/demo-data";
+import {
+  demoAccount,
+  demoAds,
+  demoCampaignPerformance,
+  demoCampaigns,
+  getDemoRecommendation,
+} from "../openai-ads/demo-data";
+import {
+  claimLiveSyncRefresh,
+  completeLiveSyncRefresh,
+  failLiveSyncRefresh,
+  pruneExpiredLiveSyncSnapshots,
+  readLiveSyncState,
+  verifyLiveSyncStore,
+} from "../openai-ads/live-sync-store.server";
 import {
   consumeReadinessAuditQuota,
   pruneExpiredReadinessRateLimitBuckets,
@@ -68,9 +87,11 @@ import type { ReadinessAudit } from "../readiness/schema";
 import type { AccountAccess } from "../tenancy/schema";
 import {
   AccountAccessForbiddenError,
+  AdvertiserCredentialChangedError,
   bootstrapWorkspace,
   getAccountAccess,
   getAdsApiKeyForAccount,
+  getAdsCredentialMaterialForAccount,
   getConversionsApiCredentialForAccount,
   listAccountAccesses,
   requireAccountAccess,
@@ -79,6 +100,7 @@ import {
   verifyConversionCredentialStore,
   verifyCredentialStore,
   verifyTenancyStore,
+  withAuthorizedAdsWriteFence,
 } from "../tenancy/store.server";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -116,6 +138,7 @@ async function applyMigrations(sql: Sql) {
     "docs/database/009_recommendation_dismissals.sql",
     "docs/database/010_conversion_credentials.sql",
     "docs/database/011_readiness_audit_history.sql",
+    "docs/database/012_live_workbench_snapshots.sql",
   ];
   await sql.begin(async (transaction) => {
     for (const migrationFile of migrationFiles) {
@@ -192,6 +215,7 @@ describe("PostgreSQL customer and approval boundary", () => {
   }, 20_000);
 
   afterAll(async () => {
+    await closeRuntimeDatabase();
     await database.end({ timeout: 5 });
   });
 
@@ -203,6 +227,11 @@ describe("PostgreSQL customer and approval boundary", () => {
     await expect(verifyReadinessRateLimitStore()).resolves.toBe(true);
     await expect(verifyRecommendationDecisionStore()).resolves.toBe(true);
     await expect(verifyReadinessHistoryStore()).resolves.toBe(true);
+    await expect(verifyLiveSyncStore()).resolves.toBe(true);
+    const [runtimeSettings] = await getRuntimeDatabase(databaseUrl)<
+      { search_path: string }[]
+    >`show search_path`;
+    expect(runtimeSettings?.search_path).toBe("public");
 
     expect(advertiserAccess).toMatchObject({
       organizationType: "advertiser",
@@ -313,6 +342,14 @@ describe("PostgreSQL customer and approval boundary", () => {
     expect(
       applyRecommendationDismissals([recommendation], dismissals)[0],
     ).toMatchObject({ status: "dismissed", dismissal: { reason } });
+    await expect(
+      createApprovalRecord({
+        accountId: advertiserAccountId,
+        operatorId: ownerOperatorId,
+        access: advertiserAccess,
+        recommendation,
+      }),
+    ).rejects.toThrow("actively dismissed");
 
     const [stored] = await database<
       {
@@ -622,6 +659,9 @@ describe("PostgreSQL customer and approval boundary", () => {
   });
 
   it("stores ciphertext and rotates credentials atomically", async () => {
+    const initialMaterial = await getAdsCredentialMaterialForAccount(
+      advertiserAccountId,
+    );
     await expect(
       getAdsApiKeyForAccount(advertiserAccountId),
     ).resolves.toBe(initialAdvertiserKey);
@@ -636,6 +676,10 @@ describe("PostgreSQL customer and approval boundary", () => {
       where account.external_account_id = ${advertiserAccountId}
     `;
     expect(initialRow).toMatchObject({ credential_version: 1, status: "active" });
+    expect(initialMaterial).toEqual({
+      apiKey: initialAdvertiserKey,
+      credentialGeneration: `vault:${initialRow!.id}:1`,
+    });
     expect(initialRow?.ciphertext.toString("utf8")).not.toContain(
       initialAdvertiserKey,
     );
@@ -644,10 +688,68 @@ describe("PostgreSQL customer and approval boundary", () => {
       apiKey: replacementAdvertiserKey,
       externalAccountId: advertiserAccountId,
     });
+    const viewerAccess = await requireAccountAccess(
+      viewerOperatorId,
+      advertiserAccountId,
+      "read",
+    );
+    const forgedViewerAccess: AccountAccess = {
+      ...viewerAccess,
+      membershipRole: "owner",
+      accountRole: "owner",
+    };
+    await expect(
+      rotateAdsApiCredential({
+        operatorId: viewerOperatorId,
+        accountId: advertiserAccountId,
+        access: forgedViewerAccess,
+        credential: encryptAdsApiKey({
+          apiKey: replacementAdvertiserKey,
+          externalAccountId: advertiserAccountId,
+        }),
+        verifiedAt: new Date("2026-08-30T08:50:00.000Z"),
+      }),
+    ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
+    await expect(
+      getAdsApiKeyForAccount(advertiserAccountId),
+    ).resolves.toBe(initialAdvertiserKey);
+
+    await database`
+      update maintainflow_organization_memberships set
+        role = 'analyst', updated_at = now()
+      where organization_id = ${advertiserAccess.organizationId}
+        and clerk_user_id = ${ownerOperatorId}
+    `;
+    try {
+      await expect(
+        rotateAdsApiCredential({
+          operatorId: ownerOperatorId,
+          accountId: advertiserAccountId,
+          access: advertiserAccess,
+          credential: encryptAdsApiKey({
+            apiKey: replacementAdvertiserKey,
+            externalAccountId: advertiserAccountId,
+          }),
+          verifiedAt: new Date("2026-08-30T08:55:00.000Z"),
+        }),
+      ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
+      await expect(
+        getAdsApiKeyForAccount(advertiserAccountId),
+      ).resolves.toBe(initialAdvertiserKey);
+    } finally {
+      await database`
+        update maintainflow_organization_memberships set
+          role = 'owner', updated_at = now()
+        where organization_id = ${advertiserAccess.organizationId}
+          and clerk_user_id = ${ownerOperatorId}
+      `;
+    }
+
     await expect(
       rotateAdsApiCredential({
         operatorId: ownerOperatorId,
         accountId: advertiserAccountId,
+        access: advertiserAccess,
         credential: { ...replacement, id: initialRow!.id },
         verifiedAt: new Date("2026-08-30T09:00:00.000Z"),
       }),
@@ -660,6 +762,7 @@ describe("PostgreSQL customer and approval boundary", () => {
       rotateAdsApiCredential({
         operatorId: ownerOperatorId,
         accountId: advertiserAccountId,
+        access: advertiserAccess,
         credential: replacement,
         verifiedAt: new Date("2026-08-30T09:05:00.000Z"),
       }),
@@ -667,6 +770,44 @@ describe("PostgreSQL customer and approval boundary", () => {
     await expect(
       getAdsApiKeyForAccount(advertiserAccountId),
     ).resolves.toBe(replacementAdvertiserKey);
+    const replacementMaterial = await getAdsCredentialMaterialForAccount(
+      advertiserAccountId,
+    );
+    expect(replacementMaterial).toEqual({
+      apiKey: replacementAdvertiserKey,
+      credentialGeneration: `vault:${replacement.id}:2`,
+    });
+    expect(replacementMaterial.credentialGeneration).not.toBe(
+      initialMaterial.credentialGeneration,
+    );
+    const fenced = await withAuthorizedAdsWriteFence(
+      {
+        accountId: advertiserAccountId,
+        operatorId: ownerOperatorId,
+        access: advertiserAccess,
+        expectedCredentialGeneration:
+          replacementMaterial.credentialGeneration,
+      },
+      async ({ access, credentialMaterial }) => ({
+        access,
+        credentialGeneration: credentialMaterial.credentialGeneration,
+      }),
+    );
+    expect(fenced.value).toMatchObject({
+      access: { accountId: advertiserAccountId, membershipRole: "owner" },
+      credentialGeneration: replacementMaterial.credentialGeneration,
+    });
+    await expect(
+      withAuthorizedAdsWriteFence(
+        {
+          accountId: advertiserAccountId,
+          operatorId: ownerOperatorId,
+          access: advertiserAccess,
+          expectedCredentialGeneration: initialMaterial.credentialGeneration,
+        },
+        async () => undefined,
+      ),
+    ).rejects.toBeInstanceOf(AdvertiserCredentialChangedError);
 
     const versions = await database<
       {
@@ -687,6 +828,170 @@ describe("PostgreSQL customer and approval boundary", () => {
       { credential_version: 1, status: "revoked", revoked: true },
       { credential_version: 2, status: "active", revoked: false },
     ]);
+  });
+
+  it("waits for an in-flight role change and reauthorizes before credential rotation", async () => {
+    const materialBefore = await getAdsCredentialMaterialForAccount(
+      advertiserAccountId,
+    );
+    let releaseDowngrade!: () => void;
+    let markDowngradeStarted!: () => void;
+    const downgradeRelease = new Promise<void>((resolve) => {
+      releaseDowngrade = resolve;
+    });
+    const downgradeStarted = new Promise<void>((resolve) => {
+      markDowngradeStarted = resolve;
+    });
+    const downgrade = database.begin(async (transaction) => {
+      await transaction`
+        update maintainflow_organization_memberships set
+          role = 'analyst', updated_at = now()
+        where organization_id = ${advertiserAccess.organizationId}
+          and clerk_user_id = ${ownerOperatorId}
+      `;
+      markDowngradeStarted();
+      await downgradeRelease;
+    });
+    await downgradeStarted;
+
+    const rotation = rotateAdsApiCredential({
+      operatorId: ownerOperatorId,
+      accountId: advertiserAccountId,
+      access: advertiserAccess,
+      credential: encryptAdsApiKey({
+        apiKey: "must-not-become-active",
+        externalAccountId: advertiserAccountId,
+      }),
+      verifiedAt: new Date("2026-08-30T09:06:00.000Z"),
+    });
+    let earlyOutcome: "blocked" | "settled" = "blocked";
+    try {
+      earlyOutcome = await Promise.race([
+        rotation.then(
+          () => "settled" as const,
+          () => "settled" as const,
+        ),
+        new Promise<"blocked">((resolve) =>
+          setTimeout(() => resolve("blocked"), 100),
+        ),
+      ]);
+    } finally {
+      releaseDowngrade();
+      await downgrade;
+    }
+
+    try {
+      expect(earlyOutcome).toBe("blocked");
+      await expect(rotation).rejects.toBeInstanceOf(
+        AccountAccessForbiddenError,
+      );
+      await expect(
+        getAdsCredentialMaterialForAccount(advertiserAccountId),
+      ).resolves.toEqual(materialBefore);
+    } finally {
+      await database`
+        update maintainflow_organization_memberships set
+          role = 'owner', updated_at = now()
+        where organization_id = ${advertiserAccess.organizationId}
+          and clerk_user_id = ${ownerOperatorId}
+      `;
+    }
+  });
+
+  it("single-flights and generation-scopes durable live workbench snapshots", async () => {
+    const credential = await getAdsCredentialMaterialForAccount(
+      advertiserAccountId,
+    );
+    const now = new Date("2026-08-30T12:00:00.000Z");
+    const claims = await Promise.all([
+      claimLiveSyncRefresh({
+        accountId: advertiserAccountId,
+        credentialGeneration: credential.credentialGeneration,
+        now,
+        leaseMs: 90_000,
+      }),
+      claimLiveSyncRefresh({
+        accountId: advertiserAccountId,
+        credentialGeneration: credential.credentialGeneration,
+        now,
+        leaseMs: 90_000,
+      }),
+    ]);
+    const winningClaims = claims.filter(
+      (claim): claim is NonNullable<typeof claim> => Boolean(claim),
+    );
+    expect(winningClaims).toHaveLength(1);
+
+    const snapshot = {
+      account: { ...demoAccount, id: advertiserAccountId },
+      campaigns: demoCampaigns,
+      ads: demoAds,
+      performance: demoCampaignPerformance,
+      recommendations: [],
+      conversionMeasurement: {
+        source: "live" as const,
+        status: "ready" as const,
+        checkedAt: now.toISOString(),
+        activeConversionCampaigns: 0,
+        healthyCampaigns: 0,
+        eventSettingCount: 0,
+        checks: [],
+        message: "Integration snapshot.",
+      },
+      syncedAt: now.toISOString(),
+    };
+    await expect(
+      completeLiveSyncRefresh({
+        accountId: advertiserAccountId,
+        credentialGeneration: credential.credentialGeneration,
+        claimId: winningClaims[0].claimId,
+        snapshot,
+        now,
+        freshForMs: 120_000,
+        staleForMs: 900_000,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      readLiveSyncState({
+        accountId: advertiserAccountId,
+        credentialGeneration: credential.credentialGeneration,
+      }),
+    ).resolves.toMatchObject({ snapshot, consecutiveFailures: 0, claim: null });
+    await expect(
+      readLiveSyncState({
+        accountId: advertiserAccountId,
+        credentialGeneration: "vault:unreachable-after-rotation:3",
+      }),
+    ).resolves.toBeNull();
+
+    // A failed refresh may update retry metadata, but must not extend the
+    // retention lifetime of the older customer payload.
+    const failedRefreshAt = new Date(now.getTime() + 23 * 60 * 60 * 1_000);
+    const failedClaim = await claimLiveSyncRefresh({
+      accountId: advertiserAccountId,
+      credentialGeneration: credential.credentialGeneration,
+      now: failedRefreshAt,
+      leaseMs: 90_000,
+    });
+    expect(failedClaim).not.toBeNull();
+    await expect(
+      failLiveSyncRefresh({
+        accountId: advertiserAccountId,
+        credentialGeneration: credential.credentialGeneration,
+        claimId: failedClaim!.claimId,
+        failureCode: "provider_unavailable",
+        now: failedRefreshAt,
+        retryAfter: new Date(failedRefreshAt.getTime() + 60_000),
+      }),
+    ).resolves.toBe(true);
+
+    await expect(
+      pruneExpiredLiveSyncSnapshots({
+        now: new Date(now.getTime() + 25 * 60 * 60 * 1_000),
+        retentionMs: 24 * 60 * 60 * 1_000,
+        limit: 500,
+      }),
+    ).resolves.toBe(1);
   });
 
   it("encrypts, scopes, and atomically rotates conversion credentials", async () => {
@@ -751,6 +1056,71 @@ describe("PostgreSQL customer and approval boundary", () => {
       getConversionsApiCredentialForAccount(advertiserAccountId),
     ).resolves.toEqual(initialCredential);
 
+    const viewerAccess = await requireAccountAccess(
+      viewerOperatorId,
+      advertiserAccountId,
+      "read",
+    );
+    const forgedViewerAccess: AccountAccess = {
+      ...viewerAccess,
+      membershipRole: "owner",
+      accountRole: "owner",
+    };
+    await expect(
+      rotateConversionsApiCredential({
+        operatorId: viewerOperatorId,
+        accountId: advertiserAccountId,
+        access: forgedViewerAccess,
+        credential: encryptConversionsApiCredential({
+          credential: replacementCredential,
+          externalAccountId: advertiserAccountId,
+        }),
+        validatedAt: new Date("2026-08-30T09:16:00.000Z"),
+        validation: { providerStatus: 204, eventCount: 1 },
+      }),
+    ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
+    await expect(
+      getConversionsApiCredentialForAccount(advertiserAccountId),
+    ).resolves.toEqual(initialCredential);
+
+    await database`
+      update maintainflow_account_access set
+        role = 'viewer', updated_at = now()
+      where organization_id = ${advertiserAccess.organizationId}
+        and advertiser_account_id = (
+          select id from maintainflow_advertiser_accounts
+          where external_account_id = ${advertiserAccountId}
+        )
+    `;
+    try {
+      await expect(
+        rotateConversionsApiCredential({
+          operatorId: ownerOperatorId,
+          accountId: advertiserAccountId,
+          access: advertiserAccess,
+          credential: encryptConversionsApiCredential({
+            credential: replacementCredential,
+            externalAccountId: advertiserAccountId,
+          }),
+          validatedAt: new Date("2026-08-30T09:17:00.000Z"),
+          validation: { providerStatus: 204, eventCount: 1 },
+        }),
+      ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
+      await expect(
+        getConversionsApiCredentialForAccount(advertiserAccountId),
+      ).resolves.toEqual(initialCredential);
+    } finally {
+      await database`
+        update maintainflow_account_access set
+          role = 'owner', updated_at = now()
+        where organization_id = ${advertiserAccess.organizationId}
+          and advertiser_account_id = (
+            select id from maintainflow_advertiser_accounts
+            where external_account_id = ${advertiserAccountId}
+          )
+      `;
+    }
+
     const [initialRow] = await database<
       {
         id: string;
@@ -810,16 +1180,53 @@ describe("PostgreSQL customer and approval boundary", () => {
       getConversionsApiCredentialForAccount(advertiserAccountId),
     ).resolves.toEqual(initialCredential);
 
-    await expect(
-      rotateConversionsApiCredential({
-        operatorId: ownerOperatorId,
-        accountId: advertiserAccountId,
-        access: advertiserAccess,
-        credential: replacementEncrypted,
-        validatedAt: new Date("2026-08-30T09:25:00.000Z"),
-        validation: { providerStatus: 204, eventCount: 1 },
-      }),
-    ).resolves.toMatchObject({ credentialVersion: 2 });
+    await database.begin(async (transaction) => {
+      await transaction`
+        update maintainflow_organization_memberships set
+          role = 'admin', updated_at = now()
+        where organization_id = ${advertiserAccess.organizationId}
+          and clerk_user_id = ${ownerOperatorId}
+      `;
+      await transaction`
+        update maintainflow_account_access set
+          role = 'manager', updated_at = now()
+        where organization_id = ${advertiserAccess.organizationId}
+          and advertiser_account_id = (
+            select id from maintainflow_advertiser_accounts
+            where external_account_id = ${advertiserAccountId}
+          )
+      `;
+    });
+    try {
+      await expect(
+        rotateConversionsApiCredential({
+          operatorId: ownerOperatorId,
+          accountId: advertiserAccountId,
+          access: advertiserAccess,
+          credential: replacementEncrypted,
+          validatedAt: new Date("2026-08-30T09:25:00.000Z"),
+          validation: { providerStatus: 204, eventCount: 1 },
+        }),
+      ).resolves.toMatchObject({ credentialVersion: 2 });
+    } finally {
+      await database.begin(async (transaction) => {
+        await transaction`
+          update maintainflow_organization_memberships set
+            role = 'owner', updated_at = now()
+          where organization_id = ${advertiserAccess.organizationId}
+            and clerk_user_id = ${ownerOperatorId}
+        `;
+        await transaction`
+          update maintainflow_account_access set
+            role = 'owner', updated_at = now()
+          where organization_id = ${advertiserAccess.organizationId}
+            and advertiser_account_id = (
+              select id from maintainflow_advertiser_accounts
+              where external_account_id = ${advertiserAccountId}
+            )
+        `;
+      });
+    }
     await expect(
       getConversionsApiCredentialForAccount(advertiserAccountId),
     ).resolves.toEqual(replacementCredential);
@@ -937,12 +1344,14 @@ describe("PostgreSQL customer and approval boundary", () => {
         credential_version: number;
         status: string;
         revoked: boolean;
+        actor_membership_role: string;
         actor_account_role: string;
       }[]
     >`
       select account.external_account_id as account_id,
         credential.credential_version, credential.status,
         credential.revoked_at is not null as revoked,
+        credential.actor_membership_role,
         credential.actor_account_role
       from maintainflow_conversion_credentials credential
       join maintainflow_advertiser_accounts account
@@ -955,6 +1364,7 @@ describe("PostgreSQL customer and approval boundary", () => {
         credential_version: 1,
         status: "revoked",
         revoked: true,
+        actor_membership_role: "owner",
         actor_account_role: "owner",
       },
       {
@@ -962,13 +1372,15 @@ describe("PostgreSQL customer and approval boundary", () => {
         credential_version: 2,
         status: "active",
         revoked: false,
-        actor_account_role: "owner",
+        actor_membership_role: "admin",
+        actor_account_role: "manager",
       },
       {
         account_id: agencyAccountId,
         credential_version: 1,
         status: "active",
         revoked: false,
+        actor_membership_role: "owner",
         actor_account_role: "manager",
       },
     ]);

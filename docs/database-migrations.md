@@ -2,7 +2,7 @@
 
 `npm run db:migrate` is the only application migration command. It applies the
 SQL files in [`database/`](database/) by filename, beginning with the existing
-`001` through `011` set. It connects to the database named by `DATABASE_URL`; it
+`001` through `012` set. It connects to the database named by `DATABASE_URL`; it
 never creates, renames, or drops a database.
 
 ## Safety contract
@@ -14,12 +14,10 @@ environment variable.
 
 For a hosted `DATABASE_URL`, two additional gates are enforced:
 
-1. The URL must include `sslmode=require`, `sslmode=verify-ca`, or
-   `sslmode=verify-full`. All three require TLS; prefer `verify-full` with the
-   provider's trusted CA because it also verifies the server identity.
-   `sslmode=require` encrypts transport but does not by itself provide the same
-   hostname verification. `disable`, `allow`, `prefer`, a missing mode, and
-   non-PostgreSQL URLs are rejected.
+1. The URL must include exactly one `sslmode=verify-full` parameter so the
+   connection verifies both the provider's trusted certificate chain and the
+   database hostname. `require`, `verify-ca`, `disable`, `allow`, `prefer`, a
+   missing or duplicate mode, and non-PostgreSQL URLs are rejected.
 2. `MAINTAINFLOW_DATABASE_BACKUP_RESTORE_VERIFIED=true` must attest that the
    recovery gate below has passed for the target release. The flag is an
    operator acknowledgement, not proof by itself.
@@ -27,6 +25,13 @@ For a hosted `DATABASE_URL`, two additional gates are enforced:
 The runner does not print `DATABASE_URL`, usernames, passwords, provider keys,
 tokens, or other configured secrets. Success output contains only migration
 filenames and counts; failure output is redacted.
+
+Application stores share one postgres.js pool per running instance, pin
+`search_path=public`, and default to four connections. Set
+`MAINTAINFLOW_DATABASE_POOL_MAX` to an integer from 1 through 10 only after
+checking the hosted database connection budget; every horizontally scaled or
+serverless instance has its own pool. Migration tooling continues to use a
+separate, short-lived privileged connection.
 
 ## Backup and restore gate
 
@@ -83,7 +88,7 @@ remain transaction-safe: do not add `CREATE INDEX CONCURRENTLY`, `VACUUM`, or
 other statements PostgreSQL forbids inside a transaction.
 
 Never edit a migration after it has been applied. If behavior must change, add
-the next sequential file (for example, `012_description.sql`). If drift is
+the next sequential file (for example, `013_description.sql`). If drift is
 reported, restore the applied file byte-for-byte from the deployed revision and
 add a corrective migration; do not update or delete ledger rows by hand.
 

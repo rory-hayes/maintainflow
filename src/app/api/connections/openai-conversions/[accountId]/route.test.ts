@@ -238,6 +238,20 @@ describe("per-account conversion credential connection", () => {
     expect(testState.rotateConversionsApiCredential).not.toHaveBeenCalled();
   });
 
+  it("rejects stale access after provider validation", async () => {
+    testState.rotateConversionsApiCredential.mockRejectedValue(
+      new testState.AccountAccessForbiddenError("Account access changed."),
+    );
+
+    const response = await POST(request(), context);
+
+    expect(response.status).toBe(403);
+    expect(testState.validateConversionsApiPayload).toHaveBeenCalledTimes(1);
+    expect(testState.rotateConversionsApiCredential).toHaveBeenCalledWith(
+      expect.objectContaining({ access }),
+    );
+  });
+
   it("does not contact OpenAI when encrypted storage is unavailable", async () => {
     testState.verifyConversionCredentialStore.mockResolvedValue(false);
 

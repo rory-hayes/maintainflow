@@ -13,6 +13,8 @@ import {
 } from "@/lib/audit/approval-schema";
 import {
   applyRecommendationDismissals,
+  recommendationApprovalFingerprint,
+  recommendationFingerprint,
   toRecommendationDecisionHistoryDto,
   type RecommendationDecisionHistoryDto,
 } from "@/lib/audit/recommendation-decision";
@@ -40,8 +42,8 @@ import {
 } from "@/lib/openai-ads/conversions-connection";
 import {
   fetchLiveAdAccount,
-  fetchLiveWorkbenchData,
 } from "@/lib/openai-ads/data.server";
+import { getLiveWorkbench } from "@/lib/openai-ads/live-sync.server";
 import {
   listCreativeReviewEvents,
   recordCreativeReviewSnapshot,
@@ -72,7 +74,7 @@ import {
   verifyReadinessHistoryStore,
 } from "@/lib/readiness/history.server";
 import {
-  getAdsApiKeyForAccount,
+  getAdsCredentialMaterialForAccount,
   listAccountAccesses,
   verifyCredentialStore,
   verifyTenancyStore,
@@ -111,6 +113,7 @@ export default async function MaintainFlowAppPage({
   let writeMode: "demo" | "live" = "demo";
   let syncedAt: string | undefined;
   let syncError: string | undefined;
+  let syncWarning: string | undefined;
   let approvalHistory: ApprovalRecordDto[] = [];
   let monitoringWindows: MonitoringWindowDto[] = [];
   let conversionMeasurement: ConversionMeasurementReadiness =
@@ -218,6 +221,31 @@ export default async function MaintainFlowAppPage({
           } else {
             workspaceSetupState = "ready";
             workspaceAccountName = workspaceAccess.accountName;
+            const connectedRuntime = getAdsRuntimeMode({ hasAccountKey: true });
+            if (connectedRuntime.dataSource === "live") {
+              // A connected live workspace must become fail-closed before any
+              // vault, database, or provider read. If one of those reads fails,
+              // the outer error path cannot leave interactive demo fixtures on
+              // screen under a real advertiser identity.
+              runtime = connectedRuntime;
+              dataSource = "live";
+              writeMode = "demo";
+              account = {
+                ...demoAccount,
+                id: workspaceAccess.accountId,
+                name: workspaceAccess.accountName,
+              };
+              ads = [];
+              campaigns = [];
+              performance = [];
+              recommendations = [];
+              creativeReviewHistory = [];
+              conversionMeasurement = unavailableConversionMeasurement({
+                source: "live",
+                message:
+                  "A confirmed OpenAI Ads snapshot is required before conversion measurement can be assessed.",
+              });
+            }
             if (readinessHistoryStoreReady) {
               try {
                 readinessHistory = await listReadinessAuditRuns(
@@ -236,7 +264,7 @@ export default async function MaintainFlowAppPage({
               readinessHistoryError =
                 "Apply the readiness history migration to retain and compare account scans.";
             }
-            const [resolvedConversionsConnection, apiKey] = await Promise.all([
+            const [resolvedConversionsConnection, adsCredential] = await Promise.all([
               getConversionsApiConnectionStatus(workspaceAccess.accountId).catch(
                 (error) => {
                   console.error("Conversion credential status failed", error);
@@ -249,27 +277,39 @@ export default async function MaintainFlowAppPage({
                   };
                 },
               ),
-              getAdsApiKeyForAccount(workspaceAccess.accountId),
+              getAdsCredentialMaterialForAccount(workspaceAccess.accountId),
             ]);
             conversionsConnection = resolvedConversionsConnection;
             const credential: AdsApiCredential = {
               kind: "account_api_key",
-              secret: apiKey,
+              secret: adsCredential.apiKey,
               expectedAccountId: workspaceAccess.accountId,
             };
             runtime = getAdsRuntimeMode({ hasAccountKey: true });
 
             if (runtime.dataSource === "live") {
-              const connectedAccount = await fetchLiveAdAccount(credential);
-              if (connectedAccount.id !== workspaceAccess.accountId) {
-                throw new Error(
-                  "The stored credential resolved to a different advertiser account.",
-                );
-              }
-              const live = await fetchLiveWorkbenchData(
-                connectedAccount,
+              // Once a connected workspace enters live mode, never leave demo
+              // fixtures on screen if the provider is unavailable. Start from
+              // an empty, write-locked live snapshot and replace it only with
+              // schema-validated provider data.
+              dataSource = "live";
+              account = {
+                ...demoAccount,
+                id: workspaceAccess.accountId,
+                name: workspaceAccess.accountName,
+              };
+              ads = [];
+              campaigns = [];
+              performance = [];
+              recommendations = [];
+              creativeReviewHistory = [];
+              const liveResult = await getLiveWorkbench({
+                accountId: workspaceAccess.accountId,
+                credentialGeneration: adsCredential.credentialGeneration,
                 credential,
-              );
+                policy: "dashboard",
+              });
+              const live = liveResult.data;
               account = live.account;
               ads = live.ads;
               campaigns = live.campaigns;
@@ -279,6 +319,10 @@ export default async function MaintainFlowAppPage({
               dataSource = "live";
               syncedAt = live.syncedAt;
               creativeReviewHistory = [];
+              if (liveResult.freshness === "stale") {
+                syncWarning =
+                  "MaintainFlow could not refresh OpenAI Ads, so this is the last confirmed snapshot. External changes are locked until a fresh sync succeeds.";
+              }
 
               if (creativeHistoryStoreReady) {
                 try {
@@ -302,14 +346,16 @@ export default async function MaintainFlowAppPage({
 
               if (approvalStoreReady) {
                 try {
-                  const evaluation = await evaluateDueMonitoringWindows({
-                    accountId: live.account.id,
-                    credential,
-                    now: new Date(live.syncedAt),
-                  });
-                  if (evaluation.failed > 0) {
-                    monitoringEvaluationError =
-                      "One or more completed windows could not be evaluated from live Insights. No missing data was treated as zero, and no rollback was sent.";
+                  if (liveResult.freshness !== "stale") {
+                    const evaluation = await evaluateDueMonitoringWindows({
+                      accountId: live.account.id,
+                      credential,
+                      now: new Date(live.syncedAt),
+                    });
+                    if (evaluation.failed > 0) {
+                      monitoringEvaluationError =
+                        "One or more completed windows could not be evaluated from live Insights. No missing data was treated as zero, and no rollback was sent.";
+                    }
                   }
                 } catch (error) {
                   console.error("Monitoring evaluation sync failed", error);
@@ -365,6 +411,7 @@ export default async function MaintainFlowAppPage({
                 runtime.writeInfrastructureConfigured &&
                 approvalStoreReady &&
                 !approvalHistoryError &&
+                liveResult.freshness !== "stale" &&
                 canWriteAccount(workspaceAccess)
                   ? "live"
                   : "demo";
@@ -372,9 +419,43 @@ export default async function MaintainFlowAppPage({
           }
         }
       } catch (error) {
-        console.error("OpenAI Ads live sync failed", error);
+        console.error("OpenAI Ads live sync failed", {
+          name: error instanceof Error ? error.name : "UnknownError",
+          code:
+            error && typeof error === "object" && "code" in error
+              ? String(error.code)
+              : undefined,
+        });
+        if (runtime.liveDataRequested && runtime.liveReadStage) {
+          workspaceSetupState = "unavailable";
+          workspaceMessage =
+            "The live advertiser workspace could not be loaded. No account data or external actions are available.";
+          dataSource = "live";
+          writeMode = "demo";
+          account = {
+            ...demoAccount,
+            id:
+              workspaceAccess?.accountId ??
+              requestedAccountId ??
+              "live-account-unavailable",
+            name: workspaceAccess?.accountName ?? "Live account unavailable",
+          };
+          ads = [];
+          campaigns = [];
+          performance = [];
+          recommendations = [];
+          creativeReviewHistory = [];
+          approvalHistory = [];
+          monitoringWindows = [];
+          recommendationDecisionHistory = [];
+          conversionMeasurement = unavailableConversionMeasurement({
+            source: "live",
+            message:
+              "A confirmed OpenAI Ads snapshot is required before conversion measurement can be assessed.",
+          });
+        }
         syncError =
-          "Live sync failed, so MaintainFlow returned to demo data and disabled all external writes.";
+          "Live sync failed. MaintainFlow is showing no account metrics or recommendations and has disabled all external writes; demo fixtures are not substituted for this connected account.";
       }
     }
   }
@@ -391,6 +472,8 @@ export default async function MaintainFlowAppPage({
       ? ["workspace write permission"]
       : []),
     ...(approvalHistoryError ? ["readable approval history"] : []),
+    ...(syncError ? ["confirmed live Ads snapshot"] : []),
+    ...(syncWarning ? ["fresh live Ads snapshot"] : []),
   ];
 
   return (
@@ -406,10 +489,24 @@ export default async function MaintainFlowAppPage({
       campaigns={campaigns}
       performance={performance}
       initialRecommendations={recommendations}
+      recommendationApprovalFingerprints={Object.fromEntries(
+        recommendations.map((recommendation) => [
+          recommendation.id,
+          recommendationApprovalFingerprint(recommendation),
+        ]),
+      )}
+      recommendationFingerprints={Object.fromEntries(
+        recommendations.map((recommendation) => [
+          recommendation.id,
+          recommendationFingerprint(recommendation),
+        ]),
+      )}
       dataSource={dataSource}
       writeMode={writeMode}
       syncedAt={syncedAt}
+      snapshotAvailable={dataSource === "demo" || Boolean(syncedAt)}
       syncError={syncError}
+      syncWarning={syncWarning}
       operator={operator}
       operatorAuthenticated={Boolean(authenticatedOperator)}
       authConfigured={runtime.authConfigured}

@@ -6,16 +6,20 @@ const {
   evaluateScheduledMonitoringWindowsMock,
   isReadinessRateLimitConfiguredMock,
   pruneExpiredReadinessRateLimitBucketsMock,
+  pruneExpiredLiveSyncSnapshotsMock,
   verifyApprovalStoreMock,
   verifyCredentialStoreMock,
   verifyTenancyStoreMock,
+  verifyLiveSyncStoreMock,
 } = vi.hoisted(() => ({
   evaluateScheduledMonitoringWindowsMock: vi.fn(),
   isReadinessRateLimitConfiguredMock: vi.fn(),
   pruneExpiredReadinessRateLimitBucketsMock: vi.fn(),
+  pruneExpiredLiveSyncSnapshotsMock: vi.fn(),
   verifyApprovalStoreMock: vi.fn(),
   verifyCredentialStoreMock: vi.fn(),
   verifyTenancyStoreMock: vi.fn(),
+  verifyLiveSyncStoreMock: vi.fn(),
 }));
 
 vi.mock("@/lib/audit/approval-store.server", () => ({
@@ -23,6 +27,10 @@ vi.mock("@/lib/audit/approval-store.server", () => ({
 }));
 vi.mock("@/lib/openai-ads/monitoring-runner.server", () => ({
   evaluateScheduledMonitoringWindows: evaluateScheduledMonitoringWindowsMock,
+}));
+vi.mock("@/lib/openai-ads/live-sync-store.server", () => ({
+  pruneExpiredLiveSyncSnapshots: pruneExpiredLiveSyncSnapshotsMock,
+  verifyLiveSyncStore: verifyLiveSyncStoreMock,
 }));
 vi.mock("@/lib/readiness/rate-limit.server", () => ({
   isReadinessRateLimitConfigured: isReadinessRateLimitConfiguredMock,
@@ -50,12 +58,15 @@ describe("scheduled monitoring route", () => {
     verifyApprovalStoreMock.mockReset();
     verifyCredentialStoreMock.mockReset();
     verifyTenancyStoreMock.mockReset();
+    verifyLiveSyncStoreMock.mockReset();
     evaluateScheduledMonitoringWindowsMock.mockReset();
     isReadinessRateLimitConfiguredMock.mockReset();
     pruneExpiredReadinessRateLimitBucketsMock.mockReset();
+    pruneExpiredLiveSyncSnapshotsMock.mockReset();
     verifyApprovalStoreMock.mockResolvedValue(true);
     verifyCredentialStoreMock.mockResolvedValue(true);
     verifyTenancyStoreMock.mockResolvedValue(true);
+    verifyLiveSyncStoreMock.mockResolvedValue(true);
     evaluateScheduledMonitoringWindowsMock.mockResolvedValue({
       accountsSelected: 2,
       accountsProcessed: 2,
@@ -66,6 +77,7 @@ describe("scheduled monitoring route", () => {
     });
     isReadinessRateLimitConfiguredMock.mockReturnValue(true);
     pruneExpiredReadinessRateLimitBucketsMock.mockResolvedValue(0);
+    pruneExpiredLiveSyncSnapshotsMock.mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -92,6 +104,9 @@ describe("scheduled monitoring route", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(payload).toEqual({
       ok: true,
+      monitoringUnavailable: false,
+      maintenanceFailed: false,
+      maintenanceBacklog: false,
       accountsSelected: 2,
       accountsProcessed: 2,
       accountsFailed: 0,
@@ -100,10 +115,18 @@ describe("scheduled monitoring route", () => {
       failed: 0,
     });
     expect(JSON.stringify(payload)).not.toContain("adacct_");
-    expect(pruneExpiredReadinessRateLimitBucketsMock).toHaveBeenCalledOnce();
+    expect(pruneExpiredReadinessRateLimitBucketsMock).toHaveBeenCalledWith(
+      expect.any(Date),
+      5_000,
+    );
+    expect(pruneExpiredLiveSyncSnapshotsMock).toHaveBeenCalledWith({
+      now: expect.any(Date),
+      retentionMs: 86_400_000,
+      limit: 5_000,
+    });
   });
 
-  it("reports partial account failures without discarding successful work", async () => {
+  it("surfaces partial account failures to the scheduler without discarding successful work", async () => {
     evaluateScheduledMonitoringWindowsMock.mockResolvedValue({
       accountsSelected: 2,
       accountsProcessed: 1,
@@ -116,7 +139,8 @@ describe("scheduled monitoring route", () => {
     const response = await GET(
       request(`Bearer ${process.env.CRON_SECRET}`),
     );
-    expect(response.status).toBe(207);
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe("300");
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
       accountsFailed: 1,
@@ -132,6 +156,64 @@ describe("scheduled monitoring route", () => {
     );
     expect(response.status).toBe(503);
     expect(evaluateScheduledMonitoringWindowsMock).not.toHaveBeenCalled();
+    expect(pruneExpiredLiveSyncSnapshotsMock).toHaveBeenCalledOnce();
+    await expect(response.json()).resolves.toMatchObject({
+      monitoringUnavailable: true,
+      maintenanceFailed: false,
+    });
+  });
+
+  it("surfaces snapshot-retention failure without discarding monitoring results", async () => {
+    pruneExpiredLiveSyncSnapshotsMock.mockRejectedValue(
+      new Error("private database detail"),
+    );
+
+    const response = await GET(
+      request(`Bearer ${process.env.CRON_SECRET}`),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe("300");
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      maintenanceFailed: true,
+      evaluated: 3,
+    });
+  });
+
+  it("still evaluates monitoring when snapshot storage is unavailable", async () => {
+    verifyLiveSyncStoreMock.mockResolvedValue(false);
+
+    const response = await GET(
+      request(`Bearer ${process.env.CRON_SECRET}`),
+    );
+
+    expect(evaluateScheduledMonitoringWindowsMock).toHaveBeenCalledOnce();
+    expect(pruneExpiredLiveSyncSnapshotsMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe("300");
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      maintenanceFailed: true,
+      evaluated: 3,
+    });
+  });
+
+  it("surfaces a bounded maintenance backlog for external alerting", async () => {
+    pruneExpiredLiveSyncSnapshotsMock.mockResolvedValue(5_000);
+
+    const response = await GET(
+      request(`Bearer ${process.env.CRON_SECRET}`),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe("300");
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      maintenanceBacklog: true,
+      maintenanceFailed: false,
+      evaluated: 3,
+    });
   });
 
   it("fails closed when the cron secret is absent", async () => {

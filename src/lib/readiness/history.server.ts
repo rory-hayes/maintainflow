@@ -2,9 +2,10 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import postgres, { type Sql } from "postgres";
+import type postgres from "postgres";
 
 import { canWriteAccount, type AccountAccess } from "../tenancy/schema";
+import { getRuntimeDatabase } from "../database/client.server";
 import {
   READINESS_HISTORY_PAYLOAD_SCHEMA_VERSION,
   READINESS_HISTORY_RULESET_VERSION,
@@ -31,8 +32,6 @@ type ReadinessAuditHistoryRow = {
   created_at: Date;
 };
 
-let database: Sql | undefined;
-
 export class ReadinessHistoryStoreUnavailableError extends Error {
   constructor(message = "Readiness history storage is not configured.") {
     super(message);
@@ -51,13 +50,7 @@ function getDatabase() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new ReadinessHistoryStoreUnavailableError();
 
-  database ??= postgres(connectionString, {
-    connect_timeout: 10,
-    idle_timeout: 20,
-    max: 2,
-    prepare: false,
-  });
-  return database;
+  return getRuntimeDatabase(connectionString);
 }
 
 function parseHistoryRow(

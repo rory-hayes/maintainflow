@@ -291,7 +291,7 @@ function conversionsApiSection(audit: ConversionPayloadAudit | null) {
       <div><span>Ready</span><strong>${audit.readyEventCount}</strong></div>
       <div><span>Blockers / warnings</span><strong>${audit.blockerCount} / ${audit.warningCount}</strong></div>
     </div>
-    <p class="target"><strong>Event types:</strong> ${eventTypes}</p>
+    <p class="target"><strong>Event types${audit.incomplete ? " (partial scan)" : ""}:</strong> ${eventTypes}</p>
     ${issueRows}
     <div class="boundary"><strong>Evidence boundary</strong><ul>${audit.limitations
       .map((limitation) => `<li>${escapeHtml(limitation)}</li>`)

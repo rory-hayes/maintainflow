@@ -6,6 +6,7 @@ import {
   analyzeHtml,
   classifyReadiness,
   createPinnedLookup,
+  evaluateOpenAICrawlerAccess,
   isCrawlerAllowed,
   isPrivateAddress,
   normalizeAuditUrl,
@@ -138,6 +139,58 @@ Allow: /
     const wildcard = "User-agent: *\nDisallow: /private";
     expect(isCrawlerAllowed(wildcard, "oai-adsbot", "/private/item")).toBe(false);
     expect(isCrawlerAllowed(wildcard, "oai-adsbot", "/products/item")).toBe(true);
+  });
+
+  it("preserves wildcard, prefix, and terminal-anchor semantics", () => {
+    const wildcard = [
+      "User-agent: *",
+      "Disallow: /private/*/end$",
+      "Disallow: /draft*",
+    ].join("\n");
+
+    expect(isCrawlerAllowed(wildcard, "oai-adsbot", "/private/item/end")).toBe(
+      false,
+    );
+    expect(
+      isCrawlerAllowed(wildcard, "oai-adsbot", "/private/item/end/more"),
+    ).toBe(true);
+    expect(isCrawlerAllowed(wildcard, "oai-adsbot", "/draft-copy/page")).toBe(
+      false,
+    );
+  });
+
+  it("evaluates a wildcard-heavy near miss without regex backtracking", () => {
+    const pattern = `/${"*a".repeat(120)}b$`;
+    const path = `/${"a".repeat(120)}c`;
+    const robotsTxt = `User-agent: *\nDisallow: ${pattern}`;
+
+    expect(isCrawlerAllowed(robotsTxt, "oai-adsbot", path)).toBe(true);
+  });
+
+  it("rejects robots files outside the bounded evaluation contract", () => {
+    const tooManyWildcards = `User-agent: *\nDisallow: /${"*".repeat(129)}`;
+    const tooLong = `User-agent: *\nDisallow: /${"x".repeat(2_048)}`;
+    const tooManyRules = [
+      "User-agent: *",
+      ...Array.from({ length: 1_001 }, (_, index) => `Disallow: /${index}`),
+    ].join("\n");
+
+    for (const robotsTxt of [tooManyWildcards, tooLong, tooManyRules]) {
+      expect(() => parseRobotsTxt(robotsTxt)).toThrow(
+        "robots.txt is too complex to evaluate safely",
+      );
+      expect(isCrawlerAllowed(robotsTxt, "oai-adsbot", "/products/item")).toBe(
+        false,
+      );
+    }
+
+    expect(
+      evaluateOpenAICrawlerAccess(tooManyRules, "/products/item"),
+    ).toEqual({
+      adsBotAllowed: false,
+      searchBotAllowed: false,
+      evaluationLimited: true,
+    });
   });
 });
 

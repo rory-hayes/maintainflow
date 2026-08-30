@@ -1,4 +1,5 @@
 {
+  "buildCommand": "node scripts/check-deployment-config.mjs && npm run build",
   "crons": [
     {
       "path": "/api/jobs/monitoring/evaluate",

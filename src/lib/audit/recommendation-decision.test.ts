@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { demoRecommendations } from "../openai-ads/demo-data";
 import {
   applyRecommendationDismissals,
+  recommendationApprovalFingerprint,
   recommendationFingerprint,
   type RecommendationDismissal,
 } from "./recommendation-decision";
@@ -44,6 +45,28 @@ describe("recommendation dismissal decisions", () => {
 
     expect(recommendationFingerprint(reordered)).toBe(
       recommendationFingerprint(recommendation),
+    );
+  });
+
+  it("binds approval consent to the displayed monitoring evidence", () => {
+    const changedPlan = {
+      ...recommendation,
+      monitoringPlan: recommendation.monitoringPlan
+        ? {
+            ...recommendation.monitoringPlan,
+            baseline: {
+              ...recommendation.monitoringPlan.baseline,
+              spend: recommendation.monitoringPlan.baseline.spend + 1,
+            },
+          }
+        : undefined,
+    };
+
+    expect(recommendationFingerprint(changedPlan)).toBe(
+      recommendationFingerprint(recommendation),
+    );
+    expect(recommendationApprovalFingerprint(changedPlan)).not.toBe(
+      recommendationApprovalFingerprint(recommendation),
     );
   });
 

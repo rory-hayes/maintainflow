@@ -72,10 +72,21 @@ const context = {
   params: Promise.resolve({ accountId: "adacct_client" }),
 };
 
+const access = {
+  organizationId: "00000000-0000-4000-8000-000000000001",
+  organizationName: "Client organization",
+  organizationType: "advertiser",
+  accountId: "adacct_client",
+  accountName: "Client account",
+  connectionMode: "vault",
+  membershipRole: "owner",
+  accountRole: "owner",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   testState.requireOperatorId.mockResolvedValue("user_owner");
-  testState.requireAccountAccess.mockResolvedValue({ accountRole: "owner" });
+  testState.requireAccountAccess.mockResolvedValue(access);
   testState.isCredentialVaultConfigured.mockReturnValue(true);
   testState.verifyCredentialStore.mockResolvedValue(true);
   testState.fetchLiveAdAccount.mockResolvedValue({
@@ -114,6 +125,7 @@ describe("advertiser credential rotation", () => {
       expect.objectContaining({
         operatorId: "user_owner",
         accountId: "adacct_client",
+        access,
       }),
     );
     expect(JSON.stringify(payload)).not.toContain("ads_replacement_secret_456");
@@ -141,5 +153,19 @@ describe("advertiser credential rotation", () => {
 
     expect(response.status).toBe(403);
     expect(testState.fetchLiveAdAccount).not.toHaveBeenCalled();
+  });
+
+  it("rejects stale access after provider verification", async () => {
+    testState.rotateAdsApiCredential.mockRejectedValue(
+      new testState.AccountAccessForbiddenError("Account access changed."),
+    );
+
+    const response = await POST(request(), context);
+
+    expect(response.status).toBe(403);
+    expect(testState.fetchLiveAdAccount).toHaveBeenCalledTimes(1);
+    expect(testState.rotateAdsApiCredential).toHaveBeenCalledWith(
+      expect.objectContaining({ access }),
+    );
   });
 });

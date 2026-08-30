@@ -53,7 +53,7 @@ describe("production database migration runner", () => {
     expect(migrations.map(({ name }) => name)).toEqual(
       REQUIRED_MIGRATION_NAMES,
     );
-    expect(migrations).toHaveLength(11);
+    expect(migrations).toHaveLength(12);
 
     for (const migration of migrations) {
       const file = fileURLToPath(
@@ -83,25 +83,27 @@ describe("production database migration runner", () => {
     ).toMatchObject({ hosted: false });
   });
 
-  it("requires TLS and the backup/restore gate for hosted databases", () => {
+  it("requires authenticated TLS and the backup/restore gate for hosted databases", () => {
     const base = {
       [APPLY_MIGRATIONS_FLAG]: "true",
       [BACKUP_RESTORE_FLAG]: "true",
     };
 
-    expect(() =>
-      validateMigrationEnvironment({
-        ...base,
-        DATABASE_URL: "postgres://db.example/maintainflow",
-      }),
-    ).toThrow(/sslmode/);
-    expect(() =>
-      validateMigrationEnvironment({
-        ...base,
-        DATABASE_URL:
-          "postgres://db.example/maintainflow?sslmode=disable",
-      }),
-    ).toThrow(/TLS/);
+    for (const databaseUrl of [
+      "postgres://db.example/maintainflow",
+      "postgres://db.example/maintainflow?sslmode=disable",
+      "postgres://db.example/maintainflow?sslmode=require",
+      "postgres://db.example/maintainflow?sslmode=verify-ca",
+      "postgres://db.example/maintainflow?sslmode=verify-full&sslmode=verify-full",
+      "postgres://db.example/maintainflow?sslmode=verify-full&sslmode=require",
+    ]) {
+      expect(() =>
+        validateMigrationEnvironment({
+          ...base,
+          DATABASE_URL: databaseUrl,
+        }),
+      ).toThrow(/exactly one sslmode=verify-full/);
+    }
     expect(() =>
       validateMigrationEnvironment({
         [APPLY_MIGRATIONS_FLAG]: "true",
@@ -216,7 +218,7 @@ describe("production database migration runner", () => {
 
   it("redacts the configured URL and secret values from failures", () => {
     const databaseUrl =
-      "postgres://migration_user:do%2Dnot%2Dprint@db.example/maintainflow?sslmode=require";
+      "postgres://migration_user:do%2Dnot%2Dprint@db.example/maintainflow?sslmode=verify-full";
     const formatted = formatMigrationFailure(
       new Error(`connection failed for ${databaseUrl}: do-not-print`),
       {

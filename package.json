@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build --webpack",
+    "build": "next build --webpack && node scripts/public-build-metadata.mjs",
+    "prestart": "node scripts/check-production-config.mjs --startup",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
@@ -14,7 +15,7 @@
     "test:ads-live": "vitest run --config vitest.live.config.mjs",
     "check:openai-ads-contract": "node scripts/check-openai-ads-openapi.mjs",
     "test:openai-ads-contract-checker": "vitest run scripts/check-openai-ads-openapi.test.mjs",
-    "test:production-config": "vitest run scripts/check-production-config.test.mjs",
+    "test:production-config": "vitest run scripts/check-production-config.test.mjs scripts/check-deployment-config.test.mjs",
     "db:migrate": "node scripts/run-database-migrations.mjs",
     "test:db-migrations": "vitest run scripts/run-database-migrations.test.mjs",
     "test:db": "node scripts/run-database-integration.mjs",
@@ -23,6 +24,7 @@
     "verify": "npm run lint && npm run typecheck && npm test && npm run test:ads-contract && npm run test:openai-ads-contract-checker && npm run test:production-config && npm run build"
   },
   "dependencies": {
+    "@next/env": "^16.3.3",
     "@clerk/nextjs": "^7.8.3",
     "@hookform/resolvers": "^3.9.1",
     "@radix-ui/react-accordion": "^1.2.2",

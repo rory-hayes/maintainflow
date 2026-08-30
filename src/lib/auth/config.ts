@@ -33,6 +33,13 @@ export function getWorkspaceAdmissionMode() {
     : "private_beta";
 }
 
+export function isPublicSignUpEnabled() {
+  return (
+    getWorkspaceAdmissionMode() === "open" &&
+    process.env.MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED === "true"
+  );
+}
+
 export function isWorkspaceAdmissionAllowed(operatorId: string) {
   return (
     getWorkspaceAdmissionMode() === "open" ||

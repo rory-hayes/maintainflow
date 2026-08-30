@@ -139,6 +139,9 @@ describe("scheduled monitoring runner", () => {
         },
       }),
     );
+    const logged = JSON.stringify(vi.mocked(console.error).mock.calls);
+    expect(logged).not.toContain("adacct_missing_key");
+    expect(logged).not.toContain("Credential unavailable");
     expect(evaluateLiveMonitoringWindowMock).toHaveBeenCalledWith(
       expect.objectContaining({
         entityId: "adgroup-adacct_beta",
@@ -176,5 +179,8 @@ describe("scheduled monitoring runner", () => {
         claimId: expect.any(String),
       }),
     );
+    const logged = JSON.stringify(vi.mocked(console.error).mock.calls);
+    expect(logged).not.toContain("approval-adacct_alpha");
+    expect(logged).not.toContain("Provider unavailable");
   });
 });

@@ -3,7 +3,10 @@ import "server-only";
 import { createHmac } from "node:crypto";
 import { isIP } from "node:net";
 
-import postgres, { type Sql } from "postgres";
+import type postgres from "postgres";
+import type { Sql } from "postgres";
+
+import { getRuntimeDatabase } from "../database/client.server";
 
 const WINDOW_MS = 60 * 60 * 1_000;
 const IP_LIMIT = 6;
@@ -21,8 +24,6 @@ type BucketDecision = {
 export type ReadinessRateLimitDecision = BucketDecision & {
   limit: number;
 };
-
-let database: Sql | undefined;
 
 export class ReadinessRateLimitUnavailableError extends Error {
   constructor(message = "Readiness rate limiting is not configured.") {
@@ -43,13 +44,7 @@ function getDatabase() {
   if (!process.env.DATABASE_URL) {
     throw new ReadinessRateLimitUnavailableError();
   }
-  database ??= postgres(process.env.DATABASE_URL, {
-    connect_timeout: 10,
-    idle_timeout: 20,
-    max: 2,
-    prepare: false,
-  });
-  return database;
+  return getRuntimeDatabase(process.env.DATABASE_URL);
 }
 
 function subjectHash(scope: RateLimitScope, subject: string) {

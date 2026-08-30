@@ -80,6 +80,7 @@ function readyConversionsApi(): ConversionPayloadAudit {
     warningCount: 0,
     validateOnly: true,
     integrationSourcePresent: true,
+    incomplete: false,
     eventTypes: [{ name: "purchase", count: 1 }],
     issues: [],
     limitations: ["A static result does not prove provider receipt."],

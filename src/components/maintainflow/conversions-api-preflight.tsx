@@ -115,7 +115,11 @@ export function ConversionsApiAuditResult({
 
       {audit.eventTypes.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-muted-foreground">Event types</span>
+          <span className="text-xs font-medium text-muted-foreground">
+            {audit.incomplete
+              ? "Event types (partial scan)"
+              : "Event types"}
+          </span>
           {audit.eventTypes.map((eventType) => (
             <Badge key={eventType.name} variant="secondary" className="font-mono text-[11px]">
               {eventType.name} · {eventType.count}

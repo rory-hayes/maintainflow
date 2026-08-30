@@ -9,6 +9,7 @@ import {
   conversionInsightResponseSchema,
   insightListResponseSchema,
 } from "./schema";
+import { buildAdsResourcePath } from "./resource-path";
 
 export type MonitoringRange = {
   start: number;
@@ -48,7 +49,7 @@ function deliveryInsightsPath(entityId: string, range: MonitoringRange) {
     "time_ranges[]",
     JSON.stringify({ type: "unix_range", ...range }),
   );
-  return `/ad_groups/${encodeURIComponent(entityId)}/insights?${params.toString()}`;
+  return `${buildAdsResourcePath("ad_groups", entityId)}/insights?${params.toString()}`;
 }
 
 export async function evaluateLiveMonitoringWindow(options: {

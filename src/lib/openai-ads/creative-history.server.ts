@@ -2,8 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import postgres, { type Sql } from "postgres";
-
+import { getRuntimeDatabase } from "../database/client.server";
 import {
   buildCreativeReviewTransitions,
   creativeReviewEventSchema,
@@ -32,8 +31,6 @@ type CreativeEventRow = CreativeStateRow & {
   detected_at: Date;
 };
 
-let database: Sql | undefined;
-
 export class CreativeHistoryStoreUnavailableError extends Error {
   constructor(message = "Creative review history storage is not configured.") {
     super(message);
@@ -45,13 +42,7 @@ function getDatabase() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new CreativeHistoryStoreUnavailableError();
 
-  database ??= postgres(connectionString, {
-    connect_timeout: 10,
-    idle_timeout: 20,
-    max: 2,
-    prepare: false,
-  });
-  return database;
+  return getRuntimeDatabase(connectionString);
 }
 
 function parseStateRow(row: CreativeStateRow): CreativeReviewState {

@@ -1,7 +1,11 @@
 import { fileURLToPath } from "node:url";
 
+import {
+  publicClerkConfigDigest,
+  readPublicBuildMetadata,
+} from "./public-build-metadata.mjs";
+
 const RELEASE_STAGES = new Set(["demo", "private_read", "live_write"]);
-const TLS_MODES = new Set(["require", "verify-ca", "verify-full"]);
 
 function present(value) {
   return typeof value === "string" && value.trim().length > 0;
@@ -14,6 +18,33 @@ function requireValue(issues, env, key) {
 function requireSecret(issues, env, key, minimumLength = 32) {
   if (!present(env[key]) || env[key].length < minimumLength) {
     issues.push(`${key} must contain at least ${minimumLength} characters.`);
+  }
+}
+
+function requireContactEmail(issues, env, key) {
+  const value = env[key];
+  if (
+    !present(value) ||
+    value.length > 254 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  ) {
+    issues.push(`${key} must be a valid monitored email address.`);
+  }
+}
+
+function validateDatabasePoolMax(issues, value) {
+  if (!present(value)) return;
+  if (!/^\d+$/.test(value)) {
+    issues.push(
+      "MAINTAINFLOW_DATABASE_POOL_MAX must be an integer from 1 through 10.",
+    );
+    return;
+  }
+  const parsed = Number(value);
+  if (parsed < 1 || parsed > 10) {
+    issues.push(
+      "MAINTAINFLOW_DATABASE_POOL_MAX must be an integer from 1 through 10.",
+    );
   }
 }
 
@@ -47,9 +78,25 @@ function validateDatabaseUrl(issues, value) {
     if (!new Set(["postgres:", "postgresql:"]).has(parsed.protocol)) {
       issues.push("DATABASE_URL must use the postgres or postgresql protocol.");
     }
-    if (!TLS_MODES.has(parsed.searchParams.get("sslmode") ?? "")) {
+    for (const [key] of parsed.searchParams) {
+      const normalized = key.toLowerCase();
+      if (normalized === "search_path" || normalized === "options") {
+        issues.push(
+          "DATABASE_URL must not override the runtime database search path.",
+        );
+        break;
+      }
+    }
+    const sslModes = [...parsed.searchParams].filter(
+      ([key]) => key.toLowerCase() === "sslmode",
+    );
+    if (
+      sslModes.length !== 1 ||
+      sslModes[0][0] !== "sslmode" ||
+      sslModes[0][1] !== "verify-full"
+    ) {
       issues.push(
-        "DATABASE_URL must require verified transport with sslmode=require, verify-ca, or verify-full.",
+        "DATABASE_URL must include exactly one sslmode=verify-full parameter.",
       );
     }
   } catch {
@@ -106,6 +153,24 @@ export function validateProductionConfig(env) {
     );
   }
   validateOrigin(issues, env.MAINTAINFLOW_APP_ORIGIN);
+  validateDatabasePoolMax(issues, env.MAINTAINFLOW_DATABASE_POOL_MAX);
+  requireValue(issues, env, "MAINTAINFLOW_LEGAL_ENTITY_NAME");
+  requireContactEmail(issues, env, "MAINTAINFLOW_PRIVACY_CONTACT_EMAIL");
+  requireContactEmail(issues, env, "MAINTAINFLOW_SUPPORT_CONTACT_EMAIL");
+  validateDatabaseUrl(issues, env.DATABASE_URL);
+  requireSecret(issues, env, "READINESS_RATE_LIMIT_SECRET");
+  requireSecret(issues, env, "CRON_SECRET");
+
+  if (env.MAINTAINFLOW_ADMISSION_MODE === "open") {
+    issues.push(
+      "Production releases cannot use MAINTAINFLOW_ADMISSION_MODE=open before public-launch controls are implemented.",
+    );
+  }
+  if (env.MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED === "true") {
+    issues.push(
+      "Production releases cannot enable MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED before public-launch controls are implemented.",
+    );
+  }
 
   if (stage === "demo") {
     if (env.OPENAI_ADS_DATA_MODE && env.OPENAI_ADS_DATA_MODE !== "demo") {
@@ -122,10 +187,7 @@ export function validateProductionConfig(env) {
 
   requireValue(issues, env, "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
   requireValue(issues, env, "CLERK_SECRET_KEY");
-  validateDatabaseUrl(issues, env.DATABASE_URL);
   validateCredentialKeyring(issues, env);
-  requireSecret(issues, env, "CRON_SECRET");
-  requireSecret(issues, env, "READINESS_RATE_LIMIT_SECRET");
 
   if (env.MAINTAINFLOW_ADMISSION_MODE !== "private_beta") {
     issues.push(
@@ -146,8 +208,42 @@ export function validateProductionConfig(env) {
   return { stage, issues };
 }
 
+export function validateStartupProductionConfig(
+  env,
+  { metadataPath } = {},
+) {
+  const result = validateProductionConfig(env);
+  const issues = [...result.issues];
+
+  try {
+    const metadata = readPublicBuildMetadata(metadataPath);
+    if (
+      metadata.publicClerkConfigSha256 !== publicClerkConfigDigest(env)
+    ) {
+      issues.push(
+        "Runtime NEXT_PUBLIC Clerk configuration does not match the values compiled by npm run build.",
+      );
+    }
+  } catch {
+    issues.push(
+      "Compiled NEXT_PUBLIC configuration metadata is missing or invalid; run npm run build before npm start.",
+    );
+  }
+
+  return { ...result, issues };
+}
+
+export async function loadNextProductionEnvironment() {
+  const nextEnvModule = await import("@next/env");
+  const { loadEnvConfig } = nextEnvModule.default ?? nextEnvModule;
+  loadEnvConfig(process.cwd(), false);
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const result = validateProductionConfig(process.env);
+  await loadNextProductionEnvironment();
+  const result = process.argv.includes("--startup")
+    ? validateStartupProductionConfig(process.env)
+    : validateProductionConfig(process.env);
   if (result.issues.length > 0) {
     console.error(`Production configuration is not ready for ${result.stage}:`);
     for (const issue of result.issues) console.error(`- ${issue}`);

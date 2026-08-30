@@ -1,11 +1,13 @@
 import { SignIn } from "@clerk/nextjs";
 import { LockKeyhole } from "lucide-react";
+import { connection } from "next/server";
 
 import { MaintainFlowBrand } from "@/components/maintainflow/brand";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { isClerkConfigured } from "@/lib/auth/config";
+import { isClerkConfigured, isPublicSignUpEnabled } from "@/lib/auth/config";
 
-export default function SignInPage() {
+export default async function SignInPage() {
+  await connection();
   return (
     <main className="grid min-h-[calc(100vh-4rem)] place-items-center bg-[#FAFAFA] p-4">
       {isClerkConfigured() ? (
@@ -13,7 +15,9 @@ export default function SignInPage() {
           path="/auth/sign-in"
           routing="path"
           fallbackRedirectUrl="/app"
-          signUpUrl="/auth/sign-up"
+          {...(isPublicSignUpEnabled()
+            ? { signUpUrl: "/auth/sign-up" }
+            : {})}
         />
       ) : (
         <Card className="w-full max-w-md shadow-sm">

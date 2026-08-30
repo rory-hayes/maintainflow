@@ -124,10 +124,14 @@ type WorkbenchProps = {
   campaigns: Campaign[];
   performance: CampaignPerformance[];
   initialRecommendations: Recommendation[];
+  recommendationApprovalFingerprints: Record<string, string>;
+  recommendationFingerprints: Record<string, string>;
   dataSource: "demo" | "live";
   writeMode: "demo" | "live";
   syncedAt?: string;
+  snapshotAvailable: boolean;
   syncError?: string;
+  syncWarning?: string;
   operator: { id: string; name: string; initials: string };
   operatorAuthenticated: boolean;
   authConfigured: boolean;
@@ -194,10 +198,14 @@ export function MaintainFlowWorkbench({
   campaigns,
   performance,
   initialRecommendations,
+  recommendationApprovalFingerprints,
+  recommendationFingerprints,
   dataSource,
   writeMode,
   syncedAt,
+  snapshotAvailable,
   syncError,
+  syncWarning,
   operator,
   operatorAuthenticated,
   authConfigured,
@@ -239,17 +247,19 @@ export function MaintainFlowWorkbench({
   const [dismissalReason, setDismissalReason] = useState("");
   const [deciding, setDeciding] = useState(false);
   const [reviewing, setReviewing] = useState(false);
-  const initialAuditEvent: AuditEvent = {
-    id: "initial-review",
-    occurredAt: syncedAt ?? "Demo snapshot",
-    action: "Account review completed",
-    entity: account.name,
-    outcome: `${initialRecommendations.length} recommendations prepared`,
-    mode: dataSource,
-  };
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([
-    initialAuditEvent,
-  ]);
+  const initialAuditEvent: AuditEvent | null = snapshotAvailable
+    ? {
+        id: "initial-review",
+        occurredAt: syncedAt ?? "Demo snapshot",
+        action: "Account review completed",
+        entity: account.name,
+        outcome: `${initialRecommendations.length} recommendations prepared`,
+        mode: dataSource,
+      }
+    : null;
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(
+    initialAuditEvent ? [initialAuditEvent] : [],
+  );
 
   const selected =
     recommendations.find((recommendation) => recommendation.id === selectedId) ??
@@ -310,6 +320,9 @@ export function MaintainFlowWorkbench({
         body: JSON.stringify({
           recommendationId: selected.id,
           accountId: workspaceAccess?.accountId,
+          recommendationSource: selected.source,
+          recommendationFingerprint:
+            recommendationApprovalFingerprints[selected.id],
         }),
       });
       const result = (await response.json()) as {
@@ -370,6 +383,7 @@ export function MaintainFlowWorkbench({
           body: JSON.stringify({
             accountId: workspaceAccess.accountId,
             recommendationId: selected.id,
+            recommendationFingerprint: recommendationFingerprints[selected.id],
             action,
             reason:
               action === "dismiss" ? dismissalReason.trim() : undefined,
@@ -402,8 +416,8 @@ export function MaintainFlowWorkbench({
         entity: selected.entityLabel,
         outcome:
           action === "dismiss"
-            ? `${dismissalReason.trim()} No Ads API request was made.`
-            : "Returned to active review. No Ads API request was made.",
+            ? `${dismissalReason.trim()} No Ads mutation was made.`
+            : "Returned to active review. No Ads mutation was made.",
         mode: dataSource,
       });
       setDismissalOpen(false);
@@ -435,16 +449,16 @@ export function MaintainFlowWorkbench({
 
     if (dataSource === "live") {
       addAuditEvent({
-        action: "Live review requested",
+        action: "Live snapshot reload requested",
         entity: account.name,
         outcome:
-          "Refreshing campaigns, ad creatives, insights, and conversions.",
+          "Reloading the latest confirmed snapshot. Provider refreshes are automatically coalesced to protect API quota.",
         mode: "live",
       });
       router.refresh();
-      toast.success("Live account review requested", {
+      toast.success("Live snapshot reload requested", {
         description:
-          "MaintainFlow is refreshing campaigns, ad creatives, delivery insights, and click-attributed conversions.",
+          "MaintainFlow will use a recent confirmed snapshot or refresh it when its freshness window has elapsed.",
       });
       setReviewing(false);
       return;
@@ -469,7 +483,7 @@ export function MaintainFlowWorkbench({
     setFilter("all");
     setDismissalOpen(false);
     setDismissalReason("");
-    setAuditEvents([initialAuditEvent]);
+    setAuditEvents(initialAuditEvent ? [initialAuditEvent] : []);
     toast.success("Demo reset", {
       description: "Recommendation statuses and this session's audit trail were restored.",
     });
@@ -486,26 +500,46 @@ export function MaintainFlowWorkbench({
               variant="outline"
               className={cn(
                 "hidden gap-1.5 md:inline-flex",
-                dataSource === "live"
+                syncError && dataSource === "live"
+                  ? "border-destructive/30 bg-destructive/10 text-destructive"
+                  : syncWarning && dataSource === "live"
+                    ? "border-warning/30 bg-warning/10 text-warning-foreground"
+                  : dataSource === "live"
                   ? "border-success/30 bg-success/10 text-success"
                   : "border-warning/30 bg-warning/10 text-warning-foreground",
               )}
               title={
-                syncedAt
+                syncError && dataSource === "live"
+                  ? "The connected account has no confirmed live snapshot"
+                  : syncWarning && dataSource === "live"
+                    ? "The last confirmed snapshot is visible, but live writes are locked until refresh succeeds"
+                  : syncedAt
                   ? `Last synced ${new Date(syncedAt).toLocaleString()}`
-                  : "Local demo snapshot"
+                  : dataSource === "live"
+                    ? "Live account connected; awaiting a confirmed snapshot"
+                    : "Local demo snapshot"
               }
             >
               <span
                 className={cn(
                   "size-1.5 rounded-full",
-                  dataSource === "live" ? "bg-success" : "bg-warning",
+                  syncError && dataSource === "live"
+                    ? "bg-destructive"
+                    : syncWarning && dataSource === "live"
+                      ? "bg-warning"
+                    : dataSource === "live"
+                      ? "bg-success"
+                      : "bg-warning",
                 )}
               />
               {workspaceSetupState === "needs_setup"
                 ? "Setup required"
                 : workspaceSetupState === "unavailable" && dataSource === "demo"
                   ? "Access locked"
+                  : syncError && dataSource === "live"
+                    ? "Live sync unavailable"
+                    : syncWarning && dataSource === "live"
+                      ? "Live data · stale"
                   : dataSource === "demo"
                 ? "Demo data"
                 : writeMode === "live"
@@ -571,9 +605,11 @@ export function MaintainFlowWorkbench({
                       </a>
                     </DropdownMenuItem>
                   ) : null}
-                  <DropdownMenuItem onSelect={resetDemoState}>
-                    Reset current session
-                  </DropdownMenuItem>
+                  {dataSource === "demo" ? (
+                    <DropdownMenuItem onSelect={resetDemoState}>
+                      Reset current session
+                    </DropdownMenuItem>
+                  ) : null}
                   {operatorAuthenticated ? (
                     <SignOutButton redirectUrl="/">
                       <DropdownMenuItem>
@@ -618,6 +654,16 @@ export function MaintainFlowWorkbench({
             <Info />
             <AlertTitle>Live connection unavailable</AlertTitle>
             <AlertDescription>{syncError}</AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+
+      {syncWarning ? (
+        <div className="border-b bg-background px-4 py-3 md:px-6">
+          <Alert className="mx-auto max-w-7xl">
+            <Info />
+            <AlertTitle>Live data may be stale</AlertTitle>
+            <AlertDescription>{syncWarning}</AlertDescription>
           </Alert>
         </div>
       ) : null}
@@ -789,7 +835,11 @@ export function MaintainFlowWorkbench({
                 deciding={deciding}
               />
             ) : (
-              <NoRecommendations onReview={runAccountReview} reviewing={reviewing} />
+              <NoRecommendations
+                onReview={runAccountReview}
+                reviewing={reviewing}
+                syncUnavailable={Boolean(syncError && dataSource === "live")}
+              />
             )}
           </section>
         </TabsContent>
@@ -807,6 +857,7 @@ export function MaintainFlowWorkbench({
             recommendationCount={readyCount}
             onReview={runAccountReview}
             reviewing={reviewing}
+            snapshotAvailable={snapshotAvailable}
           />
         </TabsContent>
 
@@ -855,7 +906,11 @@ export function MaintainFlowWorkbench({
             <DialogTitle>Approve this change?</DialogTitle>
             <DialogDescription>
               MaintainFlow will use the exact request shown in the review and retain
-              the rollback payload. {writeMode === "demo" ? "No external write will be made in the current mode." : "This live recommendation is connected for an external write."}
+              the rollback payload. {dataSource === "live" && writeMode !== "live"
+                ? "External changes are locked until every live-write gate is restored."
+                : writeMode === "demo"
+                  ? "No external write will be made in demo mode."
+                  : "This live recommendation is connected for an external write."}
             </DialogDescription>
           </DialogHeader>
           {selected ? (
@@ -874,13 +929,22 @@ export function MaintainFlowWorkbench({
             <Button variant="outline" onClick={() => setApprovalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={approveRecommendation} disabled={applying}>
+            <Button
+              onClick={approveRecommendation}
+              disabled={
+                applying || (dataSource === "live" && writeMode !== "live")
+              }
+            >
               {applying ? (
                 <Loader2 data-icon="inline-start" className="animate-spin" />
               ) : (
                 <Check data-icon="inline-start" />
               )}
-              {writeMode === "demo" ? "Record approval only" : "Approve and apply"}
+              {dataSource === "live" && writeMode !== "live"
+                ? "External changes locked"
+                : writeMode === "demo"
+                  ? "Record demo approval"
+                  : "Approve and apply"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1084,8 +1148,8 @@ function RecommendationDetail({
             <AlertTitle>Dismissed from active review</AlertTitle>
             <AlertDescription>
               {recommendation.dismissal.reason} This decision is tied to the
-              exact proposed change and can be restored without contacting the
-              Ads API.
+              exact proposed change and can be restored without changing the
+              Ads account.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -1130,7 +1194,10 @@ function RecommendationDetail({
               </Button>
               <Button
                 onClick={onApprove}
-                disabled={recommendation.status !== "ready"}
+                disabled={
+                  recommendation.status !== "ready" ||
+                  (dataSource === "live" && writeMode !== "live")
+                }
               >
                 <Check data-icon="inline-start" />
                 {recommendation.status === "monitoring"
@@ -1138,7 +1205,7 @@ function RecommendationDetail({
                   : writeMode === "live"
                     ? "Approve and apply"
                     : dataSource === "live"
-                      ? "Approve without applying"
+                      ? "External changes locked"
                       : "Approve in demo"}
               </Button>
             </>
@@ -1171,9 +1238,11 @@ function CodePayload({
 function NoRecommendations({
   onReview,
   reviewing,
+  syncUnavailable,
 }: {
   onReview: () => void;
   reviewing: boolean;
+  syncUnavailable: boolean;
 }) {
   return (
     <section className="grid min-h-[calc(100vh-7rem)] place-items-center p-6">
@@ -1182,10 +1251,15 @@ function NoRecommendations({
           <EmptyMedia variant="icon">
             <SearchCheck />
           </EmptyMedia>
-          <EmptyTitle>No changes need approval</EmptyTitle>
+          <EmptyTitle>
+            {syncUnavailable
+              ? "No confirmed live snapshot"
+              : "No changes need approval"}
+          </EmptyTitle>
           <EmptyDescription>
-            The current evidence did not cross a MaintainFlow safeguard threshold.
-            That is a valid result—not a reason to invent a recommendation.
+            {syncUnavailable
+              ? "MaintainFlow did not substitute demo metrics for this connected account. Retry the read-only sync when the provider connection is available."
+              : "The current evidence did not cross a MaintainFlow safeguard threshold. That is a valid result—not a reason to invent a recommendation."}
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -1203,7 +1277,7 @@ function NoRecommendations({
   );
 }
 
-function CampaignsView({
+export function CampaignsView({
   ads,
   creativeReviewHistory,
   creativeHistoryReady,
@@ -1215,6 +1289,7 @@ function CampaignsView({
   recommendationCount,
   onReview,
   reviewing,
+  snapshotAvailable,
 }: {
   ads: ScopedAd[];
   creativeReviewHistory: CreativeReviewEvent[];
@@ -1227,6 +1302,7 @@ function CampaignsView({
   recommendationCount: number;
   onReview: () => void;
   reviewing: boolean;
+  snapshotAvailable: boolean;
 }) {
   const currency = moneyFormatter(currencyCode);
   const totalSpend = performance.reduce((sum, item) => sum + item.spend, 0);
@@ -1254,10 +1330,35 @@ function CampaignsView({
           ) : (
             <SearchCheck data-icon="inline-start" />
           )}
-          {reviewing ? "Reviewing account" : "Run account review"}
+          {reviewing ? "Reloading snapshot" : "Reload account snapshot"}
         </Button>
       </div>
 
+      {!snapshotAvailable ? (
+        <Empty className="border bg-background py-12 shadow-sm">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <BarChart3 />
+            </EmptyMedia>
+            <EmptyTitle>No confirmed live snapshot</EmptyTitle>
+            <EmptyDescription>
+              Spend, conversion, campaign, and currency values stay hidden until
+              OpenAI Ads returns a schema-valid snapshot for this account.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button variant="outline" onClick={onReview} disabled={reviewing}>
+              {reviewing ? (
+                <Loader2 data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <RefreshCcw data-icon="inline-start" />
+              )}
+              {reviewing ? "Retrying live sync" : "Retry live sync"}
+            </Button>
+          </EmptyContent>
+        </Empty>
+      ) : (
+        <>
       <div className="grid gap-3 md:grid-cols-3">
         <MetricCard
           label="Month-to-date spend"
@@ -1378,6 +1479,8 @@ function CampaignsView({
         ready={creativeHistoryReady}
         error={creativeHistoryError}
       />
+        </>
+      )}
     </section>
   );
 }

@@ -69,6 +69,19 @@ account and claim can persist the result, and a crashed/failed worker's row is
 retried after lease expiry. The result may recommend human rollback review, but
 the evaluator never calls an Ads mutation endpoint.
 
+The scheduler route returns HTTP 503 with a bounded `Retry-After` whenever any
+selected account or window fails, while retaining successfully completed work.
+This makes partial failure visible to deployment alerting rather than hiding it
+inside a successful 2xx run. Logs contain aggregate counts and bounded error
+class names, not account or approval identifiers, raw error messages, provider
+bodies, credentials, or submitted event data.
+
+The same protected run prunes live workbench payloads once their confirmed
+`synced_at` age exceeds 24 hours (or an empty row's creation age does), without
+letting failed refresh metadata extend that lifetime. Active refresh leases are
+preserved; cleanup failure or a bounded cleanup backlog is reported as HTTP 503
+instead of silently extending the documented retention window.
+
 ## Duplicate-write boundary
 
 A partial unique index permits only one active or unresolved row for each
