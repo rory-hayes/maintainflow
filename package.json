@@ -7,7 +7,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:ads-contract": "vitest run --config vitest.contract.config.mjs",
     "test:ads-simulator": "vitest run src/lib/openai-ads/provider-simulator.test.ts",
