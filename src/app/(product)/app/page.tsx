@@ -427,9 +427,12 @@ export default async function MaintainFlowAppPage({
               : undefined,
         });
         if (runtime.liveDataRequested && runtime.liveReadStage) {
-          workspaceSetupState = "unavailable";
-          workspaceMessage =
-            "The live advertiser workspace could not be loaded. No account data or external actions are available.";
+          workspaceSetupState = workspaceAccess
+            ? "connection_error"
+            : "unavailable";
+          workspaceMessage = workspaceAccess
+            ? "MaintainFlow could not load live Ads data. The connected account is retained, and an authorized workspace owner or admin with account-management access can replace its client key."
+            : "The live advertiser workspace could not be loaded. No account data or external actions are available.";
           dataSource = "live";
           writeMode = "demo";
           account = {

@@ -21,13 +21,17 @@ A deployed production demo still exposes the public readiness scanner and legal
 pages. It therefore requires an identified legal entity, monitored privacy and
 support contacts, PostgreSQL with `sslmode=verify-full`, a strong readiness
 quota secret, and closed workspace admission. It does not require Clerk, an Ads
-credential, the credential vault, or the monitoring cron secret.
+credential, or the credential vault. The deployment still requires the cron
+secret because the same protected job performs bounded readiness-quota and live
+snapshot retention cleanup even when no monitoring window exists. Every
+production stage also requires a separate strong readiness-probe secret.
 
 ## `private_read`
 
 This is the first account-backed pilot stage. It requires Clerk, PostgreSQL over
-TLS, the encrypted credential keyring, strong job and quota secrets, private-beta
-admission, and live Ads reads; the global live-write switch must remain off.
+TLS, the encrypted credential keyring, strong job, readiness-probe, and quota
+secrets, private-beta admission, and live Ads reads; the global live-write
+switch must remain off.
 
 The customer's account-scoped Ads key is connected through the protected vault
 flow. The first-account acceptance suite then verifies account identity,
@@ -68,6 +72,19 @@ values in non-secret build metadata. `npm start` and the standalone container
 compare the runtime public configuration with that digest before loading the
 server, so a build cannot silently start against a different Clerk tenant or
 auth-route configuration.
+
+`GET /api/health` proves process liveness only and includes the Git revision
+compiled into the server bundle by the container build or deployment platform;
+a runtime environment override cannot change it. A local Git fallback is used
+only for a clean checkout, so an artifact containing uncommitted source cannot
+claim to be the current HEAD commit. `GET
+/api/ready` is the separate no-store deployment gate. It requires
+`Authorization: Bearer $MAINTAINFLOW_READINESS_PROBE_SECRET` before performing
+database work, then checks valid revision provenance, the exact checked-in
+migration ledger, the quota and live snapshot stores in every stage, and the
+remaining stage-appropriate stores. It never calls OpenAI and therefore remains
+usable before an Ads credential is available. A `503` is a failed deployment
+gate, not evidence that the process is down.
 
 The OpenAI Ads key is deliberately not a global deployment requirement. Each
 pilot customer can connect an account-scoped key into the encrypted vault when

@@ -92,6 +92,12 @@ the next sequential file (for example, `013_description.sql`). If drift is
 reported, restore the applied file byte-for-byte from the deployed revision and
 add a corrective migration; do not update or delete ledger rows by hand.
 
+The application compiles the same ordered names and SHA-256 checksums into its
+deployment-readiness contract. `/api/ready` compares that immutable manifest
+with `maintainflow_schema_migrations`; a missing, extra, reordered, or
+checksum-drifted row returns `503`. The manifest parity test fails CI whenever a
+migration file changes without the reviewed compiled contract changing with it.
+
 ## Verification
 
 Run the fast safety and planning tests:

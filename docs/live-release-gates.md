@@ -11,6 +11,18 @@ secret-independent; a preview that declares any live, non-demo, or public
 sign-up intent is validated before build. A non-Vercel production build can opt in with
 `MAINTAINFLOW_ENFORCE_PRODUCTION_CONFIG=true`.
 
+The deployed process exposes separate liveness and readiness signals. `/api/health`
+returns the baked Git revision without checking dependencies. `/api/ready`
+first requires the dedicated readiness-probe bearer header,
+`Authorization: Bearer $MAINTAINFLOW_READINESS_PROBE_SECRET`, then verifies
+revision provenance, an exact migration-name/checksum ledger, the public
+readiness quota and live snapshot stores in every stage, and the remaining live
+stores used by non-demo stages. It does not contact OpenAI or require an
+advertiser credential. Container CI provisions TLS PostgreSQL, applies the
+checked-in migrations, starts the production image, exercises an authenticated
+readiness probe, and verifies that a runtime environment override cannot change
+the revision served by the image.
+
 Next.js inlines `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` into the browser bundle.
 `npm run build` records a SHA-256 digest of that key and the public Clerk auth
 routes in non-secret metadata. Generic `npm start` and the standalone container
@@ -171,9 +183,10 @@ invoke the same route with `Authorization: Bearer $CRON_SECRET`.
 
 A worker atomically claims due rows with `FOR UPDATE SKIP LOCKED`, then releases
 the database transaction before calling OpenAI. Successful observations clear
-the claim as they are persisted. A failed or interrupted provider read remains
-unevaluated and becomes eligible again after the 15-minute lease expires; it
-does not trigger a rollback.
+the claim as they are persisted. A handled provider-read or result-persistence
+failure releases only its matching claim for a bounded retry. An interrupted
+worker cannot run that cleanup, so its unevaluated row becomes eligible again
+after the 15-minute lease expires. Neither failure path triggers a rollback.
 
 The same protected daily invocation independently prunes readiness rate-limit
 buckets older than 48 hours and live workbench payloads whose confirmed sync age
@@ -202,6 +215,9 @@ setting is verified separately from this application gate.
 
 - Configure Clerk and apply the database migration in a non-production test
   environment.
+- Configure an independent 32+ character
+  `MAINTAINFLOW_READINESS_PROBE_SECRET` and verify one authenticated
+  `/api/ready` probe.
 - Configure a strong `CRON_SECRET` and verify one protected production cron run.
 - Verify a real authenticated session and database record end to end.
 - Configure and exercise the encryption keyring and credential migration in a

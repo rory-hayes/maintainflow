@@ -18,6 +18,70 @@ const access = {
   accountRole: "owner" as const,
 };
 
+const disconnectedMeasurement = {
+  state: "not_connected" as const,
+  source: null,
+  validationEnabled: false,
+  credentialVersion: null,
+  validatedAt: null,
+  providerStatus: null,
+  eventCount: null,
+};
+
+function findRenderedButton(html: string, label: string) {
+  const button = [...html.matchAll(/<button\b[\s\S]*?<\/button>/g)]
+    .map((match) => match[0])
+    .find((candidate) => candidate.includes(label));
+  expect(button, `Expected a button labelled ${label}`).toBeDefined();
+  return button!;
+}
+
+describe("Workspace Ads credential recovery", () => {
+  it("keeps the connected account visible and lets an authorized owner replace its key", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceOnboarding
+        state="connection_error"
+        access={access}
+        connectedAccountName={access.accountName}
+        message="The first live sync could not be completed."
+        conversionsConnection={disconnectedMeasurement}
+      />,
+    );
+
+    expect(html).toContain("Live account connection needs attention");
+    expect(html).toContain("The first live sync could not be completed.");
+    expect(html).toContain(access.accountName);
+    expect(html).toContain(access.accountId);
+    expect(html).not.toContain("Create workspace");
+    expect(findRenderedButton(html, "Replace client key")).not.toMatch(
+      /\sdisabled(?:=|>)/,
+    );
+  });
+
+  it("keeps recovery read-only for an analyst with viewer account access", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceOnboarding
+        state="connection_error"
+        access={{
+          ...access,
+          membershipRole: "analyst",
+          accountRole: "viewer",
+        }}
+        connectedAccountName={access.accountName}
+        message="The live account could not be loaded."
+        conversionsConnection={disconnectedMeasurement}
+      />,
+    );
+
+    expect(findRenderedButton(html, "Replace client key")).toMatch(
+      /\sdisabled(?:=|>)/,
+    );
+    expect(html).toContain(
+      "Workspace owners and admins with account-management access can replace this connection.",
+    );
+  });
+});
+
 describe("Workspace measurement connection", () => {
   it("renders only privacy-safe validation evidence for a connected account", () => {
     const html = renderToStaticMarkup(

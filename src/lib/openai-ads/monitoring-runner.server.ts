@@ -6,6 +6,7 @@ import {
   claimDueMonitoringRecords,
   listDueMonitoringAccountIds,
   recordMonitoringOutcome,
+  releaseMonitoringClaim,
 } from "../audit/approval-store.server";
 import { getAdsApiKeyForAccount } from "../tenancy/store.server";
 import type { AdsApiCredential } from "./client.server";
@@ -60,6 +61,25 @@ export async function evaluateDueMonitoringWindows(options: {
           console.error("Monitoring evaluation failed", {
             name: error instanceof Error ? error.name : "UnknownError",
           });
+          try {
+            const released = await releaseMonitoringClaim({
+              id: record.id,
+              accountId: options.accountId,
+              claimId,
+            });
+            if (!released) {
+              console.error(
+                "Monitoring evaluation claim release was not confirmed",
+              );
+            }
+          } catch (releaseError) {
+            console.error("Monitoring evaluation claim release failed", {
+              name:
+                releaseError instanceof Error
+                  ? releaseError.name
+                  : "UnknownError",
+            });
+          }
           return "failed" as const;
         }
       }),

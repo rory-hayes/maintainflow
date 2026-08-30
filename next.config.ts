@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+import { resolveBuildTimeRevision } from "./scripts/build-revision";
+
 const securityHeaders = [
   {
     key: "Content-Security-Policy",
@@ -17,6 +19,13 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  // This value is substituted into the compiled server bundle by Next.js. It
+  // deliberately has no runtime-environment fallback, so a container operator
+  // cannot make an old image claim a newer revision with `docker run --env`.
+  env: {
+    MAINTAINFLOW_COMPILED_BUILD_SHA:
+      resolveBuildTimeRevision() ?? "unknown",
+  },
   images: {
     qualities: [75, 100],
   },

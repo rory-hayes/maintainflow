@@ -8,18 +8,21 @@ const {
   getAdsApiKeyForAccountMock,
   listDueMonitoringAccountIdsMock,
   recordMonitoringOutcomeMock,
+  releaseMonitoringClaimMock,
 } = vi.hoisted(() => ({
   claimDueMonitoringRecordsMock: vi.fn(),
   evaluateLiveMonitoringWindowMock: vi.fn(),
   getAdsApiKeyForAccountMock: vi.fn(),
   listDueMonitoringAccountIdsMock: vi.fn(),
   recordMonitoringOutcomeMock: vi.fn(),
+  releaseMonitoringClaimMock: vi.fn(),
 }));
 
 vi.mock("../audit/approval-store.server", () => ({
   claimDueMonitoringRecords: claimDueMonitoringRecordsMock,
   listDueMonitoringAccountIds: listDueMonitoringAccountIdsMock,
   recordMonitoringOutcome: recordMonitoringOutcomeMock,
+  releaseMonitoringClaim: releaseMonitoringClaimMock,
 }));
 vi.mock("../tenancy/store.server", () => ({
   getAdsApiKeyForAccount: getAdsApiKeyForAccountMock,
@@ -86,8 +89,10 @@ describe("scheduled monitoring runner", () => {
     getAdsApiKeyForAccountMock.mockReset();
     listDueMonitoringAccountIdsMock.mockReset();
     recordMonitoringOutcomeMock.mockReset();
+    releaseMonitoringClaimMock.mockReset();
     evaluateLiveMonitoringWindowMock.mockResolvedValue(result);
     recordMonitoringOutcomeMock.mockResolvedValue(true);
+    releaseMonitoringClaimMock.mockResolvedValue(true);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
@@ -154,7 +159,7 @@ describe("scheduled monitoring runner", () => {
     );
   });
 
-  it("keeps a failed provider read unevaluated for lease-expiry retry", async () => {
+  it("releases the exact claim after a handled provider read failure", async () => {
     claimDueMonitoringRecordsMock.mockResolvedValue([
       record("adacct_alpha"),
     ]);
@@ -179,8 +184,51 @@ describe("scheduled monitoring runner", () => {
         claimId: expect.any(String),
       }),
     );
+    const claimId = claimDueMonitoringRecordsMock.mock.calls[0]?.[0].claimId;
+    expect(releaseMonitoringClaimMock).toHaveBeenCalledTimes(1);
+    expect(releaseMonitoringClaimMock).toHaveBeenCalledWith({
+      id: "approval-adacct_alpha",
+      accountId: "adacct_alpha",
+      claimId,
+    });
     const logged = JSON.stringify(vi.mocked(console.error).mock.calls);
     expect(logged).not.toContain("approval-adacct_alpha");
     expect(logged).not.toContain("Provider unavailable");
+  });
+
+  it("releases the exact claim after a handled outcome persistence failure", async () => {
+    claimDueMonitoringRecordsMock.mockResolvedValue([
+      record("adacct_alpha"),
+    ]);
+    recordMonitoringOutcomeMock.mockRejectedValue(
+      new Error("Persistence unavailable"),
+    );
+
+    await expect(
+      evaluateDueMonitoringWindows({
+        accountId: "adacct_alpha",
+        credential: { apiKey: "key-for-adacct_alpha" },
+        now,
+        limit: 1,
+      }),
+    ).resolves.toEqual({ due: 1, evaluated: 0, failed: 1 });
+
+    const claimId = claimDueMonitoringRecordsMock.mock.calls[0]?.[0].claimId;
+    expect(recordMonitoringOutcomeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "approval-adacct_alpha",
+        accountId: "adacct_alpha",
+        claimId,
+      }),
+    );
+    expect(releaseMonitoringClaimMock).toHaveBeenCalledTimes(1);
+    expect(releaseMonitoringClaimMock).toHaveBeenCalledWith({
+      id: "approval-adacct_alpha",
+      accountId: "adacct_alpha",
+      claimId,
+    });
+    const logged = JSON.stringify(vi.mocked(console.error).mock.calls);
+    expect(logged).not.toContain("approval-adacct_alpha");
+    expect(logged).not.toContain("Persistence unavailable");
   });
 });

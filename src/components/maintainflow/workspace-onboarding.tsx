@@ -61,6 +61,7 @@ export type WorkspaceSetupState =
   | "demo"
   | "needs_setup"
   | "ready"
+  | "connection_error"
   | "unavailable";
 
 type WorkspaceOnboardingProps = {
@@ -114,6 +115,13 @@ const stateContent: Record<
       "Your identity and connected account permissions are verified.",
     badge: "Ready",
     progress: 100,
+  },
+  connection_error: {
+    title: "Connected workspace needs attention",
+    description:
+      "Your account access is retained while live Ads data remains unavailable.",
+    badge: "Needs attention",
+    progress: 66,
   },
   unavailable: {
     title: "Workspace setup unavailable",
@@ -201,6 +209,8 @@ export function WorkspaceOnboarding({
   const replacementKeyInvalid =
     replacementKey.length > 0 && replacementKey.trim().length < 10;
   const canManageConnection = access ? canWriteAccount(access) : false;
+  const hasConnectedWorkspace =
+    Boolean(access) && (state === "ready" || state === "connection_error");
   const content = stateContent[state];
   const measurementContent = measurementStateContent[conversionsConnection.state];
   const pixelInvalid = measurementAttempted && pixelId.trim().length === 0;
@@ -391,6 +401,14 @@ export function WorkspaceOnboarding({
         </Alert>
       ) : null}
 
+      {state === "connection_error" ? (
+        <Alert variant="destructive">
+          <KeyRound />
+          <AlertTitle>Live account connection needs attention</AlertTitle>
+          <AlertDescription>{message}</AlertDescription>
+        </Alert>
+      ) : null}
+
       <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)]">
         <Card className="min-w-0 shadow-sm">
           <CardHeader>
@@ -407,7 +425,7 @@ export function WorkspaceOnboarding({
             </div>
           </CardHeader>
           <CardContent>
-            {state === "ready" && access ? (
+            {hasConnectedWorkspace && access ? (
               <div className="grid gap-5">
                 <div className="grid gap-1">
                   <p className="text-sm text-muted-foreground">Organization</p>
@@ -536,7 +554,7 @@ export function WorkspaceOnboarding({
               </FieldGroup>
             )}
           </CardContent>
-          {state !== "ready" ? (
+          {!hasConnectedWorkspace ? (
             <CardFooter className="justify-between gap-3">
               <p className="text-xs text-muted-foreground">
                 {state === "demo"

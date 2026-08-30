@@ -8,7 +8,10 @@ hosted security boundary, and account ownership have all been verified.
 
 - Confirm the advertiser account ID and key ownership in OpenAI Ads Manager.
 - Use a staging deployment and a non-production database first.
-- Apply database migrations `001` through `011` in filename order.
+- Apply database migrations `001` through `012` in filename order and confirm
+  an `/api/ready` request authenticated with
+  `MAINTAINFLOW_READINESS_PROBE_SECRET` reports the exact migration ledger as
+  current.
 - Configure Clerk, `DATABASE_URL`, the credential keyring, and the readiness
   rate-limit secret. Keep `OPENAI_ADS_LIVE_WRITES_ENABLED=false`.
 

@@ -35,6 +35,7 @@ function privateConfig(overrides = {}) {
       "postgres://maintainflow:secret@db.example/maintainflow?sslmode=verify-full",
     MAINTAINFLOW_CREDENTIAL_KEYRING: keyring(),
     MAINTAINFLOW_ACTIVE_CREDENTIAL_KEY_ID: "v1",
+    MAINTAINFLOW_READINESS_PROBE_SECRET: "p".repeat(32),
     CRON_SECRET: "c".repeat(32),
     READINESS_RATE_LIMIT_SECRET: "r".repeat(32),
     MAINTAINFLOW_ADMISSION_MODE: "private_beta",
@@ -54,6 +55,7 @@ function demoConfig(overrides = {}) {
     MAINTAINFLOW_SUPPORT_CONTACT_EMAIL: "support@maintainflow.test",
     DATABASE_URL:
       "postgres://maintainflow:secret@db.example/maintainflow?sslmode=verify-full",
+    MAINTAINFLOW_READINESS_PROBE_SECRET: "p".repeat(32),
     CRON_SECRET: "c".repeat(32),
     READINESS_RATE_LIMIT_SECRET: "r".repeat(32),
     MAINTAINFLOW_ADMISSION_MODE: "private_beta",
@@ -97,6 +99,50 @@ describe("production release-stage configuration", () => {
     });
   });
 
+  it.each(["demo", "private_read", "live_write"])(
+    "requires a 32+ character readiness probe secret for %s",
+    (stage) => {
+      const config =
+        stage === "demo"
+          ? demoConfig()
+          : privateConfig({
+              MAINTAINFLOW_RELEASE_STAGE: stage,
+              OPENAI_ADS_LIVE_WRITES_ENABLED:
+                stage === "live_write" ? "true" : "false",
+            });
+
+      for (const secret of [undefined, "p".repeat(31)]) {
+        expect(
+          validateProductionConfig({
+            ...config,
+            MAINTAINFLOW_READINESS_PROBE_SECRET: secret,
+          }).issues,
+        ).toContain(
+          "MAINTAINFLOW_READINESS_PROBE_SECRET must contain at least 32 characters.",
+        );
+      }
+    },
+  );
+
+  it.each([
+    ["MAINTAINFLOW_READINESS_PROBE_SECRET", "CRON_SECRET"],
+    ["MAINTAINFLOW_READINESS_PROBE_SECRET", "READINESS_RATE_LIMIT_SECRET"],
+    ["CRON_SECRET", "READINESS_RATE_LIMIT_SECRET"],
+  ])("rejects reuse between %s and %s without leaking it", (first, second) => {
+    const reusedSecret = "shared-production-secret-".padEnd(40, "x");
+    const result = validateProductionConfig(
+      privateConfig({
+        [first]: reusedSecret,
+        [second]: reusedSecret,
+      }),
+    );
+
+    expect(result.issues).toContain(
+      "MAINTAINFLOW_READINESS_PROBE_SECRET, CRON_SECRET, and READINESS_RATE_LIMIT_SECRET must use pairwise distinct values.",
+    );
+    expect(JSON.stringify(result.issues)).not.toContain(reusedSecret);
+  });
+
   it("requires a production demo to identify its operator and meter readiness scans", () => {
     const result = validateProductionConfig({
       MAINTAINFLOW_RELEASE_STAGE: "demo",
@@ -111,6 +157,7 @@ describe("production release-stage configuration", () => {
         expect.stringContaining("MAINTAINFLOW_PRIVACY_CONTACT_EMAIL"),
         expect.stringContaining("MAINTAINFLOW_SUPPORT_CONTACT_EMAIL"),
         expect.stringContaining("DATABASE_URL"),
+        expect.stringContaining("MAINTAINFLOW_READINESS_PROBE_SECRET"),
         expect.stringContaining("CRON_SECRET"),
         expect.stringContaining("READINESS_RATE_LIMIT_SECRET"),
       ]),
@@ -286,6 +333,7 @@ describe("production release-stage configuration", () => {
       privateConfig({
         MAINTAINFLOW_ADMISSION_MODE: "open",
         DATABASE_URL: "postgres://db.example/maintainflow",
+        MAINTAINFLOW_READINESS_PROBE_SECRET: "short",
         CRON_SECRET: "short",
         READINESS_RATE_LIMIT_SECRET: "short",
         MAINTAINFLOW_CREDENTIAL_KEYRING: JSON.stringify({ v1: "not-a-key" }),
@@ -295,11 +343,15 @@ describe("production release-stage configuration", () => {
     expect(result.issues).toEqual(
       expect.arrayContaining([
         expect.stringContaining("sslmode"),
+        expect.stringContaining("MAINTAINFLOW_READINESS_PROBE_SECRET"),
         expect.stringContaining("CRON_SECRET"),
         expect.stringContaining("READINESS_RATE_LIMIT_SECRET"),
         expect.stringContaining("32 bytes"),
         expect.stringContaining("private_beta"),
       ]),
+    );
+    expect(result.issues).not.toContain(
+      "MAINTAINFLOW_READINESS_PROBE_SECRET, CRON_SECRET, and READINESS_RATE_LIMIT_SECRET must use pairwise distinct values.",
     );
   });
 
@@ -308,6 +360,7 @@ describe("production release-stage configuration", () => {
     const result = validateProductionConfig(
       privateConfig({
         DATABASE_URL: `postgres://user:${secret}@db.example/maintainflow`,
+        MAINTAINFLOW_READINESS_PROBE_SECRET: secret,
         CRON_SECRET: secret,
       }),
     );

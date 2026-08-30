@@ -6,6 +6,11 @@ import {
 } from "./public-build-metadata.mjs";
 
 const RELEASE_STAGES = new Set(["demo", "private_read", "live_write"]);
+const PRODUCTION_SECRET_KEYS = [
+  "MAINTAINFLOW_READINESS_PROBE_SECRET",
+  "CRON_SECRET",
+  "READINESS_RATE_LIMIT_SECRET",
+];
 
 function present(value) {
   return typeof value === "string" && value.trim().length > 0;
@@ -18,6 +23,18 @@ function requireValue(issues, env, key) {
 function requireSecret(issues, env, key, minimumLength = 32) {
   if (!present(env[key]) || env[key].length < minimumLength) {
     issues.push(`${key} must contain at least ${minimumLength} characters.`);
+  }
+}
+
+function requireDistinctSecrets(issues, env, keys, minimumLength = 32) {
+  const validValues = keys
+    .map((key) => env[key])
+    .filter((value) => present(value) && value.length >= minimumLength);
+
+  if (new Set(validValues).size !== validValues.length) {
+    issues.push(
+      "MAINTAINFLOW_READINESS_PROBE_SECRET, CRON_SECRET, and READINESS_RATE_LIMIT_SECRET must use pairwise distinct values.",
+    );
   }
 }
 
@@ -159,7 +176,9 @@ export function validateProductionConfig(env) {
   requireContactEmail(issues, env, "MAINTAINFLOW_SUPPORT_CONTACT_EMAIL");
   validateDatabaseUrl(issues, env.DATABASE_URL);
   requireSecret(issues, env, "READINESS_RATE_LIMIT_SECRET");
+  requireSecret(issues, env, "MAINTAINFLOW_READINESS_PROBE_SECRET");
   requireSecret(issues, env, "CRON_SECRET");
+  requireDistinctSecrets(issues, env, PRODUCTION_SECRET_KEYS);
 
   if (env.MAINTAINFLOW_ADMISSION_MODE === "open") {
     issues.push(

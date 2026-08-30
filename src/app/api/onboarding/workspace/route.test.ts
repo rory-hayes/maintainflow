@@ -167,6 +167,24 @@ describe("customer workspace onboarding", () => {
     expect(JSON.stringify(payload)).not.toContain("ads_client_secret_123");
   });
 
+  it("does not encrypt or persist a client key when provider validation fails", async () => {
+    testState.fetchLiveAdAccount.mockRejectedValue(
+      new Error("The provider rejected the candidate key."),
+    );
+
+    const response = await POST(
+      request({
+        organizationName: "Northstar Agency",
+        organizationType: "agency",
+        adsApiKey: "ads_client_secret_123",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(testState.encryptAdsApiKey).not.toHaveBeenCalled();
+    expect(testState.bootstrapWorkspace).not.toHaveBeenCalled();
+  });
+
   it("does not let a non-bootstrap user claim the environment account", async () => {
     const response = await POST(
       request({

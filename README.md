@@ -111,6 +111,10 @@ change and rollback, and requires approval before any external write.
   reason-backed dismissal and restore history, and observed outcomes without
   fabricating missing performance.
 - No Ads API credential or live advertiser account is included in this repo.
+- `/api/health` reports process liveness and deployment revision, while the
+  `MAINTAINFLOW_READINESS_PROBE_SECRET`-protected `/api/ready` separately fails
+  closed on missing revision provenance, migration drift, or required storage.
+  Neither endpoint contacts OpenAI.
 
 The account-free demo, first read-only pilot, and controlled live-write release
 are separated by explicit deployment gates documented in

@@ -546,7 +546,9 @@ export function MaintainFlowWorkbench({
                   ? "Live · writes on"
                   : "Live data · writes off"}
             </Badge>
-            {workspaceSetupState === "demo" || workspaceSetupState === "ready" ? (
+            {workspaceSetupState === "demo" ||
+            workspaceSetupState === "ready" ||
+            workspaceSetupState === "connection_error" ? (
               <Select
                 value={workspaceAccess?.accountId ?? account.id}
                 onValueChange={(accountId) => {
@@ -697,7 +699,8 @@ export function MaintainFlowWorkbench({
       <Tabs
         defaultValue={
           workspaceSetupState === "needs_setup" ||
-          workspaceSetupState === "unavailable"
+          workspaceSetupState === "unavailable" ||
+          workspaceSetupState === "connection_error"
             ? "workspace"
             : "review"
         }

@@ -65,9 +65,12 @@ clicks, and later conversions can relate to clicks near the end of the window.
 The outcome, full observation, and evaluation timestamp are inserted together.
 An atomic `FOR UPDATE SKIP LOCKED` claim gives each worker a 15-minute lease;
 the provider requests happen after that short transaction. Only the matching
-account and claim can persist the result, and a crashed/failed worker's row is
-retried after lease expiry. The result may recommend human rollback review, but
-the evaluator never calls an Ads mutation endpoint.
+account and claim can persist the result. A handled provider-read or persistence
+failure releases only that record's matching claim so a bounded scheduler retry
+can select it again. If the process is interrupted before it can release the
+claim, the row becomes eligible after the 15-minute lease expires. The result
+may recommend human rollback review, but the evaluator never calls an Ads
+mutation endpoint.
 
 The scheduler route returns HTTP 503 with a bounded `Retry-After` whenever any
 selected account or window fails, while retaining successfully completed work.

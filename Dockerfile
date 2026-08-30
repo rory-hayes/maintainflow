@@ -4,6 +4,7 @@
 # committed package-lock.json. This makes local, CI, and container installs use
 # the same dependency graph.
 ARG NODE_VERSION=24.13.0-slim
+ARG MAINTAINFLOW_BUILD_SHA=""
 
 FROM node:${NODE_VERSION} AS dependencies
 
@@ -30,9 +31,11 @@ WORKDIR /app
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL="/auth/sign-in"
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL="/auth/sign-up"
+ARG MAINTAINFLOW_BUILD_SHA=""
 ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
 ENV NEXT_PUBLIC_CLERK_SIGN_IN_URL=${NEXT_PUBLIC_CLERK_SIGN_IN_URL}
 ENV NEXT_PUBLIC_CLERK_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_SIGN_UP_URL}
+ENV MAINTAINFLOW_BUILD_SHA=${MAINTAINFLOW_BUILD_SHA}
 
 # Copy project dependencies from dependencies stage
 COPY --from=dependencies /app/node_modules ./node_modules
@@ -74,9 +77,12 @@ ENV HOSTNAME="0.0.0.0"
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL="/auth/sign-in"
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL="/auth/sign-up"
+ARG MAINTAINFLOW_BUILD_SHA
 ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
 ENV NEXT_PUBLIC_CLERK_SIGN_IN_URL=${NEXT_PUBLIC_CLERK_SIGN_IN_URL}
 ENV NEXT_PUBLIC_CLERK_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_SIGN_UP_URL}
+
+LABEL org.opencontainers.image.revision=${MAINTAINFLOW_BUILD_SHA}
 
 # Next.js collects completely anonymous telemetry data about general usage.
 # Learn more here: https://nextjs.org/telemetry

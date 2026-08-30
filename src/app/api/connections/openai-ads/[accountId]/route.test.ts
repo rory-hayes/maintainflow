@@ -144,6 +144,18 @@ describe("advertiser credential rotation", () => {
     expect(testState.rotateAdsApiCredential).not.toHaveBeenCalled();
   });
 
+  it("keeps the current credential active when provider validation fails", async () => {
+    testState.fetchLiveAdAccount.mockRejectedValue(
+      new Error("The provider rejected the replacement key."),
+    );
+
+    const response = await POST(request(), context);
+
+    expect(response.status).toBe(400);
+    expect(testState.encryptAdsApiKey).not.toHaveBeenCalled();
+    expect(testState.rotateAdsApiCredential).not.toHaveBeenCalled();
+  });
+
   it("does not validate a replacement key for a review-only operator", async () => {
     testState.requireAccountAccess.mockRejectedValue(
       new testState.AccountAccessForbiddenError("Review-only access."),

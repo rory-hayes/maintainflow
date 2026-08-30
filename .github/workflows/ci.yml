@@ -17,7 +17,7 @@ jobs:
   application:
     name: Application and provider contracts
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
@@ -42,7 +42,123 @@ jobs:
         run: npm run check:openai-ads-contract
 
       - name: Build production container
-        run: docker build --tag maintainflow-ads:ci .
+        run: >-
+          docker build
+          --build-arg MAINTAINFLOW_BUILD_SHA=${{ github.sha }}
+          --tag maintainflow-ads:ci
+          .
+
+      - name: Smoke-test production container, database readiness, and revision
+        run: |
+          set -euo pipefail
+          ci_cert_dir="$RUNNER_TEMP/maintainflow-postgres-tls"
+          ci_network="maintainflow-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          cleanup() {
+            docker logs maintainflow-ads-ci || true
+            docker logs maintainflow-postgres-ci || true
+            docker rm --force maintainflow-ads-ci || true
+            docker rm --force maintainflow-postgres-ci || true
+            docker network rm "$ci_network" || true
+          }
+          trap cleanup EXIT
+
+          mkdir -p "$ci_cert_dir"
+          openssl req -x509 -newkey rsa:2048 -sha256 -days 1 -nodes \
+            -keyout "$ci_cert_dir/ca.key" \
+            -out "$ci_cert_dir/ca.crt" \
+            -subj "/CN=MaintainFlow CI CA"
+          openssl req -newkey rsa:2048 -sha256 -nodes \
+            -keyout "$ci_cert_dir/server.key" \
+            -out "$ci_cert_dir/server.csr" \
+            -subj "/CN=postgres" \
+            -addext "subjectAltName=DNS:postgres,DNS:localhost,IP:127.0.0.1"
+          openssl x509 -req -sha256 -days 1 \
+            -in "$ci_cert_dir/server.csr" \
+            -CA "$ci_cert_dir/ca.crt" \
+            -CAkey "$ci_cert_dir/ca.key" \
+            -CAcreateserial \
+            -copy_extensions copy \
+            -out "$ci_cert_dir/server.crt"
+          postgres_uid="$(docker run --rm postgres:17 id -u postgres)"
+          postgres_gid="$(docker run --rm postgres:17 id -g postgres)"
+          chmod 600 "$ci_cert_dir/server.key"
+          sudo chown "$postgres_uid:$postgres_gid" \
+            "$ci_cert_dir/server.key" "$ci_cert_dir/server.crt"
+
+          docker network create "$ci_network"
+          docker run --detach --name maintainflow-postgres-ci \
+            --network "$ci_network" --network-alias postgres \
+            --publish 5432:5432 \
+            --env POSTGRES_USER=maintainflow \
+            --env POSTGRES_PASSWORD=maintainflow \
+            --env POSTGRES_DB=maintainflow \
+            --volume "$ci_cert_dir:/tls:ro" \
+            postgres:17 \
+            -c ssl=on \
+            -c ssl_cert_file=/tls/server.crt \
+            -c ssl_key_file=/tls/server.key
+          postgres_ready=false
+          for attempt in {1..30}; do
+            if docker exec maintainflow-postgres-ci \
+              pg_isready --username maintainflow --dbname maintainflow; then
+              postgres_ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$postgres_ready" = "true"
+
+          NODE_EXTRA_CA_CERTS="$ci_cert_dir/ca.crt" \
+            DATABASE_URL='postgres://maintainflow:maintainflow@localhost:5432/maintainflow?sslmode=verify-full' \
+            MAINTAINFLOW_APPLY_DATABASE_MIGRATIONS=true \
+            npm run db:migrate
+
+          docker run --detach --name maintainflow-ads-ci --publish 3000:3000 \
+            --network "$ci_network" \
+            --volume "$ci_cert_dir/ca.crt:/tls/ca.crt:ro" \
+            --env NODE_EXTRA_CA_CERTS=/tls/ca.crt \
+            --env MAINTAINFLOW_BUILD_SHA=0000000000000000000000000000000000000000 \
+            --env MAINTAINFLOW_RELEASE_STAGE=demo \
+            --env OPENAI_ADS_DATA_MODE=demo \
+            --env OPENAI_ADS_LIVE_WRITES_ENABLED=false \
+            --env OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED=false \
+            --env MAINTAINFLOW_APP_ORIGIN=https://maintainflow.test \
+            --env MAINTAINFLOW_LEGAL_ENTITY_NAME="MaintainFlow CI" \
+            --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.test \
+            --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.test \
+            --env DATABASE_URL='postgres://maintainflow:maintainflow@postgres:5432/maintainflow?sslmode=verify-full' \
+            --env CRON_SECRET=cccccccccccccccccccccccccccccccc \
+            --env READINESS_RATE_LIMIT_SECRET=rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr \
+            --env MAINTAINFLOW_READINESS_PROBE_SECRET=pppppppppppppppppppppppppppppppp \
+            --env MAINTAINFLOW_ADMISSION_MODE=private_beta \
+            --env MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED=false \
+            maintainflow-ads:ci
+          app_ready=false
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:3000/api/health > health.json; then
+              app_ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$app_ready" = "true"
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('health.json','utf8')); if (!value.ok || value.scope !== 'process_liveness' || value.revision !== process.env.GITHUB_SHA) process.exit(1);"
+
+          unauthorized_status="$(curl --silent --output unauthorized-ready.json \
+            --write-out '%{http_code}' http://127.0.0.1:3000/api/ready)"
+          test "$unauthorized_status" = "401"
+          dependencies_ready=false
+          for attempt in {1..20}; do
+            if curl --fail --silent \
+              --header 'Authorization: Bearer pppppppppppppppppppppppppppppppp' \
+              http://127.0.0.1:3000/api/ready > ready.json; then
+              dependencies_ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$dependencies_ready" = "true"
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('ready.json','utf8')); if (!value.ok || value.scope !== 'deployment_readiness' || value.stage !== 'demo' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 5) process.exit(1);"
 
   database:
     name: PostgreSQL integration

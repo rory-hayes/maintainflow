@@ -8,10 +8,12 @@ describe("process liveness route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    await expect(response.json()).resolves.toEqual({
+    const payload = await response.json();
+    expect(payload).toMatchObject({
       ok: true,
       service: "maintainflow-ads",
       scope: "process_liveness",
     });
+    expect(payload.revision).toMatch(/^(unknown|[a-f0-9]{7,64})$/);
   });
 });
