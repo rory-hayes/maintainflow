@@ -38,8 +38,8 @@ jobs:
       - name: Verify application
         run: npm run verify
 
-      - name: Install Chromium for browser acceptance
-        run: npx playwright install --with-deps chromium
+      - name: Install browsers for acceptance
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Check official OpenAI Ads contract drift
         run: npm run check:openai-ads-contract

@@ -24,6 +24,10 @@ import {
   Target,
   X,
 } from "lucide-react";
+import {
+  formatGroupedInteger,
+  formatUtcDateTime,
+} from "@/lib/formatting";
 import { toast } from "sonner";
 
 import { MaintainFlowBrand } from "@/components/maintainflow/brand";
@@ -341,7 +345,7 @@ export function MaintainFlowWorkbench({
       : syncWarning && dataSource === "live"
         ? "The last confirmed snapshot is visible, but live writes are locked until refresh succeeds"
         : syncedAt
-          ? `Last synced ${new Date(syncedAt).toLocaleString()}`
+          ? `Last synced ${formatUtcDateTime(syncedAt, { includeTimeZone: true })}`
           : dataSource === "live"
             ? "Live account connected; awaiting a confirmed snapshot"
             : simulatorLabel;
@@ -1485,12 +1489,12 @@ export function CampaignsView({
         />
         <MetricCard
           label="Click-attributed conversions"
-          value={totalConversions.toLocaleString()}
+          value={formatGroupedInteger(totalConversions)}
           detail="View-through shown separately"
         />
         <MetricCard
           label="Open recommendations"
-          value={recommendationCount.toLocaleString()}
+          value={formatGroupedInteger(recommendationCount)}
           detail="Only evidence-backed changes"
         />
       </div>
@@ -1551,7 +1555,7 @@ export function CampaignsView({
                       {currency.format(metrics?.spend ?? 0)}
                     </TableCell>
                     <TableCell className="text-right">
-                      {(metrics?.clicks ?? 0).toLocaleString()}
+                      {formatGroupedInteger(metrics?.clicks ?? 0)}
                     </TableCell>
                     <TableCell className="text-right">
                       {cpa === null ? "—" : currency.format(cpa)}
@@ -1724,13 +1728,13 @@ function ExperimentsView({
             </TableHeader>
             <TableBody>
               {auditEvents.map((event) => {
-                const parsedTime = Date.parse(event.occurredAt);
                 return (
                   <TableRow key={event.id}>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {Number.isNaN(parsedTime)
-                        ? event.occurredAt
-                        : new Date(parsedTime).toLocaleString()}
+                      {formatUtcDateTime(event.occurredAt, {
+                        fallback: event.occurredAt,
+                        includeTimeZone: true,
+                      })}
                     </TableCell>
                     <TableCell className="font-medium">{event.action}</TableCell>
                     <TableCell>{event.entity}</TableCell>

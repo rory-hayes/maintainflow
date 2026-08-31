@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { RecommendationDecisionHistoryDto } from "@/lib/audit/recommendation-decision";
+import { formatUtcDateTime } from "@/lib/formatting";
 
 type RecommendationDecisionHistoryProps = {
   records: RecommendationDecisionHistoryDto[];
@@ -33,11 +34,7 @@ type RecommendationDecisionHistoryProps = {
 };
 
 function decisionTime(value: string) {
-  return `${new Intl.DateTimeFormat("en-IE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(value))} UTC`;
+  return formatUtcDateTime(value, { includeTimeZone: true });
 }
 
 function actorSummary(

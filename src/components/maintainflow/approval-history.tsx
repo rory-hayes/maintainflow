@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, FileClock, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
+import { formatUtcDateTime } from "@/lib/formatting";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -219,7 +220,9 @@ export function ApprovalHistory({
                   return (
                     <TableRow key={record.id}>
                       <TableCell className="whitespace-nowrap text-muted-foreground">
-                        {new Date(record.createdAt).toLocaleString()}
+                        {formatUtcDateTime(record.createdAt, {
+                          includeTimeZone: true,
+                        })}
                       </TableCell>
                       <TableCell className="min-w-56">
                         <p className="font-medium">{record.recommendationTitle}</p>

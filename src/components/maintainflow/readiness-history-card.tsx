@@ -29,6 +29,7 @@ import {
   type ReadinessAuditHistoryEntry,
 } from "@/lib/readiness/history";
 import type { AccountAccess } from "@/lib/tenancy/schema";
+import { formatUtcDateTime } from "@/lib/formatting";
 import { cn } from "@/lib/utils";
 
 function verdictLabel(
@@ -40,11 +41,7 @@ function verdictLabel(
 }
 
 function recordedAtLabel(value: string) {
-  return new Intl.DateTimeFormat("en-IE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(value));
+  return formatUtcDateTime(value);
 }
 
 function urlLabel(value: string) {

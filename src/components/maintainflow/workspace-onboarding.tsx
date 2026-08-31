@@ -34,6 +34,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { formatUtcDateTime } from "@/lib/formatting";
 import {
   Field,
   FieldDescription,
@@ -169,15 +170,9 @@ const measurementStateContent: Record<
   },
 };
 
-const validationTimeFormatter = new Intl.DateTimeFormat("en-IE", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
-
 function formatValidationTime(value: string | null) {
   if (!value) return "No retained validation";
-  return validationTimeFormatter.format(new Date(value));
+  return formatUtcDateTime(value, { includeTimeZone: true });
 }
 
 export function WorkspaceOnboarding({

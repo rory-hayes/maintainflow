@@ -26,13 +26,15 @@ import {
 import { Progress } from "@/components/ui/progress";
 import type { Recommendation } from "@/lib/openai-ads/demo-data";
 import type { MonitoringWindowDto } from "@/lib/openai-ads/monitoring";
+import {
+  formatDecimal,
+  formatGroupedInteger,
+  formatUtcDate,
+} from "@/lib/formatting";
 import { cn } from "@/lib/utils";
 
 function dateLabel(value: string) {
-  return new Intl.DateTimeFormat("en-IE", {
-    dateStyle: "medium",
-    timeZone: "UTC",
-  }).format(new Date(value));
+  return formatUtcDate(value);
 }
 
 function windowStatusLabel(status: MonitoringWindowDto["status"]) {
@@ -83,14 +85,12 @@ function evidenceLabel(window: MonitoringWindowDto) {
 
 function conversionLabel(value: number | null) {
   if (value === null) return "Unavailable";
-  return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return formatDecimal(value);
 }
 
 function changeLabel(value: number | null) {
   if (value === null) return "Not calculated";
-  return `${value > 0 ? "+" : ""}${value.toLocaleString(undefined, {
-    maximumFractionDigits: 2,
-  })}%`;
+  return `${value > 0 ? "+" : ""}${formatDecimal(value)}%`;
 }
 
 function LiveMonitoringCard({ window }: { window: MonitoringWindowDto }) {
@@ -143,7 +143,9 @@ function LiveMonitoringCard({ window }: { window: MonitoringWindowDto }) {
               Baseline conversions
             </span>
             <span className="text-sm font-semibold">
-              {window.plan.baseline.clickAttributedConversions.toLocaleString()}
+              {formatGroupedInteger(
+                window.plan.baseline.clickAttributedConversions,
+              )}
             </span>
           </div>
           <div className="grid gap-1">

@@ -44,6 +44,7 @@ import type {
 import type { ConversionMeasurementReadiness } from "@/lib/openai-ads/measurement-readiness";
 import { createSampleStorefrontAudit } from "@/lib/readiness/demo-audit";
 import type { AccountAccess } from "@/lib/tenancy/schema";
+import { formatUtcDateTime } from "@/lib/formatting";
 import { cn } from "@/lib/utils";
 
 const statusOrder: Record<ReadinessCheck["status"], number> = {
@@ -65,11 +66,7 @@ function checkIcon(status: ReadinessCheck["status"]) {
 }
 
 function checkedAtLabel(value: string) {
-  return new Intl.DateTimeFormat("en-IE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(value));
+  return formatUtcDateTime(value);
 }
 
 export function ReadinessWorkbench({
@@ -559,7 +556,7 @@ function AuditResults({
             <Progress value={audit.score} />
             <p className="text-xs text-muted-foreground">
               {passed} of {audit.checks.length} checks passed · scanned{" "}
-              {new Date(audit.scannedAt).toLocaleString()}
+              {formatUtcDateTime(audit.scannedAt, { includeTimeZone: true })}
             </p>
           </CardContent>
         </Card>

@@ -1,4 +1,5 @@
 import type { ConversionMeasurementReadiness } from "../openai-ads/measurement-readiness";
+import { formatUtcDateTime } from "../formatting";
 import type { ConversionPayloadAudit } from "./conversions-api";
 import type { ProductFeedAudit } from "./product-feed";
 import type { ReadinessAudit, ReadinessCheck } from "./schema";
@@ -159,13 +160,7 @@ function escapeHtml(value: string | number) {
 }
 
 function formatUtc(value: string) {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "Unknown time";
-  return new Intl.DateTimeFormat("en-IE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(date);
+  return formatUtcDateTime(value, { fallback: "Unknown time" });
 }
 
 function statusClass(status: "pass" | "warning" | "fail") {
