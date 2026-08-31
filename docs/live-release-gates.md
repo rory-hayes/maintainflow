@@ -136,10 +136,11 @@ it never sends an OpenAI Ads API request.
 Apply
 [`database/004_creative_review_history.sql`](database/004_creative_review_history.sql)
 to retain creative review and delivery transitions between live syncs. This
-read-only history is not a write-authorization gate: if the migration is absent
-or unavailable, current Ads data can still load and eligible approval writes
-remain governed by the independent gates above. The Campaigns view reports the
-history limitation rather than inventing or reconstructing missing events.
+read-only history is not itself a write-authorization rule: the application can
+report its absence without inventing transitions, and the independent approval
+rules remain fail-closed. Deployment readiness nevertheless requires the exact
+`001` through `013` migration ledger, so an account-backed release must not be
+promoted while migration `004` is absent or unavailable.
 
 ## Recommendation dismissal migration
 
@@ -212,7 +213,12 @@ therefore shows sign-in only and provisions invited Clerk users directly. The
 Clerk tenant must also disable unrestricted hosted sign-up; that external
 setting is verified separately from this application gate.
 
-## Still required before public production
+## Still required before an account-backed public or live-write release
+
+These gates apply to `private_read` and `live_write`. A credential-free
+production `demo` has the separate, narrower requirements documented in
+[`release-stages.md`](release-stages.md) and must not be presented as live Ads
+evidence.
 
 Use [`production-operations.md`](production-operations.md) for the exact-revision
 hosted smoke, alert, containment, and recovery procedure.

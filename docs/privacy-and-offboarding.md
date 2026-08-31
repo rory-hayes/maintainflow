@@ -52,11 +52,20 @@ The dry run performs no database mutation. It writes a new mode-`0600` JSON
 export instead of printing customer records, refuses to overwrite existing
 evidence, excludes encrypted credential bytes and key material, inventories all
 account-scoped retained evidence, and prints a confirmation token bound to the
-complete current inventory. It does not emit a token while an Ads mutation is
-pending, ambiguous, or has a failed/unconfirmed rollback. Reconcile that record
-first. A legacy `connection_mode=environment` account is also blocked because a
-shared environment key cannot be removed account-by-account; rotate or remove it
+current inventory observed and locked by the command. It does not emit a token
+while an Ads mutation is pending, ambiguous, or has a failed/unconfirmed
+rollback. Reconcile that record first. A legacy `connection_mode=environment`
+account is also blocked because a shared environment key cannot be removed
+account-by-account; rotate or remove it
 at the host before continuing.
+
+Known concurrency limitation: the command does not yet share one lifecycle
+fence with a readiness audit that began before offboarding, and it does not
+drain a monitoring evaluation that already holds a claim and decrypted key.
+Either operation can persist evidence after the export snapshot. Until both
+paths are fixed and re-verified, the export is point-in-time evidence rather
+than proof that no later retained row can appear, and hosted offboarding must
+not be described as concurrency-complete.
 
 Review the export and agreement-specific retention scope. If the target and
 counts are correct, run apply with the unchanged token and a second new export
@@ -72,10 +81,11 @@ npm run customer:offboard -- \
   --confirm 'OFFBOARD:adacct_exact_provider_id:<dry-run-state-fingerprint>'
 ```
 
-Apply locks and re-inventories the exact account. A changed inventory invalidates
-the token. The export must be durably written before the transaction deletes all
-locally encrypted Ads and Conversions credential rows, removes every account
-access grant, marks the account disconnected, and inserts one non-secret
+Apply locks and re-inventories the exact account. A changed inventory among the
+rows covered by those locks invalidates the token. The export must be durably
+written before the transaction deletes all locally encrypted Ads and Conversions
+credential rows, removes every account access grant, marks the account
+disconnected, and inserts one non-secret
 `maintainflow_customer_lifecycle_records` completion record with the export hash
 and deletion counts. Organizations and memberships are preserved because an
 agency organization may serve other accounts. Approval, monitoring, creative,

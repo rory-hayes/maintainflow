@@ -88,7 +88,7 @@ remain transaction-safe: do not add `CREATE INDEX CONCURRENTLY`, `VACUUM`, or
 other statements PostgreSQL forbids inside a transaction.
 
 Never edit a migration after it has been applied. If behavior must change, add
-the next sequential file (for example, `013_description.sql`). If drift is
+the next sequential file (for example, `014_description.sql`). If drift is
 reported, restore the applied file byte-for-byte from the deployed revision and
 add a corrective migration; do not update or delete ledger rows by hand.
 
