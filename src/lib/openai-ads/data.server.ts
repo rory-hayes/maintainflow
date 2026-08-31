@@ -35,6 +35,7 @@ export const LIVE_SYNC_PROVIDER_LIMITS = Object.freeze({
   maxRequests: 256,
   maxResources: 10_000,
   maxConcurrency: 5,
+  maxDurationMs: 45_000,
 });
 
 export class AdsProviderBudgetExceededError extends Error {
@@ -52,6 +53,8 @@ type BudgetWaiter = {
 class LiveSyncProviderBudget implements AdsProviderRequestBudget {
   readonly #controller = new AbortController();
   readonly #waiters: BudgetWaiter[] = [];
+  readonly #deadline: Promise<never>;
+  readonly #deadlineTimer: ReturnType<typeof setTimeout>;
   #activeRequests = 0;
   #requestCount: number;
   #resourceCount = 0;
@@ -59,6 +62,18 @@ class LiveSyncProviderBudget implements AdsProviderRequestBudget {
 
   constructor(initialRequests: number) {
     this.#requestCount = initialRequests;
+    let rejectDeadline!: (reason: unknown) => void;
+    this.#deadline = new Promise<never>((_resolve, reject) => {
+      rejectDeadline = reject;
+    });
+    this.#deadlineTimer = setTimeout(() => {
+      const error = new AdsProviderBudgetExceededError(
+        `The live Ads sync exceeded its total wall-clock deadline of ${LIVE_SYNC_PROVIDER_LIMITS.maxDurationMs}ms, so no partial data was accepted.`,
+      );
+      this.abort(error);
+      rejectDeadline(error);
+    }, LIVE_SYNC_PROVIDER_LIMITS.maxDurationMs);
+    this.#deadlineTimer.unref?.();
   }
 
   get signal() {
@@ -74,6 +89,14 @@ class LiveSyncProviderBudget implements AdsProviderRequestBudget {
     this.#failureReason = reason;
     this.#controller.abort(reason);
     for (const waiter of this.#waiters.splice(0)) waiter.reject(reason);
+  }
+
+  runWithinDeadline<T>(operation: () => Promise<T>) {
+    return Promise.race([operation(), this.#deadline]);
+  }
+
+  dispose() {
+    clearTimeout(this.#deadlineTimer);
   }
 
   recordResources(count: number, resource: string) {
@@ -517,82 +540,86 @@ export async function fetchLiveWorkbenchData(
   const providerBudget = new LiveSyncProviderBudget(prefetchedAccount ? 1 : 0);
 
   try {
-    const [account, campaigns] = await allOrAbort(
-      providerBudget,
-      [
-        prefetchedAccount
-          ? Promise.resolve(prefetchedAccount)
-          : fetchLiveAdAccount(credential, providerBudget),
-        listCampaigns(credential, providerBudget),
-      ] as const,
-    );
-    providerBudget.recordResources(1, "advertiser account");
+    return await providerBudget.runWithinDeadline(async () => {
+      const [account, campaigns] = await allOrAbort(
+        providerBudget,
+        [
+          prefetchedAccount
+            ? Promise.resolve(prefetchedAccount)
+            : fetchLiveAdAccount(credential, providerBudget),
+          listCampaigns(credential, providerBudget),
+        ] as const,
+      );
+      providerBudget.recordResources(1, "advertiser account");
 
-    const [adGroups, eventSettings] = await allOrAbort(
-      providerBudget,
-      [
-        listAdGroups(campaigns, credential, providerBudget),
-        listConversionEventSettings(credential, providerBudget),
-      ] as const,
-    );
-    const dashboardWindow = currentMonthRange();
-    const recommendationWindow = trailingFullDaysRange(7);
+      const [adGroups, eventSettings] = await allOrAbort(
+        providerBudget,
+        [
+          listAdGroups(campaigns, credential, providerBudget),
+          listConversionEventSettings(credential, providerBudget),
+        ] as const,
+      );
+      const dashboardWindow = currentMonthRange();
+      const recommendationWindow = trailingFullDaysRange(7);
 
-    const [
-      ads,
-      campaignRows,
-      adGroupRows,
-      campaignConversions,
-      adGroupConversions,
-    ] = await allOrAbort(
-      providerBudget,
-      [
-        listAds(adGroups, credential, providerBudget),
-        getInsights(
-          "campaign",
-          dashboardWindow,
-          credential,
-          providerBudget,
-        ),
-        getInsights(
-          "ad_group",
-          recommendationWindow,
-          credential,
-          providerBudget,
-        ),
-        getConversionInsights(
-          "campaign",
-          campaigns.map((campaign) => campaign.id),
-          dashboardWindow,
-          credential,
-          providerBudget,
-        ),
-        getConversionInsights(
-          "ad_group",
-          adGroups.map((adGroup) => adGroup.id),
-          recommendationWindow,
-          credential,
-          providerBudget,
-        ),
-      ] as const,
-    );
+      const [
+        ads,
+        campaignRows,
+        adGroupRows,
+        campaignConversions,
+        adGroupConversions,
+      ] = await allOrAbort(
+        providerBudget,
+        [
+          listAds(adGroups, credential, providerBudget),
+          getInsights(
+            "campaign",
+            dashboardWindow,
+            credential,
+            providerBudget,
+          ),
+          getInsights(
+            "ad_group",
+            recommendationWindow,
+            credential,
+            providerBudget,
+          ),
+          getConversionInsights(
+            "campaign",
+            campaigns.map((campaign) => campaign.id),
+            dashboardWindow,
+            credential,
+            providerBudget,
+          ),
+          getConversionInsights(
+            "ad_group",
+            adGroups.map((adGroup) => adGroup.id),
+            recommendationWindow,
+            credential,
+            providerBudget,
+          ),
+        ] as const,
+      );
 
-    const syncedAt = new Date().toISOString();
-    return buildWorkbenchDataFromProviderSnapshot({
-      account,
-      campaigns,
-      adGroups,
-      ads,
-      campaignInsights: campaignRows,
-      adGroupInsights: adGroupRows,
-      campaignConversions,
-      adGroupConversions,
-      eventSettings,
-      recommendationWindow,
-      syncedAt,
+      const syncedAt = new Date().toISOString();
+      return buildWorkbenchDataFromProviderSnapshot({
+        account,
+        campaigns,
+        adGroups,
+        ads,
+        campaignInsights: campaignRows,
+        adGroupInsights: adGroupRows,
+        campaignConversions,
+        adGroupConversions,
+        eventSettings,
+        recommendationWindow,
+        syncedAt,
+      });
     });
   } catch (error) {
     providerBudget.abort(error);
     throw providerBudget.failureReason ?? error;
+  } finally {
+    providerBudget.dispose();
   }
 }

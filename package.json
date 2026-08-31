@@ -7,7 +7,7 @@
     "build": "next build --webpack && node scripts/public-build-metadata.mjs",
     "prestart": "node scripts/check-production-config.mjs --startup",
     "start": "next start",
-    "start:e2e": "npm start -- --hostname 127.0.0.1 --port 3100",
+    "start:e2e": "node scripts/start-local-standalone.mjs",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",

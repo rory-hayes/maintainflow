@@ -160,3 +160,40 @@ test("agency portfolio remains operable at a 390 by 844 viewport", async ({
   ).toBe(true);
   expect(browserErrors).toEqual([]);
 });
+
+test("storefront sample demonstrates a report without making a network audit", async ({
+  page,
+}) => {
+  const browserErrors = collectBrowserErrors(page);
+  const auditRequests: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/api/readiness/audit"
+    ) {
+      auditRequests.push(request.url());
+    }
+  });
+
+  await page.goto("/app?tab=readiness");
+  await page.getByRole("button", { name: "Load sample audit" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "Illustrative storefront result" }),
+  ).toBeVisible();
+  await expect(page.getByText("91/100", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("Sample data", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Product structured data", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open page" })).toHaveCount(0);
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download client report" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(
+    /^maintainflow-readiness-harbourhome-example-\d{4}-\d{2}-\d{2}\.html$/,
+  );
+  expect(auditRequests).toEqual([]);
+  expect(browserErrors).toEqual([]);
+});

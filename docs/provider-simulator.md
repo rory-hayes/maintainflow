@@ -52,7 +52,8 @@ the response, allowing MaintainFlow's no-retry and reconciliation behavior to
 be verified without pretending to know the external result.
 
 Full live-read simulations share one request-scoped usage budget: at most 256
-provider attempts, 10,000 returned resources, and five concurrent requests.
+provider attempts, 10,000 returned resources, five concurrent requests, and 45
+seconds for the complete sync.
 Those limits accommodate a moderate advertiser hierarchy while bounding the
 current per-campaign and per-ad-group fan-out. Larger accounts fail closed and
 need a deliberately redesigned sync (for example, durable incremental import),
@@ -65,6 +66,13 @@ requests are not retried. Any page, dataset, or budget failure aborts sibling
 reads and discards the entire assembled result, including conversion settings.
 No live response or in-flight promise is cached across requests, so advertiser
 data cannot be reused under another account or credential.
+
+The production parser also enforces response-byte ceilings independently of
+pagination: 16 MiB for a read and 1 MiB for a mutation acknowledgement. Tests
+cover both a declared oversized body and a chunked body with no
+`Content-Length`; an oversized apply or rollback response is not retained and
+enters manual reconciliation because the provider may already have committed
+the write.
 
 ```bash
 npm run test:ads-simulator

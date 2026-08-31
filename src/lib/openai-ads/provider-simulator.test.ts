@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import { adsApiRequest } from "./client.server";
 import {
+  AdsProviderBudgetExceededError,
   fetchLiveWorkbenchData,
   LIVE_SYNC_PROVIDER_LIMITS,
 } from "./data.server";
@@ -31,6 +32,7 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  vi.useRealTimers();
   vi.unstubAllEnvs();
 });
 
@@ -451,6 +453,61 @@ describe("OpenAI Ads provider simulator failure contracts", () => {
         request.path.startsWith("/v1/campaigns?"),
       ).map((request) => request.outcome),
     ).toEqual(["fault", "response", "response"]);
+  });
+
+  it("keeps one deadline across successful pages and bounded 429 retries", async () => {
+    vi.useFakeTimers();
+    const simulator = createOpenAIAdsProviderSimulator({
+      seed: largeCampaignSeed(30, 1),
+    });
+    const delayedCampaignPages = new Set<string>();
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      const page = `${url.pathname}${url.search}`;
+      if (
+        url.pathname === "/v1/campaigns" &&
+        !delayedCampaignPages.has(page)
+      ) {
+        delayedCampaignPages.add(page);
+        simulator.enqueueFault({
+          kind: "http",
+          status: 429,
+          method: "GET",
+          path: "/campaigns",
+          retryAfter: "2",
+        });
+      }
+      return simulator.fetch(request);
+    };
+
+    let settled = false;
+    const outcome = fetchLiveWorkbenchData(
+      undefined,
+      simulatorCredential,
+    )
+      .catch((error: unknown) => error)
+      .finally(() => {
+        settled = true;
+      });
+
+    await vi.advanceTimersByTimeAsync(
+      LIVE_SYNC_PROVIDER_LIMITS.maxDurationMs - 1,
+    );
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    const error = await outcome;
+    expect(error).toBeInstanceOf(AdsProviderBudgetExceededError);
+    expect(error).toHaveProperty(
+      "message",
+      expect.stringContaining(
+        `wall-clock deadline of ${LIVE_SYNC_PROVIDER_LIMITS.maxDurationMs}ms`,
+      ),
+    );
+    const requestsAtDeadline = simulator.requests.length;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(simulator.requests).toHaveLength(requestsAtDeadline);
   });
 
   it("discards a first page when the next page times out", async () => {

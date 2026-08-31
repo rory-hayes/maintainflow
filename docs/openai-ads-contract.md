@@ -1,6 +1,6 @@
 # OpenAI Ads API contract
 
-Verified against the official OpenAI Ads documentation on 30 August 2026.
+Verified against the official OpenAI Ads documentation on 31 August 2026.
 
 ## Authentication boundary
 
@@ -74,7 +74,11 @@ every documented cursor page with repeated-cursor and page-count safety limits;
 partial pagination is rejected rather than shown as a complete account. Read
 requests have a 15-second timeout, and the already verified account response is
 reused during the full sync. One request-scoped budget caps a sync at 256
-provider attempts, 10,000 returned resources, and five concurrent requests.
+provider attempts, 10,000 returned resources, five concurrent requests, and a
+45-second wall-clock deadline across the complete provider sync.
+Each successful JSON response is streamed through a 16 MiB byte limit before
+schema validation; both declared and chunked oversized bodies are cancelled and
+discarded. Provider error bodies remain unread and opaque.
 Safe `429` retries honour bounded `Retry-After` metadata; mutations and
 timeouts are never retried. A failure in any required dataset aborts the sync,
 so no partially assembled live account is returned or cached across requests.
@@ -204,6 +208,10 @@ the requested fields, or the requested active/paused state for an action. An
 invalid acknowledgement, unexpected success status, failed readback, or state
 mismatch becomes reconciliation-required because the non-idempotent write may
 already have taken effect; the mutation is never retried automatically.
+Mutation and rollback acknowledgements have a stricter 1 MiB streamed response
+limit. If that body is oversized or cannot be safely read after the request was
+sent, MaintainFlow stores no response body, marks the operation for manual
+reconciliation, and preserves the must-not-retry rule.
 
 Completed monitoring does not depend on a browser refresh. The protected daily
 scheduler resolves each selected advertiser's credential independently, claims

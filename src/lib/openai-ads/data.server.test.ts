@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -10,7 +10,10 @@ vi.mock("./client.server", () => ({
   adsApiRequest: adsApiRequestMock,
 }));
 
-import { fetchLiveWorkbenchData } from "./data.server";
+import {
+  fetchLiveWorkbenchData,
+  LIVE_SYNC_PROVIDER_LIMITS,
+} from "./data.server";
 import type { AdAccount, AdGroup, Campaign } from "./schema";
 
 const account: AdAccount = {
@@ -81,6 +84,10 @@ const ad = {
 describe("live workbench adapter", () => {
   beforeEach(() => {
     adsApiRequestMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("reuses the verified account and consumes every campaign page", async () => {
@@ -283,5 +290,38 @@ describe("live workbench adapter", () => {
     await expect(fetchLiveWorkbenchData(account)).rejects.toThrow(
       "Campaign pagination returned an invalid cursor",
     );
+  });
+
+  it("aborts the complete provider sync at one wall-clock deadline", async () => {
+    vi.useFakeTimers();
+    let providerSignal: AbortSignal | undefined;
+    adsApiRequestMock.mockImplementation(
+      (
+        _path: string,
+        _schema: unknown,
+        init?: { providerBudget?: { signal: AbortSignal } },
+      ) =>
+        new Promise((_resolve, reject) => {
+          providerSignal = init?.providerBudget?.signal;
+          const signal = providerSignal;
+          if (!signal) return;
+          const rejectFromAbort = () => reject(signal.reason);
+          if (signal.aborted) rejectFromAbort();
+          else signal.addEventListener("abort", rejectFromAbort, { once: true });
+        }),
+    );
+
+    const sync = fetchLiveWorkbenchData(account);
+    const rejection = expect(sync).rejects.toThrow(
+      `wall-clock deadline of ${LIVE_SYNC_PROVIDER_LIMITS.maxDurationMs}ms`,
+    );
+    await vi.advanceTimersByTimeAsync(
+      LIVE_SYNC_PROVIDER_LIMITS.maxDurationMs - 1,
+    );
+    expect(providerSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await rejection;
+    expect(providerSignal?.aborted).toBe(true);
   });
 });

@@ -8,6 +8,7 @@ import {
   CircleAlert,
   CircleX,
   ExternalLink,
+  FileText,
   Globe2,
   Loader2,
   Radar,
@@ -41,6 +42,7 @@ import type {
   ReadinessCheck,
 } from "@/lib/readiness/schema";
 import type { ConversionMeasurementReadiness } from "@/lib/openai-ads/measurement-readiness";
+import { createSampleStorefrontAudit } from "@/lib/readiness/demo-audit";
 import type { AccountAccess } from "@/lib/tenancy/schema";
 import { cn } from "@/lib/utils";
 
@@ -95,6 +97,7 @@ export function ReadinessWorkbench({
   const [history, setHistory] = useState(initialHistory);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sampleResult, setSampleResult] = useState(false);
 
   const priorityFixes = useMemo(
     () =>
@@ -113,6 +116,7 @@ export function ReadinessWorkbench({
     event.preventDefault();
     setLoading(true);
     setError(null);
+    setSampleResult(false);
 
     try {
       const response = await fetch("/api/readiness/audit", {
@@ -158,6 +162,17 @@ export function ReadinessWorkbench({
     }
   }
 
+  function loadSampleAudit() {
+    const result = createSampleStorefrontAudit();
+    setAudit(result);
+    setUrl(result.finalUrl);
+    setError(null);
+    setSampleResult(true);
+    toast.success("Sample storefront audit loaded", {
+      description: "Illustrative data only · no website request was made",
+    });
+  }
+
   return (
     <section className="mx-auto grid max-w-7xl gap-6 p-4 md:p-6 lg:p-8">
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
@@ -201,6 +216,16 @@ export function ReadinessWorkbench({
               )}
               {loading ? "Auditing page" : "Run readiness audit"}
             </Button>
+            <Button
+              className="h-11 md:min-w-40"
+              type="button"
+              variant="outline"
+              onClick={loadSampleAudit}
+              disabled={loading}
+            >
+              <FileText data-icon="inline-start" />
+              Load sample audit
+            </Button>
           </form>
           <p className="mt-3 text-xs text-muted-foreground">
             MaintainFlow makes a read-only request and does not submit, edit, or
@@ -208,6 +233,18 @@ export function ReadinessWorkbench({
           </p>
         </CardContent>
       </Card>
+
+      {sampleResult ? (
+        <Alert>
+          <FileText />
+          <AlertTitle>Illustrative storefront result</AlertTitle>
+          <AlertDescription>
+            This schema-valid fixture demonstrates the audit and downloadable
+            report without requesting a website. It is not saved to account
+            history and is not evidence about a real shop or OpenAI review.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {error ? (
         <Alert variant="destructive">
@@ -218,7 +255,11 @@ export function ReadinessWorkbench({
       ) : null}
 
       {audit ? (
-        <AuditResults audit={audit} priorityFixes={priorityFixes} />
+        <AuditResults
+          audit={audit}
+          priorityFixes={priorityFixes}
+          sample={sampleResult}
+        />
       ) : (
         <ReadinessEmptyState />
       )}
@@ -484,9 +525,11 @@ function ReadinessEmptyState() {
 function AuditResults({
   audit,
   priorityFixes,
+  sample,
 }: {
   audit: ReadinessAudit;
   priorityFixes: ReadinessCheck[];
+  sample: boolean;
 }) {
   const passed = audit.checks.filter((item) => item.status === "pass").length;
 
@@ -566,12 +609,16 @@ function AuditResults({
             <CardTitle className="text-base">Observed checks</CardTitle>
             <CardDescription className="break-all">{audit.finalUrl}</CardDescription>
           </div>
-          <Button variant="outline" size="sm" asChild>
-            <a href={audit.finalUrl} target="_blank" rel="noreferrer">
-              Open page
-              <ExternalLink data-icon="inline-end" />
-            </a>
-          </Button>
+          {sample ? (
+            <Badge variant="secondary">Sample data</Badge>
+          ) : (
+            <Button variant="outline" size="sm" asChild>
+              <a href={audit.finalUrl} target="_blank" rel="noreferrer">
+                Open page
+                <ExternalLink data-icon="inline-end" />
+              </a>
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2">
           {audit.checks.map((item) => {

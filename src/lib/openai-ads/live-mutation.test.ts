@@ -44,6 +44,7 @@ vi.mock("../tenancy/store.server", () => ({
 }));
 
 import {
+  ADS_RESPONSE_LIMITS,
   AdsMutationReconciliationRequiredError,
   AdsMutationRejectedError,
   adsApiRequest,
@@ -51,6 +52,7 @@ import {
   applyStoredRollback,
   buildAdsRequestHeaders,
   OpenAIAdsApiError,
+  OpenAIAdsResponseTooLargeError,
 } from "./client.server";
 import { demoRecommendations } from "./demo-data";
 import { buildAdsResourcePath } from "./resource-path";
@@ -440,6 +442,43 @@ describe("guarded live mutations", () => {
     );
   });
 
+  it("requires reconciliation without retaining an oversized apply response", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response("{}", {
+        status: 200,
+        headers: {
+          "Content-Length": String(ADS_RESPONSE_LIMITS.mutationBytes + 1),
+        },
+      }),
+    );
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId: "approval-test-123",
+      operation: "apply",
+      mustNotRetry: true,
+      persistenceWarning: false,
+    });
+    expect(approvalMocks.update).toHaveBeenCalledWith(
+      "approval-test-123",
+      "reconciliation_required",
+      {
+        error:
+          "OpenAI Ads API mutation response exceeded the bounded response limit and was not retained.",
+      },
+    );
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledOnce();
+  });
+
   it.each([408, 500, 502, 503, 504])(
     "treats HTTP %s after an apply request as uncertain and must-not-retry",
     async (status) => {
@@ -686,6 +725,57 @@ describe("guarded live mutations", () => {
     );
   });
 
+  it("requires reconciliation without retaining an oversized rollback response", async () => {
+    armLiveInfrastructure();
+    const approvalId = "00000000-0000-4000-8000-000000000001";
+    approvalMocks.claim.mockResolvedValue({
+      id: approvalId,
+      rollback: {
+        method: "POST",
+        path: "/ad_groups/adgrp_live",
+        body: {
+          bidding_config: {
+            billing_event_type: "click",
+            max_bid_micros: 250_000_000,
+          },
+        },
+      },
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response("{}", {
+        status: 200,
+        headers: {
+          "Content-Length": String(ADS_RESPONSE_LIMITS.mutationBytes + 1),
+        },
+      }),
+    );
+
+    const outcome = await applyStoredRollback({
+      approvalId,
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId,
+      operation: "rollback",
+      mustNotRetry: true,
+      persistenceWarning: false,
+    });
+    expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
+      approvalId,
+      "rollback_reconciliation_required",
+      {
+        error:
+          "OpenAI Ads API rollback response exceeded the bounded response limit and was not retained.",
+      },
+    );
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledOnce();
+  });
+
   it.each([408, 502])(
     "treats HTTP %s after a rollback request as uncertain and must-not-retry",
     async (status) => {
@@ -878,6 +968,54 @@ describe("guarded live reads", () => {
     await expect(
       adsApiRequest("/ad_account", z.object({ id: z.string() })),
     ).rejects.toThrow("did not return a confirmed response");
+  });
+
+  it("rejects a declared oversized read response before accepting its body", async () => {
+    process.env.OPENAI_ADS_API_KEY = "ads-test-key";
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response("{}", {
+        status: 200,
+        headers: {
+          "Content-Length": String(ADS_RESPONSE_LIMITS.readBytes + 1),
+        },
+      }),
+    );
+
+    const error = await adsApiRequest(
+      "/ad_account",
+      z.object({ id: z.string() }),
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(OpenAIAdsResponseTooLargeError);
+    expect(error).toMatchObject({ maximumBytes: ADS_RESPONSE_LIMITS.readBytes });
+  });
+
+  it("stops a chunked read once the streamed byte limit is crossed", async () => {
+    process.env.OPENAI_ADS_API_KEY = "ads-test-key";
+    let cancelled = false;
+    let emittedBytes = 0;
+    const chunk = new Uint8Array(256 * 1024).fill(32);
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(chunk);
+        emittedBytes += chunk.byteLength;
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(
+      adsApiRequest("/ad_account", z.object({ id: z.string() })),
+    ).rejects.toBeInstanceOf(OpenAIAdsResponseTooLargeError);
+    expect(emittedBytes).toBeGreaterThan(ADS_RESPONSE_LIMITS.readBytes);
+    expect(cancelled).toBe(true);
   });
 
   it("uses an explicit account credential without a process-wide Ads key", async () => {

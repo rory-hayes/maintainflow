@@ -42,6 +42,11 @@ const ADS_RATE_LIMIT_MAX_ATTEMPTS = 3;
 const ADS_RATE_LIMIT_BACKOFF_MS = 100;
 const ADS_RATE_LIMIT_MAX_DELAY_MS = 2_000;
 
+export const ADS_RESPONSE_LIMITS = {
+  readBytes: 16 * 1024 * 1024,
+  mutationBytes: 1024 * 1024,
+} as const;
+
 export function validateAdsMutation(mutation: AdsMutation) {
   let target: ReturnType<typeof parseAdsResourcePath>;
   try {
@@ -180,6 +185,18 @@ export class OpenAIAdsApiError extends Error {
   }
 }
 
+export class OpenAIAdsResponseTooLargeError extends Error {
+  readonly maximumBytes: number;
+
+  constructor(maximumBytes: number) {
+    super(
+      `The OpenAI Ads API response exceeded the ${maximumBytes}-byte safety limit.`,
+    );
+    this.name = "OpenAIAdsResponseTooLargeError";
+    this.maximumBytes = maximumBytes;
+  }
+}
+
 export class OpenAIAdsLiveReadUnavailableError extends Error {
   constructor() {
     super(
@@ -223,6 +240,62 @@ export class AdsMutationRejectedError extends Error {
 
 function isAmbiguousMutationStatus(status: number) {
   return status === 408 || status >= 500;
+}
+
+function cancelResponseBody(response: Response) {
+  try {
+    void response.body?.cancel().catch(() => undefined);
+  } catch {
+    // Cancellation is best-effort after the response has already been rejected.
+  }
+}
+
+async function readJsonResponseWithLimit(
+  response: Response,
+  maximumBytes: number,
+): Promise<unknown> {
+  const contentLength = response.headers.get("Content-Length")?.trim();
+  if (contentLength && /^\d+$/.test(contentLength)) {
+    const declaredBytes = Number(contentLength);
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes > maximumBytes) {
+      cancelResponseBody(response);
+      throw new OpenAIAdsResponseTooLargeError(maximumBytes);
+    }
+  }
+
+  if (!response.body) return null;
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let receivedBytes = 0;
+  let text = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      receivedBytes += value.byteLength;
+      if (receivedBytes > maximumBytes) {
+        try {
+          void reader.cancel().catch(() => undefined);
+        } catch {
+          // Preserve the bounded-response error if cancellation itself fails.
+        }
+        throw new OpenAIAdsResponseTooLargeError(maximumBytes);
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function parseRetryAfterMs(
@@ -551,9 +624,14 @@ export async function adsApiRequest<T>(
     }
 
     if (response.ok) {
-      const payload: unknown = await response.json().catch(() => null);
+      const payload = await readJsonResponseWithLimit(
+        response,
+        ADS_RESPONSE_LIMITS.readBytes,
+      );
       return schema.parse(payload);
     }
+
+    cancelResponseBody(response);
 
     const retryAfter = response.headers.get("Retry-After");
     const retryAfterMs = parseRetryAfterMs(retryAfter);
@@ -697,7 +775,35 @@ export async function applyAdsMutation(
     );
   }
 
-  const payload = await response.json().catch(() => null);
+  let payload: unknown;
+  try {
+    payload = await readJsonResponseWithLimit(
+      response,
+      ADS_RESPONSE_LIMITS.mutationBytes,
+    );
+  } catch (error) {
+    let persistenceWarning = false;
+    try {
+      await updateApprovalRecord(approvalId, "reconciliation_required", {
+        error:
+          error instanceof OpenAIAdsResponseTooLargeError
+            ? "OpenAI Ads API mutation response exceeded the bounded response limit and was not retained."
+            : "OpenAI Ads API mutation response could not be safely read and was not retained.",
+      });
+    } catch {
+      persistenceWarning = true;
+    }
+    log.error("ads.apply.reconciliation_required", {
+      status: response.status,
+      error,
+    });
+    throw new AdsMutationReconciliationRequiredError(
+      approvalId,
+      "apply",
+      `The Ads API response could not be safely confirmed. Approval ${approvalId} requires manual reconciliation and must not be retried automatically.`,
+      { cause: error, persistenceWarning },
+    );
+  }
 
   if (!response.ok && isAmbiguousMutationStatus(response.status)) {
     let persistenceWarning = false;
@@ -914,7 +1020,39 @@ export async function applyStoredRollback(options: {
     );
   }
 
-  const payload = await response.json().catch(() => null);
+  let payload: unknown;
+  try {
+    payload = await readJsonResponseWithLimit(
+      response,
+      ADS_RESPONSE_LIMITS.mutationBytes,
+    );
+  } catch (error) {
+    let persistenceWarning = false;
+    try {
+      await updateRollbackRecord(
+        approval.id,
+        "rollback_reconciliation_required",
+        {
+          error:
+            error instanceof OpenAIAdsResponseTooLargeError
+              ? "OpenAI Ads API rollback response exceeded the bounded response limit and was not retained."
+              : "OpenAI Ads API rollback response could not be safely read and was not retained.",
+        },
+      );
+    } catch {
+      persistenceWarning = true;
+    }
+    log.error("ads.rollback.reconciliation_required", {
+      status: response.status,
+      error,
+    });
+    throw new AdsMutationReconciliationRequiredError(
+      approval.id,
+      "rollback",
+      `The Ads API rollback response could not be safely confirmed. Approval ${approval.id} requires manual reconciliation and must not be retried automatically.`,
+      { cause: error, persistenceWarning },
+    );
+  }
   if (!response.ok && isAmbiguousMutationStatus(response.status)) {
     let persistenceWarning = false;
     try {

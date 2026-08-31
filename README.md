@@ -24,6 +24,10 @@ change and rollback, and requires approval before any external write.
 - The Readiness workflow audits a public landing page without an Ads API key. It
   checks OpenAI crawler rules, crawlability, indexability, product structured
   data, offer facts, metadata, and sitemap discovery.
+- The same screen includes a clearly labelled, schema-valid sample storefront
+  result for sales demonstrations. Loading it makes no network request, stores
+  no history, suppresses the external-page link, and keeps every limitation in
+  the downloadable client report.
 - Connected account owners and managers can retain the bounded readiness result
   and compare a repeat scan of the same URL. Query strings are removed before
   persistence, manual URLs remain explicitly unverified against provider
@@ -160,6 +164,9 @@ publish a stable schema for it; only the HTTP result is treated as evidence.
 The simulator command separately verifies stateful provider mutations and
 failure injection, the shared provider-to-workbench transformation, and the
 direct-merchant and five-client agency sales workspaces.
+The browser suite builds and serves the same standalone Next.js artifact used by
+the production container; it does not substitute `next start` for the configured
+standalone runtime.
 
 The explicit OpenAI contract check downloads the current official Ads OpenAPI
 document and compares all 88 reviewed operations, the base URL, authentication
@@ -190,6 +197,9 @@ The browser demo includes both a direct merchant and an explicitly labelled
 five-client agency portfolio. The agency entry point is
 `/app?tab=campaigns&account=adacct_sim_northstar`; it does not create tenant
 access, persist credentials, or contact OpenAI.
+The Readiness entry point also includes a `Load sample audit` action so the
+storefront findings and client-report export can be demonstrated without
+requesting a real shop URL.
 The read-only first-key procedure is recorded in
 [`docs/first-account-acceptance.md`](docs/first-account-acceptance.md).
 The reviewed OpenAPI manifest and drift workflow are documented in
