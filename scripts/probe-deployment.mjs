@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 
-const MAX_RESPONSE_BYTES = 64 * 1024;
+const MAX_JSON_RESPONSE_BYTES = 64 * 1024;
+const MAX_HTML_RESPONSE_BYTES = 512 * 1024;
 const REVISION_PATTERN = /^[a-f0-9]{7,64}$/i;
 const RELEASE_STAGES = new Set(["demo", "private_read", "live_write"]);
 
@@ -41,9 +42,13 @@ function deploymentOrigin(value) {
   return url.origin;
 }
 
-async function responseJson(response, label) {
+async function responseText(
+  response,
+  label,
+  maximumBytes = MAX_JSON_RESPONSE_BYTES,
+) {
   const declaredLength = Number(response.headers.get("content-length") ?? "0");
-  if (declaredLength > MAX_RESPONSE_BYTES) {
+  if (declaredLength > maximumBytes) {
     throw new DeploymentProbeError(`${label} returned an oversized response.`);
   }
   const reader = response.body?.getReader();
@@ -63,17 +68,53 @@ async function responseJson(response, label) {
     const { done, value } = chunk;
     if (done) break;
     receivedBytes += value.byteLength;
-    if (receivedBytes > MAX_RESPONSE_BYTES) {
+    if (receivedBytes > maximumBytes) {
       await reader.cancel().catch(() => undefined);
       throw new DeploymentProbeError(`${label} returned an oversized response.`);
     }
     body += decoder.decode(value, { stream: true });
   }
   body += decoder.decode();
+  return body;
+}
+
+async function responseJson(response, label) {
+  const body = await responseText(response, label);
   try {
     return JSON.parse(body);
   } catch {
     throw new DeploymentProbeError(`${label} did not return valid JSON.`);
+  }
+}
+
+async function assertHtmlSurface(
+  fetchImpl,
+  origin,
+  { path, label, requiredText, requiredAnyText = [] },
+) {
+  const response = await request(fetchImpl, `${origin}${path}`, label);
+  assertStatus(response, 200, label);
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.startsWith("text/html")) {
+    throw new DeploymentProbeError(`${label} did not return HTML.`);
+  }
+  const body = await responseText(
+    response,
+    label,
+    MAX_HTML_RESPONSE_BYTES,
+  );
+  if (requiredText.some((marker) => !body.includes(marker))) {
+    throw new DeploymentProbeError(
+      `${label} did not render the expected deployment surface.`,
+    );
+  }
+  if (
+    requiredAnyText.length > 0 &&
+    !requiredAnyText.some((marker) => body.includes(marker))
+  ) {
+    throw new DeploymentProbeError(
+      `${label} did not render the expected deployment state.`,
+    );
   }
 }
 
@@ -198,12 +239,51 @@ export async function probeDeployment(options) {
     );
   }
 
+  const publicSurfaces = [
+    {
+      path: "/",
+      label: "Public landing page",
+      requiredText: ["Make every ad change", "Audit your store"],
+    },
+    {
+      path: "/privacy",
+      label: "Privacy notice",
+      requiredText: ["Privacy at MaintainFlow", "Privacy requests"],
+    },
+    {
+      path: "/terms",
+      label: "Private beta terms",
+      requiredText: ["MaintainFlow service terms", "Support and notices"],
+    },
+    {
+      path: "/auth/sign-up",
+      label: "Registration access gate",
+      requiredText: ["MaintainFlow"],
+      requiredAnyText: [
+        "MaintainFlow is invitation-only",
+        "Account creation is not configured",
+      ],
+    },
+    {
+      path: "/app?tab=readiness",
+      label: "Readiness workspace",
+      requiredText: [
+        "Is your commerce stack ready for ChatGPT?",
+        "Load sample audit",
+      ],
+    },
+  ];
+  for (const surface of publicSurfaces) {
+    await assertHtmlSurface(fetchImpl, origin, surface);
+  }
+
   return {
     ok: true,
     service: "maintainflow-ads",
     stage: expectedStage,
     revision: expectedRevision,
     readinessChecks: readiness.checks.total,
+    surfaceChecks: publicSurfaces.length,
   };
 }
 

@@ -123,7 +123,8 @@ change and rollback, and requires approval before any external write.
 - Server operations emit allowlisted one-line JSON events that exclude raw error
   messages, stacks, customer identifiers, URLs, payloads, and secrets. A manual
   hosted-smoke workflow proves the exact revision, readiness authentication,
-  complete dependency checks, and one protected maintenance run.
+  complete dependency checks, one protected maintenance run, and the expected
+  landing, legal, access-gate, and Readiness application surfaces.
 
 The account-free demo, first read-only pilot, and controlled live-write release
 are separated by explicit deployment gates documented in

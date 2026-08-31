@@ -3,7 +3,7 @@ import { LockKeyhole } from "lucide-react";
 import { connection } from "next/server";
 
 import { MaintainFlowBrand } from "@/components/maintainflow/brand";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { isClerkConfigured, isPublicSignUpEnabled } from "@/lib/auth/config";
 
 export default async function SignInPage() {
@@ -27,7 +27,9 @@ export default async function SignInPage() {
               <LockKeyhole className="size-5" />
             </div>
             <div className="grid gap-1.5">
-              <CardTitle>Operator access is not configured</CardTitle>
+              <h1 className="font-semibold leading-none tracking-tight">
+                Operator access is not configured
+              </h1>
               <CardDescription className="leading-6">
                 The local demo remains available, but MaintainFlow will not show a
                 pretend sign-in or enable live Ads writes until Clerk credentials

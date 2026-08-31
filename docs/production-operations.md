@@ -50,17 +50,23 @@ CRON_SECRET='<dedicated cron secret>' \
 npm run probe:deployment
 ```
 
-The probe must prove all four gates in one run:
+The probe must prove all five gate groups in one run:
 
 1. `/api/health` returns the exact compiled revision;
 2. unauthenticated `/api/ready` returns 401;
 3. authenticated `/api/ready` returns the expected stage/revision with every
-   dependency check passed; and
+   dependency check passed;
 4. the protected monitoring route completes successfully, including bounded
-   cleanup.
+   cleanup; and
+5. the public landing page, privacy notice, private-beta terms, registration
+   access gate, and Readiness workspace all return bounded HTML containing
+   their expected product markers.
 
-The script never prints bearer secrets or response bodies. A 503 is deployment
-failure evidence, even if some maintenance or monitoring work completed.
+Those five public surface requests are deliberately unauthenticated, reject
+redirects, and fail if a different application is mounted at the configured
+origin. The script never prints bearer secrets or response bodies. A 503 is
+deployment failure evidence, even if some maintenance or monitoring work
+completed.
 
 ## Alert and retry policy
 

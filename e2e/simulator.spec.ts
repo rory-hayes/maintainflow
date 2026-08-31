@@ -197,3 +197,128 @@ test("storefront sample demonstrates a report without making a network audit", a
   expect(auditRequests).toEqual([]);
   expect(browserErrors).toEqual([]);
 });
+
+test("public, legal, and closed-access surfaces render deployment truth", async ({
+  page,
+}) => {
+  const browserErrors = collectBrowserErrors(page);
+
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: /Make every ad change/ }),
+  ).toBeVisible();
+
+  await page.goto("/privacy");
+  await expect(
+    page.getByRole("heading", { name: "Privacy at MaintainFlow" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "privacy@maintainflow.test" }),
+  ).toHaveAttribute("href", "mailto:privacy@maintainflow.test");
+
+  await page.goto("/terms");
+  await expect(
+    page.getByRole("heading", { name: "MaintainFlow service terms" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "support@maintainflow.test" }),
+  ).toHaveAttribute("href", "mailto:support@maintainflow.test");
+
+  await page.goto("/auth/sign-up");
+  await expect(
+    page.getByRole("heading", { name: "Account creation is not configured" }),
+  ).toBeVisible();
+
+  await page.goto("/auth/sign-in");
+  await expect(
+    page.getByRole("heading", { name: "Operator access is not configured" }),
+  ).toBeVisible();
+  expect(browserErrors).toEqual([]);
+});
+
+test("mobile workspace exposes a visible keyboard path into readiness", async ({
+  page,
+}) => {
+  const browserErrors = collectBrowserErrors(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/app?tab=readiness");
+  await expect(
+    page.getByRole("textbox", { name: "Public landing-page URL" }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  });
+
+  const focusNames: string[] = [];
+  const requiredFocusNames = new Set([
+    "Mobile ad account",
+    "Public landing-page URL",
+    "Run readiness audit",
+  ]);
+  for (let index = 0; index < 40 && requiredFocusNames.size > 0; index += 1) {
+    await page.keyboard.press("Tab");
+    const focusState = await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      const bounds = active?.getBoundingClientRect();
+      return {
+        name:
+          active?.getAttribute("aria-label") ??
+          active?.innerText?.trim().replace(/\s+/g, " ") ??
+          "",
+        visible:
+          Boolean(bounds) &&
+          (bounds?.width ?? 0) > 0 &&
+          (bounds?.height ?? 0) > 0,
+      };
+    });
+    expect(focusState.visible).toBe(true);
+    focusNames.push(focusState.name);
+    requiredFocusNames.delete(focusState.name);
+  }
+
+  expect(focusNames).toContain("Mobile ad account");
+  expect(focusNames).toContain("Public landing-page URL");
+  expect(focusNames).toContain("Run readiness audit");
+  expect(browserErrors).toEqual([]);
+});
+
+test("readiness fails closed when the browser origin is not the public deployment origin", async ({
+  page,
+}) => {
+  const browserErrors = collectBrowserErrors(page);
+  const externalRequests: string[] = [];
+  const readinessStatuses: number[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (!new Set(["127.0.0.1", "localhost"]).has(url.hostname)) {
+      externalRequests.push(request.url());
+    }
+  });
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname === "/api/readiness/audit") {
+      readinessStatuses.push(response.status());
+    }
+  });
+
+  await page.goto("/app?tab=readiness");
+  await page
+    .getByRole("textbox", { name: "Public landing-page URL" })
+    .fill("http://127.0.0.1/internal-only");
+  await page.getByRole("button", { name: "Run readiness audit" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "We could not audit that page" }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("tabpanel", { name: "Readiness" })
+      .getByText("Secure same-origin readiness requests are required."),
+  ).toBeVisible();
+  expect(externalRequests).toEqual([]);
+  expect(readinessStatuses).toEqual([403]);
+  expect(browserErrors).toEqual([
+    "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+  ]);
+});
