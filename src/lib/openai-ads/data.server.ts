@@ -5,17 +5,7 @@ import {
   type AdsApiCredential,
   type AdsProviderRequestBudget,
 } from "./client.server";
-import type { CampaignPerformance, Recommendation } from "./demo-data";
-import {
-  buildConversionMeasurementReadiness,
-  measurementReadyCampaignIds,
-  type ConversionMeasurementReadiness,
-} from "./measurement-readiness";
-import {
-  buildLiveRecommendations,
-  type AdsMeasurementWindow,
-  type ScopedAdGroup,
-} from "./recommendations";
+import type { AdsMeasurementWindow, ScopedAdGroup } from "./recommendations";
 import {
   adAccountSchema,
   adListResponseSchema,
@@ -26,21 +16,16 @@ import {
   insightListResponseSchema,
   type AdAccount,
   type Campaign,
-  type ConversionInsightRow,
   type ConversionEventSetting,
   type InsightRow,
   type ScopedAd,
 } from "./schema";
+import {
+  buildWorkbenchDataFromProviderSnapshot,
+  type LiveWorkbenchData,
+} from "./workbench-builder";
 
-export type LiveWorkbenchData = {
-  account: AdAccount;
-  campaigns: Campaign[];
-  ads: ScopedAd[];
-  performance: CampaignPerformance[];
-  recommendations: Recommendation[];
-  conversionMeasurement: ConversionMeasurementReadiness;
-  syncedAt: string;
-};
+export type { LiveWorkbenchData } from "./workbench-builder";
 
 const MAX_LIST_PAGES = 100;
 const AD_GROUP_FETCH_BATCH_SIZE = 5;
@@ -522,35 +507,6 @@ async function getConversionInsights(
   return response.data;
 }
 
-function combinePerformance(
-  rows: InsightRow[],
-  conversions: ConversionInsightRow[],
-  idField: "campaign_id" | "ad_group_id",
-): CampaignPerformance[] {
-  const conversionsById = new Map(
-    conversions.map((row) => [row.entity_id, row]),
-  );
-
-  return rows.flatMap((row) => {
-    const entityId = row[idField];
-    if (!entityId) return [];
-
-    const conversion = conversionsById.get(entityId);
-    return [
-      {
-        campaignId: entityId,
-        spend: row.spend ?? 0,
-        impressions: row.impressions ?? 0,
-        clicks: row.clicks ?? 0,
-        conversions:
-          conversion?.click_through_conversions ?? conversion?.conversions ?? 0,
-        viewThroughConversions: conversion?.view_through_conversions ?? 0,
-        trend: "Month to date",
-      },
-    ];
-  });
-}
-
 export async function fetchLiveWorkbenchData(
   prefetchedAccount?: AdAccount,
   credential?: AdsApiCredential,
@@ -621,43 +577,20 @@ export async function fetchLiveWorkbenchData(
       ] as const,
     );
 
-    const performance = combinePerformance(
-      campaignRows,
-      campaignConversions,
-      "campaign_id",
-    );
-    const adGroupPerformance = combinePerformance(
-      adGroupRows,
-      adGroupConversions,
-      "ad_group_id",
-    );
     const syncedAt = new Date().toISOString();
-    const conversionMeasurement = buildConversionMeasurementReadiness({
-      campaigns,
-      eventSettings,
-      checkedAt: syncedAt,
-    });
-    const recommendations = buildLiveRecommendations({
-      campaigns,
-      adGroups,
-      performance,
-      adGroupPerformance,
-      currencyCode: account.currency_code,
-      measurementWindow: recommendationWindow,
-      measurementReadyCampaignIds: measurementReadyCampaignIds(
-        conversionMeasurement,
-      ),
-    });
-
-    return {
+    return buildWorkbenchDataFromProviderSnapshot({
       account,
       campaigns,
+      adGroups,
       ads,
-      performance,
-      recommendations,
-      conversionMeasurement,
+      campaignInsights: campaignRows,
+      adGroupInsights: adGroupRows,
+      campaignConversions,
+      adGroupConversions,
+      eventSettings,
+      recommendationWindow,
       syncedAt,
-    };
+    });
   } catch (error) {
     providerBudget.abort(error);
     throw providerBudget.failureReason ?? error;

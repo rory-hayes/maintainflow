@@ -71,7 +71,7 @@ export function CreativeReviewHistory({
         </div>
         {dataSource === "demo" ? (
           <Badge className="self-start" variant="secondary">
-            Demo history
+            Simulator history
           </Badge>
         ) : ready ? (
           <Badge className="self-start" variant="outline">

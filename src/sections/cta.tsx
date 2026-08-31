@@ -3,6 +3,7 @@ import Image from "next/image";
 import ctaImage from "@/assets/images/cta-img.png";
 import { Button } from "@/components/ui/button";
 import { buildAppHref } from "@/lib/app-navigation";
+import { agencySimulatorEntryAccountId } from "@/lib/openai-ads/simulator-links";
 import Link from "next/link";
 
 const Cta = () => {
@@ -24,8 +25,15 @@ const Cta = () => {
                 Open the interactive demo
               </Link>
             </Button>
-            <Button className=" w-full" variant="transparent" disabled>
-              Human approval built in
+            <Button asChild className=" w-full" variant="transparent">
+              <Link
+                href={buildAppHref({
+                  tab: "campaigns",
+                  accountId: agencySimulatorEntryAccountId,
+                })}
+              >
+                Explore the five-client agency portfolio
+              </Link>
             </Button>
           </div>
         </div>

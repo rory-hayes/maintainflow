@@ -144,6 +144,7 @@ npm run typecheck
 npm run build
 npm test
 npm run test:ads-contract
+npm run test:ads-simulator
 npm run check:openai-ads-contract
 npm run check:production-config
 ```
@@ -155,6 +156,10 @@ projections, conversion request encoding, fail-closed account binding, and
 documented response schemas without a real advertiser credential. The
 Conversions API response body is deliberately ignored because OpenAI does not
 publish a stable schema for it; only the HTTP result is treated as evidence.
+
+The simulator command separately verifies stateful provider mutations and
+failure injection, the shared provider-to-workbench transformation, and the
+direct-merchant and five-client agency sales workspaces.
 
 The explicit OpenAI contract check downloads the current official Ads OpenAPI
 document and compares all 88 reviewed operations, the base URL, authentication
@@ -180,6 +185,11 @@ The Ads contract and source documentation are recorded in
 [`docs/openai-ads-contract.md`](docs/openai-ads-contract.md).
 The stateful local scenarios and their evidence boundary are recorded in
 [`docs/provider-simulator.md`](docs/provider-simulator.md).
+
+The browser demo includes both a direct merchant and an explicitly labelled
+five-client agency portfolio. The agency entry point is
+`/app?tab=campaigns&account=adacct_sim_northstar`; it does not create tenant
+access, persist credentials, or contact OpenAI.
 The read-only first-key procedure is recorded in
 [`docs/first-account-acceptance.md`](docs/first-account-acceptance.md).
 The reviewed OpenAPI manifest and drift workflow are documented in
@@ -198,6 +208,9 @@ The live-write interlocks and approval migration are documented in
 [`docs/live-release-gates.md`](docs/live-release-gates.md).
 The advertiser/agency access model is documented in
 [`docs/customer-tenancy.md`](docs/customer-tenancy.md).
+The dry-run-first customer export, access revocation, credential removal, and
+retention boundary are documented in
+[`docs/privacy-and-offboarding.md`](docs/privacy-and-offboarding.md).
 The post-approval lifecycle is documented in
 [`docs/monitoring-lifecycle.md`](docs/monitoring-lifecycle.md).
 The secret-safe event contract, exact-revision smoke probe, alert policy, and

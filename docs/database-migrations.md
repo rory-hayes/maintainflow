@@ -2,7 +2,7 @@
 
 `npm run db:migrate` is the only application migration command. It applies the
 SQL files in [`database/`](database/) by filename, beginning with the existing
-`001` through `012` set. It connects to the database named by `DATABASE_URL`; it
+`001` through `013` set. It connects to the database named by `DATABASE_URL`; it
 never creates, renames, or drops a database.
 
 ## Safety contract

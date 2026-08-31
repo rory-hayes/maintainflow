@@ -28,23 +28,66 @@ request export or deletion. Confirm whether readiness URLs, advertising data,
 approval evidence, and monitoring records contain personal or commercially
 sensitive information for that customer.
 
-## Current offboarding boundary
+## Executable private-pilot offboarding
 
-Self-service deletion is not implemented. Until it is, every private pilot must
-use a reviewed manual runbook that:
+Self-service deletion is not implemented. Private pilots use the operator-only
+`customer:offboard` command after verifying the requester and the exact Ads
+account, acting organization, and Clerk operator ID. The command never accepts a
+wildcard or list target. The acting operator must still be an active organization
+owner, and the organization must be the advertiser owner or the sole manager of
+an ownerless agency-managed account.
 
-1. verifies the requesting customer and affected organizations/accounts;
-2. removes Clerk and database access before handling stored data;
-3. exports only the customer-scoped records the agreement requires;
-4. revokes active Ads and Conversions ciphertext versions and instructs the
-   customer to revoke the source credentials in Ads Manager;
-5. deletes or retains account-scoped live workbench snapshots and refresh
-   metadata, approval, monitoring, creative, decision, readiness, and credential
-   records according to the signed schedule;
-6. records the operator, exact scope, completion time, exceptions, and restore
-   or backup-expiry implications.
+Load `DATABASE_URL` from the deployment secret manager. First run the command
+without `--apply`; dry-run is the default:
 
-Run the procedure on a disposable customer fixture and verify the export,
-authorization revocation, deletion scope, backup expiry, and audit evidence
-before treating offboarding as production-proven. Broader self-service release
-remains blocked until this lifecycle is automated and independently tested.
+```bash
+npm run customer:offboard -- \
+  --account-id 'adacct_exact_provider_id' \
+  --organization-id '00000000-0000-4000-8000-000000000000' \
+  --operator-id 'user_exact_clerk_id' \
+  --export-file '/absolute/new/path/customer-offboarding-dry-run.json'
+```
+
+The dry run performs no database mutation. It writes a new mode-`0600` JSON
+export instead of printing customer records, refuses to overwrite existing
+evidence, excludes encrypted credential bytes and key material, inventories all
+account-scoped retained evidence, and prints a confirmation token bound to the
+complete current inventory. It does not emit a token while an Ads mutation is
+pending, ambiguous, or has a failed/unconfirmed rollback. Reconcile that record
+first. A legacy `connection_mode=environment` account is also blocked because a
+shared environment key cannot be removed account-by-account; rotate or remove it
+at the host before continuing.
+
+Review the export and agreement-specific retention scope. If the target and
+counts are correct, run apply with the unchanged token and a second new export
+path:
+
+```bash
+npm run customer:offboard -- \
+  --account-id 'adacct_exact_provider_id' \
+  --organization-id '00000000-0000-4000-8000-000000000000' \
+  --operator-id 'user_exact_clerk_id' \
+  --export-file '/absolute/new/path/customer-offboarding-final.json' \
+  --apply \
+  --confirm 'OFFBOARD:adacct_exact_provider_id:<dry-run-state-fingerprint>'
+```
+
+Apply locks and re-inventories the exact account. A changed inventory invalidates
+the token. The export must be durably written before the transaction deletes all
+locally encrypted Ads and Conversions credential rows, removes every account
+access grant, marks the account disconnected, and inserts one non-secret
+`maintainflow_customer_lifecycle_records` completion record with the export hash
+and deletion counts. Organizations and memberships are preserved because an
+agency organization may serve other accounts. Approval, monitoring, creative,
+decision, readiness, and live-snapshot evidence is retained until its signed
+schedule authorizes a separate deletion; disconnected accounts are excluded from
+scheduled monitoring claims.
+
+The command cannot revoke the source credentials held by OpenAI. Immediately
+instruct the customer to revoke Ads and Conversions keys in Ads Manager, record
+that external confirmation with the pilot evidence, remove Clerk access where
+the organization itself is ending, and record backup-expiry implications. Test
+the full procedure on a disposable hosted customer fixture and independently
+verify the export hash, authorization denial, credential-row deletion, retained
+history, source-key revocation, and recovery evidence before treating hosted
+offboarding as production-proven.

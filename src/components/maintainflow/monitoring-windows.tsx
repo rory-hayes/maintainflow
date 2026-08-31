@@ -251,7 +251,7 @@ function DemoMonitoringCard({
           >
             {recommendation.status === "monitoring"
               ? "Monitoring"
-              : "Demo preview"}
+              : "Simulator preview"}
           </Badge>
         </div>
         <CardTitle className="pt-3 text-base">{recommendation.title}</CardTitle>

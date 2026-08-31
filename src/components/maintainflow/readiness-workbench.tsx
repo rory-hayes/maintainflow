@@ -356,7 +356,7 @@ export function ConversionMeasurementCard({
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
-            Demo mode does not fabricate event-setting evidence.
+            Simulator mode does not fabricate event-setting evidence.
           </p>
         )}
       </CardContent>

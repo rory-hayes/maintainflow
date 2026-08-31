@@ -119,6 +119,7 @@ import type {
   Recommendation,
   RecommendationStatus,
 } from "@/lib/openai-ads/demo-data";
+import type { SimulatedAccountOption } from "@/lib/openai-ads/simulated-workspaces";
 import { cn } from "@/lib/utils";
 
 type WorkbenchProps = {
@@ -155,6 +156,9 @@ type WorkbenchProps = {
   workspaceMessage?: string;
   conversionsConnection: ConversionsConnectionStatus;
   availableAccounts: AccountAccess[];
+  agencyClientAttachEnabled: boolean;
+  simulatedAccounts: SimulatedAccountOption[];
+  simulatorLabel: string;
   recommendationDecisionReady: boolean;
   recommendationDecisionError?: string;
   canManageRecommendationDecisions: boolean;
@@ -230,6 +234,9 @@ export function MaintainFlowWorkbench({
   workspaceMessage,
   conversionsConnection,
   availableAccounts,
+  agencyClientAttachEnabled,
+  simulatedAccounts,
+  simulatorLabel,
   recommendationDecisionReady,
   recommendationDecisionError,
   canManageRecommendationDecisions,
@@ -260,7 +267,7 @@ export function MaintainFlowWorkbench({
   const initialAuditEvent: AuditEvent | null = snapshotAvailable
     ? {
         id: "initial-review",
-        occurredAt: syncedAt ?? "Demo snapshot",
+        occurredAt: syncedAt ?? "Simulator snapshot",
         action: "Account review completed",
         entity: account.name,
         outcome: `${initialRecommendations.length} recommendations prepared`,
@@ -312,6 +319,72 @@ export function MaintainFlowWorkbench({
     (recommendation) => recommendation.status === "ready",
   ).length;
 
+  const connectionStatusTone =
+    syncError && dataSource === "live"
+      ? "border-destructive/30 bg-destructive/10 text-destructive"
+      : syncWarning && dataSource === "live"
+        ? "border-warning/30 bg-warning/10 text-warning-foreground"
+        : dataSource === "live"
+          ? "border-success/30 bg-success/10 text-success"
+          : "border-warning/30 bg-warning/10 text-warning-foreground";
+  const connectionStatusDot =
+    syncError && dataSource === "live"
+      ? "bg-destructive"
+      : syncWarning && dataSource === "live"
+        ? "bg-warning"
+        : dataSource === "live"
+          ? "bg-success"
+          : "bg-warning";
+  const connectionStatusTitle =
+    syncError && dataSource === "live"
+      ? "The connected account has no confirmed live snapshot"
+      : syncWarning && dataSource === "live"
+        ? "The last confirmed snapshot is visible, but live writes are locked until refresh succeeds"
+        : syncedAt
+          ? `Last synced ${new Date(syncedAt).toLocaleString()}`
+          : dataSource === "live"
+            ? "Live account connected; awaiting a confirmed snapshot"
+            : simulatorLabel;
+  const connectionStatusText =
+    workspaceSetupState === "needs_setup"
+      ? "Setup required"
+      : workspaceSetupState === "unavailable" && dataSource === "demo"
+        ? "Access locked"
+        : syncError && dataSource === "live"
+          ? "Live sync unavailable"
+          : syncWarning && dataSource === "live"
+            ? "Live data · stale"
+            : dataSource === "demo"
+              ? "Simulator data"
+              : writeMode === "live"
+                ? "Live · writes on"
+                : "Live data · writes off";
+  const accountSelectorVisible =
+    workspaceSetupState === "demo" ||
+    workspaceSetupState === "ready" ||
+    workspaceSetupState === "connection_error";
+  const selectableAccounts: SimulatedAccountOption[] =
+    dataSource === "demo"
+      ? simulatedAccounts
+      : availableAccounts.map((item) => ({
+          accountId: item.accountId,
+          accountName: item.accountName,
+        }));
+  const accountSelectorOptions =
+    selectableAccounts.length > 0
+      ? selectableAccounts
+      : [{ accountId: account.id, accountName: account.name }];
+  const selectedAccountId =
+    dataSource === "demo"
+      ? account.id
+      : workspaceAccess?.accountId ?? account.id;
+
+  function changeAccount(accountId: string) {
+    if (accountSelectorOptions.some((item) => item.accountId === accountId)) {
+      openAccount(accountId);
+    }
+  }
+
   function updateStatus(
     id: string,
     status: RecommendationStatus,
@@ -346,12 +419,32 @@ export function MaintainFlowWorkbench({
 
     setApplying(true);
     try {
+      if (dataSource === "demo") {
+        updateStatus(selected.id, "monitoring");
+        const message =
+          "Simulated approval recorded locally. No OpenAI Ads request was sent.";
+        addAuditEvent({
+          action: "Simulated approval recorded",
+          entity: selected.entityLabel,
+          outcome: message,
+          mode: "demo",
+        });
+        setApprovalOpen(false);
+        toast.success("Simulator approval recorded", {
+          description: message,
+        });
+        return;
+      }
+      if (!workspaceAccess) {
+        throw new Error("Select an authorized advertiser account first.");
+      }
+
       const response = await fetch("/api/ads/recommendations/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           recommendationId: selected.id,
-          accountId: workspaceAccess?.accountId,
+          accountId: workspaceAccess.accountId,
           recommendationSource: selected.source,
           recommendationFingerprint:
             recommendationApprovalFingerprints[selected.id],
@@ -365,23 +458,19 @@ export function MaintainFlowWorkbench({
 
       if (!response.ok) throw new Error(result.error ?? "Approval failed.");
 
-      if (result.mode !== "live") updateStatus(selected.id, "monitoring");
       addAuditEvent({
-        action: result.mode === "live" ? "Change applied" : "Approval recorded",
+        action: "Change applied",
         entity: selected.entityLabel,
         outcome:
           result.message ?? "Recommendation moved to its monitoring window.",
-        mode: result.mode === "live" ? "live" : "demo",
+        mode: "live",
       });
       setApprovalOpen(false);
-      toast.success(
-        result.mode === "live" ? "Change applied" : "Demo approval recorded",
-        {
-          description:
-            result.message ?? "The recommendation is now being monitored.",
-        },
-      );
-      if (result.mode === "live") router.refresh();
+      toast.success("Change applied", {
+        description:
+          result.message ?? "The recommendation is now being monitored.",
+      });
+      router.refresh();
     } catch (error) {
       toast.error("Unable to approve recommendation", {
         description:
@@ -498,12 +587,12 @@ export function MaintainFlowWorkbench({
 
     await new Promise((resolve) => window.setTimeout(resolve, 450));
     addAuditEvent({
-      action: "Demo review completed",
+      action: "Simulator review completed",
       entity: account.name,
       outcome: `${initialRecommendations.length} schema-valid checks evaluated.`,
       mode: "demo",
     });
-    toast.success("Demo review complete", {
+    toast.success("Simulator review complete", {
       description: `${initialRecommendations.length} schema-valid checks were evaluated without contacting the Ads API.`,
     });
     setReviewing(false);
@@ -516,7 +605,7 @@ export function MaintainFlowWorkbench({
     setDismissalOpen(false);
     setDismissalReason("");
     setAuditEvents(initialAuditEvent ? [initialAuditEvent] : []);
-    toast.success("Demo reset", {
+    toast.success("Simulator reset", {
       description: "Recommendation statuses and this session's audit trail were restored.",
     });
   }
@@ -532,67 +621,17 @@ export function MaintainFlowWorkbench({
               variant="outline"
               className={cn(
                 "hidden gap-1.5 md:inline-flex",
-                syncError && dataSource === "live"
-                  ? "border-destructive/30 bg-destructive/10 text-destructive"
-                  : syncWarning && dataSource === "live"
-                    ? "border-warning/30 bg-warning/10 text-warning-foreground"
-                  : dataSource === "live"
-                  ? "border-success/30 bg-success/10 text-success"
-                  : "border-warning/30 bg-warning/10 text-warning-foreground",
+                connectionStatusTone,
               )}
-              title={
-                syncError && dataSource === "live"
-                  ? "The connected account has no confirmed live snapshot"
-                  : syncWarning && dataSource === "live"
-                    ? "The last confirmed snapshot is visible, but live writes are locked until refresh succeeds"
-                  : syncedAt
-                  ? `Last synced ${new Date(syncedAt).toLocaleString()}`
-                  : dataSource === "live"
-                    ? "Live account connected; awaiting a confirmed snapshot"
-                    : "Local demo snapshot"
-              }
+              title={connectionStatusTitle}
             >
               <span
-                className={cn(
-                  "size-1.5 rounded-full",
-                  syncError && dataSource === "live"
-                    ? "bg-destructive"
-                    : syncWarning && dataSource === "live"
-                      ? "bg-warning"
-                    : dataSource === "live"
-                      ? "bg-success"
-                      : "bg-warning",
-                )}
+                className={cn("size-1.5 rounded-full", connectionStatusDot)}
               />
-              {workspaceSetupState === "needs_setup"
-                ? "Setup required"
-                : workspaceSetupState === "unavailable" && dataSource === "demo"
-                  ? "Access locked"
-                  : syncError && dataSource === "live"
-                    ? "Live sync unavailable"
-                    : syncWarning && dataSource === "live"
-                      ? "Live data · stale"
-                  : dataSource === "demo"
-                ? "Demo data"
-                : writeMode === "live"
-                  ? "Live · writes on"
-                  : "Live data · writes off"}
+              {connectionStatusText}
             </Badge>
-            {workspaceSetupState === "demo" ||
-            workspaceSetupState === "ready" ||
-            workspaceSetupState === "connection_error" ? (
-              <Select
-                value={workspaceAccess?.accountId ?? account.id}
-                onValueChange={(accountId) => {
-                  if (
-                    availableAccounts.some(
-                      (item) => item.accountId === accountId,
-                    )
-                  ) {
-                    openAccount(accountId);
-                  }
-                }}
-              >
+            {accountSelectorVisible ? (
+              <Select value={selectedAccountId} onValueChange={changeAccount}>
                 <SelectTrigger
                   className="hidden w-[190px] bg-background md:flex"
                   aria-label="Ad account"
@@ -601,15 +640,11 @@ export function MaintainFlowWorkbench({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {availableAccounts.length > 0 ? (
-                      availableAccounts.map((item) => (
-                        <SelectItem key={item.accountId} value={item.accountId}>
-                          {item.accountName}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <SelectItem value={account.id}>{account.name}</SelectItem>
-                    )}
+                    {accountSelectorOptions.map((item) => (
+                      <SelectItem key={item.accountId} value={item.accountId}>
+                        {item.accountName}
+                      </SelectItem>
+                    ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>
@@ -630,7 +665,9 @@ export function MaintainFlowWorkbench({
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <DropdownMenuItem disabled>
-                    {operatorAuthenticated ? "Authenticated operator" : "Demo operator"}
+                    {operatorAuthenticated
+                      ? "Authenticated operator"
+                      : "Simulator operator"}
                   </DropdownMenuItem>
                   {!operatorAuthenticated ? (
                     <DropdownMenuItem asChild>
@@ -653,17 +690,29 @@ export function MaintainFlowWorkbench({
                     </SignOutButton>
                   ) : null}
                 </DropdownMenuGroup>
-                {availableAccounts.length > 0 ? (
+                {(dataSource === "demo"
+                  ? simulatedAccounts.length > 1
+                  : availableAccounts.length > 0) ? (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuLabel>Advertiser accounts</DropdownMenuLabel>
+                    <DropdownMenuLabel>
+                      {dataSource === "demo"
+                        ? "Simulated advertiser accounts"
+                        : "Advertiser accounts"}
+                    </DropdownMenuLabel>
                     <DropdownMenuGroup>
-                      {availableAccounts.map((item) => (
+                      {(dataSource === "demo"
+                        ? simulatedAccounts
+                        : availableAccounts
+                      ).map((item) => (
                         <DropdownMenuItem
                           key={item.accountId}
                           onSelect={() => openAccount(item.accountId)}
                         >
-                          {item.accountId === workspaceAccess?.accountId ? (
+                          {item.accountId ===
+                          (dataSource === "demo"
+                            ? account.id
+                            : workspaceAccess?.accountId) ? (
                             <Check data-icon="inline-start" />
                           ) : null}
                           {item.accountName}
@@ -675,6 +724,41 @@ export function MaintainFlowWorkbench({
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+        </div>
+        <div
+          className="flex items-center gap-2 border-t px-4 py-2 md:hidden"
+          role="group"
+          aria-label="Mobile data source and account"
+        >
+          <Badge
+            variant="outline"
+            className={cn("shrink-0 gap-1.5", connectionStatusTone)}
+            title={connectionStatusTitle}
+          >
+            <span
+              className={cn("size-1.5 rounded-full", connectionStatusDot)}
+            />
+            {connectionStatusText}
+          </Badge>
+          {accountSelectorVisible ? (
+            <Select value={selectedAccountId} onValueChange={changeAccount}>
+              <SelectTrigger
+                className="h-8 min-w-0 flex-1 bg-background text-xs"
+                aria-label="Mobile ad account"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {accountSelectorOptions.map((item) => (
+                    <SelectItem key={item.accountId} value={item.accountId}>
+                      {item.accountName}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          ) : null}
         </div>
       </header>
 
@@ -926,6 +1010,7 @@ export function MaintainFlowWorkbench({
             connectedAccountName={workspaceAccountName}
             message={workspaceMessage}
             conversionsConnection={conversionsConnection}
+            agencyClientAttachEnabled={agencyClientAttachEnabled}
           />
         </TabsContent>
       </Tabs>
@@ -939,7 +1024,7 @@ export function MaintainFlowWorkbench({
               the rollback payload. {dataSource === "live" && writeMode !== "live"
                 ? "External changes are locked until every live-write gate is restored."
                 : writeMode === "demo"
-                  ? "No external write will be made in demo mode."
+                  ? "This is a simulator action. No external write will be made."
                   : "This live recommendation is connected for an external write."}
             </DialogDescription>
           </DialogHeader>
@@ -973,7 +1058,7 @@ export function MaintainFlowWorkbench({
               {dataSource === "live" && writeMode !== "live"
                 ? "External changes locked"
                 : writeMode === "demo"
-                  ? "Record demo approval"
+                  ? "Record simulator approval"
                   : "Approve and apply"}
             </Button>
           </DialogFooter>
@@ -1082,6 +1167,9 @@ function RecommendationDetail({
           <div className="grid max-w-3xl gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">{recommendation.entityLabel}</Badge>
+              {dataSource === "demo" ? (
+                <Badge variant="secondary">Simulator</Badge>
+              ) : null}
               {statusBadge(recommendation.status)}
             </div>
             <div className="grid gap-2">
@@ -1236,7 +1324,7 @@ function RecommendationDetail({
                     ? "Approve and apply"
                     : dataSource === "live"
                       ? "External changes locked"
-                      : "Approve in demo"}
+                      : "Approve in simulator"}
               </Button>
             </>
           )}
@@ -1571,7 +1659,7 @@ function ExperimentsView({
         </h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Every approved change gets a baseline, success rule, rollback rule, and
-          audit trail. Demo experiments are clearly separated from live results.
+          audit trail. Simulator experiments are clearly separated from live results.
         </p>
       </div>
 

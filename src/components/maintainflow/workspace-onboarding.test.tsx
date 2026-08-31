@@ -18,6 +18,13 @@ const access = {
   accountRole: "owner" as const,
 };
 
+const agencyAccess = {
+  ...access,
+  organizationName: "Northstar Agency",
+  organizationType: "agency" as const,
+  accountRole: "manager" as const,
+};
+
 const disconnectedMeasurement = {
   state: "not_connected" as const,
   source: null,
@@ -131,5 +138,69 @@ describe("Workspace measurement connection", () => {
     expect(html).toMatch(
       /<button[^>]*disabled=""[^>]*>[\s\S]*Connect measurement/,
     );
+  });
+});
+
+describe("Agency client account connection eligibility", () => {
+  it.each(["owner", "admin"] as const)(
+    "shows the attach control to a ready live agency %s",
+    (membershipRole) => {
+      const html = renderToStaticMarkup(
+        <WorkspaceOnboarding
+          state="ready"
+          access={{ ...agencyAccess, membershipRole }}
+          connectedAccountName={agencyAccess.accountName}
+          conversionsConnection={disconnectedMeasurement}
+          agencyClientAttachEnabled
+        />,
+      );
+
+      expect(html).toContain("Connect client account");
+    },
+  );
+
+  it.each([
+    {
+      name: "a direct advertiser",
+      state: "ready" as const,
+      candidate: access,
+      enabled: true,
+    },
+    {
+      name: "an agency analyst",
+      state: "ready" as const,
+      candidate: { ...agencyAccess, membershipRole: "analyst" as const },
+      enabled: true,
+    },
+    {
+      name: "an agency in connection recovery",
+      state: "connection_error" as const,
+      candidate: agencyAccess,
+      enabled: true,
+    },
+    {
+      name: "a simulator workspace",
+      state: "demo" as const,
+      candidate: undefined,
+      enabled: false,
+    },
+    {
+      name: "a signed-out workspace",
+      state: "ready" as const,
+      candidate: undefined,
+      enabled: false,
+    },
+  ])("does not show the attach control to $name", ({ state, candidate, enabled }) => {
+    const html = renderToStaticMarkup(
+      <WorkspaceOnboarding
+        state={state}
+        access={candidate}
+        connectedAccountName={candidate?.accountName}
+        conversionsConnection={disconnectedMeasurement}
+        agencyClientAttachEnabled={enabled}
+      />,
+    );
+
+    expect(html).not.toContain("Connect client account");
   });
 });

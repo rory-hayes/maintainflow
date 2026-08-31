@@ -8,7 +8,7 @@ hosted security boundary, and account ownership have all been verified.
 
 - Confirm the advertiser account ID and key ownership in OpenAI Ads Manager.
 - Use a staging deployment and a non-production database first.
-- Apply database migrations `001` through `012` in filename order and confirm
+- Apply database migrations `001` through `013` in filename order and confirm
   an `/api/ready` request authenticated with
   `MAINTAINFLOW_READINESS_PROBE_SECRET` reports the exact migration ledger as
   current.
@@ -41,11 +41,14 @@ bulk operation.
 1. Sign in through the configured Clerk tenant.
 2. Connect the account key through the workspace onboarding form so it is
    verified with `GET /ad_account`, encrypted, and stored for that account.
-3. Confirm account switching and read-only roles with separate test users.
-4. Compare campaigns, statuses, budgets, creatives, and a fixed insight window
+3. For an agency pilot, connect a second client from the Workspace screen and
+   confirm the provider-derived account appears in the selector. Retry the same
+   key once and confirm it is idempotent rather than a credential rotation.
+4. Confirm account switching and read-only roles with separate test users.
+5. Compare campaigns, statuses, budgets, creatives, and a fixed insight window
    with Ads Manager. Record discrepancies as provider-contract findings; do not
    normalize them away in the UI.
-5. Verify logs and error monitoring do not contain the key, authorization
+6. Verify logs and error monitoring do not contain the key, authorization
    header, raw conversion payload, or encrypted credential material.
 
 ## 4. Validate measurement separately

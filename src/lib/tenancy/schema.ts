@@ -24,6 +24,14 @@ export const workspaceBootstrapSchema = z
   })
   .strict();
 
+export const organizationIdSchema = z.string().uuid();
+
+export const advertiserAccountAttachSchema = z
+  .object({
+    adsApiKey: z.string().trim().min(10).max(4096),
+  })
+  .strict();
+
 export type OrganizationType = z.infer<typeof organizationTypeSchema>;
 export type MembershipRole = z.infer<typeof membershipRoleSchema>;
 export type AccountAccessRole = z.infer<typeof accountAccessRoleSchema>;

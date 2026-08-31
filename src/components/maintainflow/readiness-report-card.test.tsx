@@ -14,7 +14,7 @@ const accountMeasurement: ConversionMeasurementReadiness = {
   healthyCampaigns: 0,
   eventSettingCount: 0,
   checks: [],
-  message: "Demo mode does not fabricate event-setting evidence.",
+  message: "Simulator mode does not fabricate event-setting evidence.",
 };
 
 const productFeed: ProductFeedAudit = {

@@ -1,0 +1,11 @@
+# MaintainFlow Ads is currently maintained by one owner. This file makes the
+# intended review boundary explicit before branch protection is enabled.
+* @rory-hayes
+
+# Credential, authorization, deployment, and database boundaries always need
+# the repository owner in the review path.
+/src/lib/credentials/ @rory-hayes
+/src/lib/tenancy/ @rory-hayes
+/src/app/api/ @rory-hayes
+/docs/database/ @rory-hayes
+/.github/ @rory-hayes

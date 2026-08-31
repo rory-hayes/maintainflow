@@ -50,7 +50,7 @@ describe("recommendation decision history", () => {
       <RecommendationDecisionHistory records={[]} dataSource="demo" />,
     );
 
-    expect(html).toContain("No durable decisions in demo mode");
-    expect(html).toContain("Demo dismissals remain in the session audit");
+    expect(html).toContain("No durable decisions in simulator mode");
+    expect(html).toContain("Simulator dismissals remain in the session audit");
   });
 });

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ConnectClientAccountDialog } from "@/components/maintainflow/connect-client-account-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,7 @@ type WorkspaceOnboardingProps = {
   connectedAccountName?: string;
   message?: string;
   conversionsConnection: ConversionsConnectionStatus;
+  agencyClientAttachEnabled?: boolean;
 };
 
 const setupSteps = [
@@ -184,6 +186,7 @@ export function WorkspaceOnboarding({
   connectedAccountName,
   message,
   conversionsConnection,
+  agencyClientAttachEnabled = false,
 }: WorkspaceOnboardingProps) {
   const router = useRouter();
   const [organizationName, setOrganizationName] = useState("");
@@ -224,6 +227,11 @@ export function WorkspaceOnboarding({
     canManageConnection &&
     conversionsConnection.state !== "unavailable" &&
     conversionsConnection.validationEnabled;
+  const canAttachAgencyClient =
+    agencyClientAttachEnabled &&
+    state === "ready" &&
+    access?.organizationType === "agency" &&
+    (access.membershipRole === "owner" || access.membershipRole === "admin");
 
   function resetMeasurementConnection() {
     setPixelId("");
@@ -455,17 +463,25 @@ export function WorkspaceOnboarding({
                   </Badge>
                 </div>
                 <div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setRotationOpen(true)}
-                    disabled={!canManageConnection}
-                  >
-                    <KeyRound data-icon="inline-start" />
-                    {access.connectionMode === "vault"
-                      ? "Replace client key"
-                      : "Move to encrypted client key"}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setRotationOpen(true)}
+                      disabled={!canManageConnection}
+                    >
+                      <KeyRound data-icon="inline-start" />
+                      {access.connectionMode === "vault"
+                        ? "Replace client key"
+                        : "Move to encrypted client key"}
+                    </Button>
+                    {canAttachAgencyClient ? (
+                      <ConnectClientAccountDialog
+                        organizationId={access.organizationId}
+                        organizationName={access.organizationName}
+                      />
+                    ) : null}
+                  </div>
                   {!canManageConnection ? (
                     <p className="mt-2 text-xs text-muted-foreground">
                       Workspace owners and admins with account-management access

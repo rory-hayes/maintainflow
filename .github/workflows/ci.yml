@@ -21,10 +21,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Use Node.js 24
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: npm
@@ -37,6 +37,9 @@ jobs:
 
       - name: Verify application
         run: npm run verify
+
+      - name: Install Chromium for browser acceptance
+        run: npx playwright install --with-deps chromium
 
       - name: Check official OpenAI Ads contract drift
         run: npm run check:openai-ads-contract
@@ -98,7 +101,7 @@ jobs:
             -c ssl_cert_file=/tls/server.crt \
             -c ssl_key_file=/tls/server.key
           postgres_ready=false
-          for attempt in {1..30}; do
+          for _attempt in {1..30}; do
             if docker exec maintainflow-postgres-ci \
               pg_isready --username maintainflow --dbname maintainflow; then
               postgres_ready=true
@@ -134,7 +137,7 @@ jobs:
             --env MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED=false \
             maintainflow-ads:ci
           app_ready=false
-          for attempt in {1..20}; do
+          for _attempt in {1..20}; do
             if curl --fail --silent http://127.0.0.1:3000/api/health > health.json; then
               app_ready=true
               break
@@ -148,7 +151,7 @@ jobs:
             --write-out '%{http_code}' http://127.0.0.1:3000/api/ready)"
           test "$unauthorized_status" = "401"
           dependencies_ready=false
-          for attempt in {1..20}; do
+          for _attempt in {1..20}; do
             if curl --fail --silent \
               --header 'Authorization: Bearer pppppppppppppppppppppppppppppppp' \
               http://127.0.0.1:3000/api/ready > ready.json; then
@@ -159,6 +162,8 @@ jobs:
           done
           test "$dependencies_ready" = "true"
           node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('ready.json','utf8')); if (!value.ok || value.scope !== 'deployment_readiness' || value.stage !== 'demo' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 5) process.exit(1);"
+
+          PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npm run test:e2e
 
   database:
     name: PostgreSQL integration
@@ -181,10 +186,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Use Node.js 24
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: npm

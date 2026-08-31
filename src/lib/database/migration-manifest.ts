@@ -59,6 +59,11 @@ export const databaseMigrationManifest = [
     checksumSha256:
       "92f8f199449344347898fba8a4700a7e3d154b5d354089eca204ee329c57deae",
   },
+  {
+    name: "013_customer_offboarding.sql",
+    checksumSha256:
+      "7ebf1f6caed77042de0c2222fbe00f8f95fdac1ecfc0b297742b7deb1218a856",
+  },
 ] as const;
 
 export type DatabaseMigrationManifestEntry =

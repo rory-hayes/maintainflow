@@ -18,6 +18,10 @@ import {
   closeRuntimeDatabase,
   getRuntimeDatabase,
 } from "./client.server";
+import {
+  applyCustomerOffboarding,
+  prepareCustomerOffboarding,
+} from "../../../scripts/customer-offboarding.mjs";
 
 import {
   ApprovalTransitionError,
@@ -87,18 +91,23 @@ import type { ReadinessAudit } from "../readiness/schema";
 import type { AccountAccess } from "../tenancy/schema";
 import {
   AccountAccessForbiddenError,
+  AdvertiserAccountAttachConflictError,
   AdvertiserCredentialChangedError,
+  AdvertiserCredentialUnavailableError,
+  attachAdvertiserAccountToAgency,
   bootstrapWorkspace,
   getAccountAccess,
   getAdsApiKeyForAccount,
   getAdsCredentialMaterialForAccount,
   getConversionsApiCredentialForAccount,
   listAccountAccesses,
+  requireAgencyAccountAttachAuthorization,
   requireAccountAccess,
   rotateAdsApiCredential,
   rotateConversionsApiCredential,
   verifyConversionCredentialStore,
   verifyCredentialStore,
+  verifyAdvertiserAccountAttachStore,
   verifyTenancyStore,
   withAuthorizedAdsWriteFence,
 } from "../tenancy/store.server";
@@ -140,6 +149,7 @@ async function applyMigrations(sql: Sql) {
     "docs/database/010_conversion_credentials.sql",
     "docs/database/011_readiness_audit_history.sql",
     "docs/database/012_live_workbench_snapshots.sql",
+    "docs/database/013_customer_offboarding.sql",
   ];
   await sql.begin(async (transaction) => {
     for (const migrationFile of migrationFiles) {
@@ -324,6 +334,303 @@ describe("PostgreSQL customer and approval boundary", () => {
         connection: { mode: "environment" },
       }),
     ).rejects.toThrow("already claimed");
+  });
+
+  it("attaches an agency client idempotently without rotating its credential", async () => {
+    const accountId = "adacct_integration_agency_additional";
+    const initialKey = "ads-integration-agency-additional-initial";
+    const retryKey = "ads-integration-agency-additional-retry";
+
+    await expect(verifyAdvertiserAccountAttachStore()).resolves.toBe(true);
+    await expect(
+      requireAgencyAccountAttachAuthorization(
+        ownerOperatorId,
+        agencyAccess.organizationId,
+      ),
+    ).resolves.toMatchObject({
+      organizationId: agencyAccess.organizationId,
+      membershipRole: "owner",
+    });
+
+    const firstCredential = encryptAdsApiKey({
+      apiKey: initialKey,
+      externalAccountId: accountId,
+    });
+    const first = await attachAdvertiserAccountToAgency({
+      operatorId: ownerOperatorId,
+      organizationId: agencyAccess.organizationId,
+      accountId,
+      accountName: "Beacon Additional Client",
+      credential: firstCredential,
+      verifiedAt: new Date("2026-08-30T08:10:00.000Z"),
+    });
+    expect(first).toMatchObject({
+      created: true,
+      access: {
+        organizationId: agencyAccess.organizationId,
+        organizationType: "agency",
+        accountId,
+        connectionMode: "vault",
+        accountRole: "manager",
+      },
+    });
+    await expect(getAdsApiKeyForAccount(accountId)).resolves.toBe(initialKey);
+
+    const retry = await attachAdvertiserAccountToAgency({
+      operatorId: ownerOperatorId,
+      organizationId: agencyAccess.organizationId,
+      accountId,
+      accountName: "Provider Rename Must Not Mutate Stored Account",
+      credential: encryptAdsApiKey({
+        apiKey: retryKey,
+        externalAccountId: accountId,
+      }),
+      verifiedAt: new Date("2026-08-30T08:11:00.000Z"),
+    });
+    expect(retry).toMatchObject({
+      created: false,
+      access: {
+        accountId,
+        accountName: "Beacon Additional Client",
+      },
+    });
+    await expect(getAdsApiKeyForAccount(accountId)).resolves.toBe(initialKey);
+
+    const [stored] = await database<
+      {
+        advertiser_account_id: string;
+        status: string;
+        credential_count: number;
+        credential_id: string;
+      }[]
+    >`
+      select account.id as advertiser_account_id, account.status,
+        count(credential.id)::int as credential_count,
+        min(credential.id::text) as credential_id
+      from maintainflow_advertiser_accounts account
+      join maintainflow_advertiser_credentials credential
+        on credential.advertiser_account_id = account.id
+      where account.external_account_id = ${accountId}
+      group by account.id, account.status
+    `;
+    expect(stored).toMatchObject({
+      status: "active",
+      credential_count: 1,
+      credential_id: firstCredential.id,
+    });
+
+    const retryAttachment = () =>
+      attachAdvertiserAccountToAgency({
+        operatorId: ownerOperatorId,
+        organizationId: agencyAccess.organizationId,
+        accountId,
+        accountName: "Retry Must Preserve Existing State",
+        credential: encryptAdsApiKey({
+          apiKey: retryKey,
+          externalAccountId: accountId,
+        }),
+        verifiedAt: new Date("2026-08-30T08:11:30.000Z"),
+      });
+
+    await database`
+      update maintainflow_account_access set
+        role = 'viewer', updated_at = now()
+      where organization_id = ${agencyAccess.organizationId}
+        and advertiser_account_id = ${stored!.advertiser_account_id}
+    `;
+    await expect(retryAttachment()).rejects.toBeInstanceOf(
+      AdvertiserAccountAttachConflictError,
+    );
+    await database`
+      update maintainflow_account_access set
+        role = 'manager', updated_at = now()
+      where organization_id = ${agencyAccess.organizationId}
+        and advertiser_account_id = ${stored!.advertiser_account_id}
+    `;
+
+    await database`
+      update maintainflow_advertiser_accounts set
+        connection_mode = 'environment', updated_at = now()
+      where id = ${stored!.advertiser_account_id}
+    `;
+    await expect(retryAttachment()).rejects.toBeInstanceOf(
+      AdvertiserAccountAttachConflictError,
+    );
+    await database`
+      update maintainflow_advertiser_accounts set
+        connection_mode = 'vault', updated_at = now()
+      where id = ${stored!.advertiser_account_id}
+    `;
+
+    await database`
+      update maintainflow_advertiser_credentials set
+        status = 'revoked', revoked_at = now(), updated_at = now()
+      where id = ${firstCredential.id}
+    `;
+    await expect(retryAttachment()).rejects.toBeInstanceOf(
+      AdvertiserAccountAttachConflictError,
+    );
+    await database`
+      update maintainflow_advertiser_credentials set
+        status = 'active', revoked_at = null, updated_at = now()
+      where id = ${firstCredential.id}
+    `;
+
+    await database`
+      update maintainflow_advertiser_accounts set
+        owner_organization_id = ${advertiserAccess.organizationId},
+        updated_at = now()
+      where id = ${stored!.advertiser_account_id}
+    `;
+    await expect(retryAttachment()).rejects.toBeInstanceOf(
+      AdvertiserAccountAttachConflictError,
+    );
+    await database`
+      update maintainflow_advertiser_accounts set
+        owner_organization_id = null, updated_at = now()
+      where id = ${stored!.advertiser_account_id}
+    `;
+
+    await database`
+      update maintainflow_advertiser_accounts set
+        status = 'disconnected', updated_at = now()
+      where id = ${stored!.advertiser_account_id}
+    `;
+    await expect(retryAttachment()).rejects.toBeInstanceOf(
+      AdvertiserAccountAttachConflictError,
+    );
+    await database`
+      update maintainflow_advertiser_accounts set
+        status = 'active', updated_at = now()
+      where id = ${stored!.advertiser_account_id}
+    `;
+    await database`
+      insert into maintainflow_customer_lifecycle_records (
+        id, advertiser_account_id, external_account_id,
+        acting_organization_id, operator_id, action,
+        state_fingerprint, export_sha256, inventory_counts
+      ) values (
+        ${randomUUID()}, ${stored!.advertiser_account_id}, ${accountId},
+        ${agencyAccess.organizationId}, ${ownerOperatorId}, 'offboarded',
+        ${"a".repeat(64)}, ${"b".repeat(64)}, ${database.json({})}
+      )
+    `;
+    await expect(retryAttachment()).rejects.toBeInstanceOf(
+      AdvertiserAccountAttachConflictError,
+    );
+  });
+
+  it("reauthorizes the active agency owner or admin inside the attach transaction", async () => {
+    const accountId = "adacct_integration_stale_agency_authority";
+    await expect(
+      requireAgencyAccountAttachAuthorization(
+        ownerOperatorId,
+        advertiserAccess.organizationId,
+      ),
+    ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
+    await expect(
+      requireAgencyAccountAttachAuthorization(
+        ownerOperatorId,
+        agencyAccess.organizationId,
+      ),
+    ).resolves.toBeDefined();
+
+    await database`
+      update maintainflow_organization_memberships set
+        role = 'analyst', updated_at = now()
+      where organization_id = ${agencyAccess.organizationId}
+        and clerk_user_id = ${ownerOperatorId}
+    `;
+    try {
+      await expect(
+        attachAdvertiserAccountToAgency({
+          operatorId: ownerOperatorId,
+          organizationId: agencyAccess.organizationId,
+          accountId,
+          accountName: "Stale Agency Authority",
+          credential: encryptAdsApiKey({
+            apiKey: "ads-integration-stale-agency-authority",
+            externalAccountId: accountId,
+          }),
+          verifiedAt: new Date("2026-08-30T08:13:00.000Z"),
+        }),
+      ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
+    } finally {
+      await database`
+        update maintainflow_organization_memberships set
+          role = 'owner', updated_at = now()
+        where organization_id = ${agencyAccess.organizationId}
+          and clerk_user_id = ${ownerOperatorId}
+      `;
+    }
+    const rows = await database`
+      select id from maintainflow_advertiser_accounts
+      where external_account_id = ${accountId}
+    `;
+    expect(rows).toEqual([]);
+  });
+
+  it("serializes concurrent agency claims for one external advertiser account", async () => {
+    const competingAgency = await bootstrapWorkspace({
+      operatorId: ownerOperatorId,
+      organizationName: "Competing Integration Agency",
+      organizationType: "agency",
+      accountId: "adacct_integration_competing_agency_seed",
+      accountName: "Competing Agency Seed Client",
+      connection: {
+        mode: "vault",
+        credential: encryptAdsApiKey({
+          apiKey: "ads-integration-competing-agency-seed",
+          externalAccountId: "adacct_integration_competing_agency_seed",
+        }),
+        verifiedAt: new Date("2026-08-30T08:14:00.000Z"),
+      },
+    });
+    const accountId = "adacct_integration_concurrent_agency_claim";
+    const attempts = await Promise.allSettled(
+      [agencyAccess.organizationId, competingAgency.organizationId].map(
+        (organizationId, index) =>
+          attachAdvertiserAccountToAgency({
+            operatorId: ownerOperatorId,
+            organizationId,
+            accountId,
+            accountName: "Concurrent Agency Client",
+            credential: encryptAdsApiKey({
+              apiKey: `ads-integration-concurrent-agency-${index}`,
+              externalAccountId: accountId,
+            }),
+            verifiedAt: new Date("2026-08-30T08:15:00.000Z"),
+          }),
+      ),
+    );
+    const fulfilled = attempts.filter(
+      (attempt): attempt is PromiseFulfilledResult<Awaited<ReturnType<typeof attachAdvertiserAccountToAgency>>> =>
+        attempt.status === "fulfilled",
+    );
+    const rejected = attempts.filter(
+      (attempt): attempt is PromiseRejectedResult =>
+        attempt.status === "rejected",
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(fulfilled[0]?.value.created).toBe(true);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toBeInstanceOf(
+      AdvertiserAccountAttachConflictError,
+    );
+
+    const [stored] = await database<
+      { access_count: number; credential_count: number }[]
+    >`
+      select count(distinct account_access.organization_id)::int as access_count,
+        count(distinct credential.id)::int as credential_count
+      from maintainflow_advertiser_accounts account
+      join maintainflow_account_access account_access
+        on account_access.advertiser_account_id = account.id
+      join maintainflow_advertiser_credentials credential
+        on credential.advertiser_account_id = account.id
+      where account.external_account_id = ${accountId}
+    `;
+    expect(stored).toEqual({ access_count: 1, credential_count: 1 });
   });
 
   it("keeps recommendation dismissals account scoped, auditable, and reversible", async () => {
@@ -2020,5 +2327,256 @@ describe("PostgreSQL customer and approval boundary", () => {
         evaluatedAt: new Date(evaluatedAt.getTime() + 16 * 60 * 1_000),
       }),
     ).resolves.toBe(true);
+  });
+
+  it("offboards one exact customer account without exposing credentials or crossing tenants", async () => {
+    const offboardingAccountId = "adacct_integration_offboarding";
+    const offboardingAdsKey = "ads-integration-offboarding-plaintext";
+    const offboardingPixelId = "pixel-integration-offboarding";
+    const offboardingCapiKey = "capi-integration-offboarding-plaintext";
+    const access = await bootstrapWorkspace({
+      operatorId: ownerOperatorId,
+      organizationName: "Customer Leaving MaintainFlow",
+      organizationType: "advertiser",
+      accountId: offboardingAccountId,
+      accountName: "Offboarding Fixture",
+      connection: {
+        mode: "vault",
+        credential: encryptAdsApiKey({
+          apiKey: offboardingAdsKey,
+          externalAccountId: offboardingAccountId,
+        }),
+        verifiedAt: new Date("2026-08-30T19:00:00.000Z"),
+      },
+    });
+    await rotateConversionsApiCredential({
+      operatorId: ownerOperatorId,
+      accountId: offboardingAccountId,
+      access,
+      credential: encryptConversionsApiCredential({
+        credential: {
+          pixelId: offboardingPixelId,
+          apiKey: offboardingCapiKey,
+        },
+        externalAccountId: offboardingAccountId,
+      }),
+      validatedAt: new Date("2026-08-30T19:05:00.000Z"),
+      validation: { providerStatus: 200, eventCount: 1 },
+    });
+    await addReviewOnlyAccess(offboardingAccountId);
+
+    const source = getDemoRecommendation("rec_bid_20");
+    if (!source) throw new Error("The offboarding fixture is missing.");
+    const unresolvedApprovalId = await createApprovalRecord({
+      accountId: offboardingAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: { ...source, id: "rec_offboarding_unresolved" },
+      access,
+    });
+    const blockedPlan = await prepareCustomerOffboarding(database, {
+      accountId: offboardingAccountId,
+      organizationId: access.organizationId,
+      operatorId: ownerOperatorId,
+      generatedAt: new Date("2026-08-30T19:10:00.000Z"),
+    });
+    expect(blockedPlan.confirmationToken).toBeNull();
+    expect(blockedPlan.blockers).toEqual([
+      expect.stringMatching(/terminal reconciliation state/i),
+    ]);
+    await updateApprovalRecord(unresolvedApprovalId, "failed", {
+      error: "Provider rejected the request before applying it.",
+    });
+
+    const appliedApprovalId = await createApprovalRecord({
+      accountId: offboardingAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: { ...source, id: "rec_offboarding_applied" },
+      access,
+    });
+    await updateApprovalRecord(appliedApprovalId, "applied", {
+      response: { id: source.entityId, status: "ACTIVE" },
+    });
+    await database`
+      update ads_approval_records set
+        monitoring_started_at = ${new Date("2026-08-20T00:00:00.000Z")},
+        monitoring_ends_at = ${new Date("2026-08-27T00:00:00.000Z")}
+      where id = ${appliedApprovalId}
+    `;
+
+    const plan = await prepareCustomerOffboarding(database, {
+      accountId: offboardingAccountId,
+      organizationId: access.organizationId,
+      operatorId: ownerOperatorId,
+      generatedAt: new Date("2026-08-30T19:15:00.000Z"),
+    });
+    expect(plan.blockers).toEqual([]);
+    expect(plan.confirmationToken).toMatch(
+      /^OFFBOARD:adacct_integration_offboarding:[a-f0-9]{64}$/,
+    );
+    expect(plan.inventory).toMatchObject({
+      accessGrants: 2,
+      advertiserCredentials: 1,
+      conversionCredentials: 1,
+      approvals: 2,
+      unresolvedApprovals: 0,
+    });
+    expect(plan.serializedExport).not.toContain(offboardingAdsKey);
+    expect(plan.serializedExport).not.toContain(offboardingCapiKey);
+    expect(plan.serializedExport).not.toContain(offboardingPixelId);
+    expect(plan.serializedExport).not.toMatch(
+      /ciphertext|initialization_vector|authentication_tag/i,
+    );
+
+    let wrongTokenExportCalled = false;
+    await expect(
+      applyCustomerOffboarding(database, {
+        accountId: offboardingAccountId,
+        organizationId: access.organizationId,
+        operatorId: ownerOperatorId,
+        confirmationToken: `${plan.confirmationToken}-wrong`,
+        writeValidatedExport: async () => {
+          wrongTokenExportCalled = true;
+        },
+      }),
+    ).rejects.toThrow(/does not match/i);
+    expect(wrongTokenExportCalled).toBe(false);
+    await expect(
+      getAdsApiKeyForAccount(offboardingAccountId),
+    ).resolves.toBe(offboardingAdsKey);
+    await expect(
+      requireAccountAccess(viewerOperatorId, offboardingAccountId, "read"),
+    ).resolves.toMatchObject({ accountRole: "viewer" });
+
+    let committedExport = "";
+    let releaseValidatedExport!: () => void;
+    let markValidatedExportStarted!: () => void;
+    const validatedExportRelease = new Promise<void>((resolve) => {
+      releaseValidatedExport = resolve;
+    });
+    const validatedExportStarted = new Promise<void>((resolve) => {
+      markValidatedExportStarted = resolve;
+    });
+    const offboarding = applyCustomerOffboarding(database, {
+      accountId: offboardingAccountId,
+      organizationId: access.organizationId,
+      operatorId: ownerOperatorId,
+      confirmationToken: plan.confirmationToken,
+      generatedAt: new Date("2026-08-30T19:20:00.000Z"),
+      writeValidatedExport: async ({ serialized }: { serialized: string }) => {
+        committedExport = serialized;
+        markValidatedExportStarted();
+        await validatedExportRelease;
+      },
+    });
+    await validatedExportStarted;
+    const concurrentRotation = rotateAdsApiCredential({
+      operatorId: ownerOperatorId,
+      accountId: offboardingAccountId,
+      access,
+      credential: encryptAdsApiKey({
+        apiKey: "must-not-land-after-offboarding",
+        externalAccountId: offboardingAccountId,
+      }),
+      verifiedAt: new Date("2026-08-30T19:21:00.000Z"),
+    });
+    let concurrentOutcome: "blocked" | "settled" = "blocked";
+    try {
+      concurrentOutcome = await Promise.race([
+        concurrentRotation.then(
+          () => "settled" as const,
+          () => "settled" as const,
+        ),
+        new Promise<"blocked">((resolve) =>
+          setTimeout(() => resolve("blocked"), 100),
+        ),
+      ]);
+    } finally {
+      releaseValidatedExport();
+    }
+    expect(concurrentOutcome).toBe("blocked");
+    const result = await offboarding;
+    await expect(concurrentRotation).rejects.toBeInstanceOf(
+      AccountAccessForbiddenError,
+    );
+    expect(committedExport).toContain(offboardingAccountId);
+    expect(committedExport).not.toContain(offboardingAdsKey);
+    expect(result.deleted).toEqual({
+      accountAccess: 2,
+      advertiserCredentials: 1,
+      conversionCredentials: 1,
+    });
+    expect(result.providerRevocationRequired).toBe(true);
+
+    const [stored] = await database<
+      {
+        status: string;
+        access_count: number;
+        ads_credential_count: number;
+        conversion_credential_count: number;
+        approval_count: number;
+        lifecycle_count: number;
+        export_sha256: string;
+        provider_revocation_required: boolean;
+      }[]
+    >`
+      select account.status,
+        (select count(*)::int from maintainflow_account_access
+          where advertiser_account_id = account.id) as access_count,
+        (select count(*)::int from maintainflow_advertiser_credentials
+          where advertiser_account_id = account.id) as ads_credential_count,
+        (select count(*)::int from maintainflow_conversion_credentials
+          where advertiser_account_id = account.id) as conversion_credential_count,
+        (select count(*)::int from ads_approval_records
+          where account_id = account.external_account_id) as approval_count,
+        (select count(*)::int from maintainflow_customer_lifecycle_records
+          where advertiser_account_id = account.id) as lifecycle_count,
+        lifecycle.export_sha256, lifecycle.provider_revocation_required
+      from maintainflow_advertiser_accounts account
+      join maintainflow_customer_lifecycle_records lifecycle
+        on lifecycle.advertiser_account_id = account.id
+      where account.external_account_id = ${offboardingAccountId}
+    `;
+    expect(stored).toMatchObject({
+      status: "disconnected",
+      access_count: 0,
+      ads_credential_count: 0,
+      conversion_credential_count: 0,
+      approval_count: 2,
+      lifecycle_count: 1,
+      export_sha256: result.exportSha256,
+      provider_revocation_required: true,
+    });
+    await expect(
+      requireAccountAccess(ownerOperatorId, offboardingAccountId, "read"),
+    ).rejects.toBeInstanceOf(AccountAccessForbiddenError);
+    await expect(
+      listDueMonitoringAccountIds(new Date("2026-08-30T19:30:00.000Z")),
+    ).resolves.not.toContain(offboardingAccountId);
+    await expect(
+      claimDueMonitoringRecords({
+        accountId: offboardingAccountId,
+        claimId: randomUUID(),
+        now: new Date("2026-08-30T19:30:00.000Z"),
+        limit: 5,
+      }),
+    ).resolves.toEqual([]);
+    await expect(
+      getAdsApiKeyForAccount(offboardingAccountId),
+    ).rejects.toBeInstanceOf(AdvertiserCredentialUnavailableError);
+    await expect(
+      getAdsApiKeyForAccount(advertiserAccountId),
+    ).resolves.toBe(replacementAdvertiserKey);
+    await expect(
+      requireAccountAccess(ownerOperatorId, advertiserAccountId, "write"),
+    ).resolves.toMatchObject({ accountId: advertiserAccountId });
+    await expect(
+      applyCustomerOffboarding(database, {
+        accountId: offboardingAccountId,
+        organizationId: access.organizationId,
+        operatorId: ownerOperatorId,
+        confirmationToken: plan.confirmationToken,
+        writeValidatedExport: async () => {},
+      }),
+    ).rejects.toThrow(/authority could not be resolved/i);
   });
 });

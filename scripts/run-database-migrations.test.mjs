@@ -53,7 +53,7 @@ describe("production database migration runner", () => {
     expect(migrations.map(({ name }) => name)).toEqual(
       REQUIRED_MIGRATION_NAMES,
     );
-    expect(migrations).toHaveLength(12);
+    expect(migrations).toHaveLength(13);
 
     for (const migration of migrations) {
       const file = fileURLToPath(

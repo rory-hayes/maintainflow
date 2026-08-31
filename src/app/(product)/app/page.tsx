@@ -54,12 +54,8 @@ import {
 import type { CreativeReviewEvent } from "@/lib/openai-ads/creative-history";
 import {
   demoAccount,
-  demoAds,
-  demoCampaignPerformance,
-  demoCampaigns,
-  demoCreativeReviewEvents,
-  demoRecommendations,
 } from "@/lib/openai-ads/demo-data";
+import { resolveSimulatedWorkspace } from "@/lib/openai-ads/simulated-workspaces";
 import {
   buildMonitoringWindows,
   suppressRecommendationsUnderActiveApproval,
@@ -103,19 +99,17 @@ export default async function MaintainFlowAppPage({
   const requestedTab = parseAppTab(query.tab);
   const log = createServerLogger("app.workspace");
   const authenticatedOperator = await getOptionalOperator();
-  const operator = authenticatedOperator ?? {
-    id: "demo-operator",
-    name: "Demo operator",
-    initials: "DO",
-  };
+  const simulatedWorkspace = resolveSimulatedWorkspace(requestedAccountId);
+  const operator = authenticatedOperator ?? simulatedWorkspace.operator;
 
   let runtime = getAdsRuntimeMode();
-  let account = demoAccount;
-  let ads = demoAds;
-  let campaigns = demoCampaigns;
-  let performance = demoCampaignPerformance;
-  let recommendations = demoRecommendations;
-  let creativeReviewHistory: CreativeReviewEvent[] = demoCreativeReviewEvents;
+  let account = simulatedWorkspace.account;
+  let ads = simulatedWorkspace.ads;
+  let campaigns = simulatedWorkspace.campaigns;
+  let performance = simulatedWorkspace.performance;
+  let recommendations = simulatedWorkspace.recommendations;
+  let creativeReviewHistory: CreativeReviewEvent[] =
+    simulatedWorkspace.creativeReviewHistory;
   let dataSource: "demo" | "live" = "demo";
   let writeMode: "demo" | "live" = "demo";
   let syncedAt: string | undefined;
@@ -490,6 +484,14 @@ export default async function MaintainFlowAppPage({
     workspaceSetupState === "connection_error"
       ? "workspace"
       : "review");
+  const agencyClientAttachEnabled = Boolean(
+    authenticatedOperator &&
+      dataSource === "live" &&
+      workspaceSetupState === "ready" &&
+      workspaceAccess?.organizationType === "agency" &&
+      (workspaceAccess.membershipRole === "owner" ||
+        workspaceAccess.membershipRole === "admin"),
+  );
 
   return (
     <MaintainFlowWorkbench
@@ -542,6 +544,7 @@ export default async function MaintainFlowAppPage({
       workspaceMessage={workspaceMessage}
       conversionsConnection={conversionsConnection}
       availableAccounts={availableAccounts}
+      agencyClientAttachEnabled={agencyClientAttachEnabled}
       recommendationDecisionReady={
         dataSource === "demo" ||
         (recommendationDecisionStoreReady && !recommendationDecisionError)
@@ -562,6 +565,12 @@ export default async function MaintainFlowAppPage({
       readinessHistoryCanSave={Boolean(
         workspaceAccess && canWriteAccount(workspaceAccess),
       )}
+      simulatedAccounts={
+        dataSource === "demo" ? simulatedWorkspace.accountOptions : []
+      }
+      simulatorLabel={
+        dataSource === "demo" ? simulatedWorkspace.simulatorLabel : ""
+      }
     />
   );
 }

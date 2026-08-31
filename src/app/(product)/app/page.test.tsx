@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const {
+  getOptionalOperatorMock,
   getAdsCredentialMaterialForAccountMock,
   getConversionsApiConnectionStatusMock,
   getLiveWorkbenchMock,
   listAccountAccessesMock,
 } = vi.hoisted(() => ({
+  getOptionalOperatorMock: vi.fn(),
   getAdsCredentialMaterialForAccountMock: vi.fn(),
   getConversionsApiConnectionStatusMock: vi.fn(),
   getLiveWorkbenchMock: vi.fn(),
@@ -16,11 +18,7 @@ const {
 
 vi.mock("next/server", () => ({ connection: vi.fn() }));
 vi.mock("@/lib/auth/operator.server", () => ({
-  getOptionalOperator: vi.fn(async () => ({
-    id: "operator_live",
-    name: "Live operator",
-    initials: "LO",
-  })),
+  getOptionalOperator: getOptionalOperatorMock,
 }));
 vi.mock("@/lib/auth/config", () => ({
   isBootstrapOperator: vi.fn(() => false),
@@ -74,6 +72,9 @@ vi.mock("@/lib/tenancy/store.server", () => ({
 }));
 
 import MaintainFlowAppPage from "./page";
+import { demoAccount } from "@/lib/openai-ads/demo-data";
+import { unavailableConversionMeasurement } from "@/lib/openai-ads/measurement-readiness";
+import { agencySimulatorEntryAccountId } from "@/lib/openai-ads/simulated-workspaces";
 
 const access = {
   organizationId: "00000000-0000-4000-8000-000000000001",
@@ -86,6 +87,16 @@ const access = {
   accountRole: "owner" as const,
 };
 
+const agencyAccess = {
+  ...access,
+  organizationId: "00000000-0000-4000-8000-000000000002",
+  organizationName: "Northstar Agency",
+  organizationType: "agency" as const,
+  accountId: "adacct_agency_client",
+  accountName: "Harbour Home Ireland",
+  accountRole: "manager" as const,
+};
+
 describe("MaintainFlow app page live failure boundary", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -93,6 +104,12 @@ describe("MaintainFlow app page live failure boundary", () => {
     getAdsCredentialMaterialForAccountMock.mockReset();
     getConversionsApiConnectionStatusMock.mockReset();
     getLiveWorkbenchMock.mockReset();
+    getOptionalOperatorMock.mockReset();
+    getOptionalOperatorMock.mockResolvedValue({
+      id: "operator_live",
+      name: "Live operator",
+      initials: "LO",
+    });
     getAdsCredentialMaterialForAccountMock.mockResolvedValue({
       apiKey: "ads_private_test_key",
       credentialGeneration: "vault:credential-id:1",
@@ -138,7 +155,7 @@ describe("MaintainFlow app page live failure boundary", () => {
 
     const element = await MaintainFlowAppPage({
       searchParams: Promise.resolve({
-        account: access.accountId,
+        account: agencySimulatorEntryAccountId,
         tab: "experiments",
       }),
     });
@@ -147,6 +164,8 @@ describe("MaintainFlow app page live failure boundary", () => {
     expect(props.initialTab).toBe("experiments");
     expect(props.workspaceSetupState).toBe("connection_error");
     expect(props.workspaceAccess).toEqual(access);
+    expect(props.agencyClientAttachEnabled).toBe(false);
+    expect(props.account.id).toBe(access.accountId);
     expect(props.availableAccounts).toEqual([access]);
     expect(props.workspaceMessage).toContain("replace its client key");
     expect(props.dataSource).toBe("live");
@@ -160,5 +179,68 @@ describe("MaintainFlow app page live failure boundary", () => {
     expect(getAdsCredentialMaterialForAccountMock).toHaveBeenCalledWith(
       access.accountId,
     );
+  });
+
+  it("renders the five-account agency simulator without fabricating live access", async () => {
+    getOptionalOperatorMock.mockResolvedValue(undefined);
+
+    const element = await MaintainFlowAppPage({
+      searchParams: Promise.resolve({
+        account: agencySimulatorEntryAccountId,
+        tab: "campaigns",
+      }),
+    });
+    const props = element.props;
+
+    expect(props.initialTab).toBe("campaigns");
+    expect(props.dataSource).toBe("demo");
+    expect(props.writeMode).toBe("demo");
+    expect(props.account.id).toBe(agencySimulatorEntryAccountId);
+    expect(props.account.currency_code).toBe("EUR");
+    expect(props.simulatedAccounts).toHaveLength(5);
+    expect(props.simulatorLabel).toBe("Agency portfolio simulator");
+    expect(props.workspaceAccess).toBeUndefined();
+    expect(props.availableAccounts).toEqual([]);
+    expect(props.operatorAuthenticated).toBe(false);
+    expect(props.agencyClientAttachEnabled).toBe(false);
+  });
+
+  it("enables another client connection only for a ready live agency owner", async () => {
+    listAccountAccessesMock.mockResolvedValue([agencyAccess]);
+    getLiveWorkbenchMock.mockResolvedValue({
+      data: {
+        account: {
+          ...demoAccount,
+          id: agencyAccess.accountId,
+          name: agencyAccess.accountName,
+          currency_code: "EUR",
+          timezone: "Europe/Dublin",
+        },
+        ads: [],
+        campaigns: [],
+        performance: [],
+        recommendations: [],
+        conversionMeasurement: unavailableConversionMeasurement({
+          source: "live",
+          checkedAt: "2026-08-31T10:00:00.000Z",
+          message: "No active conversion campaigns require a measurement check.",
+        }),
+        syncedAt: "2026-08-31T10:00:00.000Z",
+      },
+      freshness: "fresh",
+    });
+
+    const element = await MaintainFlowAppPage({
+      searchParams: Promise.resolve({
+        account: agencyAccess.accountId,
+        tab: "workspace",
+      }),
+    });
+    const props = element.props;
+
+    expect(props.workspaceSetupState).toBe("ready");
+    expect(props.dataSource).toBe("live");
+    expect(props.workspaceAccess).toEqual(agencyAccess);
+    expect(props.agencyClientAttachEnabled).toBe(true);
   });
 });

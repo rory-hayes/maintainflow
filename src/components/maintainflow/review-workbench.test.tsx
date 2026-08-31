@@ -76,6 +76,11 @@ describe("CampaignsView", () => {
           eventCount: null,
         }}
         availableAccounts={[]}
+        agencyClientAttachEnabled={false}
+        simulatedAccounts={[
+          { accountId: "adacct_123", accountName: "Harbour Home" },
+        ]}
+        simulatorLabel="Direct merchant simulator"
         recommendationDecisionReady={false}
         canManageRecommendationDecisions={false}
         recommendationDecisionHistory={[]}

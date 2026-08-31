@@ -41,6 +41,22 @@ support, abuse-control, and offboarding gates.
 the server-managed pilot key. It is not required when a signed-in customer
 supplies and validates the key for their own unclaimed account.
 
+## Additional agency client accounts
+
+An active agency owner or admin can connect another client from the Workspace
+screen. The browser sends only the account-scoped advertiser key to
+`POST /api/organizations/{organizationId}/advertiser-accounts`; the server
+checks agency authority before contacting OpenAI, derives the account ID and
+name from `GET /ad_account`, encrypts the key, and checks authority again inside
+the database transaction.
+
+Account attachment is serialized by provider account identity. A retry for an
+already-complete connection to the same agency returns the existing manager
+access without replacing its stored credential. A direct-owned account, an
+account managed by another agency, an incomplete prior connection, or an
+offboarded identity returns a conflict and is never transferred or resurrected
+automatically.
+
 ## Credential boundary
 
 The one-time Workspace form sends a client key only to a secure same-origin

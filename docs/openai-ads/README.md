@@ -17,6 +17,11 @@ version, server, operation, header, OAuth-scope, response-code, or selected
 schema change. It is a review/CI tool only: it is not imported by the Next.js
 application and a network failure cannot affect normal MaintainFlow runtime.
 
+GitHub also runs `.github/workflows/openai-ads-contract-watch.yml` once per day
+and on demand. A failed scheduled run is a review signal, not permission to
+update the checksum: the semantic change must still be compared with the
+adapter, schemas, simulator, UI assumptions, and first-account gates below.
+
 ## Reviewing an upstream change
 
 1. Keep the failing output as evidence that the upstream contract changed.

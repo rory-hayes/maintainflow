@@ -86,7 +86,7 @@ and real Ads Manager ownership, receipt, and attribution evidence.
 
 ## Approval-store migration
 
-Apply migrations `001` through `012` in filename order before enabling the full
+Apply migrations `001` through `013` in filename order before enabling the full
 live product. Migration `005` adds the typed monitoring baseline, seven-day
 timestamps, and partial unique index that prevents a second active approval for
 the same recommendation. Migration `006` adds an atomic outcome, observation,
@@ -160,7 +160,7 @@ keyset-ready index and shows both the dismissal and restoration actor contexts.
 
 ## Local database proof
 
-`npm run test:db` now applies all twelve migrations to a uniquely named,
+`npm run test:db` now applies all thirteen migrations to a uniquely named,
 disposable PostgreSQL database and exercises the real tenancy, credential, and
 approval stores. It covers direct-advertiser and agency roles, review-only
 access, duplicate account claims, encrypted key rotation with transaction

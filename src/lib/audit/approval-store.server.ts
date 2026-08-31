@@ -350,6 +350,9 @@ export async function listDueMonitoringRecords(
   const rows = await sql<ApprovalRow[]>`
     select approval.*, organization.name as organization_name
     from ads_approval_records approval
+    join maintainflow_advertiser_accounts advertiser_account
+      on advertiser_account.external_account_id = approval.account_id
+      and advertiser_account.status = 'active'
     left join maintainflow_organizations organization
       on organization.id = approval.acting_organization_id
     where approval.account_id = ${accountId}
@@ -374,18 +377,21 @@ export async function listDueMonitoringAccountIds(
   const sql = getDatabase();
   const safeLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
   const rows = await sql<{ account_id: string }[]>`
-    select account_id
-    from ads_approval_records
-    where monitoring_evaluated_at is null
-      and monitoring_started_at is not null
-      and monitoring_ends_at <= ${now}
+    select approval.account_id
+    from ads_approval_records approval
+    join maintainflow_advertiser_accounts advertiser_account
+      on advertiser_account.external_account_id = approval.account_id
+      and advertiser_account.status = 'active'
+    where approval.monitoring_evaluated_at is null
+      and approval.monitoring_started_at is not null
+      and approval.monitoring_ends_at <= ${now}
       and (
-        monitoring_evaluation_claimed_at is null
-        or monitoring_evaluation_claimed_at < ${now} - interval '15 minutes'
+        approval.monitoring_evaluation_claimed_at is null
+        or approval.monitoring_evaluation_claimed_at < ${now} - interval '15 minutes'
       )
-      and status in ('applied', 'rollback_failed')
-    group by account_id
-    order by min(monitoring_ends_at), account_id
+      and approval.status in ('applied', 'rollback_failed')
+    group by approval.account_id
+    order by min(approval.monitoring_ends_at), approval.account_id
     limit ${safeLimit}
   `;
   return rows.map((row) => row.account_id);
@@ -405,20 +411,23 @@ export async function claimDueMonitoringRecords(options: {
   );
   const rows = await sql<ApprovalRow[]>`
     with candidates as (
-      select id
-      from ads_approval_records
-      where account_id = ${options.accountId}
-        and monitoring_evaluated_at is null
-        and monitoring_started_at is not null
-        and monitoring_ends_at <= ${now}
+      select approval.id
+      from ads_approval_records approval
+      join maintainflow_advertiser_accounts advertiser_account
+        on advertiser_account.external_account_id = approval.account_id
+        and advertiser_account.status = 'active'
+      where approval.account_id = ${options.accountId}
+        and approval.monitoring_evaluated_at is null
+        and approval.monitoring_started_at is not null
+        and approval.monitoring_ends_at <= ${now}
         and (
-          monitoring_evaluation_claimed_at is null
-          or monitoring_evaluation_claimed_at < ${now} - interval '15 minutes'
+          approval.monitoring_evaluation_claimed_at is null
+          or approval.monitoring_evaluation_claimed_at < ${now} - interval '15 minutes'
         )
-        and status in ('applied', 'rollback_failed')
-      order by monitoring_ends_at, id
+        and approval.status in ('applied', 'rollback_failed')
+      order by approval.monitoring_ends_at, approval.id
       limit ${safeLimit}
-      for update skip locked
+      for update of approval skip locked
     )
     update ads_approval_records approval set
       monitoring_evaluation_claim_id = ${options.claimId},

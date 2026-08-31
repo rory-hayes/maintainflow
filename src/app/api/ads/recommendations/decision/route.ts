@@ -33,6 +33,7 @@ import {
   getLiveWorkbench,
   LiveSyncUnavailableError,
 } from "@/lib/openai-ads/live-sync.server";
+import { createServerLogger } from "@/lib/observability/logger.server";
 import {
   AccountAccessForbiddenError,
   AdvertiserCredentialUnavailableError,
@@ -71,9 +72,38 @@ class LiveRecommendationDecisionUnavailableError extends Error {
   }
 }
 
+class RecommendationDecisionRequestInvalidError extends Error {
+  constructor() {
+    super("The recommendation decision request is invalid.");
+    this.name = "RecommendationDecisionRequestInvalidError";
+  }
+}
+
+async function readRecommendationDecisionRequest(request: Request) {
+  try {
+    const value = await readJsonBodyWithLimit(request, 4_096);
+    return requestSchema.parse(value);
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) throw error;
+    if (error instanceof ZodError || error instanceof SyntaxError) {
+      throw new RecommendationDecisionRequestInvalidError();
+    }
+    throw error;
+  }
+}
+
 export async function POST(request: Request) {
+  const log = createServerLogger("api.ads.recommendation_decision");
+  const startedAt = Date.now();
+  const fields = (status: number, error?: unknown) => ({
+    status,
+    durationMs: Date.now() - startedAt,
+    ...(error === undefined ? {} : { error }),
+  });
+
   try {
     if (!isSecureSameOriginRequest(request)) {
+      log.warn("ads.recommendation_decision.rejected", fields(403));
       return Response.json(
         { error: "Secure same-origin recommendation review is required." },
         { status: 403 },
@@ -82,9 +112,7 @@ export async function POST(request: Request) {
 
     const [operatorId, input] = await Promise.all([
       requireOperatorId(),
-      readJsonBodyWithLimit(request, 4_096).then((value) =>
-        requestSchema.parse(value),
-      ),
+      readRecommendationDecisionRequest(request),
     ]);
     const access = await requireAccountAccess(
       operatorId,
@@ -121,6 +149,7 @@ export async function POST(request: Request) {
       (item) => item.id === input.recommendationId,
     );
     if (!recommendation) {
+      log.warn("ads.recommendation_decision.rejected", fields(404));
       return Response.json(
         { error: "That recommendation is no longer present in the live account." },
         { status: 404 },
@@ -130,6 +159,7 @@ export async function POST(request: Request) {
       input.recommendationFingerprint !==
       recommendationFingerprint(recommendation)
     ) {
+      log.warn("ads.recommendation_decision.rejected", fields(409));
       return Response.json(
         {
           error:
@@ -159,6 +189,7 @@ export async function POST(request: Request) {
           }),
       );
       const result = fenced.value;
+      log.info("ads.recommendation_decision.completed", fields(200));
       return Response.json({
         action: "dismissed",
         created: result.created,
@@ -184,24 +215,29 @@ export async function POST(request: Request) {
           transaction,
         }),
     );
+    log.info("ads.recommendation_decision.completed", fields(200));
     return Response.json({
       action: "restored",
       message: "Recommendation restored for review.",
     });
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
+      log.warn("ads.recommendation_decision.rejected", fields(413, error));
       return Response.json(
         { error: "The recommendation decision request is too large." },
         { status: 413 },
       );
     }
     if (error instanceof OperatorUnauthorizedError) {
+      log.warn("ads.recommendation_decision.rejected", fields(401, error));
       return Response.json({ error: error.message }, { status: 401 });
     }
     if (error instanceof AccountAccessForbiddenError) {
+      log.warn("ads.recommendation_decision.rejected", fields(403, error));
       return Response.json({ error: error.message }, { status: 403 });
     }
-    if (error instanceof ZodError || error instanceof SyntaxError) {
+    if (error instanceof RecommendationDecisionRequestInvalidError) {
+      log.warn("ads.recommendation_decision.rejected", fields(422, error));
       return Response.json(
         {
           error:
@@ -211,13 +247,16 @@ export async function POST(request: Request) {
       );
     }
     if (error instanceof RecommendationDecisionTransitionError) {
+      log.warn("ads.recommendation_decision.rejected", fields(409, error));
       return Response.json({ error: error.message }, { status: 409 });
     }
     if (error instanceof LiveRecommendationDecisionUnavailableError) {
+      log.warn("ads.recommendation_decision.rejected", fields(409, error));
       return Response.json({ error: error.message }, { status: 409 });
     }
     if (error instanceof LiveSyncUnavailableError) {
       if (error.refreshFailure === "account_mismatch") {
+        log.warn("ads.recommendation_decision.rejected", fields(403, error));
         return Response.json(
           {
             error:
@@ -232,6 +271,10 @@ export async function POST(request: Request) {
             Math.ceil((error.retryAfter.getTime() - Date.now()) / 1_000),
           )
         : 30;
+      log.error(
+        "ads.recommendation_decision.unavailable",
+        fields(503, error),
+      );
       return Response.json(
         {
           error:
@@ -250,11 +293,16 @@ export async function POST(request: Request) {
       error instanceof ApprovalStoreUnavailableError ||
       error instanceof RecommendationDecisionStoreUnavailableError
     ) {
+      log.error(
+        "ads.recommendation_decision.unavailable",
+        fields(503, error),
+      );
       return Response.json({ error: error.message }, { status: 503 });
     }
+    log.error("ads.recommendation_decision.failed", fields(500, error));
     return Response.json(
       { error: "Unable to record the recommendation decision safely." },
-      { status: 400 },
+      { status: 500 },
     );
   }
 }

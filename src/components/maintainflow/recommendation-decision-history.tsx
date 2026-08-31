@@ -84,12 +84,12 @@ export function RecommendationDecisionHistory({
               </EmptyMedia>
               <EmptyTitle>
                 {dataSource === "demo"
-                  ? "No durable decisions in demo mode"
+                  ? "No durable decisions in simulator mode"
                   : "No recommendation decisions yet"}
               </EmptyTitle>
               <EmptyDescription>
                 {dataSource === "demo"
-                  ? "Demo dismissals remain in the session audit below. Connected accounts retain the full decision and restore trail here."
+                  ? "Simulator dismissals remain in the session audit below. Connected accounts retain the full decision and restore trail here."
                   : "Reason-backed dismissals and restores will appear here for this advertiser account."}
               </EmptyDescription>
             </EmptyHeader>
