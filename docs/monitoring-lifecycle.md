@@ -34,6 +34,8 @@ not mix the two attribution types.
    request.
 2. A confirmed apply starts at the next full UTC hour, matching the Insights
    API boundary, and sets `monitoring_ends_at` exactly seven days later.
+   Evaluation then waits a further 48 hours so conversion attribution has a
+   minimum maturity buffer; the stored seven-day evidence range does not change.
 3. An ambiguous provider outcome remains `reconciliation_required` and has no
    monitoring start until an operator verifies that it was applied.
 4. A verified `mark_applied` reconciliation starts a fresh full window because
@@ -45,32 +47,39 @@ not mix the two attribution types.
 
 ## Completed-window evaluation
 
-A protected daily job selects the oldest due advertiser accounts and claims a
-bounded number of unevaluated records for each account. For each record it
-requests the stored ad group over the exact completed full-hour range from
+A protected daily job selects the oldest advertiser accounts only after a
+record's `monitoring_ends_at + 48 hours`, then claims a bounded number of mature,
+unevaluated records for each account. For each record it requests the stored ad
+group over the exact completed full-hour range from
 `GET /ad_groups/{id}/insights`, then requests the same range and entity from
 `POST /conversions/insights` using that account's own encrypted credential.
 
-The evaluator compares only `click_through_conversions` with the stored
-seven-day baseline. A decline strictly greater than the stored 15% threshold
-produces `safeguard_triggered`; exactly 15% remains `within_safeguard`. A
-missing delivery row, missing conversion row, or invalid low-volume baseline is
-stored as `insufficient_evidence` rather than converted to zero.
+The evaluator prefers `click_through_conversions` and falls back to the required
+`conversions` total when that optional field is absent; the provider contract
+defines the values as equal when both are present. It compares that value with
+the stored seven-day baseline. A decline strictly greater than the stored 15%
+threshold produces `safeguard_triggered`; exactly 15% remains
+`within_safeguard`. A missing delivery row, missing conversion row, or invalid
+low-volume baseline is stored as `insufficient_evidence` rather than converted
+to zero.
 
 OpenAI's current conversion setup uses a 30-day attribution window. The
 seven-day comparison is therefore a directional delivery guardrail, not a
 causal incrementality claim: early post-change conversions can relate to prior
 clicks, and later conversions can relate to clicks near the end of the window.
 
-The outcome, full observation, and evaluation timestamp are inserted together.
-An atomic `FOR UPDATE SKIP LOCKED` claim gives each worker a 15-minute lease;
-the provider requests happen after that short transaction. Only the matching
-account and claim can persist the result. A handled provider-read or persistence
-failure releases only that record's matching claim so a bounded scheduler retry
-can select it again. If the process is interrupted before it can release the
-claim, the row becomes eligible after the 15-minute lease expires. The result
-may recommend human rollback review, but the evaluator never calls an Ads
-mutation endpoint.
+The same shared 48-hour cutoff is enforced independently by due-account
+discovery, atomic record claiming, and terminal outcome persistence. An early or
+stale caller therefore cannot claim a window or write an outcome before
+attribution maturity. The outcome, full observation, and evaluation timestamp
+are inserted together. An atomic `FOR UPDATE SKIP LOCKED` claim gives each
+worker a 15-minute lease; the provider requests happen after that short
+transaction. Only the matching account and claim can persist the result. A
+handled provider-read or persistence failure releases only that record's
+matching claim so a bounded scheduler retry can select it again. If the process
+is interrupted before it can release the claim, the row becomes eligible after
+the 15-minute lease expires. The result may recommend human rollback review,
+but the evaluator never calls an Ads mutation endpoint.
 
 The scheduler route returns HTTP 503 with a bounded `Retry-After` whenever any
 selected account or window fails, while retaining successfully completed work.
@@ -95,14 +104,15 @@ provider request.
 ## Evidence boundary
 
 The local MVP proves the baseline, elapsed window, exact provider request shape,
-pure threshold calculation, protected scheduler, expiring claim lease,
-durable/idempotent result, rollback state, and duplicate-write boundary against
-simulators and disposable PostgreSQL. It does not prove that a real OpenAI Ads
+pure threshold calculation, protected scheduler, shared 48-hour maturity gate,
+expiring claim lease, durable/idempotent result, rollback state, and
+duplicate-write boundary against simulators and disposable PostgreSQL. The
+48-hour delay is a minimum operational buffer, not proof that a real account's
+30-day attribution window is complete. It does not prove that a real OpenAI Ads
 account returns the expected completed-window rows, that the production cron is
-configured, that conversion attribution has matured at first evaluation, or
-that a human rollback succeeds. A real eligible advertiser account and full
-observed window remain release gates; automatic rollback is intentionally out
-of scope.
+configured, or that a human rollback succeeds. A real eligible advertiser
+account and full observed window remain release gates; automatic rollback is
+intentionally out of scope.
 
 ## Official sources
 

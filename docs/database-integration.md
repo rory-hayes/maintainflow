@@ -67,9 +67,10 @@ this explicitly disposable harness.
 - successful and reconciled applies start an exact seven-day monitoring window,
   while one partial unique index allows only one active or uncertain approval
   for each account, recommendation, and entity;
-- due monitoring rows stay account-scoped, concurrent workers claim a row once,
-  abandoned claims become eligible after 15 minutes, and exactly one typed
-  observation and safeguard outcome persists;
+- due monitoring rows stay account-scoped and unavailable until exactly 48
+  hours after their evidence window ends, concurrent workers claim a row once,
+  abandoned claims become eligible after 15 minutes, and exactly one
+  maturity-gated typed observation and safeguard outcome persists;
 - concurrent public-audit checks enforce six requests per client and 30 per
   target host per fixed hour, reset at the next hour, retain only HMACed
   subjects, and prune expired buckets;

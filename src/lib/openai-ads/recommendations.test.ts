@@ -157,15 +157,18 @@ describe("buildLiveRecommendations", () => {
     expect(recommendations).toEqual([]);
   });
 
-  it("preserves audience bid multipliers in the change and rollback", () => {
+  it("projects supported bid fields into validated change and rollback bodies", () => {
     const configuredAdGroup: ScopedAdGroup = {
       ...adGroup,
       bidding_config: {
         ...adGroup.bidding_config,
+        strategy: "fixed_bid",
+        provider_only_field: "must not be written",
         custom_audience_bid_multipliers: [
           {
             custom_audience_id: "ca_high_value",
             bid_multiplier_micros: 1_500_000,
+            provider_only_field: "must not be written",
           },
         ],
       },
@@ -179,8 +182,11 @@ describe("buildLiveRecommendations", () => {
       measurementWindow,
     });
 
-    expect(recommendation.mutation.body).toMatchObject({
+    expect(recommendation.mutation.body).toEqual({
       bidding_config: {
+        billing_event_type: "click",
+        strategy: "fixed_bid",
+        max_bid_micros: 200_000_000,
         custom_audience_bid_multipliers: [
           {
             custom_audience_id: "ca_high_value",
@@ -190,8 +196,60 @@ describe("buildLiveRecommendations", () => {
       },
     });
     expect(recommendation.rollback.body).toEqual({
-      bidding_config: configuredAdGroup.bidding_config,
+      bidding_config: {
+        billing_event_type: "click",
+        strategy: "fixed_bid",
+        max_bid_micros: 250_000_000,
+        custom_audience_bid_multipliers: [
+          {
+            custom_audience_id: "ca_high_value",
+            bid_multiplier_micros: 1_500_000,
+          },
+        ],
+      },
     });
+  });
+
+  it("withholds automated-bid recommendations that cannot be written", () => {
+    const recommendations = buildLiveRecommendations({
+      campaigns: [campaign],
+      adGroups: [
+        {
+          ...adGroup,
+          bidding_config: {
+            ...adGroup.bidding_config,
+            strategy: "automated_bid",
+          },
+        },
+      ],
+      performance: [metrics(campaign.id, 2_000, 7)],
+      adGroupPerformance: [metrics(adGroup.id, 1_250, 4)],
+      currencyCode: "USD",
+      measurementWindow,
+    });
+
+    expect(recommendations).toEqual([]);
+  });
+
+  it("withholds recommendations whose rollback is outside the write contract", () => {
+    const recommendations = buildLiveRecommendations({
+      campaigns: [campaign],
+      adGroups: [
+        {
+          ...adGroup,
+          bidding_config: {
+            ...adGroup.bidding_config,
+            max_bid_micros: 35_000_000_000_000,
+          },
+        },
+      ],
+      performance: [metrics(campaign.id, 2_000, 7)],
+      adGroupPerformance: [metrics(adGroup.id, 200_000_000, 4)],
+      currencyCode: "USD",
+      measurementWindow,
+    });
+
+    expect(recommendations).toEqual([]);
   });
 
   it("encodes provider resource IDs in both the proposed change and rollback", () => {

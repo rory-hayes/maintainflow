@@ -1,4 +1,5 @@
 import type { CampaignPerformance, Recommendation } from "./demo-data";
+import type { BudgetGuardEvidence } from "./budget-guard";
 import {
   buildConversionMeasurementReadiness,
   measurementReadyCampaignIds,
@@ -23,6 +24,7 @@ export type LiveWorkbenchData = {
   campaigns: Campaign[];
   ads: ScopedAd[];
   performance: CampaignPerformance[];
+  budgetGuardEvidence: BudgetGuardEvidence[];
   recommendations: Recommendation[];
   conversionMeasurement: ConversionMeasurementReadiness;
   syncedAt: string;
@@ -39,6 +41,7 @@ export type ProviderWorkbenchSnapshot = {
   adGroupConversions: ConversionInsightRow[];
   eventSettings: ConversionEventSetting[];
   recommendationWindow: AdsMeasurementWindow;
+  budgetGuardEvidence?: BudgetGuardEvidence[];
   syncedAt: string;
 };
 
@@ -87,6 +90,7 @@ export function buildWorkbenchDataFromProviderSnapshot({
   adGroupConversions,
   eventSettings,
   recommendationWindow,
+  budgetGuardEvidence = [],
   syncedAt,
 }: ProviderWorkbenchSnapshot): LiveWorkbenchData {
   const performance = combinePerformance(
@@ -121,6 +125,7 @@ export function buildWorkbenchDataFromProviderSnapshot({
     campaigns,
     ads,
     performance,
+    budgetGuardEvidence,
     recommendations,
     conversionMeasurement,
     syncedAt,

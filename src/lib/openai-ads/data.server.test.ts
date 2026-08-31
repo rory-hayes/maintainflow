@@ -91,6 +91,8 @@ describe("live workbench adapter", () => {
   });
 
   it("reuses the verified account and consumes every campaign page", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-31T16:00:00.000Z"));
     adsApiRequestMock.mockImplementation(
       async (
         path: string,
@@ -241,6 +243,28 @@ describe("live workbench adapter", () => {
       entityId: adGroup.id,
       source: "live",
     });
+    const campaignDeliveryCall = adsApiRequestMock.mock.calls.find(([path]) => {
+      if (typeof path !== "string" || !path.startsWith("/ad_account/insights?")) {
+        return false;
+      }
+      return (
+        new URL(path, "https://test.invalid").searchParams.get(
+          "aggregation_level",
+        ) === "campaign"
+      );
+    });
+    const campaignRange = JSON.parse(
+      new URL(
+        campaignDeliveryCall![0],
+        "https://test.invalid",
+      ).searchParams.get("time_ranges[]")!,
+    );
+    expect(campaignRange).toMatchObject({
+      type: "unix_range",
+      start: Date.parse("2026-07-31T23:00:00.000Z") / 1_000,
+      end: Date.parse("2026-08-30T23:00:00.000Z") / 1_000,
+    });
+    expect(result.budgetGuardEvidence).toEqual([]);
     const deliveryCall = adsApiRequestMock.mock.calls.find(([path]) => {
       if (typeof path !== "string" || !path.startsWith("/ad_account/insights?")) {
         return false;

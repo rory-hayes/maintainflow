@@ -9,6 +9,25 @@ const testState = vi.hoisted(() => {
   class ApprovalStoreUnavailableError extends Error {}
   class ApprovalTransitionError extends Error {}
   class RequestBodyTooLargeError extends Error {}
+  class AdsMutationPreconditionFailedError extends Error {
+    approvalId: string;
+    operation = "apply" as const;
+    reason: "provider_state_changed" | "provider_state_unavailable";
+    requiresFreshReview: boolean;
+    persistenceWarning: boolean;
+
+    constructor(
+      approvalId: string,
+      reason: "provider_state_changed" | "provider_state_unavailable",
+      persistenceWarning = false,
+    ) {
+      super("provider detail must not escape");
+      this.approvalId = approvalId;
+      this.reason = reason;
+      this.requiresFreshReview = reason === "provider_state_changed";
+      this.persistenceWarning = persistenceWarning;
+    }
+  }
   class AdsMutationReconciliationRequiredError extends Error {
     approvalId: string;
     operation: "apply" | "rollback";
@@ -57,6 +76,7 @@ const testState = vi.hoisted(() => {
     ApprovalStoreUnavailableError,
     ApprovalTransitionError,
     RequestBodyTooLargeError,
+    AdsMutationPreconditionFailedError,
     AdsMutationReconciliationRequiredError,
     AdsMutationRejectedError,
     OpenAIAdsApiError,
@@ -73,6 +93,8 @@ const testState = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/openai-ads/client.server", () => ({
+  AdsMutationPreconditionFailedError:
+    testState.AdsMutationPreconditionFailedError,
   AdsMutationReconciliationRequiredError:
     testState.AdsMutationReconciliationRequiredError,
   AdsMutationRejectedError: testState.AdsMutationRejectedError,
@@ -379,6 +401,59 @@ describe("live recommendation application", () => {
       operation: "apply",
       mustNotRetry: true,
       persistenceWarning: false,
+    });
+  });
+
+  it("returns a no-write conflict when provider state changed after review", async () => {
+    testState.applyAdsMutation.mockRejectedValue(
+      new testState.AdsMutationPreconditionFailedError(
+        "approval-drifted",
+        "provider_state_changed",
+      ),
+    );
+
+    const response = await POST(
+      request({
+        accountId: "adacct_client",
+        recommendationId: recommendation.id,
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "OpenAI Ads changed after this recommendation was reviewed. No write was sent; refresh and review the current recommendation.",
+      code: "provider_state_changed",
+      approvalId: "approval-drifted",
+      operation: "apply",
+      noMutationSent: true,
+      requiresFreshReview: true,
+      persistenceWarning: false,
+    });
+  });
+
+  it("returns retry guidance when the final provider-state read is unavailable", async () => {
+    testState.applyAdsMutation.mockRejectedValue(
+      new testState.AdsMutationPreconditionFailedError(
+        "approval-read-failed",
+        "provider_state_unavailable",
+      ),
+    );
+
+    const response = await POST(
+      request({
+        accountId: "adacct_client",
+        recommendationId: recommendation.id,
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("30");
+    await expect(response.json()).resolves.toMatchObject({
+      code: "provider_state_unavailable",
+      approvalId: "approval-read-failed",
+      noMutationSent: true,
+      requiresFreshReview: false,
     });
   });
 

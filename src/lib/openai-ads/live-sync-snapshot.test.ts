@@ -7,6 +7,7 @@ import {
   demoCampaigns,
 } from "./demo-data";
 import type { LiveWorkbenchData } from "./data.server";
+import { OPENAI_BUDGET_POLICY_VERSION } from "./budget-guard";
 import {
   LIVE_WORKBENCH_SNAPSHOT_MAX_BYTES,
   LiveWorkbenchSnapshotValidationError,
@@ -15,12 +16,29 @@ import {
 } from "./live-sync-snapshot";
 
 function snapshot(overrides: Partial<LiveWorkbenchData> = {}): LiveWorkbenchData {
-  const syncedAt = "2026-08-30T12:00:00.000Z";
+  const syncedAt = "2026-08-31T12:00:00.000Z";
   return {
     account: demoAccount,
     campaigns: demoCampaigns,
     ads: demoAds,
     performance: demoCampaignPerformance,
+    budgetGuardEvidence: [
+      {
+        campaignId: demoCampaigns[0].id,
+        source: "live",
+        policyVersion: OPENAI_BUDGET_POLICY_VERSION,
+        rangeStart: 1_787_526_000,
+        rangeEnd: 1_787_958_000,
+        periodStart: 1_787_526_000,
+        periodEnd: 1_788_130_800,
+        calculatedAt: syncedAt,
+        accountTimeZone: "Europe/Dublin",
+        isComplete: true,
+        budgetHistoryConfirmed: true,
+        spendMicros: 1_900_000_000,
+        applicableSpendLimitMicros: 2_310_000_000,
+      },
+    ],
     recommendations: [],
     conversionMeasurement: {
       source: "live",

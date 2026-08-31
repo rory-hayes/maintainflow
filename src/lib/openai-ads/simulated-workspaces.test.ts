@@ -61,6 +61,24 @@ describe("simulated sales workspaces", () => {
     }
   });
 
+  it("keeps portfolio severity aligned with the Budget Guard pacing thresholds", () => {
+    const workspace = resolveSimulatedWorkspace(agencySimulatorEntryAccountId);
+    const statusByAccount = Object.fromEntries(
+      workspace.accountOptions.map((account) => [
+        account.accountName,
+        account.portfolioSummary?.status,
+      ]),
+    );
+
+    expect(statusByAccount).toEqual({
+      "Northstar Home": "critical",
+      "Alder & Ash": "attention",
+      "Nook Living": "critical",
+      Hearthline: "attention",
+      TidyNest: "critical",
+    });
+  });
+
   it("keeps every simulated entity and mutation scoped to its selected account", () => {
     for (const accountId of listAgencySimulatedAccountIds()) {
       const workspace = resolveSimulatedWorkspace(accountId);

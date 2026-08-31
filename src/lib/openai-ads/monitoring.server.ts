@@ -83,6 +83,7 @@ export async function evaluateLiveMonitoringWindow(options: {
           ],
           entity_ids: [options.entityId],
         },
+        retryOnRateLimit: true,
       },
       options.credential,
     ),
@@ -104,6 +105,6 @@ export async function evaluateLiveMonitoringWindow(options: {
     rangeEnd: range.end,
     spend: delivery?.spend ?? null,
     clickAttributedConversions:
-      conversion?.click_through_conversions ?? null,
+      conversion?.click_through_conversions ?? conversion?.conversions ?? null,
   });
 }

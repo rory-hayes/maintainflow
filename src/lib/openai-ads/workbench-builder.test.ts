@@ -26,6 +26,7 @@ function builderInput(
   options: {
     syncedAt?: string;
     recommendationWindow?: { start: number; end: number };
+    budgetGuardEvidence?: ProviderWorkbenchSnapshot["budgetGuardEvidence"];
   } = {},
 ): ProviderWorkbenchSnapshot {
   const campaignIds = new Set(seed.campaigns.map((campaign) => campaign.id));
@@ -47,6 +48,7 @@ function builderInput(
     eventSettings: seed.conversionEventSettings,
     recommendationWindow:
       options.recommendationWindow ?? RECOMMENDATION_WINDOW,
+    budgetGuardEvidence: options.budgetGuardEvidence,
     syncedAt: options.syncedAt ?? SYNCED_AT,
   };
 }
@@ -84,6 +86,7 @@ describe("provider workbench builder", () => {
           start: monitoringBaseline!.rangeStart,
           end: monitoringBaseline!.rangeEnd,
         },
+        budgetGuardEvidence: live.budgetGuardEvidence,
       }),
     );
 
@@ -133,6 +136,7 @@ describe("provider workbench builder", () => {
       ads: [],
       performance: [],
       recommendations: [],
+      budgetGuardEvidence: [],
       conversionMeasurement: expect.objectContaining({
         source: "live",
         status: "not_applicable",

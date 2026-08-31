@@ -227,44 +227,154 @@ function LiveMonitoringCard({ window }: { window: MonitoringWindowDto }) {
   );
 }
 
+type DemoMonitoringScenario = {
+  id: "within_safeguard" | "rollback_review";
+  label: "Within safeguard" | "Rollback review";
+  baselineConversions: number;
+  baselineSpend: number;
+  observedConversions: number;
+  observedSpend: number;
+  conversionChange: string;
+  summary: string;
+};
+
+const demoMonitoringScenarios: DemoMonitoringScenario[] = [
+  {
+    id: "within_safeguard",
+    label: "Within safeguard",
+    baselineConversions: 15,
+    baselineSpend: 4_822,
+    observedConversions: 14,
+    observedSpend: 4_390,
+    conversionChange: "−6.7%",
+    summary:
+      "The sample conversion change remains inside the illustrative 15% guardrail.",
+  },
+  {
+    id: "rollback_review",
+    label: "Rollback review",
+    baselineConversions: 15,
+    baselineSpend: 4_822,
+    observedConversions: 12,
+    observedSpend: 4_680,
+    conversionChange: "−20%",
+    summary:
+      "The sample conversion change crosses the illustrative 15% guardrail, so a human review would be appropriate.",
+  },
+];
+
 function DemoMonitoringCard({
   recommendation,
-  index,
+  scenario,
+  currencyCode,
 }: {
-  recommendation: Recommendation;
-  index: number;
+  recommendation: Pick<
+    Recommendation,
+    "title" | "entityLabel" | "safeguard" | "monitoringPlan"
+  >;
+  scenario: DemoMonitoringScenario;
+  currencyCode: string;
 }) {
+  const currency = new Intl.NumberFormat("en", {
+    style: "currency",
+    currency:
+      recommendation.monitoringPlan?.baseline.currencyCode ?? currencyCode,
+    maximumFractionDigits: 0,
+  });
+  const withinSafeguard = scenario.id === "within_safeguard";
+
   return (
     <Card className="shadow-sm">
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div className="grid size-10 place-items-center rounded-lg bg-primary/10 text-primary">
-            {index === 0 ? <Gauge /> : <FlaskConical />}
+            {withinSafeguard ? <Gauge /> : <FlaskConical />}
           </div>
-          <Badge
-            className={cn(
-              recommendation.status === "monitoring"
-                ? "border-success/20 bg-success/10 text-success"
-                : "",
-            )}
-            variant={
-              recommendation.status === "monitoring" ? "outline" : "secondary"
-            }
-          >
-            {recommendation.status === "monitoring"
-              ? "Monitoring"
-              : "Simulator preview"}
-          </Badge>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Badge variant="secondary">Sample outcome</Badge>
+            <Badge
+              variant="outline"
+              className={cn(
+                withinSafeguard
+                  ? "border-success/20 bg-success/10 text-success"
+                  : "border-destructive/20 bg-destructive/10 text-destructive",
+              )}
+            >
+              {scenario.label}
+            </Badge>
+          </div>
         </div>
         <CardTitle className="pt-3 text-base">{recommendation.title}</CardTitle>
         <CardDescription>{recommendation.entityLabel}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Observation window</span>
-          <span className="font-medium">7 days</span>
+          <span className="text-muted-foreground">Comparison</span>
+          <span className="font-medium">Equal 7-day windows</span>
         </div>
-        <Progress value={recommendation.status === "monitoring" ? 14 : 0} />
+        <Progress value={100} />
+        <div className="flex justify-between gap-2 text-xs text-muted-foreground">
+          <span>Completed sample</span>
+          <span>100% evaluated</span>
+        </div>
+        <div className="grid gap-3 rounded-lg border bg-muted/30 p-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <FlaskConical className="size-4 text-primary" />
+            Simulator evidence
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Equal 7-day baseline and observed windows.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-2 rounded-md border bg-background p-3">
+              <span className="text-xs font-medium">Baseline · 7 days</span>
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="text-muted-foreground">Conversions</span>
+                <span className="font-semibold">
+                  {formatGroupedInteger(scenario.baselineConversions)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="text-muted-foreground">Spend</span>
+                <span className="font-semibold">
+                  {currency.format(scenario.baselineSpend)}
+                </span>
+              </div>
+            </div>
+            <div className="grid gap-2 rounded-md border bg-background p-3">
+              <span className="text-xs font-medium">Observed · 7 days</span>
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="text-muted-foreground">Conversions</span>
+                <span className="font-semibold">
+                  {formatGroupedInteger(scenario.observedConversions)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="text-muted-foreground">Spend</span>
+                <span className="font-semibold">
+                  {currency.format(scenario.observedSpend)}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t pt-3 text-sm">
+            <span className="flex items-center gap-2 font-medium">
+              {withinSafeguard ? (
+                <CircleCheck className="size-4 text-success" />
+              ) : (
+                <TriangleAlert className="size-4 text-destructive" />
+              )}
+              {scenario.label}
+            </span>
+            <span className="font-semibold">{scenario.conversionChange}</span>
+          </div>
+          <p className="text-xs text-muted-foreground">{scenario.summary}</p>
+          <p className="text-xs text-muted-foreground">
+            Illustrative simulator evidence only. This comparison does not
+            establish causal lift, and no rollback or other external action was
+            taken.
+          </p>
+        </div>
         <div className="flex items-start gap-2 text-xs text-muted-foreground">
           <RotateCcw className="mt-0.5 size-3.5 shrink-0" />
           <span>{recommendation.safeguard}</span>
@@ -279,11 +389,13 @@ export function MonitoringWindows({
   windows,
   recommendations,
   error,
+  currencyCode = "USD",
 }: {
   dataSource: "demo" | "live";
   windows: MonitoringWindowDto[];
   recommendations: Recommendation[];
   error?: string;
+  currencyCode?: string;
 }) {
   if (dataSource === "live") {
     if (windows.length === 0) {
@@ -331,18 +443,26 @@ export function MonitoringWindows({
   const monitoring = recommendations.filter(
     (recommendation) => recommendation.status === "monitoring",
   );
-  const experiments =
-    monitoring.length > 0
-      ? monitoring
-      : recommendations.filter((recommendation) =>
-          ["rec_bid_20", "rec_creative_test"].includes(recommendation.id),
-        );
+  const sampleRecommendation =
+    monitoring.find(
+      (recommendation) => recommendation.monitoringPlan?.windowDays === 7,
+    ) ??
+    recommendations.find(
+      (recommendation) => recommendation.monitoringPlan?.windowDays === 7,
+    );
+  const subject = sampleRecommendation ?? {
+    title: "Illustrative monitored bid change",
+    entityLabel: "Sample campaign · Sample ad group",
+    safeguard:
+      "Example rule: request human rollback review if click-attributed conversions fall more than 15% across equal seven-day windows.",
+  };
 
-  return experiments.map((recommendation, index) => (
+  return demoMonitoringScenarios.map((scenario) => (
     <DemoMonitoringCard
-      key={recommendation.id}
-      recommendation={recommendation}
-      index={index}
+      key={`simulator-monitoring-${scenario.id}`}
+      recommendation={subject}
+      scenario={scenario}
+      currencyCode={currencyCode}
     />
   ));
 }

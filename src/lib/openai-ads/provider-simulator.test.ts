@@ -8,6 +8,8 @@ import {
   fetchLiveWorkbenchData,
   LIVE_SYNC_PROVIDER_LIMITS,
 } from "./data.server";
+import { evaluateLiveMonitoringWindow } from "./monitoring.server";
+import type { MonitoringPlan } from "./monitoring";
 import {
   adGroupSchema,
   adListResponseSchema,
@@ -453,6 +455,69 @@ describe("OpenAI Ads provider simulator failure contracts", () => {
         request.path.startsWith("/v1/campaigns?"),
       ).map((request) => request.outcome),
     ).toEqual(["fault", "response", "response"]);
+  });
+
+  it("retries the safe monitoring conversion read and accepts total conversions", async () => {
+    const seed = createOpenAIAdsSimulatorSeed("overspending");
+    seed.conversionInsights = seed.conversionInsights.map((row) => {
+      if (row.entity_id !== "adgrp_sim_001") return row;
+      const contractValidRow = { ...row };
+      delete contractValidRow.click_through_conversions;
+      return contractValidRow;
+    });
+    const simulator = createOpenAIAdsProviderSimulator({
+      seed,
+      faults: [
+        {
+          kind: "http",
+          status: 429,
+          method: "POST",
+          path: "/conversions/insights",
+          retryAfter: "0",
+        },
+      ],
+    });
+    globalThis.fetch = simulator.fetch;
+    const monitoringPlan: MonitoringPlan = {
+      kind: "click_attributed_conversion_guardrail",
+      windowDays: 7,
+      baseline: {
+        rangeStart: 1_787_356_800,
+        rangeEnd: 1_787_961_600,
+        spend: 1_500,
+        clickAttributedConversions: 30,
+        cpa: 50,
+        configuredBidMicros: 250_000_000,
+        currencyCode: "USD",
+      },
+      rollbackRule: {
+        metric: "click_attributed_conversions",
+        comparison: "decrease_percent_greater_than",
+        thresholdPercent: 15,
+      },
+    };
+
+    const result = await evaluateLiveMonitoringWindow({
+      entityId: "adgrp_sim_001",
+      plan: monitoringPlan,
+      startedAt: new Date(1_788_048_000_000),
+      endsAt: new Date(1_788_652_800_000),
+      credential: simulatorCredential,
+    });
+
+    expect(result).toMatchObject({
+      outcome: "safeguard_triggered",
+      observation: {
+        clickAttributedConversions: 24,
+        conversionChangePercent: -20,
+        evidenceState: "complete",
+      },
+    });
+    expect(
+      simulator.requests
+        .filter((request) => request.path === "/v1/conversions/insights")
+        .map((request) => request.outcome),
+    ).toEqual(["fault", "response"]);
   });
 
   it("keeps one deadline across successful pages and bounded 429 retries", async () => {

@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ProductFeedPreflight } from "@/components/maintainflow/product-feed-preflight";
 import { ConversionsApiPreflight } from "@/components/maintainflow/conversions-api-preflight";
+import { AttributionReadinessCard } from "@/components/maintainflow/attribution-readiness-card";
 import { ReadinessReportCard } from "@/components/maintainflow/readiness-report-card";
 import { ReadinessHistoryCard } from "@/components/maintainflow/readiness-history-card";
 import type { ConversionPayloadAudit } from "@/lib/readiness/conversions-api";
@@ -42,6 +43,8 @@ import type {
   ReadinessCheck,
 } from "@/lib/readiness/schema";
 import type { ConversionMeasurementReadiness } from "@/lib/openai-ads/measurement-readiness";
+import { buildCampaignAttributionReadiness } from "@/lib/openai-ads/attribution-readiness";
+import type { Campaign } from "@/lib/openai-ads/schema";
 import { createSampleStorefrontAudit } from "@/lib/readiness/demo-audit";
 import type { AccountAccess } from "@/lib/tenancy/schema";
 import { formatUtcDateTime } from "@/lib/formatting";
@@ -71,6 +74,8 @@ function checkedAtLabel(value: string) {
 
 export function ReadinessWorkbench({
   conversionMeasurement,
+  campaigns,
+  dataSource,
   account,
   historyReady,
   historyError,
@@ -78,6 +83,8 @@ export function ReadinessWorkbench({
   canSaveHistory,
 }: {
   conversionMeasurement: ConversionMeasurementReadiness;
+  campaigns: Campaign[];
+  dataSource: "demo" | "live";
   account?: Pick<AccountAccess, "accountId" | "accountName">;
   historyReady: boolean;
   historyError?: string;
@@ -95,6 +102,10 @@ export function ReadinessWorkbench({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sampleResult, setSampleResult] = useState(false);
+  const attributionReadiness = useMemo(
+    () => buildCampaignAttributionReadiness({ campaigns }),
+    [campaigns],
+  );
 
   const priorityFixes = useMemo(
     () =>
@@ -267,6 +278,11 @@ export function ReadinessWorkbench({
         error={historyError}
         entries={history}
         canSave={canSaveHistory}
+      />
+
+      <AttributionReadinessCard
+        readiness={attributionReadiness}
+        dataSource={dataSource}
       />
 
       <ConversionMeasurementCard readiness={conversionMeasurement} />

@@ -6,6 +6,7 @@ import {
   type AdsProviderRequestBudget,
 } from "./client.server";
 import type { AdsMeasurementWindow, ScopedAdGroup } from "./recommendations";
+import { accountLocalMonthPeriod } from "./account-local-period";
 import {
   adAccountSchema,
   adListResponseSchema,
@@ -192,17 +193,17 @@ export function fetchLiveAdAccount(
   );
 }
 
-function currentMonthRange() {
-  const now = new Date();
-  const start = Math.floor(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000,
-  );
-  const currentFullHour = Math.floor(now.getTime() / 3_600_000) * 3_600;
+function currentMonthRange(accountTimeZone: string, now = new Date()) {
+  const period = accountLocalMonthPeriod(now, accountTimeZone);
+  const hasCompleteDays = period.completeAccountLocalDays > 0;
+  const rangeEnd = hasCompleteDays
+    ? period.rangeEnd
+    : Math.max(period.rangeStart + 1, Math.floor(now.getTime() / 1_000));
 
   return {
     type: "unix_range" as const,
-    start: Math.min(start, currentFullHour - 3_600),
-    end: currentFullHour,
+    start: period.rangeStart,
+    end: rangeEnd,
   };
 }
 
@@ -559,7 +560,7 @@ export async function fetchLiveWorkbenchData(
           listConversionEventSettings(credential, providerBudget),
         ] as const,
       );
-      const dashboardWindow = currentMonthRange();
+      const dashboardWindow = currentMonthRange(account.timezone);
       const recommendationWindow = trailingFullDaysRange(7);
 
       const [

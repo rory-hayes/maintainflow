@@ -133,14 +133,14 @@ export default function Hero({ children }: HeroProps) {
   ]);
 
   return (
-    <section className=" w-full h-[92vh] flex flex-col items-center justify-center px-4 md:px-6">
+    <section className="flex min-h-[92svh] w-full flex-col items-center justify-center px-4 py-4 md:h-[92vh] md:min-h-0 md:px-6 md:py-0">
       <div
-        className="py-24 overflow-clip bg-[#FAFAFA] bg-[radial-gradient(#CECECE_1px,transparent_1px)] [background-size:16px_16px] flex flex-col justify-center border border-input rounded-3xl w-full h-full"
+        className="flex min-h-[calc(92svh-2rem)] w-full flex-col justify-center overflow-clip rounded-3xl border border-input bg-[#FAFAFA] bg-[radial-gradient(#CECECE_1px,transparent_1px)] py-12 [background-size:16px_16px] md:h-full md:min-h-0 md:py-24"
         style={{
           cursor: `url(${cursorYouImage.src}) auto`,
         }}
       >
-        <div className="container relative h-full">
+        <div className="container relative flex min-h-0 flex-1 flex-col">
           <motion.div
             aria-hidden="true"
             ref={topLeftDesignScope}
@@ -161,7 +161,7 @@ export default function Hero({ children }: HeroProps) {
             initial={{ opacity: 0, y: 100, x: 200 }}
             className="absolute hidden lg:block -left-24 top-48"
           >
-            <Pointer color="blue" name="Abiola" />
+            <Pointer color="blue" name="Agency reviewer" />
           </motion.div>
 
           <motion.div
@@ -185,7 +185,7 @@ export default function Hero({ children }: HeroProps) {
             initial={{ opacity: 0, y: 320, x: 240 }}
             className="absolute hidden lg:block right-24 bottom-[18rem]"
           >
-            <Pointer color="orange" name="Alan" />
+            <Pointer color="orange" name="Client approver" />
           </motion.div>
 
           <motion.div
@@ -209,7 +209,7 @@ export default function Hero({ children }: HeroProps) {
             initial={{ opacity: 0, y: -120, x: 250 }}
             className="absolute hidden lg:block right-10 top-52"
           >
-            <Pointer color="green" name="Duke" />
+            <Pointer color="green" name="Analyst" />
           </motion.div>
 
           <motion.div
@@ -233,7 +233,7 @@ export default function Hero({ children }: HeroProps) {
             initial={{ opacity: 0, y: -260, x: 100 }}
             className="absolute hidden lg:block -left-24 bottom-10"
           >
-            <Pointer color="violet" name="Dimitri" />
+            <Pointer color="violet" name="Account owner" />
           </motion.div>
 
           {children}

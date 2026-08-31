@@ -9,6 +9,10 @@ import {
   type Recommendation,
 } from "./demo-data";
 import type { CreativeReviewEvent } from "./creative-history";
+import {
+  OPENAI_BUDGET_POLICY_VERSION,
+  type BudgetGuardEvidence,
+} from "./budget-guard";
 import type { AdAccount, Campaign, ScopedAd } from "./schema";
 import { agencySimulatorEntryAccountId } from "./simulator-links";
 
@@ -17,6 +21,12 @@ export { agencySimulatorEntryAccountId } from "./simulator-links";
 export type SimulatedAccountOption = {
   accountId: string;
   accountName: string;
+  portfolioSummary?: {
+    projectedExposure: number;
+    openReviews: number;
+    campaignTemplateFixes: number;
+    status: "critical" | "attention" | "clear";
+  };
 };
 
 export type SimulatedWorkspace = {
@@ -24,6 +34,7 @@ export type SimulatedWorkspace = {
   ads: ScopedAd[];
   campaigns: Campaign[];
   performance: CampaignPerformance[];
+  budgetGuardEvidence: BudgetGuardEvidence[];
   recommendations: Recommendation[];
   creativeReviewHistory: CreativeReviewEvent[];
   accountOptions: SimulatedAccountOption[];
@@ -32,6 +43,15 @@ export type SimulatedWorkspace = {
   operator: { id: string; name: string; initials: string };
 };
 
+const simulatorBudgetPeriod = {
+  rangeStart: 1_787_526_000,
+  rangeEnd: 1_787_958_000,
+  periodStart: 1_787_526_000,
+  periodEnd: 1_788_130_800,
+  calculatedAt: "2026-08-29T08:00:00.000Z",
+  accountTimeZone: "Europe/Dublin",
+} as const;
+
 type AgencyAccountConfig = {
   slug: string;
   accountId: string;
@@ -39,6 +59,7 @@ type AgencyAccountConfig = {
   host: string;
   campaignNames: readonly [string, string, string];
   spendMultiplier: number;
+  budgetMultipliers: readonly [number, number, number];
   recommendationIndexes: readonly number[];
 };
 
@@ -54,6 +75,7 @@ const agencyAccountConfigs = [
       "Seasonal clearance",
     ],
     spendMultiplier: 1,
+    budgetMultipliers: [1, 1, 1],
     recommendationIndexes: [0, 1, 3],
   },
   {
@@ -67,6 +89,7 @@ const agencyAccountConfigs = [
       "Seasonal outlet",
     ],
     spendMultiplier: 0.76,
+    budgetMultipliers: [1.6, 0.8, 1],
     recommendationIndexes: [1, 2],
   },
   {
@@ -80,6 +103,7 @@ const agencyAccountConfigs = [
       "End-of-line feed",
     ],
     spendMultiplier: 1.34,
+    budgetMultipliers: [1.1, 0.5, 1],
     recommendationIndexes: [3],
   },
   {
@@ -93,6 +117,7 @@ const agencyAccountConfigs = [
       "Warehouse clearance",
     ],
     spendMultiplier: 0.58,
+    budgetMultipliers: [1.25, 0.7, 1],
     recommendationIndexes: [0],
   },
   {
@@ -106,6 +131,7 @@ const agencyAccountConfigs = [
       "Outlet feed",
     ],
     spendMultiplier: 1.16,
+    budgetMultipliers: [1, 2, 1],
     recommendationIndexes: [],
   },
 ] as const satisfies readonly AgencyAccountConfig[];
@@ -155,6 +181,17 @@ function scaled(value: number, multiplier: number) {
   return Math.round(value * multiplier * 100) / 100;
 }
 
+function projectedBudgetRatio(config: AgencyAccountConfig, campaignIndex: number) {
+  const baseProjectedRatio = campaignIndex === 0 ? 1.22 : 0.74;
+  return Math.max(
+    0.55,
+    Math.min(
+      1.35,
+      baseProjectedRatio / config.budgetMultipliers[campaignIndex],
+    ),
+  );
+}
+
 function createAgencyWorkspace(
   config: AgencyAccountConfig,
   accountOptions: SimulatedAccountOption[],
@@ -167,7 +204,7 @@ function createAgencyWorkspace(
     timezone: "Europe/Dublin",
     currency_code: "EUR",
   };
-  const campaigns = structuredClone(demoCampaigns).map((campaign, index) => ({
+  const campaigns: Campaign[] = structuredClone(demoCampaigns).map((campaign, index) => ({
     ...campaign,
     id: remapProviderId(campaign.id, config.slug),
     name: config.campaignNames[index],
@@ -175,10 +212,14 @@ function createAgencyWorkspace(
       Object.entries(campaign.budget).map(([key, value]) => [
         key,
         typeof value === "number"
-          ? Math.round(value * config.spendMultiplier)
+          ? Math.round(
+              value *
+                config.spendMultiplier *
+                config.budgetMultipliers[index],
+            )
           : value,
       ]),
-    ),
+    ) as Campaign["budget"],
   }));
   const ads = structuredClone(demoAds).map((ad) => ({
     ...ad,
@@ -194,6 +235,28 @@ function createAgencyWorkspace(
     clicks: Math.round(row.clicks * config.spendMultiplier),
     conversions: Math.round(row.conversions * config.spendMultiplier),
   }));
+  const budgetGuardEvidence = campaigns.flatMap((campaign, index) => {
+    const dailyBudgetMicros = campaign.budget.daily_spend_limit_micros;
+    if (campaign.status !== "active" || dailyBudgetMicros == null) {
+      return [];
+    }
+    const projectedRatio = projectedBudgetRatio(config, index);
+
+    return [
+      {
+        campaignId: campaign.id,
+        source: "demo" as const,
+        policyVersion: OPENAI_BUDGET_POLICY_VERSION,
+        ...simulatorBudgetPeriod,
+        isComplete: true,
+        budgetHistoryConfirmed: true,
+        spendMicros: Math.round(
+          dailyBudgetMicros * projectedRatio * 5,
+        ),
+        applicableSpendLimitMicros: dailyBudgetMicros * 7,
+      },
+    ];
+  });
   const recommendations = config.recommendationIndexes.map((index) => {
     const recommendation = structuredClone(demoRecommendations[index]);
     const rewritten = rewriteValue(
@@ -245,6 +308,7 @@ function createAgencyWorkspace(
     ads,
     campaigns,
     performance,
+    budgetGuardEvidence,
     recommendations,
     creativeReviewHistory,
     accountOptions,
@@ -258,10 +322,44 @@ function createAgencyWorkspace(
   };
 }
 
-const agencyAccountOptions = agencyAccountConfigs.map((config) => ({
-  accountId: config.accountId,
-  accountName: config.accountName,
-}));
+const agencyAccountOptions = agencyAccountConfigs.map((config) => {
+  const projectedBudget = demoCampaigns.reduce((summary, campaign, index) => {
+    const baseDailyBudget = campaign.budget.daily_spend_limit_micros;
+    if (campaign.status !== "active" || baseDailyBudget === undefined) {
+      return summary;
+    }
+    const applicableLimit =
+      baseDailyBudget *
+      config.spendMultiplier *
+      config.budgetMultipliers[index] *
+      7;
+    const projectedRatio = projectedBudgetRatio(config, index);
+    return {
+      exposure:
+        summary.exposure +
+        Math.max(0, applicableLimit * (projectedRatio - 1)) / 1_000_000,
+      highestRatio: Math.max(summary.highestRatio, projectedRatio),
+    };
+  }, { exposure: 0, highestRatio: 0 });
+  const projectedExposure = projectedBudget.exposure;
+  const openReviews = config.recommendationIndexes.length;
+
+  return {
+    accountId: config.accountId,
+    accountName: config.accountName,
+    portfolioSummary: {
+      projectedExposure: Math.round(projectedExposure),
+      openReviews,
+      campaignTemplateFixes: 2,
+      status:
+        projectedBudget.highestRatio >= 1.2
+          ? ("critical" as const)
+          : projectedExposure > 0 || openReviews > 0
+            ? ("attention" as const)
+            : ("clear" as const),
+    },
+  };
+});
 
 const agencyWorkspaces = new Map<string, SimulatedWorkspace>(
   agencyAccountConfigs.map((config) => [
@@ -283,6 +381,7 @@ const directWorkspaceBase = createAgencyWorkspace(
       "Clearance feed",
     ],
     spendMultiplier: 1,
+    budgetMultipliers: [1, 1, 1],
     recommendationIndexes: [0, 1, 2, 3],
   },
   [{ accountId: demoAccount.id, accountName: directAccountName }],

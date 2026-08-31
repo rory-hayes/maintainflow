@@ -1,48 +1,20 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
 import { getAdsRuntimeMode, type AdsApiCredential } from "./client.server";
 import { fetchLiveAdAccount, fetchLiveWorkbenchData } from "./data.server";
-
-const LIVE_TEST_FLAG = "OPENAI_ADS_LIVE_TEST_ENABLED";
+import { readLiveAccountAcceptanceConfig } from "./live-account-acceptance-config";
 
 describe("OpenAI Ads account read-only acceptance", () => {
-  beforeAll(() => {
-    if (process.env[LIVE_TEST_FLAG] !== "true") {
-      throw new Error(
-        `${LIVE_TEST_FLAG}=true is required because this suite contacts the real OpenAI Ads API.`,
-      );
-    }
-    if (!process.env.OPENAI_ADS_API_KEY) {
-      throw new Error("OPENAI_ADS_API_KEY is required for the live acceptance suite.");
-    }
-    if (process.env.OPENAI_ADS_DATA_MODE !== "live") {
-      throw new Error(
-        "OPENAI_ADS_DATA_MODE=live is required for the live acceptance suite.",
-      );
-    }
-    if (process.env.MAINTAINFLOW_RELEASE_STAGE !== "private_read") {
-      throw new Error(
-        "MAINTAINFLOW_RELEASE_STAGE=private_read is required for read-only acceptance.",
-      );
-    }
-    if (process.env.OPENAI_ADS_LIVE_WRITES_ENABLED === "true") {
-      throw new Error(
-        "Disable OPENAI_ADS_LIVE_WRITES_ENABLED before running the read-only acceptance suite.",
-      );
-    }
-  });
-
   it("binds the account key and parses the complete read-only workbench contract", async () => {
+    const config = readLiveAccountAcceptanceConfig();
     const account = await fetchLiveAdAccount();
-    const expectedAccountId = process.env.OPENAI_ADS_EXPECTED_ACCOUNT_ID;
-
-    if (expectedAccountId) expect(account.id).toBe(expectedAccountId);
+    expect(account.id).toBe(config.expectedAccountId);
 
     const credential: AdsApiCredential = {
       kind: "account_api_key",
-      secret: process.env.OPENAI_ADS_API_KEY!,
+      secret: config.apiKey,
       expectedAccountId: account.id,
     };
     const workbench = await fetchLiveWorkbenchData(account, credential);

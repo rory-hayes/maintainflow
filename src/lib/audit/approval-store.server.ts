@@ -7,6 +7,7 @@ import type postgres from "postgres";
 import type { Recommendation } from "../openai-ads/demo-data";
 import { getRuntimeDatabase } from "../database/client.server";
 import {
+  monitoringAttributionMaturityCutoff,
   monitoringObservationSchema,
   monitoringOutcomeSchema,
   type MonitoringObservation,
@@ -40,10 +41,12 @@ type ApprovalRow = {
   recommendation_id: string;
   recommendation_title: string;
   entity_id: string;
+  request_payload?: unknown;
   rollback_payload: unknown;
   safeguard: string;
   status: ApprovalStatus;
   error_message: string | null;
+  rollback_error_message?: string | null;
   reconciliation_note: string | null;
   monitoring_plan: unknown | null;
   monitoring_window_days: number | null;
@@ -74,6 +77,7 @@ const approvalColumns = [
   "safeguard",
   "status",
   "error_message",
+  "rollback_error_message",
   "reconciliation_note",
   "monitoring_plan",
   "monitoring_window_days",
@@ -88,6 +92,17 @@ const approvalColumns = [
   "updated_at",
   "applied_at",
   "rolled_back_at",
+] as const;
+
+type ApprovalRollbackClaimRow = Pick<ApprovalRow, "id"> & {
+  request_payload: unknown;
+  rollback_payload: unknown;
+};
+
+const rollbackClaimColumns = [
+  "id",
+  "request_payload",
+  "rollback_payload",
 ] as const;
 
 export class ApprovalStoreUnavailableError extends Error {
@@ -181,7 +196,7 @@ function parseApprovalRow(row: ApprovalRow): ApprovalRecord {
     rollback: row.rollback_payload,
     safeguard: row.safeguard,
     status: row.status,
-    errorMessage: row.error_message,
+    errorMessage: row.rollback_error_message ?? row.error_message,
     reconciliationNote: row.reconciliation_note,
     monitoringPlan: row.monitoring_plan,
     monitoringStartedAt: row.monitoring_started_at,
@@ -347,6 +362,7 @@ export async function listDueMonitoringRecords(
 ) {
   const sql = getDatabase();
   const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+  const maturityCutoff = monitoringAttributionMaturityCutoff(now);
   const rows = await sql<ApprovalRow[]>`
     select approval.*, organization.name as organization_name
     from ads_approval_records approval
@@ -358,7 +374,7 @@ export async function listDueMonitoringRecords(
     where approval.account_id = ${accountId}
       and approval.monitoring_evaluated_at is null
       and approval.monitoring_started_at is not null
-      and approval.monitoring_ends_at <= ${now}
+      and approval.monitoring_ends_at <= ${maturityCutoff}
       and (
         approval.monitoring_evaluation_claimed_at is null
         or approval.monitoring_evaluation_claimed_at < ${now} - interval '15 minutes'
@@ -376,6 +392,7 @@ export async function listDueMonitoringAccountIds(
 ) {
   const sql = getDatabase();
   const safeLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
+  const maturityCutoff = monitoringAttributionMaturityCutoff(now);
   const rows = await sql<{ account_id: string }[]>`
     select approval.account_id
     from ads_approval_records approval
@@ -384,7 +401,7 @@ export async function listDueMonitoringAccountIds(
       and advertiser_account.status = 'active'
     where approval.monitoring_evaluated_at is null
       and approval.monitoring_started_at is not null
-      and approval.monitoring_ends_at <= ${now}
+      and approval.monitoring_ends_at <= ${maturityCutoff}
       and (
         approval.monitoring_evaluation_claimed_at is null
         or approval.monitoring_evaluation_claimed_at < ${now} - interval '15 minutes'
@@ -409,6 +426,7 @@ export async function claimDueMonitoringRecords(options: {
     1,
     Math.min(20, Math.trunc(options.limit ?? 3)),
   );
+  const maturityCutoff = monitoringAttributionMaturityCutoff(now);
   const rows = await sql<ApprovalRow[]>`
     with candidates as (
       select approval.id
@@ -419,7 +437,7 @@ export async function claimDueMonitoringRecords(options: {
       where approval.account_id = ${options.accountId}
         and approval.monitoring_evaluated_at is null
         and approval.monitoring_started_at is not null
-        and approval.monitoring_ends_at <= ${now}
+        and approval.monitoring_ends_at <= ${maturityCutoff}
         and (
           approval.monitoring_evaluation_claimed_at is null
           or approval.monitoring_evaluation_claimed_at < ${now} - interval '15 minutes'
@@ -472,6 +490,7 @@ export async function recordMonitoringOutcome(options: {
   const outcome = monitoringOutcomeSchema.parse(options.outcome);
   const observation = monitoringObservationSchema.parse(options.observation);
   const evaluatedAt = options.evaluatedAt ?? new Date();
+  const maturityCutoff = monitoringAttributionMaturityCutoff(evaluatedAt);
   const rows = await sql<{ id: string }[]>`
     update ads_approval_records set
       monitoring_outcome = ${outcome},
@@ -484,7 +503,7 @@ export async function recordMonitoringOutcome(options: {
       and account_id = ${options.accountId}
       and monitoring_evaluated_at is null
       and monitoring_evaluation_claim_id = ${options.claimId}
-      and monitoring_ends_at <= ${evaluatedAt}
+      and monitoring_ends_at <= ${maturityCutoff}
       and status in ('applied', 'rollback_failed')
     returning id
   `;
@@ -513,7 +532,7 @@ export async function claimApprovalRollback(
   transaction?: postgres.TransactionSql,
 ) {
   const sql = transaction ?? getDatabase();
-  const rows = await sql<ApprovalRow[]>`
+  const rows = await sql<ApprovalRollbackClaimRow[]>`
     update ads_approval_records set
       status = 'rollback_pending', rollback_operator_id = ${operatorId},
       rollback_organization_id = ${access.organizationId},
@@ -522,14 +541,22 @@ export async function claimApprovalRollback(
       rollback_error_message = null, updated_at = now()
     where id = ${id} and account_id = ${accountId}
       and status in ('applied', 'rollback_failed')
-    returning ${sql(approvalColumns)}
+    returning ${sql(rollbackClaimColumns)}
   `;
   if (!rows[0]) {
     throw new ApprovalTransitionError(
       "This approval is not eligible for rollback or belongs to another account.",
     );
   }
-  return parseApprovalRow(rows[0]);
+  return {
+    id: rows[0].id,
+    // Return both payloads raw so malformed legacy rows can be moved from the
+    // committed rollback_pending claim to rollback_failed by the executor.
+    // Parsing here could throw at the transaction boundary and strand intent
+    // without a durable failure outcome.
+    mutationPayload: rows[0].request_payload,
+    rollbackPayload: rows[0].rollback_payload,
+  };
 }
 
 export async function updateRollbackRecord(

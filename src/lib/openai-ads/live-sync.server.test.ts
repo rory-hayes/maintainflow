@@ -33,6 +33,7 @@ function workbench(
     campaigns: [],
     ads: [],
     performance: [],
+    budgetGuardEvidence: [],
     recommendations: [],
     conversionMeasurement: {} as LiveWorkbenchData["conversionMeasurement"],
     syncedAt,

@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { demoRecommendations } from "@/lib/openai-ads/demo-data";
 import type { MonitoringWindowDto } from "@/lib/openai-ads/monitoring";
 
 import { MonitoringWindows } from "./monitoring-windows";
@@ -66,5 +67,55 @@ describe("monitoring outcome card", () => {
     expect(html).toContain("Human rollback review is recommended");
     expect(html).toContain("No rollback was sent");
     expect(html).not.toContain("Automatic rollback");
+    expect(html).not.toContain("Simulator evidence");
+  });
+
+  it("shows two completed, explicitly illustrative simulator outcomes", () => {
+    const html = renderToStaticMarkup(
+      <MonitoringWindows
+        dataSource="demo"
+        windows={[]}
+        recommendations={demoRecommendations.map((recommendation) => ({
+          ...recommendation,
+          id: `workspace_${recommendation.id}`,
+        }))}
+      />,
+    );
+
+    expect(html.match(/Sample outcome/g)).toHaveLength(2);
+    expect(html.match(/Simulator evidence/g)).toHaveLength(2);
+    expect(html).toContain("Within safeguard");
+    expect(html).toContain("Rollback review");
+    expect(html.match(/Baseline · 7 days/g)).toHaveLength(2);
+    expect(html.match(/Observed · 7 days/g)).toHaveLength(2);
+    expect(html.match(/Equal 7-day baseline and observed windows/g)).toHaveLength(
+      2,
+    );
+    expect(html).toContain("Conversions");
+    expect(html).toContain("Spend");
+    expect(html).toContain("$4,822");
+    expect(html).toContain("$4,390");
+    expect(html).toContain("$4,680");
+    expect(html).toContain("does not establish causal lift");
+    expect(html).toContain(
+      "no rollback or other external action was taken",
+    );
+  });
+
+  it("keeps every demo workspace useful when no recommendation has a monitoring plan", () => {
+    const html = renderToStaticMarkup(
+      <MonitoringWindows
+        dataSource="demo"
+        windows={[]}
+        recommendations={[]}
+        currencyCode="EUR"
+      />,
+    );
+
+    expect(html.match(/Sample outcome/g)).toHaveLength(2);
+    expect(html).toContain("Illustrative monitored bid change");
+    expect(html).toContain("Sample campaign · Sample ad group");
+    expect(html).toContain("€4,822");
+    expect(html).not.toContain("$4,822");
   });
 });

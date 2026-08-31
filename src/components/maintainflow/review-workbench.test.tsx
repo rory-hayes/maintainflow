@@ -21,11 +21,15 @@ describe("CampaignsView", () => {
         dataSource="live"
         campaigns={[]}
         performance={[]}
+        budgetGuardEvidence={[]}
         currencyCode="USD"
         recommendationCount={0}
         onReview={() => undefined}
         reviewing={false}
         snapshotAvailable={false}
+        portfolioAccounts={[]}
+        currentAccountId="adacct_live"
+        onOpenAccount={() => undefined}
       />,
     );
 
@@ -46,6 +50,7 @@ describe("CampaignsView", () => {
         creativeHistoryReady={false}
         campaigns={[]}
         performance={[]}
+        budgetGuardEvidence={[]}
         initialRecommendations={[]}
         recommendationApprovalFingerprints={{}}
         recommendationFingerprints={{}}

@@ -35,6 +35,7 @@ function snapshot(): LiveWorkbenchData {
     campaigns: demoCampaigns,
     ads: demoAds,
     performance: demoCampaignPerformance,
+    budgetGuardEvidence: [],
     recommendations: [],
     conversionMeasurement: {
       source: "live",

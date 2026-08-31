@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { OPENAI_BUDGET_POLICY_VERSION } from "./budget-guard";
 import type { LiveWorkbenchData } from "./data.server";
 import { conversionMeasurementReadinessSchema } from "./measurement-readiness";
 import { monitoringPlanSchema } from "./monitoring";
@@ -17,6 +18,36 @@ const campaignPerformanceSchema = z
     conversions: z.number().finite().nonnegative(),
     viewThroughConversions: z.number().finite().nonnegative().optional(),
     trend: z.string(),
+  })
+  .strict();
+
+const budgetGuardEvidenceSchema = z
+  .object({
+    campaignId: z.string().min(1),
+    source: z.literal("live"),
+    policyVersion: z.literal(OPENAI_BUDGET_POLICY_VERSION),
+    rangeStart: z.number().int().nonnegative(),
+    rangeEnd: z.number().int().nonnegative(),
+    periodStart: z.number().int().nonnegative(),
+    periodEnd: z.number().int().nonnegative(),
+    calculatedAt: z.string().datetime(),
+    accountTimeZone: z.string().min(1),
+    isComplete: z.boolean(),
+    budgetHistoryConfirmed: z.boolean(),
+    spendMicros: z.number().int().nonnegative(),
+    applicableSpendLimitMicros: z.number().int().positive(),
+    dailySpend: z
+      .array(
+        z
+          .object({
+            accountLocalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+            spendMicros: z.number().int().nonnegative(),
+            maximumDailySpendMicros: z.number().int().positive(),
+            isComplete: z.boolean(),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict();
 
@@ -73,6 +104,7 @@ export const liveWorkbenchDataSchema = z
     campaigns: z.array(campaignSchema),
     ads: z.array(adSchema.extend({ ad_group_id: z.string() })),
     performance: z.array(campaignPerformanceSchema),
+    budgetGuardEvidence: z.array(budgetGuardEvidenceSchema).default([]),
     recommendations: z.array(recommendationSchema),
     conversionMeasurement: conversionMeasurementReadinessSchema,
     syncedAt: z.string().datetime(),

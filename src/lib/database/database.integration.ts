@@ -68,6 +68,7 @@ import {
   demoCampaigns,
   getDemoRecommendation,
 } from "../openai-ads/demo-data";
+import { MONITORING_ATTRIBUTION_MATURITY_MS } from "../openai-ads/monitoring";
 import {
   claimLiveSyncRefresh,
   completeLiveSyncRefresh,
@@ -1280,6 +1281,7 @@ describe("PostgreSQL customer and approval boundary", () => {
       ads: demoAds,
       performance: demoCampaignPerformance,
       recommendations: [],
+      budgetGuardEvidence: [],
       conversionMeasurement: {
         source: "live" as const,
         status: "ready" as const,
@@ -2157,11 +2159,65 @@ describe("PostgreSQL customer and approval boundary", () => {
     await updateApprovalRecord(approvalId, "applied");
     const startedAt = new Date("2026-08-20T00:00:00.000Z");
     const endsAt = new Date("2026-08-27T00:00:00.000Z");
-    const evaluatedAt = new Date("2026-08-30T12:00:00.000Z");
+    const evaluatedAt = new Date(
+      endsAt.getTime() + MONITORING_ATTRIBUTION_MATURITY_MS,
+    );
+    const beforeMaturity = new Date(evaluatedAt.getTime() - 1);
+    const observation = {
+      rangeStart: Math.floor(startedAt.getTime() / 1_000),
+      rangeEnd: Math.floor(endsAt.getTime() / 1_000),
+      spend: 4_100,
+      clickAttributedConversions: 12,
+      cpa: 341.6667,
+      conversionChangePercent: -20,
+      baselineClickAttributedConversions:
+        recommendation.monitoringPlan!.baseline.clickAttributedConversions,
+      thresholdPercent: 15,
+      evidenceState: "complete" as const,
+    };
     await database`
       update ads_approval_records set
         monitoring_started_at = ${startedAt},
         monitoring_ends_at = ${endsAt}
+      where id = ${approvalId}
+    `;
+
+    await expect(
+      listDueMonitoringRecords(advertiserAccountId, beforeMaturity),
+    ).resolves.toEqual([]);
+    await expect(
+      listDueMonitoringAccountIds(beforeMaturity),
+    ).resolves.not.toContain(advertiserAccountId);
+    await expect(
+      claimDueMonitoringRecords({
+        accountId: advertiserAccountId,
+        claimId: randomUUID(),
+        now: beforeMaturity,
+        limit: 1,
+      }),
+    ).resolves.toEqual([]);
+
+    const prematureClaimId = randomUUID();
+    await database`
+      update ads_approval_records set
+        monitoring_evaluation_claim_id = ${prematureClaimId},
+        monitoring_evaluation_claimed_at = ${beforeMaturity}
+      where id = ${approvalId}
+    `;
+    await expect(
+      recordMonitoringOutcome({
+        id: approvalId,
+        accountId: advertiserAccountId,
+        outcome: "safeguard_triggered",
+        observation,
+        claimId: prematureClaimId,
+        evaluatedAt: beforeMaturity,
+      }),
+    ).resolves.toBe(false);
+    await database`
+      update ads_approval_records set
+        monitoring_evaluation_claim_id = null,
+        monitoring_evaluation_claimed_at = null
       where id = ${approvalId}
     `;
 
@@ -2213,18 +2269,6 @@ describe("PostgreSQL customer and approval boundary", () => {
       expect.arrayContaining([expect.objectContaining({ id: approvalId })]),
     );
 
-    const observation = {
-      rangeStart: Math.floor(startedAt.getTime() / 1_000),
-      rangeEnd: Math.floor(endsAt.getTime() / 1_000),
-      spend: 4_100,
-      clickAttributedConversions: 12,
-      cpa: 341.6667,
-      conversionChangePercent: -20,
-      baselineClickAttributedConversions:
-        recommendation.monitoringPlan!.baseline.clickAttributedConversions,
-      thresholdPercent: 15,
-      evidenceState: "complete" as const,
-    };
     await expect(
       recordMonitoringOutcome({
         id: approvalId,

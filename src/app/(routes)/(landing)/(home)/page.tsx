@@ -31,7 +31,7 @@ const HomePage = () => {
   return (
     <div>
       <Hero>
-        <div className="flex h-full flex-col items-center justify-center">
+        <div className="flex min-h-full flex-1 flex-col items-center justify-center py-6">
           <div className="inline-flex rounded-xl border bg-white p-3 shadow-md">
             <MaintainFlowBrand compact />
           </div>
@@ -39,15 +39,16 @@ const HomePage = () => {
             <span className="size-1.5 rounded-full bg-warning" />
             Built against the OpenAI Ads API schema
           </div>
-          <h1 className="mt-6 text-center text-5xl font-medium tracking-[-0.04em] md:text-6xl">
-            Make every ad change <br className="hidden md:block" />
+          <h1 className="mt-6 text-center text-4xl font-medium tracking-[-0.04em] sm:text-5xl md:text-6xl">
+            Deploy every ChatGPT Ads change <br className="hidden md:block" />
             <span className="text-[#848484]">with evidence, not instinct</span>
           </h1>
           <p className="mt-8 max-w-2xl text-center text-lg leading-8 text-black/50 md:text-xl">
-            MaintainFlow finds waste and missed opportunities in OpenAI Ads,
-            shows the proof, and waits for your approval before changing anything.
+            MaintainFlow finds spend, measurement, and launch risk, shows the
+            exact action and rollback, and waits for approval before changing
+            anything.
           </p>
-          <div className="mt-8 flex w-full flex-col items-center justify-center gap-3 sm:flex-row">
+          <div className="mt-8 flex w-full flex-col items-center justify-center gap-3 md:flex-row">
             <Button asChild>
               <Link href={buildAppHref({ tab: "readiness" })}>
                 <Sparkles data-icon="inline-start" />

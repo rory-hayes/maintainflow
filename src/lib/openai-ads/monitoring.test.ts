@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { evaluateMonitoringObservation, type MonitoringPlan } from "./monitoring";
+import {
+  evaluateMonitoringObservation,
+  hasMonitoringAttributionMatured,
+  MONITORING_ATTRIBUTION_MATURITY_MS,
+  monitoringAttributionMaturityCutoff,
+  type MonitoringPlan,
+} from "./monitoring";
 
 const plan: MonitoringPlan = {
   kind: "click_attributed_conversion_guardrail",
@@ -32,6 +38,23 @@ function evaluate(clickAttributedConversions: number | null, spend = 1_680) {
 }
 
 describe("monitoring safeguard evaluation", () => {
+  it("matures attribution exactly 48 hours after the monitoring window ends", () => {
+    const endsAt = new Date("2026-08-27T00:00:00.000Z");
+    const maturityAt = new Date(
+      endsAt.getTime() + MONITORING_ATTRIBUTION_MATURITY_MS,
+    );
+
+    expect(MONITORING_ATTRIBUTION_MATURITY_MS).toBe(172_800_000);
+    expect(
+      hasMonitoringAttributionMatured(
+        endsAt,
+        new Date(maturityAt.getTime() - 1),
+      ),
+    ).toBe(false);
+    expect(hasMonitoringAttributionMatured(endsAt, maturityAt)).toBe(true);
+    expect(monitoringAttributionMaturityCutoff(maturityAt)).toEqual(endsAt);
+  });
+
   it("triggers human rollback review only beyond the strict threshold", () => {
     expect(evaluate(84)).toMatchObject({
       outcome: "safeguard_triggered",

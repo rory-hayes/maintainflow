@@ -1,8 +1,12 @@
 # MaintainFlow
 
-MaintainFlow is a human-controlled optimization layer for OpenAI Ads. It turns
-account delivery data into evidence-backed recommendations, shows the exact API
+MaintainFlow is a human-controlled change and assurance layer for OpenAI Ads. It
+turns account delivery data into evidence-backed actions, shows the exact API
 change and rollback, and requires approval before any external write.
+
+The product wedge, customer, integration order, pricing hypothesis, and paid
+validation gate are documented in
+[`docs/product-strategy.md`](docs/product-strategy.md).
 
 ## Current status
 
@@ -14,6 +18,12 @@ change and rollback, and requires approval before any external write.
   review reasons, evidence screenshots, appeals, and serving issues are retained
   and mapped to practical checks; unknown provider codes remain visible rather
   than being turned into an invented diagnosis.
+- Campaigns also includes Budget Guard. OpenAI daily budgets are treated as
+  seven-day averages, with the documented 2x individual-day maximum and 7x
+  applicable-period limit kept separate. Forecasts require complete
+  account-local spend plus confirmed budget history, and remain locked after an
+  unverified mid-week change or for partial, stale, duplicate, unsafe, or
+  mismatched lifetime evidence.
 - Live account refreshes retain account-scoped creative review and delivery
   transitions after the first baseline sync. Demo history remains explicitly
   labelled and is never presented as provider evidence.
@@ -24,6 +34,11 @@ change and rollback, and requires approval before any external write.
 - The Readiness workflow audits a public landing page without an Ads API key. It
   checks OpenAI crawler rules, crawlability, indexability, product structured
   data, offer facts, metadata, and sitemap discovery.
+- Readiness reviews each active campaign's
+  `landing_page_configuration.query_string_template` for source/medium labels,
+  supported dynamic campaign/ad identifiers, malformed macros, and the reserved
+  `oppref` parameter. UTM values are explicitly recommendations rather than
+  OpenAI requirements, and the check does not claim redirect or analytics proof.
 - The same screen includes a clearly labelled, schema-valid sample storefront
   result for sales demonstrations. Loading it makes no network request, stores
   no history, suppresses the external-page link, and keeps every limitation in
@@ -99,6 +114,10 @@ change and rollback, and requires approval before any external write.
   rollback payload before the Ads API is contacted. Network failures, timeouts,
   HTTP 408, and 5xx outcomes are marked for manual reconciliation and must not
   be retried automatically.
+- Immediately before apply or rollback, MaintainFlow reads the provider resource
+  again and compares a normalized fingerprint of only the controlled fields.
+  Drift or an unavailable read records a no-write outcome and blocks the POST;
+  the remaining narrow GET-to-POST race is a documented provider limitation.
 - Live recommendation dismissals require a reason and persist the account,
   operator, organization roles, full recommendation snapshot, and a stable
   fingerprint of the exact proposed change. Dismissals can be restored, and a
@@ -107,14 +126,18 @@ change and rollback, and requires approval before any external write.
   exact click-attributed baseline that produced the recommendation. Active or
   unresolved approvals suppress the same recommendation and block concurrent
   duplicate writes.
-- A protected daily job evaluates due windows across connected advertiser
-  accounts without requiring someone to open the app. A short PostgreSQL lease
-  prevents duplicate workers; missing rows remain insufficient evidence and a
-  safeguard breach only creates human rollback review.
+- A protected daily job evaluates due windows only after a shared 48-hour
+  attribution-maturity buffer across connected advertiser accounts, without
+  requiring someone to open the app. A short PostgreSQL lease prevents
+  duplicate workers; missing rows remain insufficient evidence and a safeguard
+  breach only creates human rollback review.
 - The Experiments view includes account-scoped approval history, confirmed
   rollback execution, note-backed reconciliation, elapsed monitoring state,
   reason-backed dismissal and restore history, and observed outcomes without
   fabricating missing performance.
+- Demo Experiments includes two deterministic, clearly labelled sample outcomes
+  over equal seven-day windows so buyers can understand the safeguard workflow.
+  They are never presented as live results, causal lift, or an external action.
 - No Ads API credential or live advertiser account is included in this repo.
 - `/api/health` reports process liveness and deployment revision, while the
   `MAINTAINFLOW_READINESS_PROBE_SECRET`-protected `/api/ready` separately fails

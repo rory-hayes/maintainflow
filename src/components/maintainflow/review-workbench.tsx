@@ -34,6 +34,7 @@ import { MaintainFlowBrand } from "@/components/maintainflow/brand";
 import { ApprovalHistory } from "@/components/maintainflow/approval-history";
 import { CreativeReviewHistory } from "@/components/maintainflow/creative-review-history";
 import { CreativeReviewTable } from "@/components/maintainflow/creative-review-table";
+import { BudgetGuard } from "@/components/maintainflow/budget-guard";
 import { MonitoringWindows } from "@/components/maintainflow/monitoring-windows";
 import { ReadinessWorkbench } from "@/components/maintainflow/readiness-workbench";
 import { RecommendationDecisionHistory } from "@/components/maintainflow/recommendation-decision-history";
@@ -115,6 +116,7 @@ import type { RecommendationDecisionHistoryDto } from "@/lib/audit/recommendatio
 import type { CreativeReviewEvent } from "@/lib/openai-ads/creative-history";
 import type { MonitoringWindowDto } from "@/lib/openai-ads/monitoring";
 import type { ConversionMeasurementReadiness } from "@/lib/openai-ads/measurement-readiness";
+import type { BudgetGuardEvidence } from "@/lib/openai-ads/budget-guard";
 import type { ConversionsConnectionStatus } from "@/lib/openai-ads/conversions-connection";
 import type { ReadinessAuditHistoryEntry } from "@/lib/readiness/history";
 import type { AccountAccess } from "@/lib/tenancy/schema";
@@ -135,6 +137,7 @@ type WorkbenchProps = {
   creativeHistoryError?: string;
   campaigns: Campaign[];
   performance: CampaignPerformance[];
+  budgetGuardEvidence: BudgetGuardEvidence[];
   initialRecommendations: Recommendation[];
   recommendationApprovalFingerprints: Record<string, string>;
   recommendationFingerprints: Record<string, string>;
@@ -213,6 +216,7 @@ export function MaintainFlowWorkbench({
   creativeHistoryError,
   campaigns,
   performance,
+  budgetGuardEvidence,
   initialRecommendations,
   recommendationApprovalFingerprints,
   recommendationFingerprints,
@@ -971,11 +975,17 @@ export function MaintainFlowWorkbench({
             dataSource={dataSource}
             campaigns={campaigns}
             performance={performance}
+            budgetGuardEvidence={budgetGuardEvidence}
             currencyCode={account.currency_code}
             recommendationCount={readyCount}
             onReview={runAccountReview}
             reviewing={reviewing}
             snapshotAvailable={snapshotAvailable}
+            portfolioAccounts={
+              dataSource === "demo" ? simulatedAccounts : []
+            }
+            currentAccountId={account.id}
+            onOpenAccount={openAccount}
           />
         </TabsContent>
 
@@ -983,6 +993,7 @@ export function MaintainFlowWorkbench({
           <ExperimentsView
             recommendations={recommendations}
             dataSource={dataSource}
+            currencyCode={account.currency_code}
             monitoringWindows={monitoringWindows}
             monitoringEvaluationError={monitoringEvaluationError}
             auditEvents={auditEvents}
@@ -999,6 +1010,8 @@ export function MaintainFlowWorkbench({
           <ReadinessWorkbench
             key={workspaceAccess?.accountId ?? "public-readiness"}
             conversionMeasurement={conversionMeasurement}
+            campaigns={campaigns}
+            dataSource={dataSource}
             account={workspaceAccess}
             historyReady={readinessHistoryReady}
             historyError={readinessHistoryError}
@@ -1407,11 +1420,15 @@ export function CampaignsView({
   dataSource,
   campaigns,
   performance,
+  budgetGuardEvidence,
   currencyCode,
   recommendationCount,
   onReview,
   reviewing,
   snapshotAvailable,
+  portfolioAccounts,
+  currentAccountId,
+  onOpenAccount,
 }: {
   ads: ScopedAd[];
   creativeReviewHistory: CreativeReviewEvent[];
@@ -1420,16 +1437,35 @@ export function CampaignsView({
   dataSource: "demo" | "live";
   campaigns: Campaign[];
   performance: CampaignPerformance[];
+  budgetGuardEvidence: BudgetGuardEvidence[];
   currencyCode: string;
   recommendationCount: number;
   onReview: () => void;
   reviewing: boolean;
   snapshotAvailable: boolean;
+  portfolioAccounts: SimulatedAccountOption[];
+  currentAccountId: string;
+  onOpenAccount: (accountId: string) => void;
 }) {
   const currency = moneyFormatter(currencyCode);
   const totalSpend = performance.reduce((sum, item) => sum + item.spend, 0);
   const totalConversions = performance.reduce(
     (sum, item) => sum + item.conversions,
+    0,
+  );
+  const portfolioRows = portfolioAccounts.filter(
+    (item) => item.portfolioSummary,
+  );
+  const portfolioExposure = portfolioRows.reduce(
+    (sum, item) => sum + (item.portfolioSummary?.projectedExposure ?? 0),
+    0,
+  );
+  const portfolioReviews = portfolioRows.reduce(
+    (sum, item) => sum + (item.portfolioSummary?.openReviews ?? 0),
+    0,
+  );
+  const portfolioTemplateFixes = portfolioRows.reduce(
+    (sum, item) => sum + (item.portfolioSummary?.campaignTemplateFixes ?? 0),
     0,
   );
 
@@ -1455,6 +1491,117 @@ export function CampaignsView({
           {reviewing ? "Reloading snapshot" : "Reload account snapshot"}
         </Button>
       </div>
+
+      {portfolioRows.length > 1 ? (
+        <Card className="min-w-0 shadow-sm">
+          <CardHeader className="gap-3 border-b bg-muted/20 min-[640px]:flex-row min-[640px]:items-start min-[640px]:justify-between">
+            <div className="grid gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle className="text-base">Agency exception queue</CardTitle>
+                <Badge variant="secondary">Simulator portfolio</Badge>
+              </div>
+              <CardDescription>
+                Triage money at risk, open reviews, and campaign-template gaps
+                across clients before opening one advertiser account.
+              </CardDescription>
+            </div>
+            <Badge variant="outline">{portfolioRows.length} client accounts</Badge>
+          </CardHeader>
+          <CardContent className="grid gap-4 p-4 md:p-5">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <MetricCard
+                label="Projected weekly exposure"
+                value={currency.format(portfolioExposure)}
+                detail="Illustrative confirmed-budget windows"
+              />
+              <MetricCard
+                label="Open reviews"
+                value={formatGroupedInteger(portfolioReviews)}
+                detail="Across the simulated agency portfolio"
+              />
+              <MetricCard
+                label="Campaign template fixes"
+                value={formatGroupedInteger(portfolioTemplateFixes)}
+                detail="Campaign-level checks only"
+              />
+            </div>
+            <div
+              aria-label="Agency account exception queue"
+              role="region"
+              tabIndex={0}
+              className="data-table-scroll max-w-full overflow-x-auto pb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Client account</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Money at risk</TableHead>
+                    <TableHead className="text-right">Open reviews</TableHead>
+                    <TableHead className="text-right">Template fixes</TableHead>
+                    <TableHead className="text-right">Workspace</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {portfolioRows.map((item) => {
+                    const summary = item.portfolioSummary!;
+                    const selected = item.accountId === currentAccountId;
+                    return (
+                      <TableRow key={item.accountId}>
+                        <TableCell>
+                          <div className="flex min-w-44 items-center gap-2">
+                            <span className="font-medium">{item.accountName}</span>
+                            {selected ? <Badge variant="outline">Open</Badge> : null}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "whitespace-nowrap",
+                              summary.status === "critical"
+                                ? "border-destructive/30 bg-destructive/10 text-destructive"
+                                : summary.status === "attention"
+                                  ? "border-warning/30 bg-warning/10 text-warning-foreground"
+                                  : "border-success/30 bg-success/10 text-success",
+                            )}
+                          >
+                            {summary.status === "critical"
+                              ? "Budget risk"
+                              : summary.status === "attention"
+                                ? "Review needed"
+                                : "No exception"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {currency.format(summary.projectedExposure)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {summary.openReviews}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {summary.campaignTemplateFixes}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={selected ? "secondary" : "outline"}
+                            disabled={selected}
+                            onClick={() => onOpenAccount(item.accountId)}
+                          >
+                            {selected ? "Current" : "Open account"}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {!snapshotAvailable ? (
         <Empty className="border bg-background py-12 shadow-sm">
@@ -1485,7 +1632,7 @@ export function CampaignsView({
         <MetricCard
           label="Month-to-date spend"
           value={currency.format(totalSpend)}
-          detail={`Across ${campaigns.length} campaigns`}
+          detail={`Current account snapshot · ${campaigns.length} campaigns`}
         />
         <MetricCard
           label="Click-attributed conversions"
@@ -1498,6 +1645,13 @@ export function CampaignsView({
           detail="Only evidence-backed changes"
         />
       </div>
+
+      <BudgetGuard
+        campaigns={campaigns}
+        evidence={budgetGuardEvidence}
+        currencyCode={currencyCode}
+        dataSource={dataSource}
+      />
 
       <Card className="min-w-0 shadow-sm">
         <CardHeader>
@@ -1632,6 +1786,7 @@ function MetricCard({
 function ExperimentsView({
   recommendations,
   dataSource,
+  currencyCode,
   monitoringWindows,
   monitoringEvaluationError,
   auditEvents,
@@ -1644,6 +1799,7 @@ function ExperimentsView({
 }: {
   recommendations: Recommendation[];
   dataSource: "demo" | "live";
+  currencyCode: string;
   monitoringWindows: MonitoringWindowDto[];
   monitoringEvaluationError?: string;
   auditEvents: AuditEvent[];
@@ -1670,6 +1826,7 @@ function ExperimentsView({
       <div className="grid gap-4 md:grid-cols-2">
         <MonitoringWindows
           dataSource={dataSource}
+          currencyCode={currencyCode}
           windows={monitoringWindows}
           recommendations={recommendations}
           error={monitoringEvaluationError}

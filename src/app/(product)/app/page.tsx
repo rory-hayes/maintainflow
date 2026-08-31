@@ -55,6 +55,7 @@ import type { CreativeReviewEvent } from "@/lib/openai-ads/creative-history";
 import {
   demoAccount,
 } from "@/lib/openai-ads/demo-data";
+import type { BudgetGuardEvidence } from "@/lib/openai-ads/budget-guard";
 import { resolveSimulatedWorkspace } from "@/lib/openai-ads/simulated-workspaces";
 import {
   buildMonitoringWindows,
@@ -107,6 +108,8 @@ export default async function MaintainFlowAppPage({
   let ads = simulatedWorkspace.ads;
   let campaigns = simulatedWorkspace.campaigns;
   let performance = simulatedWorkspace.performance;
+  let budgetGuardEvidence: BudgetGuardEvidence[] =
+    simulatedWorkspace.budgetGuardEvidence;
   let recommendations = simulatedWorkspace.recommendations;
   let creativeReviewHistory: CreativeReviewEvent[] =
     simulatedWorkspace.creativeReviewHistory;
@@ -239,6 +242,7 @@ export default async function MaintainFlowAppPage({
               ads = [];
               campaigns = [];
               performance = [];
+              budgetGuardEvidence = [];
               recommendations = [];
               creativeReviewHistory = [];
               conversionMeasurement = unavailableConversionMeasurement({
@@ -304,6 +308,7 @@ export default async function MaintainFlowAppPage({
               ads = [];
               campaigns = [];
               performance = [];
+              budgetGuardEvidence = [];
               recommendations = [];
               creativeReviewHistory = [];
               const liveResult = await getLiveWorkbench({
@@ -317,6 +322,7 @@ export default async function MaintainFlowAppPage({
               ads = live.ads;
               campaigns = live.campaigns;
               performance = live.performance;
+              budgetGuardEvidence = live.budgetGuardEvidence ?? [];
               recommendations = live.recommendations;
               conversionMeasurement = live.conversionMeasurement;
               dataSource = "live";
@@ -445,6 +451,7 @@ export default async function MaintainFlowAppPage({
           ads = [];
           campaigns = [];
           performance = [];
+          budgetGuardEvidence = [];
           recommendations = [];
           creativeReviewHistory = [];
           approvalHistory = [];
@@ -507,6 +514,7 @@ export default async function MaintainFlowAppPage({
       creativeHistoryError={creativeHistoryError}
       campaigns={campaigns}
       performance={performance}
+      budgetGuardEvidence={budgetGuardEvidence}
       initialRecommendations={recommendations}
       recommendationApprovalFingerprints={Object.fromEntries(
         recommendations.map((recommendation) => [

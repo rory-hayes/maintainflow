@@ -10,6 +10,7 @@ const SERVICE = "maintainflow-ads";
 const events = [
   "ads.apply.audit_persistence_failed",
   "ads.apply.completed",
+  "ads.apply.precondition_blocked",
   "ads.apply.reconciliation_required",
   "ads.apply.rejected",
   "ads.reconcile.completed",
@@ -18,6 +19,7 @@ const events = [
   "ads.rollback.audit_persistence_failed",
   "ads.rollback.completed",
   "ads.rollback.invalid_stored_request",
+  "ads.rollback.precondition_blocked",
   "ads.rollback.reconciliation_required",
   "ads.rollback.rejected",
   "ads.recommendation_decision.completed",

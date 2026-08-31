@@ -39,8 +39,8 @@ Ad account
         └── Ad
 ```
 
-Campaigns hold daily and/or lifetime spend limits, objective, dates, and targeting. Ad
-groups hold context hints and the bid configuration. Ads hold the complete
+Campaigns hold one selected daily or lifetime spend limit, objective, dates, and
+targeting. Ad groups hold context hints and the bid configuration. Ads hold the complete
 creative, review details, appeal state, and optional serving issues.
 
 A campaign with `mode: product_feed` also references the linked
@@ -67,6 +67,14 @@ updates are documented separately and are also enabled per ad account.
 CPA and post-click conversion rate must be calculated from click-attributed
 conversions. View-through conversions remain a separate reporting metric and
 must not be included in CPA or bidding decisions.
+
+OpenAI defines a daily budget as an average across an applicable seven-day
+period, permits up to 2x that amount on one day, and caps a stable week at 7x.
+A mid-week budget change is prorated through the next Sunday at midnight. The
+current Campaign resource is not treated as historical proof: live Budget Guard
+remains locked until the exact account-local spend window and continuous budget
+history can establish the applicable limit. Demo evidence is pinned to
+`openai_budget_rules_2026-08`; lifetime budgets require the exact campaign range.
 
 Account, campaign, ad-group, ad-creative, and insight responses are
 schema-validated before use. Campaigns, ad groups, ads, and insights consume
@@ -139,6 +147,14 @@ Every MaintainFlow recommendation therefore stores:
 3. a complete rollback request;
 4. a human approval record;
 5. a monitoring window and explicit rollback condition.
+
+Immediately before each apply or rollback POST, MaintainFlow performs a detail
+GET with the same account credential and compares a SHA-256 fingerprint of the
+normalized fields controlled by that reviewed request. A changed field records
+`blocked_no_write` and requires fresh review or reconciliation; an unreadable
+resource also blocks the mutation. This closes ordinary stale-review overwrites,
+but there is still a narrow GET-to-POST race because the current API contract
+does not document an atomic conditional-write version token.
 
 For the first live bid rule, the monitoring plan stores the exact Insights Unix
 range, spend, click-attributed conversion count, derived CPA, configured
@@ -214,9 +230,10 @@ sent, MaintainFlow stores no response body, marks the operation for manual
 reconciliation, and preserves the must-not-retry rule.
 
 Completed monitoring does not depend on a browser refresh. The protected daily
-scheduler resolves each selected advertiser's credential independently, claims
-due rows with a recoverable lease, and persists only observations. It never
-sends an Ads mutation or automatic rollback.
+scheduler resolves each selected advertiser's credential independently, waits
+until 48 hours after the stored evidence window, claims due rows with a
+recoverable lease, and persists only observations. It never sends an Ads
+mutation or automatic rollback.
 
 The first live recommendation rule is deliberately narrow: for active
 conversion campaigns, compare click-attributed CPA with the ad group's
@@ -293,3 +310,5 @@ old version unless the encrypted replacement transaction succeeds.
 - [Image Tag](https://developers.openai.com/ads/image-tag)
 - [Conversions API](https://developers.openai.com/ads/conversions-api)
 - [Supported Events](https://developers.openai.com/ads/supported-events)
+- [Daily budgets](https://help.openai.com/en/articles/20001413-daily-budgets)
+- [Measure results](https://help.openai.com/en/articles/20001214-launch-your-campaign-and-monitor-performance)

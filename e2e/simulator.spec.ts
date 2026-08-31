@@ -21,6 +21,12 @@ test("landing page opens the five-client agency portfolio", async ({ page }) => 
     name: "Explore the five-client agency portfolio",
   });
   await expect(agencyPortfolioLink).toHaveAttribute("href", agencyEntryPath);
+  await expect(
+    page.getByRole("link", { name: "Apply for an agency pilot" }),
+  ).toHaveAttribute(
+    "href",
+    /^mailto:support@maintainflow\.test\?subject=MaintainFlow%20agency%20pilot&body=/,
+  );
   await agencyPortfolioLink.press("Enter");
 
   await expect(page).toHaveURL((url) => {
@@ -36,9 +42,110 @@ test("landing page opens the five-client agency portfolio", async ({ page }) => 
   await expect(
     page.getByRole("heading", { name: "Campaign health" }),
   ).toBeVisible();
+  await expect(page.getByText("Budget Guard", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Projected overspend", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/applicable seven-day spending limit/i),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Confirmed spending limits", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Critical pacing risk", { exact: true }).first(),
+  ).toBeVisible();
+  const campaignScopedAction = page.getByRole("link", {
+    name: "Review campaign row",
+  });
+  await expect(campaignScopedAction).toHaveAttribute(
+    "href",
+    "#budget-campaign-cmpn_northstar_101",
+  );
+  await campaignScopedAction.click();
+  await expect(page).toHaveURL(/#budget-campaign-cmpn_northstar_101$/);
+  await expect(
+    page.locator("#budget-campaign-cmpn_northstar_101"),
+  ).toBeInViewport();
+  await expect(
+    page.getByText("Agency exception queue", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("5 client accounts", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("combobox", { name: "Ad account", exact: true }),
   ).toContainText("Northstar Home");
+  expect(browserErrors).toEqual([]);
+});
+
+test("simulator exposes actionable attribution and monitoring evidence", async ({
+  page,
+}) => {
+  const browserErrors = collectBrowserErrors(page);
+
+  await page.goto("/app?tab=readiness&account=adacct_sim_northstar");
+  await expect(
+    page.getByText("Campaign-level URL tags", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Campaign template needs attention", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Campaign-level check, not effective-URL or attribution proof",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/ad url, ad, and ad-group overrides are more specific/i),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Fix before launch", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Add a dynamic campaign identifier", { exact: true }),
+  ).toBeVisible();
+
+  await page.getByRole("tab", { name: "Experiments" }).click();
+  await expect(page.getByText("Sample outcome", { exact: true })).toHaveCount(2);
+  await expect(
+    page.getByText("Within safeguard", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Rollback review", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/no rollback or other external action was taken/i).first(),
+  ).toBeVisible();
+  expect(browserErrors).toEqual([]);
+});
+
+test("agency exception queue opens the selected advertiser deep link", async ({
+  page,
+}) => {
+  const browserErrors = collectBrowserErrors(page);
+
+  await page.goto(agencyEntryPath);
+  const alderRow = page.getByRole("row", { name: /Alder & Ash/ });
+  await expect(alderRow).toContainText("Review needed");
+  await alderRow.getByRole("button", { name: "Open account" }).click();
+
+  await expect(page).toHaveURL((url) => {
+    return (
+      url.pathname === "/app" &&
+      url.searchParams.get("tab") === "campaigns" &&
+      url.searchParams.get("account") === "adacct_sim_alder"
+    );
+  });
+  await expect(
+    page.getByRole("combobox", { name: "Ad account", exact: true }),
+  ).toContainText("Alder & Ash");
+  const selectedAlderRow = page.getByRole("row", { name: /Alder & Ash/ });
+  await expect(
+    selectedAlderRow.getByRole("button", { name: "Current" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText("Entryway storage", { exact: true }).first(),
+  ).toBeVisible();
   expect(browserErrors).toEqual([]);
 });
 
@@ -163,6 +270,53 @@ test("agency portfolio remains operable at a 390 by 844 viewport", async ({
   expect(browserErrors).toEqual([]);
 });
 
+test("mobile landing keeps the primary readiness action in view without overflow", async ({
+  page,
+}) => {
+  const browserErrors = collectBrowserErrors(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.goto("/", { waitUntil: "networkidle" });
+  await expect(
+    page.getByRole("heading", { name: /Deploy every ChatGPT Ads change/ }),
+  ).toBeVisible();
+  const primaryAction = page.getByRole("link", {
+    name: "Audit your store · no Ads key",
+  });
+  await expect(primaryAction).toBeVisible();
+  await expect(primaryAction).toBeInViewport({ ratio: 1 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  expect(browserErrors).toEqual([]);
+});
+
+test("workspace labels every roadmap connection as future work", async ({
+  page,
+}) => {
+  const browserErrors = collectBrowserErrors(page);
+
+  await page.goto("/app?tab=workspace&account=adacct_sim_northstar");
+  await expect(
+    page.getByText("Connection roadmap", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/none are presented as connected before a paid design partner/i),
+  ).toBeVisible();
+  await expect(page.getByText("Shopify", { exact: true })).toBeVisible();
+  await expect(page.getByText("Next connector", { exact: true })).toBeVisible();
+  await expect(page.getByText("Google Ads", { exact: true })).toBeVisible();
+  await expect(page.getByText("Meta Ads", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Design-partner gate", { exact: true }),
+  ).toHaveCount(2);
+  await expect(page.getByText("Slack / Teams", { exact: true })).toBeVisible();
+  await expect(page.getByText("Planned", { exact: true })).toBeVisible();
+  expect(browserErrors).toEqual([]);
+});
+
 test("storefront sample demonstrates a report without making a network audit", async ({
   page,
 }) => {
@@ -207,7 +361,7 @@ test("public, legal, and closed-access surfaces render deployment truth", async 
 
   await page.goto("/", { waitUntil: "networkidle" });
   await expect(
-    page.getByRole("heading", { name: /Make every ad change/ }),
+    page.getByRole("heading", { name: /Deploy every ChatGPT Ads change/ }),
   ).toBeVisible();
 
   await page.goto("/privacy", { waitUntil: "networkidle" });

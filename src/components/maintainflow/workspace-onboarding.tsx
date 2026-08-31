@@ -8,8 +8,12 @@ import {
   DatabaseZap,
   KeyRound,
   Loader2,
+  Megaphone,
+  MessagesSquare,
+  Search,
   Send,
   ShieldCheck,
+  ShoppingBag,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -91,6 +95,33 @@ const setupSteps = [
     title: "Permissioned operations",
     description: "Review, apply, rollback, and reconciliation use account roles on every request.",
     icon: ShieldCheck,
+  },
+] as const;
+
+const connectionRoadmap = [
+  {
+    name: "Shopify",
+    purpose: "Catalog, product-page, and order truth for feed and revenue checks.",
+    status: "Next connector",
+    icon: ShoppingBag,
+  },
+  {
+    name: "Google Ads",
+    purpose: "Read-only baselines, conversion definitions, and landing-page evidence.",
+    status: "Design-partner gate",
+    icon: Search,
+  },
+  {
+    name: "Meta Ads",
+    purpose: "Read-only creative and event-health context across paid channels.",
+    status: "Design-partner gate",
+    icon: Megaphone,
+  },
+  {
+    name: "Slack / Teams",
+    purpose: "Deliver approvals and escalate exceptions to the accountable operator.",
+    status: "Planned",
+    icon: MessagesSquare,
   },
 ] as const;
 
@@ -628,6 +659,46 @@ export function WorkspaceOnboarding({
           </CardContent>
         </Card>
       </div>
+
+      <Card className="min-w-0 shadow-sm">
+        <CardHeader>
+          <div className="flex flex-col justify-between gap-3 min-[640px]:flex-row min-[640px]:items-start">
+            <div className="grid gap-1">
+              <CardTitle className="text-base">Connection roadmap</CardTitle>
+              <CardDescription>
+                OpenAI Ads remains the system of record. Other channels add
+                read-only evidence or route approvals; none are presented as
+                connected before a paid design partner validates the need.
+              </CardDescription>
+            </div>
+            <Badge variant="outline">Scoped integrations</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2">
+          {connectionRoadmap.map((connection) => {
+            const Icon = connection.icon;
+            return (
+              <div
+                key={connection.name}
+                className="flex items-start gap-3 rounded-lg border p-4"
+              >
+                <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+                  <Icon className="size-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium">{connection.name}</p>
+                    <Badge variant="secondary">{connection.status}</Badge>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {connection.purpose}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
 
       <Card className="min-w-0 shadow-sm">
         <CardHeader>

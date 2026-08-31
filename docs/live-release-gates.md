@@ -113,6 +113,23 @@ Each record stores:
   rolled-back, rollback-failed, or rollback-reconciliation-required status;
 - provider response or error and relevant timestamps.
 
+Immediately before either apply or rollback, MaintainFlow performs an
+account-scoped detail `GET` for the exact campaign, ad group, or ad. For apply,
+the normalized expected state is derived from the reviewed rollback request;
+for rollback, it is derived from the original request already stored in
+`request_payload`. Only fields controlled by the outbound request are projected,
+canonically ordered, and fingerprinted. If the read fails or its fingerprint no
+longer matches, the precondition outcome is recorded as `blocked_no_write`, the
+apply is failed or the rollback is returned to `rollback_failed`, and no
+provider `POST` is sent. Drift requires a fresh review; a temporarily
+unavailable read can be retried only after provider reads recover.
+
+This is a fail-closed read-before-write guard, not a provider-atomic compare and
+swap. The current adapter has no conditional-write token to attach to the
+mutation, so the narrow interval between the final `GET` and `POST` remains a
+live-account acceptance risk and must not be described as impossible until the
+provider exposes and MaintainFlow validates such a primitive.
+
 The pending record is inserted before the OpenAI Ads request. A definitive HTTP
 4xx rejection is failed. A network error, lost connection, timeout, HTTP 408,
 or 5xx response is marked `reconciliation_required`: the operation must not be
@@ -185,10 +202,13 @@ invoke the same route with `Authorization: Bearer $CRON_SECRET`.
 
 A worker atomically claims due rows with `FOR UPDATE SKIP LOCKED`, then releases
 the database transaction before calling OpenAI. Successful observations clear
-the claim as they are persisted. A handled provider-read or result-persistence
-failure releases only its matching claim for a bounded retry. An interrupted
-worker cannot run that cleanup, so its unevaluated row becomes eligible again
-after the 15-minute lease expires. Neither failure path triggers a rollback.
+the claim as they are persisted. Due-account discovery, record claiming, and
+terminal outcome persistence each require the stored monitoring end to be at
+least 48 hours old, using one shared application constant. A handled
+provider-read or result-persistence failure releases only its matching claim for
+a bounded retry. An interrupted worker cannot run that cleanup, so its
+unevaluated row becomes eligible again after the 15-minute lease expires.
+Neither failure path triggers a rollback.
 
 The same protected daily invocation independently prunes readiness rate-limit
 buckets older than 48 hours and live workbench payloads whose confirmed sync age
@@ -245,6 +265,7 @@ hosted smoke, alert, containment, and recovery procedure.
   result in that account's Ads Manager before enabling broader measurement.
 - Confirm the event-setting list shape and archived/source behavior against that
   account before relying on measurement-ready status.
-- Observe one complete monitoring window against a real account before relying
-  on the evaluator's result operationally. The implemented evaluation is
-  non-mutating; keep rollback human-approved.
+- Observe one complete monitoring window and its following 48-hour attribution
+  maturity buffer against a real account before relying on the evaluator's
+  result operationally. The implemented evaluation is non-mutating; keep
+  rollback human-approved.
