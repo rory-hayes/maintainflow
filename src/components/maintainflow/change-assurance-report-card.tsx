@@ -1,6 +1,7 @@
 "use client";
 
 import { Download, FileCheck2, ShieldCheck } from "lucide-react";
+import { useId } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +30,7 @@ export function ChangeAssuranceReportCard({
   dataSource: "demo" | "live";
   records: ApprovalRecordDto[];
 }) {
+  const titleId = useId();
   const summary = changeAssuranceReportSummary({
     generatedAt: new Date(0).toISOString(),
     dataSource,
@@ -63,14 +65,23 @@ export function ChangeAssuranceReportCard({
   }
 
   return (
-    <Card className="min-w-0 shadow-sm">
+    <Card
+      role="region"
+      aria-labelledby={titleId}
+      className="min-w-0 shadow-sm"
+    >
       <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
             <FileCheck2 className="size-5" />
           </div>
           <div className="grid gap-1">
-            <CardTitle role="heading" aria-level={2} className="text-base">
+            <CardTitle
+              id={titleId}
+              role="heading"
+              aria-level={2}
+              className="text-base"
+            >
               Client change assurance report
             </CardTitle>
             <CardDescription className="max-w-3xl leading-5">

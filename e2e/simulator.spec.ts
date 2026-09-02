@@ -117,10 +117,18 @@ test("simulator exposes actionable attribution and monitoring evidence", async (
   await expect(
     page.getByText(/no rollback or other external action was taken/i).first(),
   ).toBeVisible();
+  const assuranceReport = page.getByRole("region", {
+    name: "Client change assurance report",
+  });
+  await expect(assuranceReport).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Client change assurance report" }),
+    assuranceReport.getByRole("heading", {
+      name: "Client change assurance report",
+    }),
   ).toBeVisible();
-  await expect(page.getByText("Simulator evidence", { exact: true })).toBeVisible();
+  await expect(
+    assuranceReport.getByText("Simulator evidence", { exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Durable approval history" }),
   ).toBeVisible();
@@ -129,7 +137,7 @@ test("simulator exposes actionable attribution and monitoring evidence", async (
   ).toBeVisible();
 
   const assuranceDownloadPromise = page.waitForEvent("download");
-  await page
+  await assuranceReport
     .getByRole("button", { name: "Download assurance report" })
     .click();
   const assuranceDownload = await assuranceDownloadPromise;

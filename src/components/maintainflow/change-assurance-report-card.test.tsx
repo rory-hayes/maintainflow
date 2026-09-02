@@ -49,7 +49,12 @@ describe("change assurance report card", () => {
       />,
     );
 
+    const regionLabelId = markup.match(/aria-labelledby="([^"]+)"/)?.[1];
+
     expect(markup).toContain("Client change assurance report");
+    expect(markup).toContain('role="region"');
+    expect(regionLabelId).toBeTruthy();
+    expect(markup).toContain(`id="${regionLabelId}"`);
     expect(markup).toContain('role="heading"');
     expect(markup).toContain('aria-level="2"');
     expect(markup).toContain("Live evidence");
