@@ -86,7 +86,7 @@ and real Ads Manager ownership, receipt, and attribution evidence.
 
 ## Approval-store migration
 
-Apply migrations `001` through `016` in filename order before enabling the full
+Apply migrations `001` through `018` in filename order before enabling the full
 live product. Migration `005` adds the typed monitoring baseline, seven-day
 timestamps, and partial unique index that prevents a second active approval for
 the same recommendation. Migration `006` adds an atomic outcome, observation,
@@ -184,7 +184,7 @@ to retain creative review and delivery transitions between live syncs. This
 read-only history is not itself a write-authorization rule: the application can
 report its absence without inventing transitions, and the independent approval
 rules remain fail-closed. Deployment readiness nevertheless requires the exact
-`001` through `016` migration ledger, so an account-backed release must not be
+`001` through `018` migration ledger, so an account-backed release must not be
 promoted while migration `004` is absent or unavailable.
 
 ## Recommendation dismissal migration
@@ -206,7 +206,7 @@ keyset-ready index and shows both the dismissal and restoration actor contexts.
 
 ## Local database proof
 
-`npm run test:db` now applies all sixteen migrations to a uniquely named,
+`npm run test:db` now applies all eighteen migrations to a uniquely named,
 disposable PostgreSQL database and exercises the real tenancy, credential, and
 approval stores. It covers direct-advertiser and agency roles, review-only
 access, duplicate account claims, encrypted key rotation with transaction
@@ -222,6 +222,12 @@ Migration `016` adds the bounded live-portfolio signal summary written only
 when a validated snapshot completes. Existing snapshots deliberately remain
 unknown in the portfolio until they are refreshed; the portfolio query never
 loads the full snapshot payload.
+
+Migration `017` adds bounded customer-retention and purge evidence. Migration
+`018` completes the remaining organization foreign-key indexes and installs the
+deny-all Supabase Data API posture: RLS is enabled, ambient schema/object
+privileges are revoked, and the server-only owner connection remains the sole
+runtime database path until a separately reviewed role-policy migration exists.
 
 ## Scheduled monitoring
 

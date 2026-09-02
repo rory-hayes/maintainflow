@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 
-import postgres, { type Sql } from "postgres";
+import postgres from "postgres";
 import {
   afterAll,
   beforeAll,
@@ -155,37 +153,6 @@ const agencyKey = "ads-integration-beta-initial";
 let advertiserAccess: AccountAccess;
 let agencyAccess: AccountAccess;
 
-async function applyMigrations(sql: Sql) {
-  const migrationFiles = [
-    "docs/database/001_ads_approval_records.sql",
-    "docs/database/002_customer_tenancy.sql",
-    "docs/database/003_advertiser_credentials.sql",
-    "docs/database/004_creative_review_history.sql",
-    "docs/database/005_durable_monitoring_windows.sql",
-    "docs/database/006_monitoring_outcomes.sql",
-    "docs/database/007_monitoring_evaluation_leases.sql",
-    "docs/database/008_readiness_rate_limits.sql",
-    "docs/database/009_recommendation_dismissals.sql",
-    "docs/database/010_conversion_credentials.sql",
-    "docs/database/011_readiness_audit_history.sql",
-    "docs/database/012_live_workbench_snapshots.sql",
-    "docs/database/013_customer_offboarding.sql",
-    "docs/database/014_approval_operation_recovery.sql",
-    "docs/database/015_monitoring_account_fairness.sql",
-    "docs/database/016_live_portfolio_summaries.sql",
-    "docs/database/017_customer_retention_purge.sql",
-  ];
-  await sql.begin(async (transaction) => {
-    for (const migrationFile of migrationFiles) {
-      const migration = await readFile(
-        path.join(process.cwd(), migrationFile),
-        "utf8",
-      );
-      await transaction.unsafe(migration);
-    }
-  });
-}
-
 async function addReviewOnlyAccess(accountId: string) {
   const organizationId = randomUUID();
   const [account] = await database<{ id: string }[]>`
@@ -327,7 +294,6 @@ async function removeMonitoringFairnessFixture(accountIds: readonly string[]) {
 
 describe("PostgreSQL customer and approval boundary", () => {
   beforeAll(async () => {
-    await applyMigrations(database);
     advertiserAccess = await bootstrapWorkspace({
       operatorId: ownerOperatorId,
       organizationName: "Alpine Retail",
@@ -376,6 +342,248 @@ describe("PostgreSQL customer and approval boundary", () => {
     await expect(verifyRecommendationDecisionStore()).resolves.toBe(true);
     await expect(verifyReadinessHistoryStore()).resolves.toBe(true);
     await expect(verifyLiveSyncStore()).resolves.toBe(true);
+
+    const expectedRlsTables = [
+      "ads_approval_records",
+      "maintainflow_account_access",
+      "maintainflow_advertiser_accounts",
+      "maintainflow_advertiser_credentials",
+      "maintainflow_conversion_credentials",
+      "maintainflow_creative_review_events",
+      "maintainflow_creative_review_state",
+      "maintainflow_customer_lifecycle_records",
+      "maintainflow_live_workbench_snapshots",
+      "maintainflow_monitoring_account_schedule",
+      "maintainflow_organization_memberships",
+      "maintainflow_organizations",
+      "maintainflow_rate_limit_buckets",
+      "maintainflow_readiness_audit_runs",
+      "maintainflow_recommendation_dismissals",
+      "maintainflow_schema_migrations",
+    ];
+    const rlsTables = await database<
+      { table_name: string; rls_enabled: boolean }[]
+    >`
+      select c.relname as table_name, c.relrowsecurity as rls_enabled
+      from pg_catalog.pg_class c
+      join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public'
+        and c.relkind in ('r', 'p')
+        and c.relname = any(${expectedRlsTables}::text[])
+      order by c.relname
+    `;
+    expect(rlsTables).toEqual(
+      expectedRlsTables.map((tableName) => ({
+        table_name: tableName,
+        rls_enabled: true,
+      })),
+    );
+
+    const hardeningIndexes = await database<
+      {
+        index_name: string;
+        table_name: string;
+        column_name: string;
+        predicate: string | null;
+        is_valid: boolean;
+        is_ready: boolean;
+        is_unique: boolean;
+      }[]
+    >`
+      select
+        index_relation.relname as index_name,
+        table_relation.relname as table_name,
+        pg_get_indexdef(indexes.indexrelid, 1, true) as column_name,
+        pg_get_expr(indexes.indpred, indexes.indrelid) as predicate,
+        indexes.indisvalid as is_valid,
+        indexes.indisready as is_ready,
+        indexes.indisunique as is_unique
+      from pg_catalog.pg_index indexes
+      join pg_catalog.pg_class index_relation
+        on index_relation.oid = indexes.indexrelid
+      join pg_catalog.pg_class table_relation
+        on table_relation.oid = indexes.indrelid
+      join pg_catalog.pg_namespace namespace
+        on namespace.oid = table_relation.relnamespace
+      where namespace.nspname = 'public'
+        and index_relation.relname = any(${[
+          "maintainflow_advertiser_accounts_owner_organization_idx",
+          "ads_approval_records_rollback_organization_idx",
+          "ads_approval_records_reconciled_organization_idx",
+        ]}::text[])
+      order by index_relation.relname
+    `;
+    expect(hardeningIndexes).toEqual([
+      {
+        index_name: "ads_approval_records_reconciled_organization_idx",
+        table_name: "ads_approval_records",
+        column_name: "reconciled_organization_id",
+        predicate: "(reconciled_organization_id IS NOT NULL)",
+        is_valid: true,
+        is_ready: true,
+        is_unique: false,
+      },
+      {
+        index_name: "ads_approval_records_rollback_organization_idx",
+        table_name: "ads_approval_records",
+        column_name: "rollback_organization_id",
+        predicate: "(rollback_organization_id IS NOT NULL)",
+        is_valid: true,
+        is_ready: true,
+        is_unique: false,
+      },
+      {
+        index_name:
+          "maintainflow_advertiser_accounts_owner_organization_idx",
+        table_name: "maintainflow_advertiser_accounts",
+        column_name: "owner_organization_id",
+        predicate: "(owner_organization_id IS NOT NULL)",
+        is_valid: true,
+        is_ready: true,
+        is_unique: false,
+      },
+    ]);
+
+    const publicTablePrivileges = await database<
+      { table_name: string; privilege_type: string }[]
+    >`
+      select c.relname as table_name, acl.privilege_type
+      from pg_catalog.pg_class c
+      join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+      cross join lateral aclexplode(
+        coalesce(c.relacl, acldefault('r', c.relowner))
+      ) acl
+      where n.nspname = 'public'
+        and c.relkind in ('r', 'p')
+        and c.relname = any(${expectedRlsTables}::text[])
+        and acl.grantee = 0
+      order by c.relname, acl.privilege_type
+    `;
+    expect(publicTablePrivileges).toEqual([]);
+
+    const publicSchemaPrivileges = await database<
+      { privilege_type: string }[]
+    >`
+      select acl.privilege_type
+      from pg_catalog.pg_namespace namespace
+      cross join lateral aclexplode(
+        coalesce(namespace.nspacl, acldefault('n', namespace.nspowner))
+      ) acl
+      where namespace.nspname = 'public'
+        and acl.grantee = 0
+      order by acl.privilege_type
+    `;
+    expect(publicSchemaPrivileges).toEqual([]);
+
+    const dataApiRolePrivileges = await database<
+      { role_name: string; object_type: string; object_name: string }[]
+    >`
+      with data_api_roles as (
+        select rolname
+        from pg_catalog.pg_roles
+        where rolname = any(${[
+          "anon",
+          "authenticated",
+          "service_role",
+        ]}::text[])
+      )
+      select roles.rolname as role_name, 'schema' as object_type,
+        'public' as object_name
+      from data_api_roles roles
+      where has_schema_privilege(roles.rolname, 'public', 'USAGE')
+        or has_schema_privilege(roles.rolname, 'public', 'CREATE')
+      union all
+      select roles.rolname, 'table', relation.relname
+      from data_api_roles roles
+      cross join pg_catalog.pg_class relation
+      join pg_catalog.pg_namespace namespace
+        on namespace.oid = relation.relnamespace
+      where namespace.nspname = 'public'
+        and relation.relkind in ('r', 'p')
+        and (
+          has_table_privilege(roles.rolname, relation.oid, 'SELECT')
+          or has_table_privilege(roles.rolname, relation.oid, 'INSERT')
+          or has_table_privilege(roles.rolname, relation.oid, 'UPDATE')
+          or has_table_privilege(roles.rolname, relation.oid, 'DELETE')
+          or has_table_privilege(roles.rolname, relation.oid, 'TRUNCATE')
+          or has_table_privilege(roles.rolname, relation.oid, 'REFERENCES')
+          or has_table_privilege(roles.rolname, relation.oid, 'TRIGGER')
+        )
+      union all
+      select roles.rolname, 'sequence', relation.relname
+      from data_api_roles roles
+      cross join pg_catalog.pg_class relation
+      join pg_catalog.pg_namespace namespace
+        on namespace.oid = relation.relnamespace
+      where namespace.nspname = 'public'
+        and relation.relkind = 'S'
+        and (
+          has_sequence_privilege(roles.rolname, relation.oid, 'USAGE')
+          or has_sequence_privilege(roles.rolname, relation.oid, 'SELECT')
+          or has_sequence_privilege(roles.rolname, relation.oid, 'UPDATE')
+        )
+      union all
+      select roles.rolname, 'function', procedure.proname
+      from data_api_roles roles
+      cross join pg_catalog.pg_proc procedure
+      join pg_catalog.pg_namespace namespace
+        on namespace.oid = procedure.pronamespace
+      where namespace.nspname = 'public'
+        and has_function_privilege(roles.rolname, procedure.oid, 'EXECUTE')
+      order by role_name, object_type, object_name
+    `;
+    expect(dataApiRolePrivileges).toEqual([]);
+
+    const publicDefaultPrivileges = await database<
+      { object_type: string; privilege_type: string }[]
+    >`
+      select defaults.defaclobjtype as object_type, acl.privilege_type
+      from pg_catalog.pg_default_acl defaults
+      join pg_catalog.pg_namespace n
+        on n.oid = defaults.defaclnamespace
+      cross join lateral aclexplode(defaults.defaclacl) acl
+      where defaults.defaclrole = (
+          select oid
+          from pg_catalog.pg_roles
+          where rolname = current_user
+        )
+        and n.nspname = 'public'
+        and defaults.defaclobjtype in ('r', 'S', 'f')
+        and acl.grantee = 0
+      order by defaults.defaclobjtype, acl.privilege_type
+    `;
+    expect(publicDefaultPrivileges).toEqual([]);
+
+    const dataApiDefaultPrivileges = await database<
+      {
+        owner_role: string;
+        grantee_role: string;
+        object_type: string;
+        privilege_type: string;
+      }[]
+    >`
+      select
+        owner.rolname as owner_role,
+        grantee.rolname as grantee_role,
+        defaults.defaclobjtype as object_type,
+        acl.privilege_type
+      from pg_catalog.pg_default_acl defaults
+      join pg_catalog.pg_roles owner on owner.oid = defaults.defaclrole
+      join pg_catalog.pg_namespace namespace
+        on namespace.oid = defaults.defaclnamespace
+      cross join lateral aclexplode(defaults.defaclacl) acl
+      join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+      where namespace.nspname = 'public'
+        and defaults.defaclobjtype in ('r', 'S', 'f')
+        and grantee.rolname = any(${[
+          "anon",
+          "authenticated",
+          "service_role",
+        ]}::text[])
+      order by owner_role, grantee_role, object_type, privilege_type
+    `;
+    expect(dataApiDefaultPrivileges).toEqual([]);
+
     const [runtimeSettings] = await getRuntimeDatabase(databaseUrl)<
       { search_path: string }[]
     >`show search_path`;

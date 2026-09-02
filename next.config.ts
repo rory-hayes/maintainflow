@@ -6,6 +6,15 @@ import { buildSecurityHeaders } from "./scripts/security-headers";
 const securityHeaders = buildSecurityHeaders({
   isProduction: process.env.NODE_ENV === "production",
 });
+const configuredAppOrigin = process.env.MAINTAINFLOW_APP_ORIGIN?.replace(
+  /\/$/,
+  "",
+);
+const canonicalAppOrigin =
+  configuredAppOrigin && URL.canParse(configuredAppOrigin)
+    ? new URL(configuredAppOrigin).origin
+    : "https://maintainflow.io";
+const canonicalAppHostname = new URL(canonicalAppOrigin).hostname;
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -19,6 +28,16 @@ const nextConfig: NextConfig = {
   },
   images: {
     qualities: [75, 100],
+  },
+  async redirects() {
+    return [
+      {
+        source: "/:path((?!api(?:/|$)).*)",
+        has: [{ type: "host", value: `www.${canonicalAppHostname}` }],
+        destination: `${canonicalAppOrigin}/:path`,
+        permanent: true,
+      },
+    ];
   },
   async headers() {
     return [

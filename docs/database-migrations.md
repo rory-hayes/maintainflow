@@ -65,6 +65,11 @@ process. Follow the executable
 for exact target identities, read-only roles, schema/count/isolation checks,
 required metadata, and the complete evidence boundary.
 
+For the first initialization of a confirmed-empty hosted database, use the
+separate [one-time empty hosted database bootstrap](empty-hosted-database-bootstrap.md).
+That path refuses any existing public-schema object and is not valid for later
+schema changes or a database that may contain customer state.
+
 ## Run the migration
 
 Load `DATABASE_URL` from the deployment secret manager rather than putting it
@@ -118,6 +123,19 @@ lifecycle receipt with externally confirmed provider-revocation evidence, a
 finite retention deadline, and purge completion evidence. Its constraints keep
 pre-purge identifiers complete and require them to be null after purge; the
 partial `(retain_until, id)` index supports bounded due-retention discovery.
+
+Migration `018_supabase_data_api_hardening.sql` adds the three missing
+organization foreign-key indexes, enables row-level security without Data API
+policies on every MaintainFlow table and the migration ledger, and revokes
+ambient schema, table, sequence, and function privileges from `PUBLIC` and any
+present Supabase `anon`, `authenticated`, and `service_role` roles. It also
+revokes matching default privileges for future public-schema objects.
+MaintainFlow uses Clerk plus its server-only PostgreSQL connection rather than
+Supabase Auth or PostgREST; keep the Supabase Data API disabled for this schema
+and run hosted migrations as the privileged `postgres` migration role so its
+defaults are hardened. Application access through a non-owner database role
+requires a separate reviewed grant/RLS policy migration before changing runtime
+roles.
 
 The application compiles the same ordered names and SHA-256 checksums into its
 deployment-readiness contract. `/api/ready` compares that immutable manifest

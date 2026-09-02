@@ -22,6 +22,7 @@
     "test:openai-ads-contract-checker": "vitest run scripts/check-openai-ads-openapi.test.mjs",
     "test:production-config": "vitest run scripts/check-production-config.test.mjs scripts/check-deployment-config.test.mjs",
     "db:migrate": "node scripts/run-database-migrations.mjs",
+    "db:bootstrap:empty:sql": "node scripts/generate-empty-database-bootstrap.mjs",
     "db:backup:source-identity": "node scripts/database-restore-verification.mjs source-identity",
     "db:backup:capture": "node scripts/database-restore-verification.mjs capture",
     "db:restore:target-identity": "node scripts/database-restore-verification.mjs restore-identity",

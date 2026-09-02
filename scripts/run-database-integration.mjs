@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 
 import postgres from "postgres";
 
+import {
+  loadCompiledManifest,
+  renderEmptyDatabaseBootstrapSql,
+} from "./generate-empty-database-bootstrap.mjs";
 import { loadMigrations } from "./run-database-migrations.mjs";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -19,6 +23,8 @@ const admin = postgres(adminDatabaseUrl, {
   max: 1,
   prepare: false,
 });
+const dataApiRoleNames = ["anon", "authenticated", "service_role"];
+const createdDataApiRoleNames = [];
 
 function withoutProviderCredentials(environment) {
   delete environment.OPENAI_ADS_API_KEY;
@@ -44,6 +50,22 @@ function runChild(command, args, environment, stoppedMessage) {
       resolve(code ?? 1);
     });
   });
+}
+
+async function ensureDataApiRoles() {
+  for (const roleName of dataApiRoleNames) {
+    const [role] = await admin`
+      select exists (
+        select 1
+        from pg_catalog.pg_roles
+        where rolname = ${roleName}
+      ) as exists
+    `;
+    if (!role?.exists) {
+      await admin.unsafe(`create role "${roleName}" nologin`);
+      createdDataApiRoleNames.push(roleName);
+    }
+  }
 }
 
 function runMigrations(databaseUrl) {
@@ -95,6 +117,85 @@ async function verifyMigrationLedger(databaseUrl) {
   }
 }
 
+async function verifyBootstrapRejectsPublicCompositeType(databaseUrl) {
+  const setup = postgres(databaseUrl, {
+    connect_timeout: 5,
+    idle_timeout: 5,
+    max: 1,
+    prepare: false,
+  });
+  try {
+    await setup`create type public.uuid as (value text)`;
+  } finally {
+    await setup.end({ timeout: 5 });
+  }
+
+  const migrations = await loadMigrations();
+  const manifest = await loadCompiledManifest();
+  const bootstrapSql = renderEmptyDatabaseBootstrapSql(migrations, {
+    manifest,
+    expectedBuildSha: "0".repeat(40),
+  });
+  const bootstrap = postgres(databaseUrl, {
+    connect_timeout: 5,
+    idle_timeout: 5,
+    max: 1,
+    prepare: false,
+  });
+  let refused = false;
+  try {
+    await bootstrap.unsafe(bootstrapSql);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("public schema is not pristine")
+    ) {
+      refused = true;
+    } else {
+      throw error;
+    }
+  } finally {
+    await bootstrap.end({ timeout: 5 });
+  }
+  if (!refused) {
+    throw new Error(
+      "The empty hosted bootstrap accepted a public composite type.",
+    );
+  }
+
+  const cleanup = postgres(databaseUrl, {
+    connect_timeout: 5,
+    idle_timeout: 5,
+    max: 1,
+    prepare: false,
+  });
+  try {
+    await cleanup`drop type public.uuid`;
+  } finally {
+    await cleanup.end({ timeout: 5 });
+  }
+  console.log("Verified that the empty bootstrap rejects a public composite type.");
+}
+
+async function seedLooseDataApiSchemaPrivileges(databaseUrl) {
+  const database = postgres(databaseUrl, {
+    connect_timeout: 5,
+    idle_timeout: 5,
+    max: 1,
+    prepare: false,
+  });
+  try {
+    await database.unsafe("grant usage, create on schema public to public");
+    for (const roleName of dataApiRoleNames) {
+      await database.unsafe(
+        `grant usage, create on schema public to "${roleName}"`,
+      );
+    }
+  } finally {
+    await database.end({ timeout: 5 });
+  }
+}
+
 function runVitest(databaseUrl) {
   const vitestPath = fileURLToPath(
     new URL("../node_modules/vitest/vitest.mjs", import.meta.url),
@@ -119,9 +220,12 @@ function runVitest(databaseUrl) {
 
 let testExitCode = 1;
 try {
+  await ensureDataApiRoles();
   await admin.unsafe(`create database ${quotedDatabaseName}`);
   const testDatabaseUrl = new URL(adminDatabaseUrl);
   testDatabaseUrl.pathname = `/${databaseName}`;
+  await seedLooseDataApiSchemaPrivileges(testDatabaseUrl.toString());
+  await verifyBootstrapRejectsPublicCompositeType(testDatabaseUrl.toString());
   const migrationExitCodes = await Promise.all([
     runMigrations(testDatabaseUrl.toString()),
     runMigrations(testDatabaseUrl.toString()),
@@ -141,6 +245,9 @@ try {
       and pid <> pg_backend_pid()
   `;
   await admin.unsafe(`drop database if exists ${quotedDatabaseName}`);
+  for (const roleName of createdDataApiRoleNames.reverse()) {
+    await admin.unsafe(`drop role "${roleName}"`);
+  }
   await admin.end({ timeout: 5 });
 }
 

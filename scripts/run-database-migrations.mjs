@@ -51,6 +51,7 @@ export const REQUIRED_MIGRATION_NAMES = Object.freeze([
   "015_monitoring_account_fairness.sql",
   "016_live_portfolio_summaries.sql",
   "017_customer_retention_purge.sql",
+  "018_supabase_data_api_hardening.sql",
 ]);
 
 const DEFAULT_MIGRATIONS_DIRECTORY = fileURLToPath(

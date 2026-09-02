@@ -45,7 +45,7 @@ this explicitly disposable harness.
 
 ## What it proves
 
-- migrations `001` through `017` apply together on PostgreSQL in filename
+- migrations `001` through `018` apply together on PostgreSQL in filename
   order;
 - concurrent migration runners serialize, record one immutable SHA-256 ledger
   row per file, and a subsequent runner is a checksum-verifying no-op;
