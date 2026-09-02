@@ -6,6 +6,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import {
+  ApprovalHistory,
   ReconciliationDecisionContext,
   RollbackConfirmationDetails,
 } from "./approval-history";
@@ -55,6 +56,23 @@ const storedRecord = {
   rolledBackAt: null,
 } satisfies ApprovalRecord;
 const record = toApprovalRecordDto(storedRecord);
+
+describe("approval history", () => {
+  it("exposes its section title as a level-two heading", () => {
+    const markup = renderToStaticMarkup(
+      <ApprovalHistory
+        records={[]}
+        dataSource="demo"
+        canRollback={false}
+        canReconcile={false}
+      />,
+    );
+
+    expect(markup).toContain("Durable approval history");
+    expect(markup).toContain('role="heading"');
+    expect(markup).toContain('aria-level="2"');
+  });
+});
 
 describe("rollback confirmation details", () => {
   it("binds the live rollback confirmation to the advertiser and exact change", () => {

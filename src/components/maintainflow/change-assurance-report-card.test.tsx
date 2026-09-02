@@ -50,6 +50,8 @@ describe("change assurance report card", () => {
     );
 
     expect(markup).toContain("Client change assurance report");
+    expect(markup).toContain('role="heading"');
+    expect(markup).toContain('aria-level="2"');
     expect(markup).toContain("Live evidence");
     expect(markup).toContain("1 unresolved item is called out");
     expect(markup).not.toContain('disabled=""');

@@ -339,7 +339,9 @@ export function ApprovalHistory({
             <FileClock />
           </div>
           <div className="min-w-0 grid gap-1">
-            <CardTitle className="text-base">Durable approval history</CardTitle>
+            <CardTitle role="heading" aria-level={2} className="text-base">
+              Durable approval history
+            </CardTitle>
             <CardDescription>
               {dataSource === "live"
                 ? "Account-scoped live changes, stored rollback requests, and reconciled outcomes."

@@ -70,7 +70,9 @@ export function ChangeAssuranceReportCard({
             <FileCheck2 className="size-5" />
           </div>
           <div className="grid gap-1">
-            <CardTitle className="text-base">Client change assurance report</CardTitle>
+            <CardTitle role="heading" aria-level={2} className="text-base">
+              Client change assurance report
+            </CardTitle>
             <CardDescription className="max-w-3xl leading-5">
               Export the approved request, stored rollback, evidence, outcome,
               monitoring result, and unresolved items as a print-ready HTML record.
