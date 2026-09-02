@@ -146,8 +146,8 @@ jobs:
             --env OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED=false \
             --env MAINTAINFLOW_APP_ORIGIN=https://maintainflow.test \
             --env MAINTAINFLOW_LEGAL_ENTITY_NAME="MaintainFlow CI" \
-            --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.test \
-            --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.test \
+            --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.io \
+            --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.io \
             --env DATABASE_URL='postgres://maintainflow:maintainflow@postgres:5432/maintainflow?sslmode=verify-full' \
             --env CRON_SECRET=cccccccccccccccccccccccccccccccc \
             --env READINESS_RATE_LIMIT_SECRET=rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr \
@@ -191,7 +191,10 @@ jobs:
             CRON_SECRET=cccccccccccccccccccccccccccccccc \
             npm run probe:deployment
 
-          PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npm run test:e2e
+          PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 \
+            PLAYWRIGHT_EXPECTED_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.io \
+            PLAYWRIGHT_EXPECTED_SUPPORT_CONTACT_EMAIL=support@maintainflow.io \
+            npm run test:e2e
 
           docker rm --force maintainflow-ads-ci
           docker run --detach --name maintainflow-ads-private-read-ci \
@@ -206,8 +209,8 @@ jobs:
             --env OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED=false \
             --env MAINTAINFLOW_APP_ORIGIN=https://maintainflow.test \
             --env MAINTAINFLOW_LEGAL_ENTITY_NAME="MaintainFlow CI" \
-            --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.test \
-            --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.test \
+            --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.io \
+            --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.io \
             --env DATABASE_URL='postgres://maintainflow:maintainflow@postgres:5432/maintainflow?sslmode=verify-full' \
             --env CRON_SECRET=cccccccccccccccccccccccccccccccc \
             --env READINESS_RATE_LIMIT_SECRET=rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr \
@@ -244,8 +247,8 @@ jobs:
             --env OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED=false \
             --env MAINTAINFLOW_APP_ORIGIN=https://maintainflow.test \
             --env MAINTAINFLOW_LEGAL_ENTITY_NAME="MaintainFlow CI" \
-            --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.test \
-            --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.test \
+            --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.io \
+            --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.io \
             --env DATABASE_URL='postgres://maintainflow:maintainflow@postgres:5432/maintainflow?sslmode=verify-full' \
             --env CRON_SECRET=cccccccccccccccccccccccccccccccc \
             --env READINESS_RATE_LIMIT_SECRET=rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr \

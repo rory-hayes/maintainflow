@@ -29,8 +29,8 @@ function privateConfig(overrides = {}) {
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_maintainflow",
     CLERK_SECRET_KEY: "sk_live_maintainflow",
     MAINTAINFLOW_LEGAL_ENTITY_NAME: "MaintainFlow Test Entity",
-    MAINTAINFLOW_PRIVACY_CONTACT_EMAIL: "privacy@maintainflow.test",
-    MAINTAINFLOW_SUPPORT_CONTACT_EMAIL: "support@maintainflow.test",
+    MAINTAINFLOW_PRIVACY_CONTACT_EMAIL: "privacy@maintainflow.io",
+    MAINTAINFLOW_SUPPORT_CONTACT_EMAIL: "support@maintainflow.io",
     DATABASE_URL:
       "postgres://maintainflow:secret@db.example/maintainflow?sslmode=verify-full",
     MAINTAINFLOW_CREDENTIAL_KEYRING: keyring(),
@@ -83,8 +83,8 @@ function demoConfig(overrides = {}) {
     MAINTAINFLOW_RELEASE_STAGE: "demo",
     MAINTAINFLOW_APP_ORIGIN: "https://maintainflow.io",
     MAINTAINFLOW_LEGAL_ENTITY_NAME: "MaintainFlow Test Entity",
-    MAINTAINFLOW_PRIVACY_CONTACT_EMAIL: "privacy@maintainflow.test",
-    MAINTAINFLOW_SUPPORT_CONTACT_EMAIL: "support@maintainflow.test",
+    MAINTAINFLOW_PRIVACY_CONTACT_EMAIL: "privacy@maintainflow.io",
+    MAINTAINFLOW_SUPPORT_CONTACT_EMAIL: "support@maintainflow.io",
     DATABASE_URL:
       "postgres://maintainflow:secret@db.example/maintainflow?sslmode=verify-full",
     MAINTAINFLOW_READINESS_PROBE_SECRET: "p".repeat(32),
@@ -301,6 +301,46 @@ describe("production release-stage configuration", () => {
     expect(result.issues).toEqual(
       expect.arrayContaining([
         expect.stringContaining("MAINTAINFLOW_LEGAL_ENTITY_NAME"),
+        expect.stringContaining("MAINTAINFLOW_PRIVACY_CONTACT_EMAIL"),
+        expect.stringContaining("MAINTAINFLOW_SUPPORT_CONTACT_EMAIL"),
+      ]),
+    );
+  });
+
+  it("rejects reserved placeholder domains for production contacts", () => {
+    for (const placeholderDomain of [
+      "maintainflow.test",
+      "sub.example.com",
+      "mail.local",
+    ]) {
+      const result = validateProductionConfig(
+        privateConfig({
+          MAINTAINFLOW_PRIVACY_CONTACT_EMAIL: `privacy@${placeholderDomain}`,
+          MAINTAINFLOW_SUPPORT_CONTACT_EMAIL: `support@${placeholderDomain}`,
+        }),
+      );
+
+      expect(result.issues).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("MAINTAINFLOW_PRIVACY_CONTACT_EMAIL"),
+          expect.stringContaining("MAINTAINFLOW_SUPPORT_CONTACT_EMAIL"),
+        ]),
+      );
+    }
+  });
+
+  it("rejects contact values that could inject mailto URL controls", () => {
+    const result = validateProductionConfig(
+      privateConfig({
+        MAINTAINFLOW_PRIVACY_CONTACT_EMAIL:
+          "privacy?bcc=attacker%40example.net@maintainflow.io",
+        MAINTAINFLOW_SUPPORT_CONTACT_EMAIL:
+          "support#fragment@maintainflow.io",
+      }),
+    );
+
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
         expect.stringContaining("MAINTAINFLOW_PRIVACY_CONTACT_EMAIL"),
         expect.stringContaining("MAINTAINFLOW_SUPPORT_CONTACT_EMAIL"),
       ]),

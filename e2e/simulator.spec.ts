@@ -2,6 +2,14 @@ import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
 const agencyEntryPath = "/app?tab=campaigns&account=adacct_sim_northstar";
+const agencyPilotBody =
+  "Agency / brand:\nAdvertiser accounts:\nExpected monthly ChatGPT Ads spend:\nApproval workflow today:\n";
+const productionE2eOrigin = "https://maintainflow.io";
+const expectedProductionRevision = process.env.PLAYWRIGHT_EXPECTED_BUILD_SHA
+  ?.trim()
+  .toLowerCase();
+const safeContactEmailPattern =
+  /^[A-Za-z0-9](?:[A-Za-z0-9._+-]{0,62}[A-Za-z0-9])?@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 
 function expectedContactEmail(name: string, fallback: string) {
   const configured = process.env[name];
@@ -11,7 +19,8 @@ function expectedContactEmail(name: string, fallback: string) {
   if (
     value.length === 0 ||
     value.length > 254 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+    !safeContactEmailPattern.test(value) ||
+    value.slice(0, value.indexOf("@")).includes("..")
   ) {
     throw new Error(`${name} must be a valid email address.`);
   }
@@ -20,12 +29,47 @@ function expectedContactEmail(name: string, fallback: string) {
 
 const expectedPrivacyContactEmail = expectedContactEmail(
   "PLAYWRIGHT_EXPECTED_PRIVACY_CONTACT_EMAIL",
-  "privacy@maintainflow.test",
+  "privacy@maintainflow.io",
 );
 const expectedSupportContactEmail = expectedContactEmail(
   "PLAYWRIGHT_EXPECTED_SUPPORT_CONTACT_EMAIL",
-  "support@maintainflow.test",
+  "support@maintainflow.io",
 );
+
+function matchesExpectedMailto(
+  href: string | null,
+  expectedRecipient: string,
+  {
+    body,
+    label,
+    subject,
+  }: { body?: string; label?: string | null; subject?: string } = {},
+) {
+  if (!href) return false;
+  try {
+    const url = new URL(href);
+    const expectedParameterNames = [
+      ...(subject === undefined ? [] : ["subject"]),
+      ...(body === undefined ? [] : ["body"]),
+    ].sort();
+    const actualParameterNames = [...url.searchParams.keys()].sort();
+    return (
+      url.protocol === "mailto:" &&
+      url.host === "" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.pathname === expectedRecipient &&
+      url.hash === "" &&
+      JSON.stringify(actualParameterNames) ===
+        JSON.stringify(expectedParameterNames) &&
+      (label === undefined || label?.trim() === expectedRecipient) &&
+      (subject === undefined || url.searchParams.get("subject") === subject) &&
+      (body === undefined || url.searchParams.get("body") === body)
+    );
+  } catch {
+    return false;
+  }
+}
 
 function collectBrowserErrors(page: Page) {
   const errors: string[] = [];
@@ -38,6 +82,29 @@ function collectBrowserErrors(page: Page) {
   return errors;
 }
 
+test.beforeEach(async ({ baseURL, request }) => {
+  if (!baseURL || new URL(baseURL).origin !== productionE2eOrigin) return;
+  if (!expectedProductionRevision) {
+    throw new Error(
+      "PLAYWRIGHT_EXPECTED_BUILD_SHA is required for production E2E.",
+    );
+  }
+
+  const healthUrl = `${productionE2eOrigin}/api/health`;
+  const response = await request.get(healthUrl, {
+    failOnStatusCode: false,
+    maxRedirects: 0,
+  });
+  expect(response.url()).toBe(healthUrl);
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toEqual({
+    ok: true,
+    service: "maintainflow-ads",
+    scope: "process_liveness",
+    revision: expectedProductionRevision,
+  });
+});
+
 test("landing page opens the five-client agency portfolio", async ({ page }) => {
   const browserErrors = collectBrowserErrors(page);
 
@@ -49,14 +116,13 @@ test("landing page opens the five-client agency portfolio", async ({ page }) => 
   const agencyPilotHref = await page
     .getByRole("link", { name: "Apply for an agency pilot" })
     .getAttribute("href");
-  expect(agencyPilotHref).not.toBeNull();
-  const agencyPilotUrl = new URL(agencyPilotHref!);
-  expect(agencyPilotUrl.protocol).toBe("mailto:");
-  expect(agencyPilotUrl.pathname).toBe(expectedSupportContactEmail);
-  expect(agencyPilotUrl.searchParams.get("subject")).toBe(
-    "MaintainFlow agency pilot",
-  );
-  expect(agencyPilotUrl.searchParams.get("body")).toBeTruthy();
+  expect(
+    matchesExpectedMailto(agencyPilotHref, expectedSupportContactEmail, {
+      body: agencyPilotBody,
+      subject: "MaintainFlow agency pilot",
+    }),
+    "Agency pilot link must target the configured monitored support alias with the expected request template.",
+  ).toBe(true);
   await agencyPortfolioLink.press("Enter");
 
   await expect(page).toHaveURL((url) => {
@@ -462,17 +528,37 @@ test("public, legal, and closed-access surfaces render deployment truth", async 
   await expect(
     page.getByRole("heading", { name: "Privacy at MaintainFlow" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: expectedPrivacyContactEmail }),
-  ).toHaveAttribute("href", `mailto:${expectedPrivacyContactEmail}`);
+  const privacyContactLinks = page
+    .locator("article")
+    .locator('a[href^="mailto:"]');
+  await expect(privacyContactLinks).toHaveCount(1);
+  await expect(privacyContactLinks).toBeVisible();
+  expect(
+    matchesExpectedMailto(
+      await privacyContactLinks.getAttribute("href"),
+      expectedPrivacyContactEmail,
+      { label: await privacyContactLinks.textContent() },
+    ),
+    "Privacy page must render the configured monitored privacy alias as its contact link.",
+  ).toBe(true);
 
   await page.goto("/terms", { waitUntil: "networkidle" });
   await expect(
     page.getByRole("heading", { name: "MaintainFlow service terms" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: expectedSupportContactEmail }),
-  ).toHaveAttribute("href", `mailto:${expectedSupportContactEmail}`);
+  const supportContactLinks = page
+    .locator("article")
+    .locator('a[href^="mailto:"]');
+  await expect(supportContactLinks).toHaveCount(1);
+  await expect(supportContactLinks).toBeVisible();
+  expect(
+    matchesExpectedMailto(
+      await supportContactLinks.getAttribute("href"),
+      expectedSupportContactEmail,
+      { label: await supportContactLinks.textContent() },
+    ),
+    "Terms page must render the configured monitored support alias as its contact link.",
+  ).toBe(true);
 
   await page.goto("/auth/sign-up", { waitUntil: "networkidle" });
   await expect(
@@ -548,7 +634,7 @@ test("readiness fails closed when the browser origin is not the public deploymen
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (url.origin !== applicationOrigin) {
-      crossOriginRequests.push(request.url());
+      crossOriginRequests.push(`${url.origin}${url.pathname}`);
     }
   });
   page.on("response", (response) => {
