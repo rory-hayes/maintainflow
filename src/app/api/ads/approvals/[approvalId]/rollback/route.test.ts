@@ -9,6 +9,7 @@ const testState = vi.hoisted(() => {
   class OperatorUnauthorizedError extends Error {}
   class AccountAccessForbiddenError extends Error {}
   class AdvertiserCredentialUnavailableError extends Error {}
+  class AdvertiserWriteBlockedError extends Error {}
   class TenancyStoreUnavailableError extends Error {}
   class RequestBodyTooLargeError extends Error {}
   class AdsMutationPreconditionFailedError extends Error {
@@ -57,6 +58,7 @@ const testState = vi.hoisted(() => {
     OperatorUnauthorizedError,
     AccountAccessForbiddenError,
     AdvertiserCredentialUnavailableError,
+    AdvertiserWriteBlockedError,
     TenancyStoreUnavailableError,
     RequestBodyTooLargeError,
     AdsMutationPreconditionFailedError,
@@ -110,6 +112,7 @@ vi.mock("@/lib/tenancy/store.server", () => ({
   AccountAccessForbiddenError: testState.AccountAccessForbiddenError,
   AdvertiserCredentialUnavailableError:
     testState.AdvertiserCredentialUnavailableError,
+  AdvertiserWriteBlockedError: testState.AdvertiserWriteBlockedError,
   TenancyStoreUnavailableError: testState.TenancyStoreUnavailableError,
   getAdsCredentialMaterialForAccount:
     testState.getAdsCredentialMaterialForAccount,
@@ -259,5 +262,21 @@ describe("approval rollback route", () => {
       persistenceWarning: false,
     });
     expect(JSON.stringify(payload)).not.toContain("provider detail");
+  });
+
+  it("blocks rollback while the account has an unresolved provider operation", async () => {
+    testState.applyStoredRollback.mockRejectedValue(
+      new testState.AdvertiserWriteBlockedError(
+        "Resolve the advertiser account's active or uncertain Ads operation before starting another live write.",
+      ),
+    );
+
+    const response = await POST(request(), context);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "Resolve the advertiser account's active or uncertain Ads operation before starting another live write.",
+    });
   });
 });

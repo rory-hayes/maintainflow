@@ -181,7 +181,7 @@ export function BudgetGuard({
 
   return (
     <Card className="min-w-0 shadow-sm">
-      <CardHeader className="gap-3 border-b bg-muted/20 min-[640px]:flex-row min-[640px]:items-start min-[640px]:justify-between">
+      <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
             <Gauge className="size-5" />
@@ -345,13 +345,10 @@ export function BudgetGuard({
           </Alert>
         )}
 
-        <div
-          aria-label="Budget Guard campaign evidence"
-          role="region"
-          tabIndex={0}
-          className="data-table-scroll max-w-full overflow-x-auto pb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        <Table
+          scrollAreaLabel="Budget Guard campaign evidence"
+          scrollAreaClassName="pb-2"
         >
-          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Campaign</TableHead>
@@ -420,8 +417,7 @@ export function BudgetGuard({
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
-        </div>
+        </Table>
       </CardContent>
     </Card>
   );

@@ -27,6 +27,7 @@ export type ReadinessReportSection = {
 
 export type ReadinessReportSummary = {
   canExport: boolean;
+  isComplete: boolean;
   completedSections: number;
   totalSections: number;
   verdict: ReadinessReportVerdict;
@@ -122,6 +123,7 @@ export function getReadinessReportSummary(
     },
   ];
   const completedSections = sections.filter((section) => section.complete).length;
+  const isComplete = completedSections === sections.length;
   const hasHardFailure =
     input.storefront?.verdict === "not_ready" ||
     input.productFeed?.verdict === "invalid" ||
@@ -142,6 +144,7 @@ export function getReadinessReportSummary(
 
   return {
     canExport: completedSections > 0,
+    isComplete,
     completedSections,
     totalSections: sections.length,
     verdict,
@@ -205,7 +208,7 @@ function storefrontSection(audit: ReadinessAudit | null) {
       audit.verdict === "ready" ? "pass" : audit.verdict === "needs_work" ? "warning" : "fail"
     }">${escapeHtml(storefrontLabel(audit))}</span></div>
     <div class="stats">
-      <div><span>Readiness score</span><strong>${audit.score}/100</strong></div>
+      <div><span>Storefront page score</span><strong>${audit.score}/100</strong></div>
       <div><span>Checks passed</span><strong>${audit.checks.filter((check) => check.status === "pass").length}/${audit.checks.length}</strong></div>
       <div><span>Scanned</span><strong>${escapeHtml(formatUtc(audit.scannedAt))} UTC</strong></div>
     </div>
@@ -343,7 +346,10 @@ function reportSlug(input: ReadinessReportInput) {
 
 export function readinessReportFileName(input: ReadinessReportInput) {
   const date = /^\d{4}-\d{2}-\d{2}/.exec(input.generatedAt)?.[0] ?? "undated";
-  return `maintainflow-readiness-${reportSlug(input)}-${date}.html`;
+  const scope = getReadinessReportSummary(input).isComplete
+    ? "readiness"
+    : "partial-readiness";
+  return `maintainflow-${scope}-${reportSlug(input)}-${date}.html`;
 }
 
 export function buildReadinessReportHtml(input: ReadinessReportInput) {
@@ -351,13 +357,17 @@ export function buildReadinessReportHtml(input: ReadinessReportInput) {
   if (!summary.canExport) {
     throw new Error("Complete at least one readiness check before exporting a report.");
   }
+  const incompleteSections = summary.totalSections - summary.completedSections;
+  const reportTitle = summary.isComplete
+    ? "ChatGPT commerce launch readiness"
+    : "Partial ChatGPT commerce launch readiness report";
 
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MaintainFlow commerce launch readiness</title>
+  <title>${escapeHtml(reportTitle)} · MaintainFlow</title>
   <style>
     :root { color-scheme: light; --ink:#151719; --muted:#62686f; --line:#dfe3e7; --soft:#f5f7f8; --brand:#2f9cdb; --pass:#16794c; --warning:#8a5a00; --fail:#b42318; }
     * { box-sizing:border-box; }
@@ -373,6 +383,9 @@ export function buildReadinessReportHtml(input: ReadinessReportInput) {
     a { color:#176998; overflow-wrap:anywhere; }
     .lede { max-width:720px; color:var(--muted); font-size:16px; }
     .meta { display:flex; flex-wrap:wrap; gap:8px 20px; margin-top:22px; color:var(--muted); font-size:12px; }
+    .partial-watermark { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin-top:22px; padding:14px 16px; border:1px solid #ead7ad; border-radius:10px; background:#fff9e8; color:var(--warning); }
+    .partial-watermark strong { flex:none; font-size:12px; letter-spacing:.1em; text-transform:uppercase; }
+    .partial-watermark span { color:var(--ink); font-size:12px; }
     .summary { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; padding:24px 40px; background:var(--soft); border-bottom:1px solid var(--line); }
     .summary div,.stats div { display:grid; gap:5px; padding:14px; background:white; border:1px solid var(--line); border-radius:10px; }
     .summary span,.stats span { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
@@ -397,17 +410,26 @@ export function buildReadinessReportHtml(input: ReadinessReportInput) {
     .empty { padding:14px; border:1px dashed var(--line); border-radius:10px; color:var(--muted); }
     footer { display:grid; gap:14px; padding:28px 40px; color:var(--muted); font-size:12px; }
     footer ul { display:flex; flex-wrap:wrap; gap:8px 18px; margin:0; padding:0; list-style:none; }
-    @media (max-width:700px) { main{width:100%;margin:0;border:0;border-radius:0} header,section,footer{padding:24px 20px}.summary{padding:18px 20px}.summary,.stats,.checks{grid-template-columns:1fr}.section-heading{align-items:flex-start;flex-direction:column}h1{font-size:28px} }
-    @media print { body{background:white} main{width:100%;margin:0;border:0}.check,section{break-inside:avoid} a{color:inherit;text-decoration:none} }
+    @media (max-width:700px) { main{width:100%;margin:0;border:0;border-radius:0} header,section,footer{padding:24px 20px}.summary{padding:18px 20px}.summary,.stats,.checks{grid-template-columns:1fr}.section-heading,.partial-watermark{align-items:flex-start;flex-direction:column}h1{font-size:28px} }
+    @media print { body{background:white} main{width:100%;margin:0;border:0}.check,section{break-inside:avoid} a{color:inherit;text-decoration:none} body.partial-report::before{content:"PARTIAL REPORT";position:fixed;left:50%;top:48%;z-index:2;transform:translate(-50%,-50%) rotate(-24deg);color:var(--warning);font-size:84px;font-weight:800;letter-spacing:.12em;opacity:.08;pointer-events:none;white-space:nowrap} }
   </style>
 </head>
-<body>
+<body${summary.isComplete ? "" : ' class="partial-report"'}>
   <main>
     <header>
       <div class="brand"><span class="mark">M</span> MaintainFlow</div>
-      <h1>ChatGPT commerce launch readiness</h1>
-      <p class="lede">A client-ready record of the OpenAI-schema checks completed in MaintainFlow. This is an independent technical preflight, not an OpenAI approval or guarantee of ad delivery.</p>
+      <h1>${escapeHtml(reportTitle)}</h1>
+      <p class="lede">${
+        summary.isComplete
+          ? "A client-ready record of the OpenAI-schema checks completed in MaintainFlow."
+          : "A working record of the OpenAI-schema checks completed so far in MaintainFlow."
+      } This is an independent technical preflight, not an OpenAI approval or guarantee of ad delivery.</p>
       <div class="meta"><span>Generated ${escapeHtml(formatUtc(input.generatedAt))} UTC</span><span>Report scope: ${summary.completedSections} of ${summary.totalSections} sections evaluated</span></div>
+      ${
+        summary.isComplete
+          ? ""
+          : `<div class="partial-watermark" role="note"><strong>Partial report</strong><span>Only ${summary.completedSections} of ${summary.totalSections} evidence sections were evaluated; ${incompleteSections} ${incompleteSections === 1 ? "section remains" : "sections remain"} untested. Treat this as a working preflight, not a complete launch assessment.</span></div>`
+      }
     </header>
     <div class="summary">
       <div><span>Overall review</span><strong>${escapeHtml(summary.verdictLabel)}</strong></div>

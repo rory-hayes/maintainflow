@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, FileClock, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -107,6 +107,53 @@ function reconciliationOptions(status: ApprovalStatus): Array<{
   ];
 }
 
+export function RollbackConfirmationDetails({
+  record,
+}: {
+  record: ApprovalRecordDto;
+}) {
+  return (
+    <dl className="grid gap-3 rounded-lg border bg-muted/40 p-4 text-sm">
+      <div className="grid gap-1">
+        <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Advertiser account
+        </dt>
+        <dd className="break-all font-mono text-xs">{record.accountId}</dd>
+      </div>
+      <div className="grid gap-1">
+        <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Original change
+        </dt>
+        <dd className="font-medium">{record.recommendationTitle}</dd>
+        <dd className="break-all font-mono text-xs text-muted-foreground">
+          {record.entityId}
+        </dd>
+      </div>
+      <div className="grid gap-1">
+        <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Exact rollback request
+        </dt>
+        <dd className="min-w-0 overflow-hidden rounded-lg bg-zinc-950 text-zinc-100">
+          <span className="block border-b border-white/10 px-3 py-2 break-all font-mono text-xs text-zinc-400">
+            {record.rollbackMethod} {record.rollbackPath}
+          </span>
+          <pre className="overflow-x-auto p-3 text-xs leading-5">
+            {record.rollbackBody
+              ? JSON.stringify(record.rollbackBody, null, 2)
+              : "No request body"}
+          </pre>
+        </dd>
+      </div>
+      <div className="grid gap-1">
+        <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Safeguard that prompted review
+        </dt>
+        <dd className="text-muted-foreground">{record.safeguard}</dd>
+      </div>
+    </dl>
+  );
+}
+
 export function ApprovalHistory({
   records,
   canRollback,
@@ -114,6 +161,7 @@ export function ApprovalHistory({
   error,
 }: ApprovalHistoryProps) {
   const router = useRouter();
+  const rollbackTitleRef = useRef<HTMLHeadingElement>(null);
   const [rollbackRecord, setRollbackRecord] = useState<ApprovalRecordDto | null>(null);
   const [reconcileRecord, setReconcileRecord] = useState<ApprovalRecordDto | null>(null);
   const [note, setNote] = useState("");
@@ -202,8 +250,7 @@ export function ApprovalHistory({
             </EmptyHeader>
           </Empty>
         ) : (
-          <div className="max-w-full overflow-x-auto">
-            <Table>
+          <Table scrollAreaLabel="Durable approval history">
               <TableHeader>
                 <TableRow>
                   <TableHead>Created</TableHead>
@@ -270,30 +317,36 @@ export function ApprovalHistory({
                   );
                 })}
               </TableBody>
-            </Table>
-          </div>
+          </Table>
         )}
       </CardContent>
 
       <AlertDialog open={Boolean(rollbackRecord)} onOpenChange={(open) => !open && setRollbackRecord(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent
+          className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            rollbackTitleRef.current?.focus();
+          }}
+        >
           <AlertDialogHeader>
-            <AlertDialogTitle>Apply the stored rollback?</AlertDialogTitle>
+            <AlertDialogTitle ref={rollbackTitleRef} tabIndex={-1}>
+              Apply the stored rollback?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This sends the exact rollback request retained before the original change. It is a live Ads API write.
+              This sends the exact rollback request retained before the original
+              change. It is a live, human-initiated Ads API write and is never
+              triggered automatically.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {rollbackRecord ? (
-            <div className="grid gap-2 rounded-lg border bg-muted/40 p-4 text-sm">
-              <p className="font-mono text-xs">POST {rollbackRecord.rollbackPath}</p>
-              <p className="text-muted-foreground">{rollbackRecord.safeguard}</p>
-            </div>
+            <RollbackConfirmationDetails record={rollbackRecord} />
           ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={rollback} disabled={busy}>
               {busy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <RotateCcw data-icon="inline-start" />}
-              Apply rollback
+              Apply live rollback
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

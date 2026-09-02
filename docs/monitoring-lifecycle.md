@@ -54,6 +54,17 @@ group over the exact completed full-hour range from
 `GET /ad_groups/{id}/insights`, then requests the same range and entity from
 `POST /conversions/insights` using that account's own encrypted credential.
 
+Account selection is an atomic, short PostgreSQL claim. It records a durable
+attempt and 15-minute attempt lease before credential resolution, skips active
+leases and accounts still in retry backoff, then orders eligible accounts by
+their least-recent attempt before oldest due evidence. Six broken credentials
+therefore cannot occupy every six-account run forever, and an account with a
+large successful backlog rotates behind an untouched due account on the next
+run. A failed account attempt starts at five minutes of exponential backoff,
+capped at six hours; a successful attempt clears the consecutive-failure count
+and backoff. Attempt IDs fence late completions so an expired worker cannot
+clear or overwrite a newer account attempt.
+
 The evaluator prefers `click_through_conversions` and falls back to the required
 `conversions` total when that optional field is absent; the provider contract
 defines the values as equal when both are present. It compares that value with
@@ -87,6 +98,10 @@ This makes partial failure visible to deployment alerting rather than hiding it
 inside a successful 2xx run. Logs contain aggregate counts and bounded error
 class names, not account or approval identifiers, raw error messages, provider
 bodies, credentials, or submitted event data.
+
+The runner additionally returns bounded selected-backlog telemetry: due-window
+count is capped at 10,000 and oldest age at 365 days, with an explicit cap flag
+for each value. These aggregates contain no account identifiers.
 
 The same protected run prunes live workbench payloads once their confirmed
 `synced_at` age exceeds 24 hours (or an empty row's creation age does), without

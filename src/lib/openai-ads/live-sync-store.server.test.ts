@@ -126,9 +126,54 @@ describe("live sync store", () => {
     });
   });
 
-  it("claims only after the insert and applies lease and cooldown predicates", async () => {
-    const { calls } = fakeDatabase([
+  it("does not clear a valid snapshot that wins the invalid-payload recovery race", async () => {
+    const serialized = serializeLiveWorkbenchSnapshot(
+      snapshot(),
+      demoAccount.id,
+    );
+    const invalidPayload = { ...serialized.envelope, schemaVersion: 0 };
+    const invalidRow = {
+      payload_schema_version: 1,
+      snapshot_payload: invalidPayload,
+      snapshot_bytes: Buffer.byteLength(JSON.stringify(invalidPayload), "utf8"),
+      synced_at: new Date(snapshot().syncedAt),
+      fresh_until: new Date("2026-08-30T12:02:00.000Z"),
+      stale_until: new Date("2026-08-30T12:15:00.000Z"),
+      refresh_claim_id: null,
+      refresh_claimed_at: null,
+      refresh_claim_expires_at: null,
+      consecutive_failures: 0,
+      last_failure_code: null,
+      last_failed_at: null,
+      retry_after: null,
+    };
+    const validRow = {
+      ...invalidRow,
+      snapshot_payload: serialized.envelope,
+      snapshot_bytes: serialized.bytes,
+    };
+    const database = fakeDatabase([
+      [invalidRow],
       [],
+      [validRow],
+    ]);
+
+    await expect(readLiveSyncState(scope)).resolves.toMatchObject({
+      snapshot: { account: { id: demoAccount.id } },
+      payloadSchemaVersion: 1,
+      snapshotBytes: serialized.bytes,
+    });
+    expect(statement(database.calls[1])).toContain(
+      "state.snapshot_payload = ?",
+    );
+    expect(statement(database.calls[1])).toContain(
+      "detected_signal_count = null",
+    );
+    expect(database.calls).toHaveLength(3);
+  });
+
+  it("claims atomically behind an active-account lock and applies lease and cooldown predicates", async () => {
+    const { calls } = fakeDatabase([
       [{ refresh_claim_id: "ignored-return-value" }],
     ]);
 
@@ -142,12 +187,16 @@ describe("live sync store", () => {
     expect(result?.expiresAt).toEqual(
       new Date("2026-08-30T12:01:35.000Z"),
     );
-    expect(statement(calls[1])).toContain("state.refresh_claim_expires_at <=");
-    expect(statement(calls[1])).toContain("state.retry_after <=");
+    expect(statement(calls[0])).toContain("for share");
+    expect(statement(calls[0])).toContain(
+      "on conflict (advertiser_account_id, credential_generation) do update",
+    );
+    expect(statement(calls[0])).toContain("refresh_claim_expires_at");
+    expect(statement(calls[0])).toContain("retry_after");
   });
 
   it("returns null when another worker owns the claim", async () => {
-    fakeDatabase([[], []]);
+    fakeDatabase([[]]);
 
     await expect(
       claimLiveSyncRefresh({
@@ -172,6 +221,7 @@ describe("live sync store", () => {
     expect(statement(renewal.calls[0])).toContain(
       "state.refresh_claim_expires_at >",
     );
+    expect(statement(renewal.calls[0])).toContain("for share");
 
     const completion = fakeDatabase([[{ refresh_claim_id: claimId }]]);
     await expect(
@@ -190,6 +240,10 @@ describe("live sync store", () => {
     expect(statement(completion.calls[0])).toContain(
       "state.refresh_claim_expires_at >",
     );
+    expect(statement(completion.calls[0])).toContain(
+      "detected_signal_count = ?",
+    );
+    expect(statement(completion.calls[0])).toContain("for share");
   });
 
   it("records only bounded failure codes for an unexpired matching claim", async () => {
@@ -207,6 +261,7 @@ describe("live sync store", () => {
     expect(statement(database.calls[0])).toContain(
       "state.refresh_claim_expires_at >",
     );
+    expect(statement(database.calls[0])).toContain("for share");
 
     await expect(
       failLiveSyncRefresh({

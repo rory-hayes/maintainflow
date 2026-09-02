@@ -5,13 +5,16 @@ import { createHash } from "node:crypto";
 import type { ZodType } from "zod";
 
 import {
+  ApprovalProviderSendFenceUnavailableError,
   ApprovalStoreUnavailableError,
   claimApprovalRollback,
   createApprovalRecord,
   isApprovalStoreConfigured,
+  markApprovalProviderAttempt,
   updateApprovalRecord,
   updateRollbackRecord,
   verifyApprovalStore,
+  withApprovalProviderSendFence,
 } from "../audit/approval-store.server";
 import { storedAdsMutationSchema } from "../audit/approval-schema";
 import {
@@ -951,6 +954,7 @@ export async function applyAdsMutation(
       operatorId: options.operatorId,
       access: options.access,
       expectedCredentialGeneration: options.credentialGeneration,
+      requireClearProviderOperationLedger: true,
     },
     async ({ transaction, access }) =>
       createApprovalRecord(
@@ -969,7 +973,6 @@ export async function applyAdsMutation(
     secret: prepared.credentialMaterial.apiKey,
     expectedAccountId: options.accountId,
   };
-
   let providerState: Awaited<
     ReturnType<typeof verifyMutationProviderPrecondition>
   >;
@@ -1042,14 +1045,48 @@ export async function applyAdsMutation(
     );
   }
 
+  try {
+    await markApprovalProviderAttempt({
+      id: approvalId,
+      accountId: options.accountId,
+      attemptId: approvalId,
+      status: "pending",
+    });
+  } catch (error) {
+    log.warn("ads.apply.execution_lease_lost", { error });
+    throw new AdsMutationReconciliationRequiredError(
+      approvalId,
+      "apply",
+      `Approval ${approvalId} no longer holds its execution lease. No new mutation was sent; reconcile the durable record before taking another action.`,
+      { cause: error },
+    );
+  }
+
   let response: Response;
   try {
-    response = await sendAdsMutation(
-      recommendation.mutation,
-      body,
-      credential,
+    response = await withApprovalProviderSendFence(
+      {
+        id: approvalId,
+        accountId: options.accountId,
+        attemptId: approvalId,
+        status: "pending",
+      },
+      () => sendAdsMutation(
+        recommendation.mutation,
+        body,
+        credential,
+      ),
     );
   } catch (error) {
+    if (error instanceof ApprovalProviderSendFenceUnavailableError) {
+      log.warn("ads.apply.execution_fence_lost", { error });
+      throw new AdsMutationReconciliationRequiredError(
+        approvalId,
+        "apply",
+        `Approval ${approvalId} no longer holds its provider-send fence. No new mutation was sent; reconcile the durable record before taking another action.`,
+        { cause: error },
+      );
+    }
     let persistenceWarning = false;
     try {
       await updateApprovalRecord(approvalId, "reconciliation_required", {
@@ -1252,6 +1289,7 @@ export async function applyStoredRollback(options: {
       operatorId: options.operatorId,
       access: options.access,
       expectedCredentialGeneration: options.credentialGeneration,
+      requireClearProviderOperationLedger: true,
     },
     async ({ transaction, access }) =>
       claimApprovalRollback(
@@ -1267,6 +1305,10 @@ export async function applyStoredRollback(options: {
     kind: "account_api_key",
     secret: prepared.credentialMaterial.apiKey,
     expectedAccountId: options.accountId,
+  };
+  const rollbackAttempt = {
+    accountId: options.accountId,
+    attemptId: approval.attemptId,
   };
 
   let rollbackMutation: AdsMutation;
@@ -1287,6 +1329,7 @@ export async function applyStoredRollback(options: {
     );
   } catch (error) {
     await updateRollbackRecord(approval.id, "rollback_failed", {
+      ...rollbackAttempt,
       error:
         error instanceof Error
           ? error.message
@@ -1308,6 +1351,7 @@ export async function applyStoredRollback(options: {
     let persistenceWarning = false;
     try {
       await updateRollbackRecord(approval.id, "rollback_failed", {
+        ...rollbackAttempt,
         response: {
           precondition: {
             outcome: "blocked_no_write",
@@ -1339,19 +1383,24 @@ export async function applyStoredRollback(options: {
   if (!providerState.matches) {
     let persistenceWarning = false;
     try {
-      await updateRollbackRecord(approval.id, "rollback_failed", {
-        response: {
-          precondition: {
-            outcome: "blocked_no_write",
-            reason: "provider_state_changed",
-            expectedStateFingerprint:
-              providerState.expectedStateFingerprint,
-            actualStateFingerprint: providerState.actualStateFingerprint,
+      await updateRollbackRecord(
+        approval.id,
+        "rollback_reconciliation_required",
+        {
+          ...rollbackAttempt,
+          response: {
+            precondition: {
+              outcome: "blocked_no_write",
+              reason: "provider_state_changed",
+              expectedStateFingerprint:
+                providerState.expectedStateFingerprint,
+              actualStateFingerprint: providerState.actualStateFingerprint,
+            },
           },
+          error:
+            "Provider-controlled fields changed after apply. No rollback was sent; reconcile the current provider state before taking another action.",
         },
-        error:
-          "Provider-controlled fields changed after apply. No rollback was sent; reconcile the live state before retrying.",
-      });
+      );
     } catch {
       persistenceWarning = true;
     }
@@ -1368,20 +1417,55 @@ export async function applyStoredRollback(options: {
     );
   }
 
+  try {
+    await markApprovalProviderAttempt({
+      id: approval.id,
+      accountId: options.accountId,
+      attemptId: approval.attemptId,
+      status: "rollback_pending",
+    });
+  } catch (error) {
+    log.warn("ads.rollback.execution_lease_lost", { error });
+    throw new AdsMutationReconciliationRequiredError(
+      approval.id,
+      "rollback",
+      `Approval ${approval.id} no longer holds its rollback execution lease. No new rollback was sent; reconcile the durable record before taking another action.`,
+      { cause: error },
+    );
+  }
+
   let response: Response;
   try {
-    response = await sendAdsMutation(
-      rollbackMutation,
-      body,
-      credential,
+    response = await withApprovalProviderSendFence(
+      {
+        id: approval.id,
+        accountId: options.accountId,
+        attemptId: approval.attemptId,
+        status: "rollback_pending",
+      },
+      () => sendAdsMutation(
+        rollbackMutation,
+        body,
+        credential,
+      ),
     );
   } catch (error) {
+    if (error instanceof ApprovalProviderSendFenceUnavailableError) {
+      log.warn("ads.rollback.execution_fence_lost", { error });
+      throw new AdsMutationReconciliationRequiredError(
+        approval.id,
+        "rollback",
+        `Approval ${approval.id} no longer holds its rollback provider-send fence. No new rollback was sent; reconcile the durable record before taking another action.`,
+        { cause: error },
+      );
+    }
     let persistenceWarning = false;
     try {
       await updateRollbackRecord(
         approval.id,
         "rollback_reconciliation_required",
         {
+          ...rollbackAttempt,
           error:
             error instanceof Error
               ? error.message
@@ -1413,6 +1497,7 @@ export async function applyStoredRollback(options: {
         approval.id,
         "rollback_reconciliation_required",
         {
+          ...rollbackAttempt,
           error:
             error instanceof OpenAIAdsResponseTooLargeError
               ? "OpenAI Ads API rollback response exceeded the bounded response limit and was not retained."
@@ -1440,6 +1525,7 @@ export async function applyStoredRollback(options: {
         approval.id,
         "rollback_reconciliation_required",
         {
+          ...rollbackAttempt,
           response: payload,
           error: `OpenAI Ads API returned an uncertain HTTP ${response.status} rollback outcome.`,
         },
@@ -1460,6 +1546,7 @@ export async function applyStoredRollback(options: {
 
   if (!response.ok) {
     await updateRollbackRecord(approval.id, "rollback_failed", {
+      ...rollbackAttempt,
       response: payload,
       error: `OpenAI Ads API returned HTTP ${response.status}.`,
     });
@@ -1474,6 +1561,7 @@ export async function applyStoredRollback(options: {
         approval.id,
         "rollback_reconciliation_required",
         {
+          ...rollbackAttempt,
           response: payload,
           error: `OpenAI Ads API returned unexpected success status ${response.status}.`,
         },
@@ -1507,6 +1595,7 @@ export async function applyStoredRollback(options: {
         approval.id,
         "rollback_reconciliation_required",
         {
+          ...rollbackAttempt,
           response: payload,
           error:
             error instanceof Error
@@ -1528,6 +1617,7 @@ export async function applyStoredRollback(options: {
 
   try {
     await updateRollbackRecord(approval.id, "rolled_back", {
+      ...rollbackAttempt,
       response: confirmation,
     });
   } catch {

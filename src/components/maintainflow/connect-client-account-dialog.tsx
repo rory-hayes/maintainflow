@@ -41,8 +41,18 @@ type FetchClient = (
 
 const attachResponseSchema = z
   .object({
+    created: z.boolean(),
+    credentialUpdated: z.boolean(),
     access: accountAccessSchema,
     message: z.string().optional(),
+  })
+  .passthrough();
+
+const verifyResponseSchema = z
+  .object({
+    verified: z.literal(true),
+    account: z.object({ id: z.string().min(1), name: z.string().min(1) }),
+    organization: z.object({ id: z.string().uuid(), name: z.string().min(1) }),
   })
   .passthrough();
 
@@ -73,6 +83,7 @@ function readObjectProperty(value: unknown, property: string) {
 export async function connectClientAdvertiserAccount(options: {
   organizationId: string;
   adsApiKey: string;
+  expectedAccountId: string;
   fetchClient?: FetchClient;
 }) {
   const submittedKey = options.adsApiKey.trim();
@@ -85,7 +96,11 @@ export async function connectClientAdvertiserAccount(options: {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adsApiKey: submittedKey }),
+        body: JSON.stringify({
+          action: "connect",
+          adsApiKey: submittedKey,
+          expectedAccountId: options.expectedAccountId,
+        }),
       },
     );
   } catch {
@@ -122,9 +137,58 @@ export async function connectClientAdvertiserAccount(options: {
   }
 
   return {
+    created: parsed.data.created,
+    credentialUpdated: parsed.data.credentialUpdated,
     access: parsed.data.access,
     message: safeResponseMessage(parsed.data.message, submittedKey),
   };
+}
+
+export async function verifyClientAdvertiserAccount(options: {
+  organizationId: string;
+  adsApiKey: string;
+  fetchClient?: FetchClient;
+}) {
+  const submittedKey = options.adsApiKey.trim();
+  const fetchClient = options.fetchClient ?? fetch;
+  let response: Response;
+
+  try {
+    response = await fetchClient(
+      `/api/organizations/${encodeURIComponent(options.organizationId)}/advertiser-accounts`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "verify", adsApiKey: submittedKey }),
+      },
+    );
+  } catch {
+    throw new ClientAccountConnectionError();
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    throw new ClientAccountConnectionError(
+      safeResponseMessage(readObjectProperty(payload, "error"), submittedKey) ??
+        genericConnectionError,
+    );
+  }
+
+  const parsed = verifyResponseSchema.safeParse(payload);
+  if (
+    !parsed.success ||
+    parsed.data.organization.id !== options.organizationId
+  ) {
+    throw new ClientAccountConnectionError(
+      "OpenAI verified the key, but MaintainFlow could not confirm the target agency. Refresh before trying again.",
+    );
+  }
+  return parsed.data;
 }
 
 type ConnectClientAccountFieldsProps = {
@@ -186,8 +250,9 @@ export function ConnectClientAccountFields({
           />
           <FieldDescription>
             Use the account-scoped advertiser key issued in OpenAI Ads Manager,
-            not an OpenAI Platform API key. If accepted, it is encrypted for{" "}
-            {organizationName} and never displayed again.
+            not an OpenAI Platform API key. MaintainFlow verifies the resolved
+            advertiser first; nothing is attached until you confirm it for{" "}
+            {organizationName}.
           </FieldDescription>
           {keyInvalid ? (
             <FieldError>Check the advertiser key and try again.</FieldError>
@@ -213,7 +278,7 @@ export function ConnectClientAccountFields({
           ) : (
             <KeyRound data-icon="inline-start" />
           )}
-          {submitting ? "Verifying with OpenAI…" : "Connect client account"}
+          {submitting ? "Verifying with OpenAI…" : "Verify advertiser account"}
         </Button>
       </DialogFooter>
     </>
@@ -235,11 +300,16 @@ export function ConnectClientAccountDialog({
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [verifiedAccount, setVerifiedAccount] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
   function resetSensitiveState() {
     setAdsApiKey("");
     setAttempted(false);
     setError(null);
+    setVerifiedAccount(null);
   }
 
   function changeOpen(nextOpen: boolean) {
@@ -252,6 +322,7 @@ export function ConnectClientAccountDialog({
     setAdsApiKey(value);
     setAttempted(false);
     setError(null);
+    setVerifiedAccount(null);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -262,9 +333,22 @@ export function ConnectClientAccountDialog({
 
     setSubmitting(true);
     try {
+      if (!verifiedAccount) {
+        const verified = await verifyClientAdvertiserAccount({
+          organizationId,
+          adsApiKey,
+        });
+        setVerifiedAccount(verified.account);
+        setAttempted(false);
+        toast.success("Advertiser account verified", {
+          description: `Confirm ${verified.account.name} before MaintainFlow stores the encrypted key.`,
+        });
+        return;
+      }
       const result = await connectClientAdvertiserAccount({
         organizationId,
         adsApiKey,
+        expectedAccountId: verifiedAccount.id,
       });
       resetSensitiveState();
       setOpen(false);
@@ -283,6 +367,7 @@ export function ConnectClientAccountDialog({
           : genericConnectionError;
       setAdsApiKey("");
       setAttempted(false);
+      setVerifiedAccount(null);
       setError(detail);
       toast.error("Unable to connect client account", {
         description: detail,
@@ -300,7 +385,7 @@ export function ConnectClientAccountDialog({
           Connect client account
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Connect another client account</DialogTitle>
           <DialogDescription>
@@ -309,15 +394,79 @@ export function ConnectClientAccountDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="flex flex-col gap-5">
-          <ConnectClientAccountFields
-            adsApiKey={adsApiKey}
-            attempted={attempted}
-            error={error}
-            organizationName={organizationName}
-            submitting={submitting}
-            onAdsApiKeyChange={updateKey}
-            onCancel={() => changeOpen(false)}
-          />
+          {verifiedAccount ? (
+            <>
+              <Alert>
+                <ShieldCheck />
+                <AlertTitle>Confirm the resolved advertiser</AlertTitle>
+                <AlertDescription>
+                  OpenAI says this key belongs to the account below. Confirm
+                  both the advertiser and target agency before the key is
+                  encrypted and attached.
+                </AlertDescription>
+              </Alert>
+              <dl className="grid gap-3 rounded-lg border bg-muted/30 p-4 text-sm">
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Advertiser
+                  </dt>
+                  <dd className="mt-1 font-medium">{verifiedAccount.name}</dd>
+                  <dd className="font-mono text-xs text-muted-foreground">
+                    {verifiedAccount.id}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Agency workspace
+                  </dt>
+                  <dd className="mt-1 font-medium">{organizationName}</dd>
+                </div>
+              </dl>
+              {error ? (
+                <Alert variant="destructive">
+                  <ShieldCheck />
+                  <AlertTitle>Client account was not connected</AlertTitle>
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              ) : null}
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => changeOpen(false)}
+                  disabled={submitting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setVerifiedAccount(null)}
+                  disabled={submitting}
+                >
+                  Back
+                </Button>
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? (
+                    <Loader2 data-icon="inline-start" className="animate-spin" />
+                  ) : (
+                    <ShieldCheck data-icon="inline-start" />
+                  )}
+                  {submitting ? "Connecting account…" : "Confirm connection"}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <ConnectClientAccountFields
+              adsApiKey={adsApiKey}
+              attempted={attempted}
+              error={error}
+              organizationName={organizationName}
+              submitting={submitting}
+              onAdsApiKeyChange={updateKey}
+              onCancel={() => changeOpen(false)}
+            />
+          )}
         </form>
       </DialogContent>
     </Dialog>

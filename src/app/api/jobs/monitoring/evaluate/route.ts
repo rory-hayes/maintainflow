@@ -1,6 +1,10 @@
 import { timingSafeEqual } from "node:crypto";
 
-import { verifyApprovalStore } from "@/lib/audit/approval-store.server";
+import {
+  countUnresolvedApprovalOperations,
+  recoverStaleApprovalOperations,
+  verifyApprovalStore,
+} from "@/lib/audit/approval-store.server";
 import { createServerLogger } from "@/lib/observability/logger.server";
 import { evaluateScheduledMonitoringWindows } from "@/lib/openai-ads/monitoring-runner.server";
 import {
@@ -21,6 +25,7 @@ export const maxDuration = 60;
 
 const LIVE_SNAPSHOT_CLEANUP_LIMIT = 5_000;
 const RATE_LIMIT_CLEANUP_LIMIT = 5_000;
+const APPROVAL_RECOVERY_LIMIT = 500;
 
 const emptyMonitoringSummary = {
   accountsSelected: 0,
@@ -59,14 +64,16 @@ export async function GET(request: Request) {
 
   try {
     let monitoringUnavailable = false;
+    let approvalStoreReady = false;
     let summary = emptyMonitoringSummary;
     try {
-      const [approvalStoreReady, tenancyStoreReady, credentialStoreReady] =
+      const [approvalReady, tenancyStoreReady, credentialStoreReady] =
         await Promise.all([
           verifyApprovalStore(),
           verifyTenancyStore(),
           verifyCredentialStore(),
         ]);
+      approvalStoreReady = approvalReady;
       if (
         !approvalStoreReady ||
         !tenancyStoreReady ||
@@ -83,6 +90,31 @@ export async function GET(request: Request) {
 
     let maintenanceFailed = false;
     let maintenanceBacklog = false;
+    let approvalOperationsRecovered = 0;
+    let unresolvedApprovalOperations = 0;
+    if (approvalStoreReady) {
+      const approvalMaintenanceNow = new Date();
+      try {
+        const recovery = await recoverStaleApprovalOperations({
+          now: approvalMaintenanceNow,
+          limit: APPROVAL_RECOVERY_LIMIT,
+        });
+        approvalOperationsRecovered = recovery.recovered;
+        maintenanceBacklog ||= recovery.backlog;
+      } catch (error) {
+        log.error("monitoring.approval_recovery.failed", { error });
+        maintenanceFailed = true;
+      }
+      try {
+        unresolvedApprovalOperations =
+          await countUnresolvedApprovalOperations({
+            now: approvalMaintenanceNow,
+          });
+      } catch (error) {
+        log.error("monitoring.approval_ledger.failed", { error });
+        maintenanceFailed = true;
+      }
+    }
     if (isReadinessRateLimitConfigured()) {
       try {
         const pruned = await pruneExpiredReadinessRateLimitBuckets(
@@ -116,6 +148,8 @@ export async function GET(request: Request) {
       monitoringUnavailable ||
       summary.accountsFailed > 0 ||
       summary.failed > 0 ||
+      approvalOperationsRecovered > 0 ||
+      unresolvedApprovalOperations > 0 ||
       maintenanceFailed ||
       maintenanceBacklog;
     const logFields = {
@@ -128,6 +162,8 @@ export async function GET(request: Request) {
         due: summary.due,
         evaluated: summary.evaluated,
         failed: summary.failed,
+        approvalOperationsRecovered,
+        unresolvedApprovalOperations,
       },
     };
     if (hasFailures) log.error("monitoring.run.completed_with_failures", logFields);
@@ -138,6 +174,8 @@ export async function GET(request: Request) {
         monitoringUnavailable,
         maintenanceFailed,
         maintenanceBacklog,
+        approvalOperationsRecovered,
+        unresolvedApprovalOperations,
         ...summary,
       },
       {

@@ -1,6 +1,6 @@
 # OpenAI Ads API contract
 
-Verified against the official OpenAI Ads documentation on 31 August 2026.
+Verified against the official OpenAI Ads documentation on 2 September 2026.
 
 ## Authentication boundary
 
@@ -216,6 +216,41 @@ claimed atomically before it is sent; uncertain rollback outcomes are marked
 `rollback_reconciliation_required`, and an operator must verify Ads Manager and
 record the result with a reconciliation note rather than resend automatically.
 
+Every apply record has an immutable attempt generation, and every rollback
+claim receives a fresh UUID generation. Immediately before each provider POST,
+MaintainFlow commits a one-way marker bound to that exact account, record, and
+generation. It then holds a row lock while invoking the provider send, whose
+HTTP request has a 15-second application abort. Stale recovery uses `FOR UPDATE
+SKIP LOCKED`: if the sender owns the row, recovery skips it; if recovery changes
+the status first, the send fence rejects before invoking the provider callback.
+An older rollback worker cannot borrow a newer claim's marker or finalize its
+result because the fence and terminal update both require the exact generation.
+
+The database transaction itself has no independent 15-second guarantee; its
+lock lasts until commit, rollback, or database-session cleanup. Production
+database and proxy timeouts must therefore exceed the application send window
+and be monitored. Response parsing, provider readback, and final persistence run
+after the send transaction. Abandoned unmarked operations move to a confirmed
+no-write retryable state, while abandoned marked operations move to manual
+reconciliation and retain must-not-retry semantics.
+
+Before creating or claiming any provider write, MaintainFlow locks the account
+and refuses the operation while that account has another active or unresolved
+apply or rollback. Every protected scheduled or deployment-probe maintenance
+run reports the bounded unresolved-operation count, and the deployment probe
+requires zero. The count includes reconciliation states and active operations
+that have exceeded the recovery lease, including rows skipped because a sender
+still holds their lock. Manual reconciliation clears the interlock only after
+Ads Manager is checked.
+
+PostgreSQL and the provider are not one atomic system. A database session loss
+combined with a subsequently resumed JavaScript callback cannot be ruled out
+without provider-enforced idempotency or conditional-write support. The send
+generation fence closes the tested stale-recovery and rollback-ABA races but
+does not justify live writes on its own; live writes remain gated until the
+real-account acceptance plan proves
+the provider behavior and operational controls.
+
 A documented HTTP `200` is necessary but not sufficient for an applied state.
 MaintainFlow parses the campaign, ad-group, or ad acknowledgement through its
 official resource schema, verifies the resource ID, then performs the matching
@@ -232,8 +267,11 @@ reconciliation, and preserves the must-not-retry rule.
 Completed monitoring does not depend on a browser refresh. The protected daily
 scheduler resolves each selected advertiser's credential independently, waits
 until 48 hours after the stored evidence window, claims due rows with a
-recoverable lease, and persists only observations. It never sends an Ads
-mutation or automatic rollback.
+recoverable lease, and persists only observations. Account selection records a
+durable attempt before credential lookup, prioritizes never or least-recently
+attempted accounts, and applies bounded exponential backoff after failure so one
+broken client cannot starve the rest of an agency portfolio. It never sends an
+Ads mutation or automatic rollback.
 
 The first live recommendation rule is deliberately narrow: for active
 conversion campaigns, compare click-attributed CPA with the ad group's

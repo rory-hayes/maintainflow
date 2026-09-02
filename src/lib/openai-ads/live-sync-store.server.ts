@@ -8,6 +8,7 @@ import { getRuntimeDatabase } from "../database/client.server";
 import type { LiveWorkbenchData } from "./data.server";
 import {
   LIVE_WORKBENCH_SNAPSHOT_SCHEMA_VERSION,
+  LiveWorkbenchSnapshotValidationError,
   parseLiveWorkbenchSnapshot,
   serializeLiveWorkbenchSnapshot,
 } from "./live-sync-snapshot";
@@ -135,6 +136,18 @@ function parseStateRow(
   };
 }
 
+function withoutSnapshot(row: LiveSyncStateRow): LiveSyncStateRow {
+  return {
+    ...row,
+    payload_schema_version: null,
+    snapshot_payload: null,
+    snapshot_bytes: null,
+    synced_at: null,
+    fresh_until: null,
+    stale_until: null,
+  };
+}
+
 export async function verifyLiveSyncStore() {
   if (!process.env.DATABASE_URL) return false;
   const sql = getDatabase();
@@ -144,6 +157,14 @@ export async function verifyLiveSyncStore() {
       and to_regclass(
         'public.maintainflow_live_workbench_snapshots_retention_idx'
       ) is not null
+      and exists (
+        select 1
+        from pg_attribute
+        where attrelid =
+          'public.maintainflow_live_workbench_snapshots'::regclass
+          and attname = 'detected_signal_count'
+          and not attisdropped
+      )
     ) as ready
   `;
   return row?.ready === true;
@@ -155,29 +176,88 @@ export async function readLiveSyncState(options: {
 }): Promise<LiveSyncState | null> {
   validateScope(options.accountId, options.credentialGeneration);
   const sql = getDatabase();
-  const [row] = await sql<LiveSyncStateRow[]>`
-    select
-      state.payload_schema_version,
-      state.snapshot_payload,
-      state.snapshot_bytes,
-      state.synced_at,
-      state.fresh_until,
-      state.stale_until,
-      state.refresh_claim_id,
-      state.refresh_claimed_at,
-      state.refresh_claim_expires_at,
-      state.consecutive_failures,
-      state.last_failure_code,
-      state.last_failed_at,
-      state.retry_after
-    from maintainflow_live_workbench_snapshots state
-    join maintainflow_advertiser_accounts account
-      on account.id = state.advertiser_account_id
-    where account.external_account_id = ${options.accountId}
-      and account.status = 'active'
-      and state.credential_generation = ${options.credentialGeneration}
-  `;
-  return row ? parseStateRow(row, options.accountId) : null;
+
+  async function selectStateRow() {
+    const [row] = await sql<LiveSyncStateRow[]>`
+      select
+        state.payload_schema_version,
+        state.snapshot_payload,
+        state.snapshot_bytes,
+        state.synced_at,
+        state.fresh_until,
+        state.stale_until,
+        state.refresh_claim_id,
+        state.refresh_claimed_at,
+        state.refresh_claim_expires_at,
+        state.consecutive_failures,
+        state.last_failure_code,
+        state.last_failed_at,
+        state.retry_after
+      from maintainflow_live_workbench_snapshots state
+      join maintainflow_advertiser_accounts account
+        on account.id = state.advertiser_account_id
+      where account.external_account_id = ${options.accountId}
+        and account.status = 'active'
+        and state.credential_generation = ${options.credentialGeneration}
+    `;
+    return row;
+  }
+
+  async function clearSnapshotIfUnchanged(row: LiveSyncStateRow) {
+    const cleared = await sql<{ cleared: boolean }[]>`
+      with locked_account as materialized (
+        select id
+        from maintainflow_advertiser_accounts
+        where external_account_id = ${options.accountId}
+          and status = 'active'
+        for share
+      )
+      update maintainflow_live_workbench_snapshots state set
+        payload_schema_version = null,
+        snapshot_payload = null,
+        snapshot_bytes = null,
+        detected_signal_count = null,
+        synced_at = null,
+        fresh_until = null,
+        stale_until = null,
+        updated_at = now()
+      from locked_account account
+      where account.id = state.advertiser_account_id
+        and state.credential_generation = ${options.credentialGeneration}
+        and state.payload_schema_version is not distinct from ${row.payload_schema_version}
+        and state.snapshot_bytes is not distinct from ${row.snapshot_bytes}
+        and state.snapshot_payload = ${sql.json(
+          row.snapshot_payload as postgres.JSONValue,
+        )}
+      returning true as cleared
+    `;
+    return cleared[0]?.cleared === true;
+  }
+
+  let row = await selectStateRow();
+  if (!row) return null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return parseStateRow(row, options.accountId);
+    } catch (error) {
+      if (!(error instanceof LiveWorkbenchSnapshotValidationError)) throw error;
+    }
+
+    if (await clearSnapshotIfUnchanged(row)) {
+      return parseStateRow(withoutSnapshot(row), options.accountId);
+    }
+
+    // A concurrent writer replaced the invalid payload after our read. Re-read
+    // instead of clearing or returning the newer snapshot optimistically.
+    const currentRow = await selectStateRow();
+    if (!currentRow) return null;
+    row = currentRow;
+  }
+
+  // If a second concurrent replacement is also invalid, keep it unusable for
+  // this request and let the normal claim/completion path overwrite it.
+  return parseStateRow(withoutSnapshot(row), options.accountId);
 }
 
 export async function claimLiveSyncRefresh(options: {
@@ -191,37 +271,37 @@ export async function claimLiveSyncRefresh(options: {
   const claimId = randomUUID();
   const sql = getDatabase();
 
-  await sql`
-    insert into maintainflow_live_workbench_snapshots (
-      advertiser_account_id,
-      credential_generation
-    )
-    select account.id, ${options.credentialGeneration}
-    from maintainflow_advertiser_accounts account
-    where account.external_account_id = ${options.accountId}
-      and account.status = 'active'
-    on conflict (advertiser_account_id, credential_generation) do nothing
-  `;
   const rows = await sql<{ refresh_claim_id: string }[]>`
-    update maintainflow_live_workbench_snapshots state set
+    with locked_account as materialized (
+      select id
+      from maintainflow_advertiser_accounts
+      where external_account_id = ${options.accountId}
+        and status = 'active'
+      for share
+    )
+    insert into maintainflow_live_workbench_snapshots (
+      advertiser_account_id, credential_generation,
+      refresh_claim_id, refresh_claimed_at, refresh_claim_expires_at,
+      updated_at
+    )
+    select account.id, ${options.credentialGeneration},
+      ${claimId}, ${options.now}, ${expiresAt}, ${options.now}
+    from locked_account account
+    on conflict (advertiser_account_id, credential_generation) do update set
       refresh_claim_id = ${claimId},
       refresh_claimed_at = ${options.now},
       refresh_claim_expires_at = ${expiresAt},
       updated_at = ${options.now}
-    from maintainflow_advertiser_accounts account
-    where account.id = state.advertiser_account_id
-      and account.external_account_id = ${options.accountId}
-      and account.status = 'active'
-      and state.credential_generation = ${options.credentialGeneration}
-      and (
-        state.refresh_claim_id is null
-        or state.refresh_claim_expires_at <= ${options.now}
+    where (
+        maintainflow_live_workbench_snapshots.refresh_claim_id is null
+        or maintainflow_live_workbench_snapshots.refresh_claim_expires_at
+          <= ${options.now}
       )
       and (
-        state.retry_after is null
-        or state.retry_after <= ${options.now}
+        maintainflow_live_workbench_snapshots.retry_after is null
+        or maintainflow_live_workbench_snapshots.retry_after <= ${options.now}
       )
-    returning state.refresh_claim_id
+    returning refresh_claim_id
   `;
   return rows[0] ? { claimId, expiresAt } : null;
 }
@@ -238,13 +318,18 @@ export async function renewLiveSyncClaim(options: {
   const expiresAt = futureDate(options.now, options.leaseMs, "leaseMs");
   const sql = getDatabase();
   const rows = await sql<{ refresh_claim_id: string }[]>`
+    with locked_account as materialized (
+      select id
+      from maintainflow_advertiser_accounts
+      where external_account_id = ${options.accountId}
+        and status = 'active'
+      for share
+    )
     update maintainflow_live_workbench_snapshots state set
       refresh_claim_expires_at = ${expiresAt},
       updated_at = ${options.now}
-    from maintainflow_advertiser_accounts account
+    from locked_account account
     where account.id = state.advertiser_account_id
-      and account.external_account_id = ${options.accountId}
-      and account.status = 'active'
       and state.credential_generation = ${options.credentialGeneration}
       and state.refresh_claim_id = ${options.claimId}
       and state.refresh_claim_expires_at > ${options.now}
@@ -280,12 +365,20 @@ export async function completeLiveSyncRefresh(options: {
 
   const sql = getDatabase();
   const rows = await sql<{ refresh_claim_id: string }[]>`
+    with locked_account as materialized (
+      select id
+      from maintainflow_advertiser_accounts
+      where external_account_id = ${options.accountId}
+        and status = 'active'
+      for share
+    )
     update maintainflow_live_workbench_snapshots state set
       payload_schema_version = ${LIVE_WORKBENCH_SNAPSHOT_SCHEMA_VERSION},
       snapshot_payload = ${sql.json(
         serialized.envelope as unknown as postgres.JSONValue,
       )},
       snapshot_bytes = ${serialized.bytes},
+      detected_signal_count = ${serialized.snapshot.recommendations.length},
       synced_at = ${syncedAt},
       fresh_until = ${freshUntil},
       stale_until = ${staleUntil},
@@ -297,10 +390,8 @@ export async function completeLiveSyncRefresh(options: {
       last_failed_at = null,
       retry_after = null,
       updated_at = ${options.now}
-    from maintainflow_advertiser_accounts account
+    from locked_account account
     where account.id = state.advertiser_account_id
-      and account.external_account_id = ${options.accountId}
-      and account.status = 'active'
       and state.credential_generation = ${options.credentialGeneration}
       and state.refresh_claim_id = ${options.claimId}
       and state.refresh_claim_expires_at > ${options.now}
@@ -332,6 +423,13 @@ export async function failLiveSyncRefresh(options: {
 
   const sql = getDatabase();
   const rows = await sql<{ refresh_claim_id: string }[]>`
+    with locked_account as materialized (
+      select id
+      from maintainflow_advertiser_accounts
+      where external_account_id = ${options.accountId}
+        and status = 'active'
+      for share
+    )
     update maintainflow_live_workbench_snapshots state set
       refresh_claim_id = null,
       refresh_claimed_at = null,
@@ -341,10 +439,8 @@ export async function failLiveSyncRefresh(options: {
       last_failed_at = ${options.now},
       retry_after = ${options.retryAfter},
       updated_at = ${options.now}
-    from maintainflow_advertiser_accounts account
+    from locked_account account
     where account.id = state.advertiser_account_id
-      and account.external_account_id = ${options.accountId}
-      and account.status = 'active'
       and state.credential_generation = ${options.credentialGeneration}
       and state.refresh_claim_id = ${options.claimId}
       and state.refresh_claim_expires_at > ${options.now}

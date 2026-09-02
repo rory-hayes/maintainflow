@@ -45,7 +45,7 @@ this explicitly disposable harness.
 
 ## What it proves
 
-- migrations `001` through `013` apply together on PostgreSQL in filename
+- migrations `001` through `016` apply together on PostgreSQL in filename
   order;
 - concurrent migration runners serialize, record one immutable SHA-256 ledger
   row per file, and a subsequent runner is a checksum-verifying no-op;
@@ -71,6 +71,10 @@ this explicitly disposable harness.
   hours after their evidence window ends, concurrent workers claim a row once,
   abandoned claims become eligible after 15 minutes, and exactly one
   maturity-gated typed observation and safeguard outcome persists;
+- scheduler account attempts persist before credential resolution, broken
+  accounts enter bounded exponential backoff, successful attempts clear that
+  failure state, and least-recently-attempted ordering prevents six broken or
+  high-backlog accounts from starving an untouched seventh account;
 - concurrent public-audit checks enforce six requests per client and 30 per
   target host per fixed hour, reset at the next hour, retain only HMACed
   subjects, and prune expired buckets;
@@ -82,6 +86,17 @@ this explicitly disposable harness.
   before persistence, retain the scanner/ruleset provenance needed for safe
   comparison, and deny a review-only operator at the insertion query itself;
 - only one concurrent rollback claim succeeds;
+- apply and rollback provider sends hold an account-scoped, generation-bound
+  row fence against stale recovery; after recovery, reconciliation, and a fresh
+  rollback claim, the old generation cannot send or finalize against the new
+  generation;
+- any active or unresolved provider operation blocks a second account write,
+  and a successful manual reconciliation releases that account-wide interlock;
+- stale active operations remain visible to the persistent health count even
+  while their provider-send row lock causes recovery to skip them;
+- advertiser-account write authorization takes the account row lock before its
+  organization, membership, and access rows, matching offboarding order and
+  preventing the tested partial-acquisition deadlock;
 - ambiguous outcomes can be reconciled into a terminal audit state with the
   acting organization and roles preserved.
 

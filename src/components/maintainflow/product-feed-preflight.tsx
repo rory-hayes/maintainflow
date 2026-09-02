@@ -95,7 +95,7 @@ function FeedIssueTable({ issues }: { issues: ProductFeedIssue[] }) {
         ))}
       </div>
       <div className="hidden overflow-hidden rounded-lg border md:block">
-        <Table>
+        <Table scrollAreaLabel="Product feed issues">
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
               <TableHead>Check</TableHead>
@@ -192,7 +192,7 @@ export function ProductFeedPreflight({
 
   return (
     <Card className="shadow-sm">
-      <CardHeader className="gap-3 border-b bg-muted/20 min-[640px]:flex-row min-[640px]:items-start min-[640px]:justify-between">
+      <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
             <FileSearch className="size-5" />

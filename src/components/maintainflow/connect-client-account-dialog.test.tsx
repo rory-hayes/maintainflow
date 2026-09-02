@@ -9,6 +9,7 @@ import {
   ClientAccountConnectionError,
   ConnectClientAccountFields,
   connectClientAdvertiserAccount,
+  verifyClientAdvertiserAccount,
 } from "./connect-client-account-dialog";
 
 const organizationId = "00000000-0000-4000-8000-000000000002";
@@ -36,10 +37,11 @@ function response(payload: unknown, status = 200) {
 }
 
 describe("Connect client advertiser account request", () => {
-  it("posts only the advertiser key and accepts provider-derived account access", async () => {
+  it("connects only the advertiser identity confirmed in the prior step", async () => {
     const fetchClient = vi.fn<FetchClient>(async () =>
       response({
-        attached: true,
+        created: true,
+        credentialUpdated: true,
         access,
         message: "Harbour Home Ireland is connected.",
       }),
@@ -48,6 +50,7 @@ describe("Connect client advertiser account request", () => {
     const result = await connectClientAdvertiserAccount({
       organizationId,
       adsApiKey: "  ads_client_secret_123  ",
+      expectedAccountId: access.accountId,
       fetchClient,
     });
 
@@ -61,17 +64,48 @@ describe("Connect client advertiser account request", () => {
       headers: { "Content-Type": "application/json" },
     });
     expect(JSON.parse(String(init?.body))).toEqual({
+      action: "connect",
       adsApiKey: "ads_client_secret_123",
+      expectedAccountId: access.accountId,
     });
     expect(result).toEqual({
+      created: true,
+      credentialUpdated: true,
       access,
       message: "Harbour Home Ireland is connected.",
+    });
+  });
+
+  it("verifies the provider-derived advertiser without requesting attachment", async () => {
+    const fetchClient = vi.fn<FetchClient>(async () =>
+      response({
+        verified: true,
+        account: { id: access.accountId, name: access.accountName },
+        organization: { id: organizationId, name: "Northstar Agency" },
+      }),
+    );
+
+    const result = await verifyClientAdvertiserAccount({
+      organizationId,
+      adsApiKey: " ads_client_secret_123 ",
+      fetchClient,
+    });
+
+    expect(result.account).toEqual({
+      id: access.accountId,
+      name: access.accountName,
+    });
+    expect(JSON.parse(String(fetchClient.mock.calls[0][1]?.body))).toEqual({
+      action: "verify",
+      adsApiKey: "ads_client_secret_123",
     });
   });
 
   it("rejects a mismatched organization instead of navigating with untrusted access", async () => {
     const fetchClient = vi.fn<FetchClient>(async () =>
       response({
+        created: true,
+        credentialUpdated: true,
         access: {
           ...access,
           organizationId: "00000000-0000-4000-8000-000000000099",
@@ -83,6 +117,7 @@ describe("Connect client advertiser account request", () => {
       connectClientAdvertiserAccount({
         organizationId,
         adsApiKey: "ads_client_secret_123",
+        expectedAccountId: access.accountId,
         fetchClient,
       }),
     ).rejects.toThrow("could not confirm the attached agency account");
@@ -99,6 +134,7 @@ describe("Connect client advertiser account request", () => {
       await connectClientAdvertiserAccount({
         organizationId,
         adsApiKey,
+        expectedAccountId: access.accountId,
         fetchClient,
       });
     } catch (error) {
@@ -139,6 +175,7 @@ describe("Connect client account fields", () => {
     expect(html).toContain("OpenAI Ads advertiser key");
     expect(html).toContain('type="password"');
     expect(html).toContain("not an OpenAI Platform API key");
+    expect(html).toContain("nothing is attached until you confirm");
   });
 
   it("renders a persistent safe error with an empty credential field", () => {

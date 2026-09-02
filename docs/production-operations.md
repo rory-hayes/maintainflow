@@ -20,7 +20,11 @@ Treat these as immediate operator alerts:
 - `deployment.readiness.failed` or `deployment.readiness.unconfigured`;
 - a missing daily `monitoring.run.completed` event;
 - `monitoring.run.completed_with_failures` or `monitoring.run.failed`;
+- `ads.apply.execution_fence_lost` or
+  `ads.rollback.execution_fence_lost` once live writes are enabled;
 - any `reconciliation_required` mutation event once live writes are enabled;
+- any non-zero `unresolvedApprovalOperations` count from the protected daily
+  monitor;
 - repeated credential, authorization, storage, or provider-unavailable events.
 
 Vercel runtime logs are sufficient for the first private staging deployment.
@@ -76,9 +80,21 @@ completed.
   revision mismatch or an invalid release stage.
 - Require one successful monitoring completion after every deployment and one
   per UTC day. Respect its `Retry-After` header, retry once, then escalate.
+- The deployment probe requires both zero recovered operations for that run and
+  zero persistent unresolved operations. That count includes stale active rows
+  skipped by recovery while a provider-send transaction still holds their lock.
+  The provider-write fence also blocks every new apply or rollback on the
+  affected advertiser until reconciliation.
+- Keep database and transaction-proxy timeouts above the 15-second application
+  HTTP send window. The database lock has no independent 15-second deadline and
+  ends only on commit, rollback, or session cleanup.
 - Never automatically retry an Ads apply or rollback whose transport ended
   without a response, or returned HTTP 408 or 5xx. Those outcomes remain locked
   for manual Ads Manager reconciliation.
+- Treat any failure after the provider-send callback begins, including a
+  transaction commit failure, as an uncertain provider outcome. Disable live
+  writes, verify Ads Manager, and reconcile the durable record; never infer that
+  a database error means the provider request was not sent.
 - A definitive 4xx provider rejection may be corrected and submitted only as a
   new deliberate approval or rollback attempt.
 

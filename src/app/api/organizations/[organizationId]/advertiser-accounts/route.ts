@@ -39,6 +39,8 @@ class AdvertiserAccountAttachRequestInvalidError extends Error {
   }
 }
 
+const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
+
 async function readAdvertiserAccountAttachRequest(
   request: Request,
   params: Promise<{ organizationId: string }>,
@@ -98,7 +100,7 @@ export async function POST(
         { status: 403 },
       );
     }
-    await requireAgencyAccountAttachAuthorization(
+    const agency = await requireAgencyAccountAttachAuthorization(
       operatorId,
       parsed.organizationId,
     );
@@ -114,6 +116,30 @@ export async function POST(
     const account = await fetchLiveAdAccount({
       apiKey: parsed.input.adsApiKey,
     });
+    if (parsed.input.action === "verify") {
+      log.info("agency.account_verify.completed", fields(200));
+      return Response.json(
+        {
+          verified: true,
+          account: { id: account.id, name: account.name },
+          organization: {
+            id: agency.organizationId,
+            name: agency.organizationName,
+          },
+        },
+        { status: 200, headers: NO_STORE_HEADERS },
+      );
+    }
+    if (parsed.input.expectedAccountId !== account.id) {
+      log.warn("agency.account_attach.rejected", fields(409));
+      return Response.json(
+        {
+          error:
+            "The advertiser key now resolves to a different account. Verify it again before connecting.",
+        },
+        { status: 409, headers: NO_STORE_HEADERS },
+      );
+    }
     const credential = encryptAdsApiKey({
       apiKey: parsed.input.adsApiKey,
       externalAccountId: account.id,
@@ -131,12 +157,13 @@ export async function POST(
     return Response.json(
       {
         created: result.created,
+        credentialUpdated: result.credentialUpdated,
         access: result.access,
         message: result.created
           ? "Advertiser account connected to the agency workspace."
-          : "Advertiser account is already connected to this agency workspace.",
+          : "Advertiser account is already connected. Its existing encrypted credential was retained; use credential rotation to replace it.",
       },
-      { status },
+      { status, headers: NO_STORE_HEADERS },
     );
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {

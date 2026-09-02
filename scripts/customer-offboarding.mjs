@@ -175,6 +175,7 @@ export function customerOffboardingStateFingerprint(snapshot) {
       recommendationDecisions: snapshot.recommendationDecisions,
       readinessAudits: snapshot.readinessAudits,
       liveWorkbenchSnapshots: snapshot.liveWorkbenchSnapshots,
+      monitoringAccountSchedules: snapshot.monitoringAccountSchedules,
     }),
   );
 }
@@ -207,10 +208,11 @@ function inventoryCounts(snapshot) {
     recommendationDecisions: snapshot.recommendationDecisions.length,
     readinessAudits: snapshot.readinessAudits.length,
     liveWorkbenchSnapshots: snapshot.liveWorkbenchSnapshots.length,
+    monitoringAccountSchedules: snapshot.monitoringAccountSchedules.length,
   };
 }
 
-function snapshotBlockers(snapshot) {
+function snapshotBlockers(snapshot, evaluatedAt = new Date()) {
   const blockers = [];
   if (snapshot.account.status !== "active") {
     blockers.push("The advertiser account is not active.");
@@ -229,6 +231,35 @@ function snapshotBlockers(snapshot) {
   if (unresolved.length > 0) {
     blockers.push(
       `${unresolved.length} Ads mutation record(s) require a terminal reconciliation state before credentials can be removed.`,
+    );
+  }
+  const monitoringClaims = snapshot.approvals.filter(
+    (record) => record.monitoring_evaluation_claim_id !== null,
+  );
+  if (monitoringClaims.length > 0) {
+    blockers.push(
+      `${monitoringClaims.length} monitoring evaluation(s) still hold an active database claim. Let them finish or recover the expired claim before offboarding.`,
+    );
+  }
+  const liveRefreshClaims = snapshot.liveWorkbenchSnapshots.filter(
+    (record) => record.refresh_claim_id !== null,
+  );
+  if (liveRefreshClaims.length > 0) {
+    blockers.push(
+      `${liveRefreshClaims.length} live account refresh(es) still hold a database claim. Let them finish or recover the expired claim before offboarding.`,
+    );
+  }
+  const monitoringAccountAttempts = snapshot.monitoringAccountSchedules.filter(
+    (record) => {
+      if (record.current_attempt_id === null) return false;
+      if (record.attempt_lease_until === null) return true;
+      const leaseUntil = new Date(record.attempt_lease_until).getTime();
+      return !Number.isFinite(leaseUntil) || leaseUntil > evaluatedAt.getTime();
+    },
+  );
+  if (monitoringAccountAttempts.length > 0) {
+    blockers.push(
+      `${monitoringAccountAttempts.length} scheduled monitoring account attempt(s) still hold an unexpired database lease. Let them finish before offboarding.`,
     );
   }
   return blockers;
@@ -457,6 +488,18 @@ async function loadCustomerOffboardingSnapshot(
         where advertiser_account_id = ${account.id}
         order by credential_generation
       `;
+  const monitoringAccountSchedules = lock
+    ? await sql`
+        select * from maintainflow_monitoring_account_schedule
+        where advertiser_account_id = ${account.id}
+        order by advertiser_account_id
+        for update
+      `
+    : await sql`
+        select * from maintainflow_monitoring_account_schedule
+        where advertiser_account_id = ${account.id}
+        order by advertiser_account_id
+      `;
   const lifecycleRecords = await sql`
     select id, advertiser_account_id, external_account_id,
       acting_organization_id, operator_id, action, state_fingerprint,
@@ -487,6 +530,7 @@ async function loadCustomerOffboardingSnapshot(
     recommendationDecisions,
     readinessAudits,
     liveWorkbenchSnapshots,
+    monitoringAccountSchedules,
     lifecycleRecords,
   };
 }
@@ -517,6 +561,7 @@ function customerOffboardingExport(snapshot, generatedAt) {
       recommendationDecisions: snapshot.recommendationDecisions,
       readinessAudits: snapshot.readinessAudits,
       liveWorkbenchSnapshots: snapshot.liveWorkbenchSnapshots,
+      monitoringAccountSchedules: snapshot.monitoringAccountSchedules,
     },
     notices: [
       "Encrypted credential bytes and decryption keys are excluded from this export.",
@@ -527,7 +572,7 @@ function customerOffboardingExport(snapshot, generatedAt) {
 }
 
 function preparedResult(snapshot, generatedAt = new Date()) {
-  const blockers = snapshotBlockers(snapshot);
+  const blockers = snapshotBlockers(snapshot, generatedAt);
   const exportDocument = customerOffboardingExport(snapshot, generatedAt);
   const serializedExport = `${JSON.stringify(exportDocument, null, 2)}\n`;
   return {

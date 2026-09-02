@@ -64,6 +64,21 @@ export const databaseMigrationManifest = [
     checksumSha256:
       "7ebf1f6caed77042de0c2222fbe00f8f95fdac1ecfc0b297742b7deb1218a856",
   },
+  {
+    name: "014_approval_operation_recovery.sql",
+    checksumSha256:
+      "968520986c500b5f081417a2b2478187e81cadd592183345bc64e72fd18c7df5",
+  },
+  {
+    name: "015_monitoring_account_fairness.sql",
+    checksumSha256:
+      "b4e782e62b35a898c908d73e9949544f4c96dce160b594cfb3c692bea857dc71",
+  },
+  {
+    name: "016_live_portfolio_summaries.sql",
+    checksumSha256:
+      "9868cdda36e18375dda7094f734611308b7e610576cbe6c83dbdc6bbe0104c5a",
+  },
 ] as const;
 
 export type DatabaseMigrationManifestEntry =

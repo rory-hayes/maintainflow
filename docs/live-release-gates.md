@@ -86,7 +86,7 @@ and real Ads Manager ownership, receipt, and attribution evidence.
 
 ## Approval-store migration
 
-Apply migrations `001` through `013` in filename order before enabling the full
+Apply migrations `001` through `016` in filename order before enabling the full
 live product. Migration `005` adds the typed monitoring baseline, seven-day
 timestamps, and partial unique index that prevents a second active approval for
 the same recommendation. Migration `006` adds an atomic outcome, observation,
@@ -99,9 +99,14 @@ adds purpose-bound, versioned Pixel/CAPI ciphertext with a single-active partial
 index and direct/agency actor context. Migration `011` adds account-scoped
 readiness-audit history and comparison evidence. Migration `012` adds
 account-and-credential-generation-scoped live workbench snapshots with bounded
-payloads, expiring refresh claims, and retry cooldown metadata. The app verifies
-the required approval, tenancy, credential, and monitoring structures before
-showing or accepting the live-write state.
+payloads, expiring refresh claims, and retry cooldown metadata. Migration `013`
+adds recoverable customer-offboarding state. Migration `014` adds immutable
+apply generations, fresh per-claim rollback generations, provider-boundary
+markers, and conservative abandoned-operation recovery. Migration `015` adds
+fair account scheduling, attempt leases, and
+bounded failure backoff for scheduled monitoring. The app verifies the required
+approval, tenancy, credential, and monitoring structures before showing or
+accepting the live-write state.
 
 Each record stores:
 
@@ -119,10 +124,12 @@ the normalized expected state is derived from the reviewed rollback request;
 for rollback, it is derived from the original request already stored in
 `request_payload`. Only fields controlled by the outbound request are projected,
 canonically ordered, and fingerprinted. If the read fails or its fingerprint no
-longer matches, the precondition outcome is recorded as `blocked_no_write`, the
-apply is failed or the rollback is returned to `rollback_failed`, and no
-provider `POST` is sent. Drift requires a fresh review; a temporarily
-unavailable read can be retried only after provider reads recover.
+longer matches, the precondition outcome is recorded as `blocked_no_write` and
+no provider `POST` is sent. An apply mismatch is failed and requires fresh
+review; a rollback whose provider read is temporarily unavailable returns to
+`rollback_failed` and can be retried only after reads recover. Provider-state
+drift during rollback becomes `rollback_reconciliation_required` and requires
+manual reconciliation because the reviewed rollback is no longer safe to send.
 
 This is a fail-closed read-before-write guard, not a provider-atomic compare and
 swap. The current adapter has no conditional-write token to attach to the
@@ -135,6 +142,27 @@ The pending record is inserted before the OpenAI Ads request. A definitive HTTP
 or 5xx response is marked `reconciliation_required`: the operation must not be
 retried automatically because the provider or an intermediary may have returned
 an uncertain response after the change was applied.
+
+Immediately before the provider `POST`, a committed account-scoped marker is
+bound to the exact apply or rollback generation and followed by a row-level send
+fence. The HTTP send has a 15-second application abort, but the database lock is
+held until its transaction commits, rolls back, or its session is cleaned up;
+it is not an independent wall-clock guarantee. Stale recovery skips an active
+fence, a worker that loses the race to recovery is rejected before its callback,
+and an old rollback worker cannot use a newer claim's marker or terminal write.
+Response parsing, readback, and terminal persistence remain outside that
+transaction, and any failure after the callback starts is conservatively
+must-not-retry.
+
+The account row is locked before a provider write is created or claimed. Any
+other `pending`, `rollback_pending`, `reconciliation_required`, or
+`rollback_reconciliation_required` record for that advertiser blocks the new
+write. The scheduled monitor returns a persistent unresolved-operation count
+and the deployment probe requires zero, so a later clean recovery run cannot
+hide unresolved work. PostgreSQL still cannot make the remote provider write
+atomic: a lost database session plus a resumed process remains a
+provider-acceptance risk until OpenAI documents and MaintainFlow validates
+idempotency or a conditional-write primitive.
 
 An applied record can be rolled back only after an authorized operator confirms
 the stored request in the product. The record is atomically claimed before the
@@ -156,7 +184,7 @@ to retain creative review and delivery transitions between live syncs. This
 read-only history is not itself a write-authorization rule: the application can
 report its absence without inventing transitions, and the independent approval
 rules remain fail-closed. Deployment readiness nevertheless requires the exact
-`001` through `013` migration ledger, so an account-backed release must not be
+`001` through `016` migration ledger, so an account-backed release must not be
 promoted while migration `004` is absent or unavailable.
 
 ## Recommendation dismissal migration
@@ -178,7 +206,7 @@ keyset-ready index and shows both the dismissal and restoration actor contexts.
 
 ## Local database proof
 
-`npm run test:db` now applies all thirteen migrations to a uniquely named,
+`npm run test:db` now applies all sixteen migrations to a uniquely named,
 disposable PostgreSQL database and exercises the real tenancy, credential, and
 approval stores. It covers direct-advertiser and agency roles, review-only
 access, duplicate account claims, encrypted key rotation with transaction
@@ -189,6 +217,11 @@ expiry/recovery, concurrent readiness quotas, concurrent and account-scoped
 recommendation dismissals, reversible decision audit data, concurrent rollback
 claims, and manual reconciliation.
 See [`database-integration.md`](database-integration.md) for the exact boundary.
+
+Migration `016` adds the bounded live-portfolio signal summary written only
+when a validated snapshot completes. Existing snapshots deliberately remain
+unknown in the portfolio until they are refreshed; the portfolio query never
+loads the full snapshot payload.
 
 ## Scheduled monitoring
 

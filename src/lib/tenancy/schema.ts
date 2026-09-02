@@ -26,11 +26,23 @@ export const workspaceBootstrapSchema = z
 
 export const organizationIdSchema = z.string().uuid();
 
-export const advertiserAccountAttachSchema = z
-  .object({
-    adsApiKey: z.string().trim().min(10).max(4096),
-  })
-  .strict();
+const advertiserAccountKeySchema = z.string().trim().min(10).max(4096);
+
+export const advertiserAccountAttachSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("verify"),
+      adsApiKey: advertiserAccountKeySchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("connect"),
+      adsApiKey: advertiserAccountKeySchema,
+      expectedAccountId: z.string().trim().min(1).max(255),
+    })
+    .strict(),
+]);
 
 export type OrganizationType = z.infer<typeof organizationTypeSchema>;
 export type MembershipRole = z.infer<typeof membershipRoleSchema>;

@@ -115,7 +115,9 @@ const access = {
 
 function request(
   body: Record<string, unknown> = {
+    action: "connect",
     adsApiKey: "ads_client_secret_123",
+    expectedAccountId: "adacct_new_client",
   },
 ) {
   return new Request(
@@ -151,11 +153,33 @@ beforeEach(() => {
   testState.encryptAdsApiKey.mockReturnValue(credential);
   testState.attachAdvertiserAccountToAgency.mockResolvedValue({
     created: true,
+    credentialUpdated: true,
     access,
   });
 });
 
 describe("agency advertiser account attachment", () => {
+  it("verifies the resolved advertiser before encrypting or attaching it", async () => {
+    const response = await POST(
+      request({ action: "verify", adsApiKey: "ads_client_secret_123" }),
+      context(),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      verified: true,
+      account: { id: "adacct_new_client", name: "New Client" },
+      organization: { id: organizationId, name: "Northstar Agency" },
+    });
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(testState.encryptAdsApiKey).not.toHaveBeenCalled();
+    expect(testState.attachAdvertiserAccountToAgency).not.toHaveBeenCalled();
+    expect(testState.logInfo).toHaveBeenCalledWith(
+      "agency.account_verify.completed",
+      expect.objectContaining({ status: 200 }),
+    );
+  });
+
   it("authorizes the agency before deriving and storing the provider account", async () => {
     const response = await POST(request(), context());
     const payload = await response.json();
@@ -183,7 +207,11 @@ describe("agency advertiser account attachment", () => {
       credential,
       verifiedAt: expect.any(Date),
     });
-    expect(payload).toMatchObject({ created: true, access });
+    expect(payload).toMatchObject({
+      created: true,
+      credentialUpdated: true,
+      access,
+    });
     expect(JSON.stringify(payload)).not.toContain("ads_client_secret_123");
     expect(testState.logInfo).toHaveBeenCalledWith(
       "agency.account_attach.completed",
@@ -194,6 +222,7 @@ describe("agency advertiser account attachment", () => {
   it("returns the existing access on an idempotent same-agency retry", async () => {
     testState.attachAdvertiserAccountToAgency.mockResolvedValue({
       created: false,
+      credentialUpdated: false,
       access,
     });
 
@@ -202,8 +231,29 @@ describe("agency advertiser account attachment", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       created: false,
+      credentialUpdated: false,
       access,
+      message: expect.stringMatching(/existing encrypted credential was retained/i),
     });
+  });
+
+  it("requires a second verification when the key resolves to another account", async () => {
+    const response = await POST(
+      request({
+        action: "connect",
+        adsApiKey: "ads_client_secret_123",
+        expectedAccountId: "adacct_previous_preview",
+      }),
+      context(),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "The advertiser key now resolves to a different account. Verify it again before connecting.",
+    });
+    expect(testState.encryptAdsApiKey).not.toHaveBeenCalled();
+    expect(testState.attachAdvertiserAccountToAgency).not.toHaveBeenCalled();
   });
 
   it("blocks non-admin agency members before provider access", async () => {
@@ -242,6 +292,7 @@ describe("agency advertiser account attachment", () => {
   it("takes the organization only from a valid path UUID", async () => {
     const bodySelectedOrganization = await POST(
       request({
+        action: "verify",
         adsApiKey: "ads_client_secret_123",
         organizationId: "00000000-0000-4000-8000-000000000099",
       }),

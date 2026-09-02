@@ -14,7 +14,12 @@ vi.mock("../observability/logger.server", () => ({
 }));
 
 const approvalMocks = vi.hoisted(() => ({
+  FenceUnavailable: class ApprovalProviderSendFenceUnavailableError extends Error {},
   create: vi.fn(async () => "approval-test-123"),
+  markAttempt: vi.fn(async () => undefined),
+  sendFence: vi.fn(
+    async (_options: unknown, operation: () => Promise<unknown>) => operation(),
+  ),
   update: vi.fn(async () => undefined),
   claim: vi.fn(),
   updateRollback: vi.fn(async () => undefined),
@@ -26,13 +31,16 @@ const writeFenceMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../audit/approval-store.server", () => ({
+  ApprovalProviderSendFenceUnavailableError: approvalMocks.FenceUnavailable,
   ApprovalStoreUnavailableError: class ApprovalStoreUnavailableError extends Error {},
   createApprovalRecord: approvalMocks.create,
   claimApprovalRollback: approvalMocks.claim,
   isApprovalStoreConfigured: () => Boolean(process.env.DATABASE_URL),
+  markApprovalProviderAttempt: approvalMocks.markAttempt,
   updateApprovalRecord: approvalMocks.update,
   updateRollbackRecord: approvalMocks.updateRollback,
   verifyApprovalStore: approvalMocks.verify,
+  withApprovalProviderSendFence: approvalMocks.sendFence,
 }));
 
 vi.mock("../audit/recommendation-decision-store.server", () => ({
@@ -83,6 +91,7 @@ const environmentKeys = [
 const originalEnvironment = new Map<string, string | undefined>();
 const originalFetch = globalThis.fetch;
 const credentialGeneration = "vault:test-credential:1";
+const rollbackAttemptId = "00000000-0000-4000-8000-000000000002";
 
 function adGroupResponse(id: string, maxBidMicros: number) {
   return {
@@ -119,6 +128,7 @@ function rollbackClaim(
 ) {
   return {
     id,
+    attemptId: rollbackAttemptId,
     mutationPayload: {
       method: "POST" as const,
       path: rollback.path,
@@ -163,6 +173,12 @@ beforeEach(() => {
   process.env.OPENAI_ADS_DATA_MODE = "live";
   process.env.MAINTAINFLOW_RELEASE_STAGE = "private_read";
   approvalMocks.create.mockClear();
+  approvalMocks.markAttempt.mockReset();
+  approvalMocks.markAttempt.mockResolvedValue(undefined);
+  approvalMocks.sendFence.mockReset();
+  approvalMocks.sendFence.mockImplementation(
+    async (_options: unknown, operation: () => Promise<unknown>) => operation(),
+  );
   approvalMocks.update.mockClear();
   approvalMocks.claim.mockReset();
   approvalMocks.updateRollback.mockClear();
@@ -240,6 +256,30 @@ describe("guarded live mutations", () => {
     expect(approvalMocks.create.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(globalThis.fetch).mock.invocationCallOrder[0],
     );
+    expect(approvalMocks.markAttempt).toHaveBeenCalledWith({
+      id: "approval-test-123",
+      accountId: "account-test",
+      attemptId: "approval-test-123",
+      status: "pending",
+    });
+    expect(vi.mocked(globalThis.fetch).mock.invocationCallOrder[0]).toBeLessThan(
+      approvalMocks.markAttempt.mock.invocationCallOrder[0],
+    );
+    expect(approvalMocks.markAttempt.mock.invocationCallOrder[0]).toBeLessThan(
+      approvalMocks.sendFence.mock.invocationCallOrder[0],
+    );
+    expect(approvalMocks.sendFence).toHaveBeenCalledWith(
+      {
+        id: "approval-test-123",
+        accountId: "account-test",
+        attemptId: "approval-test-123",
+        status: "pending",
+      },
+      expect.any(Function),
+    );
+    expect(approvalMocks.sendFence.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(globalThis.fetch).mock.invocationCallOrder[1],
+    );
     expect(approvalMocks.update).toHaveBeenCalledWith(
       "approval-test-123",
       "applied",
@@ -305,6 +345,107 @@ describe("guarded live mutations", () => {
     );
     expect(logMocks.warn).toHaveBeenCalledWith(
       "ads.apply.precondition_blocked",
+    );
+  });
+
+  it("does not send when the durable provider-attempt marker cannot be claimed", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    queueApplyPrecondition(recommendation);
+    approvalMocks.markAttempt.mockRejectedValueOnce(
+      new Error("The pending operation was already recovered."),
+    );
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId: "approval-test-123",
+      operation: "apply",
+      mustNotRetry: true,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]?.method).toBe("GET");
+    expect(approvalMocks.update).not.toHaveBeenCalledWith(
+      "approval-test-123",
+      "applied",
+      expect.anything(),
+    );
+  });
+
+  it("does not send when stale recovery wins before the apply send fence", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    queueApplyPrecondition(recommendation);
+    approvalMocks.sendFence.mockRejectedValueOnce(
+      new approvalMocks.FenceUnavailable(
+        "The pending operation was recovered before the provider send.",
+      ),
+    );
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId: "approval-test-123",
+      operation: "apply",
+      mustNotRetry: true,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]?.method).toBe("GET");
+    expect(logMocks.warn).toHaveBeenCalledWith(
+      "ads.apply.execution_fence_lost",
+      { error: expect.any(approvalMocks.FenceUnavailable) },
+    );
+  });
+
+  it("keeps a post-send transaction failure must-not-retry", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    queueApplyPrecondition(recommendation);
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify(adGroupResponse(recommendation.entityId, 216_000_000)),
+        { status: 200 },
+      ),
+    );
+    approvalMocks.sendFence.mockImplementationOnce(
+      async (_options: unknown, operation: () => Promise<unknown>) => {
+        await operation();
+        throw new Error("provider-send transaction commit failed");
+      },
+    );
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId: "approval-test-123",
+      operation: "apply",
+      mustNotRetry: true,
+      persistenceWarning: false,
+    });
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(globalThis.fetch).mock.calls[1][1]?.method).toBe("POST");
+    expect(approvalMocks.update).toHaveBeenCalledWith(
+      "approval-test-123",
+      "reconciliation_required",
+      { error: "provider-send transaction commit failed" },
     );
   });
 
@@ -766,6 +907,7 @@ describe("guarded live mutations", () => {
     expect(writeFenceMocks.run).toHaveBeenCalledWith(
       expect.objectContaining({
         expectedCredentialGeneration: credentialGeneration,
+        requireClearProviderOperationLedger: true,
       }),
       expect.any(Function),
     );
@@ -824,18 +966,91 @@ describe("guarded live mutations", () => {
         credentialGeneration,
       }),
     ).resolves.toMatchObject({ applied: true });
+    expect(writeFenceMocks.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedCredentialGeneration: credentialGeneration,
+        requireClearProviderOperationLedger: true,
+      }),
+      expect.any(Function),
+    );
     expect(approvalMocks.claim.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(globalThis.fetch).mock.invocationCallOrder[0],
+    );
+    expect(approvalMocks.markAttempt).toHaveBeenCalledWith({
+      id: "00000000-0000-4000-8000-000000000001",
+      accountId: "account-test",
+      attemptId: rollbackAttemptId,
+      status: "rollback_pending",
+    });
+    expect(approvalMocks.markAttempt.mock.invocationCallOrder[0]).toBeLessThan(
+      approvalMocks.sendFence.mock.invocationCallOrder[0],
+    );
+    expect(approvalMocks.sendFence).toHaveBeenCalledWith(
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        accountId: "account-test",
+        attemptId: rollbackAttemptId,
+        status: "rollback_pending",
+      },
+      expect.any(Function),
+    );
+    expect(approvalMocks.sendFence.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(globalThis.fetch).mock.invocationCallOrder[1],
     );
     expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
       "rolled_back",
       {
+        accountId: "account-test",
+        attemptId: rollbackAttemptId,
         response: {
           acknowledgement: confirmed,
           readback: confirmed,
         },
       },
+    );
+  });
+
+  it("does not send when stale recovery wins before the rollback send fence", async () => {
+    armLiveInfrastructure();
+    const approvalId = "00000000-0000-4000-8000-000000000001";
+    const rollback = {
+      method: "POST" as const,
+      path: "/ad_groups/adgrp_live",
+      body: {
+        bidding_config: {
+          billing_event_type: "click",
+          max_bid_micros: 250_000_000,
+        },
+      },
+    };
+    approvalMocks.claim.mockResolvedValue(rollbackClaim(approvalId, rollback));
+    queueRollbackPrecondition("adgrp_live");
+    approvalMocks.sendFence.mockRejectedValueOnce(
+      new approvalMocks.FenceUnavailable(
+        "The rollback was recovered before the provider send.",
+      ),
+    );
+
+    const outcome = await applyStoredRollback({
+      approvalId,
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId,
+      operation: "rollback",
+      mustNotRetry: true,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]?.method).toBe("GET");
+    expect(logMocks.warn).toHaveBeenCalledWith(
+      "ads.rollback.execution_fence_lost",
+      { error: expect.any(approvalMocks.FenceUnavailable) },
     );
   });
 
@@ -879,7 +1094,7 @@ describe("guarded live mutations", () => {
     expect(vi.mocked(globalThis.fetch).mock.calls[0][1]?.method).toBe("GET");
     expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
       approvalId,
-      "rollback_failed",
+      "rollback_reconciliation_required",
       expect.objectContaining({
         response: {
           precondition: {
@@ -898,6 +1113,7 @@ describe("guarded live mutations", () => {
     const approvalId = "00000000-0000-4000-8000-000000000001";
     approvalMocks.claim.mockResolvedValue({
       id: approvalId,
+      attemptId: rollbackAttemptId,
       mutationPayload: { method: "PATCH", path: "/ad_groups/adgrp_live" },
       rollbackPayload: {
         method: "POST",
@@ -958,7 +1174,11 @@ describe("guarded live mutations", () => {
     expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
       "rollback_reconciliation_required",
-      { error: "socket closed" },
+      {
+        accountId: "account-test",
+        attemptId: rollbackAttemptId,
+        error: "socket closed",
+      },
     );
   });
 
@@ -1006,6 +1226,8 @@ describe("guarded live mutations", () => {
       approvalId,
       "rollback_reconciliation_required",
       {
+        accountId: "account-test",
+        attemptId: rollbackAttemptId,
         error:
           "OpenAI Ads API rollback response exceeded the bounded response limit and was not retained.",
       },
@@ -1055,6 +1277,8 @@ describe("guarded live mutations", () => {
         approvalId,
         "rollback_reconciliation_required",
         {
+          accountId: "account-test",
+          attemptId: rollbackAttemptId,
           response: providerPayload,
           error: `OpenAI Ads API returned an uncertain HTTP ${status} rollback outcome.`,
         },
@@ -1108,6 +1332,7 @@ describe("guarded live mutations", () => {
     armLiveInfrastructure();
     approvalMocks.claim.mockResolvedValue({
       id: "00000000-0000-4000-8000-000000000001",
+      attemptId: rollbackAttemptId,
       mutationPayload: {
         method: "POST",
         path: "/campaigns/cmpn_live",
@@ -1133,7 +1358,11 @@ describe("guarded live mutations", () => {
     expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
       "rollback_failed",
-      { error: "This mutation path is not enabled in the MVP." },
+      {
+        accountId: "account-test",
+        attemptId: rollbackAttemptId,
+        error: "This mutation path is not enabled in the MVP.",
+      },
     );
   });
 

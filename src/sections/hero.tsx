@@ -6,7 +6,7 @@ import topleftImage from "@/assets/images/sticky-note.png";
 import topRightImage from "@/assets/images/top-right.png";
 import Image from "next/image";
 
-import { motion, useAnimate } from "framer-motion";
+import { motion, useAnimate, useReducedMotion } from "framer-motion";
 import { useEffect } from "react";
 
 import cursorYouImage from "@/assets/icons/cursor-you.svg";
@@ -17,6 +17,7 @@ interface HeroProps {
 }
 
 export default function Hero({ children }: HeroProps) {
+  const shouldReduceMotion = useReducedMotion();
   const [topLeftDesignScope, topLeftDesignAnimate] = useAnimate();
   const [topLeftPointerScope, topLeftPointerAnimate] = useAnimate();
 
@@ -30,6 +31,34 @@ export default function Hero({ children }: HeroProps) {
   const [bottomrightPointerScope, bottomRightPointerAnimate] = useAnimate();
 
   useEffect(() => {
+    if (shouldReduceMotion) {
+      topLeftDesignAnimate([
+        [topLeftDesignScope.current, { opacity: 1, y: 0, x: 0 }, { duration: 0 }],
+      ]);
+      topLeftPointerAnimate([
+        [topLeftPointerScope.current, { opacity: 1, y: 0, x: 120 }, { duration: 0 }],
+      ]);
+      bottomLeftDesignAnimate([
+        [bottomLeftDesignScope.current, { opacity: 1, y: 0, x: 0 }, { duration: 0 }],
+      ]);
+      bottomLeftPointerAnimate([
+        [bottomLeftPointerScope.current, { opacity: 1, y: 0, x: 240 }, { duration: 0 }],
+      ]);
+      topRightDesignAnimate([
+        [toprightDesignScope.current, { opacity: 1, y: 100, x: 100 }, { duration: 0 }],
+      ]);
+      topRightPointerAnimate([
+        [toprightPointerScope.current, { opacity: 1, y: 0, x: 0 }, { duration: 0 }],
+      ]);
+      bottomRightDesignAnimate([
+        [bottomrightDesignScope.current, { opacity: 1, y: -80, x: 10 }, { duration: 0 }],
+      ]);
+      bottomRightPointerAnimate([
+        [bottomrightPointerScope.current, { opacity: 1, y: 100, x: 40 }, { duration: 0 }],
+      ]);
+      return;
+    }
+
     topLeftDesignAnimate([
       [topLeftDesignScope.current, { opacity: 1 }, { duration: 0.5 }],
       [
@@ -114,6 +143,7 @@ export default function Hero({ children }: HeroProps) {
       ],
     ]);
   }, [
+    shouldReduceMotion,
     topLeftDesignAnimate,
     topLeftDesignScope,
     topLeftPointerAnimate,
@@ -144,8 +174,8 @@ export default function Hero({ children }: HeroProps) {
           <motion.div
             aria-hidden="true"
             ref={topLeftDesignScope}
-            initial={{ opacity: 0, y: 100, x: 100 }}
-            drag
+            initial={shouldReduceMotion ? false : { opacity: 0, y: 100, x: 100 }}
+            drag={!shouldReduceMotion}
             className=" absolute hidden lg:block -left-[22rem] -top-28"
           >
             <Image
@@ -158,7 +188,7 @@ export default function Hero({ children }: HeroProps) {
           <motion.div
             aria-hidden="true"
             ref={topLeftPointerScope}
-            initial={{ opacity: 0, y: 100, x: 200 }}
+            initial={shouldReduceMotion ? false : { opacity: 0, y: 100, x: 200 }}
             className="absolute hidden lg:block -left-24 top-48"
           >
             <Pointer color="blue" name="Agency reviewer" />
@@ -167,8 +197,8 @@ export default function Hero({ children }: HeroProps) {
           <motion.div
             aria-hidden="true"
             ref={bottomrightDesignScope}
-            initial={{ opacity: 0, y: 100, x: 100 }}
-            drag
+            initial={shouldReduceMotion ? false : { opacity: 0, y: 100, x: 100 }}
+            drag={!shouldReduceMotion}
             className=" absolute hidden lg:block -right-96 -bottom-60"
           >
             <Image
@@ -182,7 +212,7 @@ export default function Hero({ children }: HeroProps) {
           <motion.div
             aria-hidden="true"
             ref={bottomrightPointerScope}
-            initial={{ opacity: 0, y: 320, x: 240 }}
+            initial={shouldReduceMotion ? false : { opacity: 0, y: 320, x: 240 }}
             className="absolute hidden lg:block right-24 bottom-[18rem]"
           >
             <Pointer color="orange" name="Client approver" />
@@ -191,8 +221,8 @@ export default function Hero({ children }: HeroProps) {
           <motion.div
             aria-hidden="true"
             ref={toprightDesignScope}
-            initial={{ opacity: 0, y: 0, x: 200 }}
-            drag
+            initial={shouldReduceMotion ? false : { opacity: 0, y: 0, x: 200 }}
+            drag={!shouldReduceMotion}
             className=" absolute hidden lg:block -right-80 -top-52"
           >
             <Image
@@ -206,7 +236,7 @@ export default function Hero({ children }: HeroProps) {
           <motion.div
             aria-hidden="true"
             ref={toprightPointerScope}
-            initial={{ opacity: 0, y: -120, x: 250 }}
+            initial={shouldReduceMotion ? false : { opacity: 0, y: -120, x: 250 }}
             className="absolute hidden lg:block right-10 top-52"
           >
             <Pointer color="green" name="Analyst" />
@@ -215,8 +245,8 @@ export default function Hero({ children }: HeroProps) {
           <motion.div
             aria-hidden="true"
             ref={bottomLeftDesignScope}
-            initial={{ opacity: 0, y: -100, x: 100 }}
-            drag
+            initial={shouldReduceMotion ? false : { opacity: 0, y: -100, x: 100 }}
+            drag={!shouldReduceMotion}
             className=" absolute hidden lg:block -left-[23rem] -bottom-40"
           >
             <Image
@@ -230,7 +260,7 @@ export default function Hero({ children }: HeroProps) {
           <motion.div
             aria-hidden="true"
             ref={bottomLeftPointerScope}
-            initial={{ opacity: 0, y: -260, x: 100 }}
+            initial={shouldReduceMotion ? false : { opacity: 0, y: -260, x: 100 }}
             className="absolute hidden lg:block -left-24 bottom-10"
           >
             <Pointer color="violet" name="Account owner" />

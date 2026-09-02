@@ -13,6 +13,7 @@ vi.mock("../database/client.server", () => ({
 import {
   ApprovalTransitionError,
   claimApprovalRollback,
+  claimDueMonitoringAccounts,
   claimDueMonitoringRecords,
   getReconciliationTransition,
   listDueMonitoringAccountIds,
@@ -41,6 +42,13 @@ function monitoringCutoffValue(call: unknown[]) {
     throw new Error("The monitoring maturity predicate is missing.");
   }
   return call[interpolationIndex + 1];
+}
+
+function normalizedQueryText(call: unknown[]) {
+  return (call[0] as TemplateStringsArray)
+    .join("$parameter")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 beforeEach(() => {
@@ -186,5 +194,42 @@ describe("approval monitoring maturity store guards", () => {
     for (const call of calls) {
       expect(monitoringCutoffValue(call)).toEqual(endsAt);
     }
+    expect(normalizedQueryText(calls[2])).toContain(
+      "with locked_account as materialized",
+    );
+    expect(normalizedQueryText(calls[2])).toContain("for share");
+    expect(normalizedQueryText(calls[3])).toContain(
+      "with locked_account as materialized",
+    );
+    expect(normalizedQueryText(calls[3])).toContain("for share");
+  });
+
+  it("fences a stale account candidate against a current lease or backoff", async () => {
+    const now = new Date("2026-08-27T00:00:00.000Z");
+    const { calls } = fakeDatabase([[]]);
+
+    await expect(
+      claimDueMonitoringAccounts({
+        attemptId: "00000000-0000-4000-8000-000000000001",
+        now,
+        limit: 6,
+      }),
+    ).resolves.toEqual([]);
+
+    expect(calls).toHaveLength(1);
+    const query = normalizedQueryText(calls[0]!);
+    expect(query).toContain(
+      "where advertiser_account.status = 'active' order by",
+    );
+    expect(query).toContain("for update of advertiser_account skip locked");
+    expect(query).toContain(
+      "on conflict (advertiser_account_id) do update set",
+    );
+    expect(query).toContain(
+      "maintainflow_monitoring_account_schedule.attempt_lease_until <= $parameter",
+    );
+    expect(query).toContain(
+      "maintainflow_monitoring_account_schedule.backoff_until <= $parameter",
+    );
   });
 });

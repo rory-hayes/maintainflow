@@ -52,20 +52,28 @@ The dry run performs no database mutation. It writes a new mode-`0600` JSON
 export instead of printing customer records, refuses to overwrite existing
 evidence, excludes encrypted credential bytes and key material, inventories all
 account-scoped retained evidence, and prints a confirmation token bound to the
-current inventory observed and locked by the command. It does not emit a token
+current inventory observed by the command. Apply re-locks and re-inventories the
+same exact account before accepting that token. It does not emit a token
 while an Ads mutation is pending, ambiguous, or has a failed/unconfirmed
 rollback. Reconcile that record first. A legacy `connection_mode=environment`
 account is also blocked because a shared environment key cannot be removed
 account-by-account; rotate or remove it
 at the host before continuing.
 
-Known concurrency limitation: the command does not yet share one lifecycle
-fence with a readiness audit that began before offboarding, and it does not
-drain a monitoring evaluation that already holds a claim and decrypted key.
-Either operation can persist evidence after the export snapshot. Until both
-paths are fixed and re-verified, the export is point-in-time evidence rather
-than proof that no later retained row can appear, and hosted offboarding must
-not be described as concurrency-complete.
+Readiness-history writes and offboarding share an advertiser-account row lock.
+If a scan is saving first, offboarding waits and includes that evidence; if
+offboarding is already running, the later save is rejected after the account is
+disconnected. Offboarding also refuses to start while any monitoring evaluation
+or live account refresh holds a database claim, or while a scheduled monitoring
+account attempt holds an unexpired lease. An expired scheduler lease remains in
+the export as crash-recovery evidence but cannot block offboarding permanently;
+scheduler completion is fenced to active accounts and cannot settle it after
+disconnect. Live refresh claim, renewal,
+completion, failure, and invalid-snapshot cleanup statements take a short shared
+lock on the active advertiser row, while offboarding takes an exclusive lock.
+The worker must finish or its expired claim must be recovered, ensuring the
+final locked inventory includes its outcome before an export is accepted and a
+new refresh claim cannot cross a completed disconnect.
 
 Review the export and agreement-specific retention scope. If the target and
 counts are correct, run apply with the unchanged token and a second new export

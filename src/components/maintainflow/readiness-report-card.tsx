@@ -43,6 +43,8 @@ export function ReadinessReportCard({
     conversionsApi,
     accountMeasurement,
   });
+  const remainingSections = summary.totalSections - summary.completedSections;
+  const partialReport = summary.canExport && !summary.isComplete;
 
   function downloadReport() {
     if (!summary.canExport) return;
@@ -64,27 +66,34 @@ export function ReadinessReportCard({
     anchor.click();
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
-    toast.success("Client report downloaded", {
+    toast.success(partialReport ? "Partial report downloaded" : "Client report downloaded", {
       description: `${summary.completedSections} of ${summary.totalSections} readiness sections included.`,
     });
   }
 
   return (
     <Card className="shadow-sm">
-      <CardHeader className="gap-3 border-b bg-muted/20 min-[640px]:flex-row min-[640px]:items-start min-[640px]:justify-between">
+      <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
             <FileText className="size-5" />
           </div>
           <div className="grid gap-1">
-            <CardTitle className="text-base">Client-ready launch report</CardTitle>
+            <CardTitle className="text-base">
+              {partialReport
+                ? "Partial launch readiness report"
+                : summary.isComplete
+                  ? "Client launch readiness report"
+                  : "Launch readiness report"}
+            </CardTitle>
             <CardDescription className="max-w-3xl leading-5">
-              Download a print-ready HTML report from the completed checks for a
-              client, developer, or launch review.
+              Download a print-ready HTML evidence report for a client,
+              developer, or launch review. Untested sections are clearly marked.
             </CardDescription>
           </div>
         </div>
         <Badge variant="outline" className="w-fit whitespace-nowrap">
+          {partialReport ? "Partial · " : ""}
           {summary.completedSections} of {summary.totalSections} evaluated
         </Badge>
       </CardHeader>
@@ -124,12 +133,14 @@ export function ReadinessReportCard({
       <CardFooter className="flex-col items-start justify-between gap-3 border-t bg-muted/20 p-4 sm:flex-row sm:items-center md:p-5">
         <p className="text-xs text-muted-foreground">
           {summary.canExport
-            ? `${summary.verdictLabel} · open the HTML file and print to PDF if needed.`
+            ? partialReport
+              ? `Partial report · ${summary.verdictLabel} · ${remainingSections} ${remainingSections === 1 ? "section" : "sections"} not evaluated.`
+              : `${summary.verdictLabel} · open the HTML file and print to PDF if needed.`
             : "Complete at least one readiness check to create a report."}
         </p>
         <Button type="button" onClick={downloadReport} disabled={!summary.canExport}>
           <Download data-icon="inline-start" />
-          Download client report
+          {partialReport ? "Download partial report" : "Download client report"}
         </Button>
       </CardFooter>
     </Card>

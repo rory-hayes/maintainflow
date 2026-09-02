@@ -4,6 +4,7 @@ import NavLink from "@/components/common/nav-link";
 import { MaintainFlowBrand } from "@/components/maintainflow/brand";
 import { Button } from "@/components/ui/button";
 import { buildAppHref } from "@/lib/app-navigation";
+import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -21,33 +22,43 @@ const Navigation = () => {
 
   return (
     <section
-      className={`w-full bg-gradient-to-b from-transparent to-[#FAFAFA] backdrop-blur-lg sticky top-0 z-[999999] ${
-        scroll ? "border-b shadow-sm" : ""
-      }`}
+      className={cn(
+        "sticky top-0 z-[999999] w-full bg-gradient-to-b from-transparent to-[#FAFAFA] backdrop-blur-lg",
+        scroll && "border-b shadow-sm",
+      )}
     >
-      <nav className="w-full flex items-center justify-between px-4 md:px-20 py-2.5 md:py-2">
+      <nav
+        aria-label="Primary"
+        className="flex w-full items-center justify-between px-4 py-2.5 md:px-20 md:py-2"
+      >
         <div className=" w-full">
           <Link href="/">
             <MaintainFlowBrand />
           </Link>
         </div>
 
-        <aside className=" hidden md:block">
-          <div className=" w-full flex flex-col items-center">
-            <ul className=" inline-flex items-center gap-8">
-              <NavLink link="/#workflow">How it works</NavLink>
-              <NavLink link={buildAppHref({ tab: "review" })}>Product</NavLink>
-              <NavLink link={buildAppHref({ tab: "readiness" })}>
-                API readiness
-              </NavLink>
+        <div className="hidden md:block">
+          <div className="flex w-full flex-col items-center">
+            <ul className="inline-flex items-center gap-8">
+              <li>
+                <NavLink link="/#workflow">How it works</NavLink>
+              </li>
+              <li>
+                <NavLink link={buildAppHref({ tab: "review" })}>Product</NavLink>
+              </li>
+              <li>
+                <NavLink link={buildAppHref({ tab: "readiness" })}>
+                  API readiness
+                </NavLink>
+              </li>
             </ul>
           </div>
-        </aside>
+        </div>
 
-        <div className=" w-full flex items-center justify-end gap-4">
-          <Link href={buildAppHref({ tab: "review" })}>
-            <Button>Open demo</Button>
-          </Link>
+        <div className="flex w-full items-center justify-end gap-4">
+          <Button asChild>
+            <Link href={buildAppHref({ tab: "review" })}>Open demo</Link>
+          </Button>
         </div>
       </nav>
     </section>

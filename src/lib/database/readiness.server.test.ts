@@ -44,7 +44,7 @@ describe("database migration deployment readiness", () => {
       ready: true,
       appliedCount: databaseMigrationManifest.length,
       expectedCount: databaseMigrationManifest.length,
-      currentMigration: "013_customer_offboarding.sql",
+      currentMigration: "016_live_portfolio_summaries.sql",
     });
   });
 

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 
 const agencyEntryPath = "/app?tab=campaigns&account=adacct_sim_northstar";
 
@@ -193,8 +194,19 @@ test("simulator approval is local-only and reload restores the fixture", async (
   const approvalDialog = page.getByRole("dialog", {
     name: "Approve this change?",
   });
+  await expect(
+    approvalDialog.getByRole("heading", { name: "Approve this change?" }),
+  ).toBeFocused();
   await expect(approvalDialog).toContainText(
     "This is a simulator action. No external write will be made.",
+  );
+  await expect(approvalDialog).toContainText("Simulator approval only");
+  await expect(approvalDialog).toContainText("Northstar Home");
+  await expect(approvalDialog).toContainText("adacct_sim_northstar");
+  await expect(approvalDialog).toContainText("API request");
+  await expect(approvalDialog).toContainText("Stored rollback");
+  await expect(approvalDialog).toContainText(
+    "Safeguard and human rollback review",
   );
   await approvalDialog
     .getByRole("button", { name: "Record simulator approval" })
@@ -337,6 +349,10 @@ test("storefront sample demonstrates a report without making a network audit", a
   await expect(
     page.getByRole("heading", { name: "Illustrative storefront result" }),
   ).toBeVisible();
+  await expect(page.getByText("Storefront page score")).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "Storefront page score" }),
+  ).toHaveAttribute("aria-valuenow", "91");
   await expect(page.getByText("91/100", { exact: false }).first()).toBeVisible();
   await expect(page.getByText("Sample data", { exact: true })).toBeVisible();
   await expect(
@@ -345,11 +361,17 @@ test("storefront sample demonstrates a report without making a network audit", a
   await expect(page.getByRole("link", { name: "Open page" })).toHaveCount(0);
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download client report" }).click();
+  await page.getByRole("button", { name: "Download partial report" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(
-    /^maintainflow-readiness-harbourhome-example-\d{4}-\d{2}-\d{2}\.html$/,
+    /^maintainflow-partial-readiness-harbourhome-example-\d{4}-\d{2}-\d{2}\.html$/,
   );
+  const downloadedPath = await download.path();
+  expect(downloadedPath).not.toBeNull();
+  const reportHtml = await readFile(downloadedPath!, "utf8");
+  expect(reportHtml).toContain('class="partial-report"');
+  expect(reportHtml).toContain("Partial report");
+  expect(reportHtml).toContain("3 sections remain untested");
   expect(auditRequests).toEqual([]);
   expect(browserErrors).toEqual([]);
 });

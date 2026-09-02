@@ -1,9 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+const { getRuntimeDatabaseMock } = vi.hoisted(() => ({
+  getRuntimeDatabaseMock: vi.fn(),
+}));
+
+vi.mock("../database/client.server", () => ({
+  getRuntimeDatabase: getRuntimeDatabaseMock,
+}));
+
 import { OpenAIAdsApiError, type AdsApiCredential } from "./client.server";
 import type { LiveWorkbenchData } from "./data.server";
+import { demoAccount } from "./demo-data";
+import { readLiveSyncState } from "./live-sync-store.server";
 import {
   LIVE_SYNC_LEASE_MS,
   LIVE_SYNC_LEASE_RENEWAL_MS,
@@ -12,6 +22,7 @@ import {
   type LiveSyncCoordinatorDependencies,
   type LiveSyncState,
 } from "./live-sync.server";
+import { LIVE_WORKBENCH_SNAPSHOT_SCHEMA_VERSION } from "./live-sync-snapshot";
 import type { AdAccount } from "./schema";
 
 const NOW = new Date("2026-08-30T12:00:00.000Z");
@@ -93,6 +104,73 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function fakeDatabase(responses: unknown[][]) {
+  const calls: unknown[][] = [];
+  const sql = vi.fn(async (...args: unknown[]) => {
+    calls.push(args);
+    return responses.shift() ?? [];
+  });
+  Object.assign(sql, { json: (value: unknown) => value });
+  getRuntimeDatabaseMock.mockReturnValue(sql);
+  return { calls };
+}
+
+function statement(call: unknown[]) {
+  return (call[0] as TemplateStringsArray).join("?").replace(/\s+/g, " ");
+}
+
+function storedWorkbench(accountId: string): LiveWorkbenchData {
+  const syncedAt = "2026-08-30T11:59:00.000Z";
+  return {
+    account: { ...demoAccount, id: accountId },
+    campaigns: [],
+    ads: [],
+    performance: [],
+    budgetGuardEvidence: [],
+    recommendations: [],
+    conversionMeasurement: {
+      source: "live",
+      status: "ready",
+      checkedAt: syncedAt,
+      activeConversionCampaigns: 0,
+      healthyCampaigns: 0,
+      eventSettingCount: 0,
+      checks: [],
+      message: "Stored cache sentinel that must never be displayed.",
+    },
+    syncedAt,
+  };
+}
+
+function unusableStoredRow(
+  accountId: string,
+  kind: "old-version" | "corrupt-current-version",
+) {
+  const cached = storedWorkbench(accountId);
+  const payload =
+    kind === "old-version"
+      ? { schemaVersion: 0, data: cached }
+      : {
+          schemaVersion: LIVE_WORKBENCH_SNAPSHOT_SCHEMA_VERSION,
+          data: { ...cached, campaigns: "corrupt-not-an-array" },
+        };
+  return {
+    payload_schema_version: LIVE_WORKBENCH_SNAPSHOT_SCHEMA_VERSION,
+    snapshot_payload: payload,
+    snapshot_bytes: Buffer.byteLength(JSON.stringify(payload), "utf8"),
+    synced_at: new Date(cached.syncedAt),
+    fresh_until: new Date(NOW.getTime() + 60_000),
+    stale_until: new Date(NOW.getTime() + 10 * 60_000),
+    refresh_claim_id: null,
+    refresh_claimed_at: null,
+    refresh_claim_expires_at: null,
+    consecutive_failures: 0,
+    last_failure_code: null,
+    last_failed_at: null,
+    retry_after: null,
+  };
+}
+
 function dependencies(
   overrides: Partial<LiveSyncCoordinatorDependencies> = {},
 ): LiveSyncCoordinatorDependencies {
@@ -115,7 +193,84 @@ function dependencies(
   };
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  process.env.DATABASE_URL = "postgres://localhost/maintainflow";
+});
+
 describe("live Ads sync coordinator", () => {
+  for (const kind of [
+    "old-version",
+    "corrupt-current-version",
+  ] as const) {
+    for (const policy of ["dashboard", "mutation"] as const) {
+      it(`${policy} clears and refreshes an unusable ${kind} cache entry`, async () => {
+        const accountId = `acct_${policy}_${kind}`;
+        const credentialGeneration = `generation_${kind}`;
+        const database = fakeDatabase([
+          [unusableStoredRow(accountId, kind)],
+          [{ cleared: true }],
+        ]);
+        const refreshed = workbench(accountId);
+        const deps = dependencies({
+          readLiveSyncState,
+          fetchLiveWorkbenchData: vi.fn(async () => refreshed),
+        });
+
+        const result = await createLiveSyncCoordinator(deps).getLiveWorkbench({
+          accountId,
+          credential: credential(accountId),
+          credentialGeneration,
+          policy,
+        });
+
+        expect(result).toEqual({ data: refreshed, freshness: "refreshed" });
+        expect(result.data).not.toEqual(storedWorkbench(accountId));
+        expect(JSON.stringify(result.data)).not.toContain(
+          "Stored cache sentinel",
+        );
+        expect(deps.fetchLiveWorkbenchData).toHaveBeenCalledOnce();
+        expect(deps.completeLiveSyncRefresh).toHaveBeenCalledWith(
+          expect.objectContaining({
+            accountId,
+            credentialGeneration,
+            snapshot: refreshed,
+          }),
+        );
+        expect(statement(database.calls[1])).toContain(
+          "snapshot_payload = null",
+        );
+        expect(statement(database.calls[1])).toContain(
+          "state.snapshot_payload = ?",
+        );
+        expect(database.calls[1].slice(1)).toContain(accountId);
+        expect(database.calls[1].slice(1)).toContain(credentialGeneration);
+      });
+    }
+  }
+
+  it("preserves genuine snapshot-store read failures as unavailable", async () => {
+    const deps = dependencies({
+      readLiveSyncState: vi.fn(async () => {
+        throw new Error("database connection failed");
+      }),
+    });
+
+    await expect(
+      createLiveSyncCoordinator(deps).getLiveWorkbench({
+        accountId: "acct_store_failure",
+        credential: credential("acct_store_failure"),
+        credentialGeneration: "1",
+        policy: "dashboard",
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+      refreshFailure: "store_unavailable",
+    });
+    expect(deps.claimLiveSyncRefresh).not.toHaveBeenCalled();
+    expect(deps.fetchLiveWorkbenchData).not.toHaveBeenCalled();
+  });
+
   it("returns a fresh dashboard snapshot without claiming or calling the provider", async () => {
     const cached = workbench("acct_fresh", "2026-08-30T11:59:30.000Z");
     const deps = dependencies({

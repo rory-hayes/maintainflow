@@ -118,6 +118,11 @@ import type { MonitoringWindowDto } from "@/lib/openai-ads/monitoring";
 import type { ConversionMeasurementReadiness } from "@/lib/openai-ads/measurement-readiness";
 import type { BudgetGuardEvidence } from "@/lib/openai-ads/budget-guard";
 import type { ConversionsConnectionStatus } from "@/lib/openai-ads/conversions-connection";
+import {
+  summarizeLivePortfolioEvidence,
+  type LivePortfolioAccount,
+  type LivePortfolioEvidenceState,
+} from "@/lib/openai-ads/live-portfolio";
 import type { ReadinessAuditHistoryEntry } from "@/lib/readiness/history";
 import type { AccountAccess } from "@/lib/tenancy/schema";
 import type {
@@ -166,6 +171,9 @@ type WorkbenchProps = {
   agencyClientAttachEnabled: boolean;
   simulatedAccounts: SimulatedAccountOption[];
   simulatorLabel: string;
+  livePortfolioVisible: boolean;
+  livePortfolioAccounts: LivePortfolioAccount[];
+  livePortfolioError?: string;
   recommendationDecisionReady: boolean;
   recommendationDecisionError?: string;
   canManageRecommendationDecisions: boolean;
@@ -184,6 +192,128 @@ type AuditEvent = {
   outcome: string;
   mode: "demo" | "live";
 };
+
+type RecommendationApplyResponse = {
+  applied?: boolean;
+  error?: string;
+  message?: string;
+  mode?: "demo" | "live";
+};
+
+export function isConfirmedLiveApplyResponse(
+  result: RecommendationApplyResponse,
+) {
+  return result.mode === "live" && result.applied === true;
+}
+
+export function RecommendationApprovalConfirmation({
+  account,
+  recommendation,
+  dataSource,
+  writeMode,
+  syncedAt,
+}: {
+  account: AdAccount;
+  recommendation: Recommendation;
+  dataSource: "demo" | "live";
+  writeMode: "demo" | "live";
+  syncedAt?: string;
+}) {
+  const liveWrite = dataSource === "live" && writeMode === "live";
+  const sourceLabel =
+    dataSource === "demo"
+      ? "Labelled simulator fixture"
+      : syncedAt
+        ? `Confirmed ${formatUtcDateTime(syncedAt, { includeTimeZone: true })}`
+        : "No confirmed live snapshot";
+
+  return (
+    <div className="grid gap-3 text-sm">
+      <Alert
+        className={cn(
+          liveWrite && "border-warning/30 bg-warning/10 text-foreground",
+        )}
+      >
+        <ShieldCheck />
+        <AlertTitle>
+          {liveWrite
+            ? `Live write to ${account.name}`
+            : dataSource === "demo"
+              ? "Simulator approval only"
+              : "External write is locked"}
+        </AlertTitle>
+        <AlertDescription>
+          {liveWrite
+            ? "Confirm the advertiser, exact API request, stored rollback, and safeguard before sending this non-idempotent change."
+            : dataSource === "demo"
+              ? "This records a local workflow example. It does not contact OpenAI Ads."
+              : "MaintainFlow will not contact OpenAI Ads until every live-write gate is restored."}
+        </AlertDescription>
+      </Alert>
+
+      <dl className="grid gap-3 rounded-lg border bg-muted/40 p-4">
+        <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+          <dt className="text-muted-foreground">Advertiser</dt>
+          <dd className="min-w-0">
+            <span className="font-medium">{account.name}</span>
+            <span className="sr-only">, advertiser ID </span>
+            <span
+              aria-hidden="true"
+              className="mx-2 text-muted-foreground"
+            >
+              ·
+            </span>
+            <span className="break-all font-mono text-xs text-muted-foreground">
+              {account.id}
+            </span>
+          </dd>
+        </div>
+        <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+          <dt className="text-muted-foreground">Evidence source</dt>
+          <dd>{sourceLabel}</dd>
+        </div>
+        <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+          <dt className="text-muted-foreground">API request</dt>
+          <dd className="break-all font-mono text-xs">
+            {recommendation.mutation.method} {recommendation.mutation.path}
+          </dd>
+        </div>
+        <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+          <dt className="text-muted-foreground">Stored rollback</dt>
+          <dd className="break-all font-mono text-xs">
+            {recommendation.rollback.method} {recommendation.rollback.path}
+          </dd>
+        </div>
+        <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+          <dt className="text-muted-foreground">Change</dt>
+          <dd
+            aria-label={`Current ${recommendation.currentValue}; proposed ${recommendation.proposedValue}`}
+          >
+            <span aria-hidden="true" className="font-medium">
+              {recommendation.currentValue}
+            </span>
+            <span className="mx-2 text-muted-foreground" aria-hidden="true">
+              →
+            </span>
+            <span aria-hidden="true" className="font-medium text-primary">
+              {recommendation.proposedValue}
+            </span>
+          </dd>
+        </div>
+      </dl>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <CodePayload title="Exact request body" mutation={recommendation.mutation} />
+        <CodePayload title="Exact stored rollback body" mutation={recommendation.rollback} />
+      </div>
+
+      <div className="grid gap-1 rounded-lg border p-4">
+        <p className="font-medium">Safeguard and human rollback review</p>
+        <p className="text-muted-foreground">{recommendation.safeguard}</p>
+      </div>
+    </div>
+  );
+}
 
 function moneyFormatter(currencyCode: string) {
   return new Intl.NumberFormat("en", {
@@ -245,6 +375,9 @@ export function MaintainFlowWorkbench({
   agencyClientAttachEnabled,
   simulatedAccounts,
   simulatorLabel,
+  livePortfolioVisible,
+  livePortfolioAccounts,
+  livePortfolioError,
   recommendationDecisionReady,
   recommendationDecisionError,
   canManageRecommendationDecisions,
@@ -257,6 +390,7 @@ export function MaintainFlowWorkbench({
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<AppTab>(initialTab);
   const tabListRef = useRef<HTMLDivElement>(null);
+  const approvalTitleRef = useRef<HTMLHeadingElement>(null);
   const [demoRecommendations, setDemoRecommendations] = useState(
     initialRecommendations,
   );
@@ -458,13 +592,26 @@ export function MaintainFlowWorkbench({
             recommendationApprovalFingerprints[selected.id],
         }),
       });
-      const result = (await response.json()) as {
-        error?: string;
-        message?: string;
-        mode?: "demo" | "live";
-      };
+      const result = (await response.json()) as RecommendationApplyResponse;
 
       if (!response.ok) throw new Error(result.error ?? "Approval failed.");
+      if (!isConfirmedLiveApplyResponse(result)) {
+        const message =
+          result.message ??
+          "MaintainFlow did not send a live Ads change because the release gates changed.";
+        addAuditEvent({
+          action: "No live change sent",
+          entity: selected.entityLabel,
+          outcome: message,
+          mode: result.mode === "live" ? "live" : "demo",
+        });
+        setApprovalOpen(false);
+        toast.warning("No live change sent", {
+          description: `${message} Refresh the workspace before reviewing again.`,
+        });
+        router.refresh();
+        return;
+      }
 
       addAuditEvent({
         action: "Change applied",
@@ -659,7 +806,11 @@ export function MaintainFlowWorkbench({
             ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-10 gap-2 px-2">
+                <Button
+                  variant="ghost"
+                  className="h-10 gap-2 px-2"
+                  aria-label="Open profile menu"
+                >
                   <Avatar className="size-7">
                     <AvatarFallback className="bg-primary text-xs font-semibold text-primary-foreground">
                       {operator.initials}
@@ -864,8 +1015,8 @@ export function MaintainFlowWorkbench({
         </div>
 
         <TabsContent value="review" className="m-0">
-          <section className="grid min-h-[calc(100vh-7rem)] min-[640px]:grid-cols-[270px_minmax(0,1fr)] lg:grid-cols-[340px_minmax(0,1fr)]">
-            <aside className="border-b bg-background min-[640px]:border-b-0 min-[640px]:border-r">
+          <section className="grid min-h-[calc(100vh-7rem)] sm:grid-cols-[270px_minmax(0,1fr)] lg:grid-cols-[340px_minmax(0,1fr)]">
+            <aside className="border-b bg-background sm:border-b-0 sm:border-r">
               <div className="flex items-start justify-between gap-3 border-b p-4 md:p-5">
                 <div className="grid gap-1">
                   <h1 className="text-base font-semibold">Recommendations</h1>
@@ -887,7 +1038,7 @@ export function MaintainFlowWorkbench({
                 </Select>
               </div>
 
-              <div className="grid max-h-[42vh] overflow-y-auto p-2 min-[640px]:max-h-[calc(100vh-12rem)]">
+              <div className="grid max-h-[42vh] overflow-y-auto p-2 sm:max-h-[calc(100vh-12rem)]">
                 {filteredRecommendations.map((recommendation) => (
                   <button
                     key={recommendation.id}
@@ -984,6 +1135,9 @@ export function MaintainFlowWorkbench({
             portfolioAccounts={
               dataSource === "demo" ? simulatedAccounts : []
             }
+            livePortfolioVisible={livePortfolioVisible}
+            livePortfolioAccounts={livePortfolioAccounts}
+            livePortfolioError={livePortfolioError}
             currentAccountId={account.id}
             onOpenAccount={openAccount}
           />
@@ -1033,9 +1187,17 @@ export function MaintainFlowWorkbench({
       </Tabs>
 
       <Dialog open={approvalOpen && Boolean(selected)} onOpenChange={setApprovalOpen}>
-        <DialogContent>
+        <DialogContent
+          className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            approvalTitleRef.current?.focus();
+          }}
+        >
           <DialogHeader>
-            <DialogTitle>Approve this change?</DialogTitle>
+            <DialogTitle ref={approvalTitleRef} tabIndex={-1}>
+              Approve this change?
+            </DialogTitle>
             <DialogDescription>
               MaintainFlow will use the exact request shown in the review and retain
               the rollback payload. {dataSource === "live" && writeMode !== "live"
@@ -1046,16 +1208,13 @@ export function MaintainFlowWorkbench({
             </DialogDescription>
           </DialogHeader>
           {selected ? (
-            <div className="grid gap-3 rounded-lg border bg-muted/40 p-4 text-sm">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">Current</span>
-                <span className="font-medium">{selected.currentValue}</span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">Proposed</span>
-                <span className="font-medium text-primary">{selected.proposedValue}</span>
-              </div>
-            </div>
+            <RecommendationApprovalConfirmation
+              account={account}
+              recommendation={selected}
+              dataSource={dataSource}
+              writeMode={writeMode}
+              syncedAt={syncedAt}
+            />
           ) : null}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setApprovalOpen(false)}>
@@ -1076,7 +1235,7 @@ export function MaintainFlowWorkbench({
                 ? "External changes locked"
                 : writeMode === "demo"
                   ? "Record simulator approval"
-                  : "Approve and apply"}
+                  : "Approve and apply live change"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1180,7 +1339,7 @@ function RecommendationDetail({
   return (
     <article className="min-w-0 p-4 md:p-6 lg:p-8">
       <div className="mx-auto grid max-w-5xl gap-6">
-        <div className="flex flex-col justify-between gap-4 min-[640px]:flex-row min-[640px]:items-start">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
           <div className="grid max-w-3xl gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">{recommendation.entityLabel}</Badge>
@@ -1200,7 +1359,7 @@ function RecommendationDetail({
           </div>
         </div>
 
-        <div className="grid gap-3 min-[640px]:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           {recommendation.evidence.map((metric, index) => {
             const icons = [CircleDollarSign, Target, BarChart3];
             const Icon = icons[index] ?? Gauge;
@@ -1233,7 +1392,7 @@ function RecommendationDetail({
               </Badge>
             </div>
           </CardHeader>
-          <CardContent className="grid gap-5 p-5 min-[640px]:grid-cols-[1fr_auto_1fr] min-[640px]:p-6">
+          <CardContent className="grid gap-5 p-5 sm:grid-cols-[1fr_auto_1fr] sm:p-6">
             <div className="grid gap-1 rounded-lg border bg-background p-4">
               <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Current
@@ -1241,8 +1400,8 @@ function RecommendationDetail({
               <span className="text-lg font-semibold">{recommendation.currentValue}</span>
             </div>
             <div className="grid place-items-center text-muted-foreground">
-              <ArrowRight className="hidden min-[640px]:block" />
-              <ArrowDownRight className="min-[640px]:hidden" />
+              <ArrowRight className="hidden sm:block" />
+              <ArrowDownRight className="sm:hidden" />
             </div>
             <div className="grid gap-1 rounded-lg border border-primary/20 bg-primary/5 p-4">
               <span className="text-xs font-medium uppercase tracking-wider text-primary">
@@ -1264,7 +1423,7 @@ function RecommendationDetail({
           </CardFooter>
         </Card>
 
-        <div className="grid gap-4 min-[640px]:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Alert className="bg-background">
             <ShieldCheck className="size-4" />
             <AlertTitle>Safeguard and rollback</AlertTitle>
@@ -1295,7 +1454,7 @@ function RecommendationDetail({
             <ChevronDown className="size-4 text-muted-foreground transition group-open:rotate-180" />
           </summary>
           <Separator />
-          <div className="grid gap-4 p-4 min-[640px]:grid-cols-2">
+          <div className="grid gap-4 p-4 sm:grid-cols-2">
             <CodePayload title="Request" mutation={recommendation.mutation} />
             <CodePayload title="Rollback" mutation={recommendation.rollback} />
           </div>
@@ -1412,6 +1571,39 @@ function NoRecommendations({
   );
 }
 
+function livePortfolioEvidenceLabel(state: LivePortfolioEvidenceState) {
+  switch (state) {
+    case "confirmed_fresh":
+      return "Fresh";
+    case "confirmed_stale":
+      return "Stale";
+    case "confirmed_expired":
+      return "Expired";
+    case "invalid":
+      return "Rejected";
+    case "refresh_required":
+      return "Refresh required";
+    default:
+      return "Not captured";
+  }
+}
+
+function livePortfolioEvidenceTone(state: LivePortfolioEvidenceState) {
+  if (state === "confirmed_fresh") {
+    return "border-success/30 bg-success/10 text-success";
+  }
+  if (state === "confirmed_stale") {
+    return "border-warning/30 bg-warning/10 text-warning-foreground";
+  }
+  if (state === "confirmed_expired" || state === "invalid") {
+    return "border-destructive/30 bg-destructive/10 text-destructive";
+  }
+  if (state === "refresh_required") {
+    return "border-warning/30 bg-warning/10 text-warning-foreground";
+  }
+  return "text-muted-foreground";
+}
+
 export function CampaignsView({
   ads,
   creativeReviewHistory,
@@ -1427,6 +1619,9 @@ export function CampaignsView({
   reviewing,
   snapshotAvailable,
   portfolioAccounts,
+  livePortfolioVisible,
+  livePortfolioAccounts,
+  livePortfolioError,
   currentAccountId,
   onOpenAccount,
 }: {
@@ -1444,6 +1639,9 @@ export function CampaignsView({
   reviewing: boolean;
   snapshotAvailable: boolean;
   portfolioAccounts: SimulatedAccountOption[];
+  livePortfolioVisible: boolean;
+  livePortfolioAccounts: LivePortfolioAccount[];
+  livePortfolioError?: string;
   currentAccountId: string;
   onOpenAccount: (accountId: string) => void;
 }) {
@@ -1467,6 +1665,9 @@ export function CampaignsView({
   const portfolioTemplateFixes = portfolioRows.reduce(
     (sum, item) => sum + (item.portfolioSummary?.campaignTemplateFixes ?? 0),
     0,
+  );
+  const livePortfolioSummary = summarizeLivePortfolioEvidence(
+    livePortfolioAccounts,
   );
 
   return (
@@ -1494,7 +1695,7 @@ export function CampaignsView({
 
       {portfolioRows.length > 1 ? (
         <Card className="min-w-0 shadow-sm">
-          <CardHeader className="gap-3 border-b bg-muted/20 min-[640px]:flex-row min-[640px]:items-start min-[640px]:justify-between">
+          <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
             <div className="grid gap-1">
               <div className="flex flex-wrap items-center gap-2">
                 <CardTitle className="text-base">Agency exception queue</CardTitle>
@@ -1525,13 +1726,10 @@ export function CampaignsView({
                 detail="Campaign-level checks only"
               />
             </div>
-            <div
-              aria-label="Agency account exception queue"
-              role="region"
-              tabIndex={0}
-              className="data-table-scroll max-w-full overflow-x-auto pb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            <Table
+              scrollAreaLabel="Agency account exception queue"
+              scrollAreaClassName="pb-2"
             >
-              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Client account</TableHead>
@@ -1597,8 +1795,152 @@ export function CampaignsView({
                     );
                   })}
                 </TableBody>
-              </Table>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {dataSource === "live" && livePortfolioVisible ? (
+        <Card className="min-w-0 shadow-sm">
+          <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
+            <div className="grid gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle className="text-base">Live client evidence</CardTitle>
+                <Badge variant="secondary">Agency portfolio</Badge>
+              </div>
+              <CardDescription>
+                Read-only evidence from stored snapshots matched to each
+                account&apos;s active credential. Missing or rejected evidence is
+                never counted as zero.
+              </CardDescription>
             </div>
+            <Badge variant="outline">
+              {livePortfolioError
+                ? "Account count unavailable"
+                : `${livePortfolioAccounts.length} active client${livePortfolioAccounts.length === 1 ? "" : "s"}`}
+            </Badge>
+          </CardHeader>
+          <CardContent className="grid gap-4 p-4 md:p-5">
+            {livePortfolioError ? (
+              <Alert>
+                <Info />
+                <AlertTitle>Live portfolio evidence unavailable</AlertTitle>
+                <AlertDescription>{livePortfolioError}</AlertDescription>
+              </Alert>
+            ) : (
+              <>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <MetricCard
+                    label="Active client accounts"
+                    value={formatGroupedInteger(livePortfolioAccounts.length)}
+                    detail="Selected agency organization only"
+                  />
+                  <MetricCard
+                    label="Usable snapshots"
+                    value={formatGroupedInteger(
+                      livePortfolioSummary.usableSnapshotCount,
+                    )}
+                    detail={`${livePortfolioSummary.unavailableSnapshotCount} expired, missing, rejected, or requiring refresh`}
+                  />
+                  <MetricCard
+                    label="Detected signals"
+                    value={
+                      livePortfolioSummary.detectedSignalCount === null
+                        ? "—"
+                        : formatGroupedInteger(
+                            livePortfolioSummary.detectedSignalCount,
+                          )
+                    }
+                    detail={
+                      livePortfolioSummary.usableSnapshotCount > 0
+                        ? `Across ${livePortfolioSummary.usableSnapshotCount} fresh or stale snapshot${livePortfolioSummary.usableSnapshotCount === 1 ? "" : "s"}; expired and unknown accounts excluded`
+                        : "No current snapshot evidence to count"
+                    }
+                  />
+                </div>
+
+                <Table
+                  scrollAreaLabel="Live agency client evidence"
+                  scrollAreaClassName="pb-2"
+                >
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Client account</TableHead>
+                      <TableHead>Snapshot</TableHead>
+                      <TableHead className="text-right">
+                        Detected signals
+                      </TableHead>
+                      <TableHead>Evidence state</TableHead>
+                      <TableHead>Evidence time</TableHead>
+                      <TableHead className="text-right">Workspace</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {livePortfolioAccounts.map((item) => {
+                      const selected = item.accountId === currentAccountId;
+                      return (
+                        <TableRow key={item.accountId}>
+                          <TableCell>
+                            <div className="flex min-w-44 items-center gap-2">
+                              <span className="font-medium">
+                                {item.accountName}
+                              </span>
+                              {selected ? (
+                                <Badge variant="outline">Open</Badge>
+                              ) : null}
+                            </div>
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {item.accountId}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              {item.hasConfirmedSnapshot
+                                ? "1 confirmed"
+                                : "Not confirmed"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            {item.detectedSignalCount === null
+                              ? "Unknown"
+                              : formatGroupedInteger(item.detectedSignalCount)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "whitespace-nowrap",
+                                livePortfolioEvidenceTone(item.evidenceState),
+                              )}
+                            >
+                              {livePortfolioEvidenceLabel(item.evidenceState)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">
+                            {item.evidenceAt
+                              ? formatUtcDateTime(item.evidenceAt, {
+                                  includeTimeZone: true,
+                                })
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={selected ? "secondary" : "outline"}
+                              disabled={selected}
+                              onClick={() => onOpenAccount(item.accountId)}
+                            >
+                              {selected ? "Current" : "Open account"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </>
+            )}
           </CardContent>
         </Card>
       ) : null}
@@ -1660,7 +2002,7 @@ export function CampaignsView({
         </CardHeader>
         <CardContent className="min-w-0">
           {campaigns.length > 0 ? (
-            <Table>
+            <Table scrollAreaLabel="Campaign performance">
             <TableHeader>
               <TableRow>
                 <TableHead>Campaign</TableHead>
@@ -1872,8 +2214,7 @@ function ExperimentsView({
           </div>
         </CardHeader>
         <CardContent className="min-w-0">
-          <div className="max-w-full overflow-x-auto">
-          <Table>
+          <Table scrollAreaLabel="Session audit trail">
             <TableHeader>
               <TableRow>
                 <TableHead>Time</TableHead>
@@ -1908,7 +2249,6 @@ function ExperimentsView({
               })}
             </TableBody>
           </Table>
-          </div>
         </CardContent>
       </Card>
     </section>

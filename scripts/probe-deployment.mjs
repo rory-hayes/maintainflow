@@ -229,6 +229,10 @@ export async function probeDeployment(options) {
     monitoring?.monitoringUnavailable !== false ||
     monitoring?.maintenanceFailed !== false ||
     monitoring?.maintenanceBacklog !== false ||
+    !Number.isInteger(monitoring?.approvalOperationsRecovered) ||
+    monitoring.approvalOperationsRecovered !== 0 ||
+    !Number.isInteger(monitoring?.unresolvedApprovalOperations) ||
+    monitoring.unresolvedApprovalOperations !== 0 ||
     !Number.isInteger(monitoring?.accountsFailed) ||
     monitoring.accountsFailed !== 0 ||
     !Number.isInteger(monitoring?.failed) ||

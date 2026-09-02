@@ -97,12 +97,14 @@ const approvalColumns = [
 type ApprovalRollbackClaimRow = Pick<ApprovalRow, "id"> & {
   request_payload: unknown;
   rollback_payload: unknown;
+  rollback_provider_attempt_id: string;
 };
 
 const rollbackClaimColumns = [
   "id",
   "request_payload",
   "rollback_payload",
+  "rollback_provider_attempt_id",
 ] as const;
 
 export class ApprovalStoreUnavailableError extends Error {
@@ -119,6 +121,25 @@ export class ApprovalTransitionError extends Error {
   }
 }
 
+export class ApprovalProviderSendFenceUnavailableError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "ApprovalProviderSendFenceUnavailableError";
+  }
+}
+
+export const APPROVAL_OPERATION_LEASE_MS = 15 * 60 * 1_000;
+export const MONITORING_ACCOUNT_ATTEMPT_LEASE_MS = 15 * 60 * 1_000;
+export const MONITORING_ACCOUNT_BACKOFF_BASE_MS = 5 * 60 * 1_000;
+export const MONITORING_ACCOUNT_BACKOFF_MAX_MS = 6 * 60 * 60 * 1_000;
+
+export type DueMonitoringAccount = {
+  accountId: string;
+  attemptId: string;
+  dueCount: number;
+  oldestDueAt: Date;
+};
+
 export function isApprovalStoreConfigured() {
   return Boolean(process.env.DATABASE_URL);
 }
@@ -130,7 +151,7 @@ export async function verifyApprovalStore() {
     select (
       to_regclass('public.ads_approval_records') is not null
       and (
-        select count(*) = 24
+        select count(*) = 28
         from information_schema.columns
         where table_schema = 'public'
           and table_name = 'ads_approval_records'
@@ -158,7 +179,11 @@ export async function verifyApprovalStore() {
             'monitoring_observation',
             'monitoring_evaluated_at',
             'monitoring_evaluation_claim_id',
-            'monitoring_evaluation_claimed_at'
+            'monitoring_evaluation_claimed_at',
+            'apply_provider_attempted_at',
+            'rollback_provider_attempted_at',
+            'apply_provider_attempt_id',
+            'rollback_provider_attempt_id'
           )
       )
       and to_regclass(
@@ -169,6 +194,15 @@ export async function verifyApprovalStore() {
       ) is not null
       and to_regclass(
         'public.ads_approval_records_monitoring_global_due_idx'
+      ) is not null
+      and to_regclass(
+        'public.ads_approval_records_stale_operation_idx'
+      ) is not null
+      and to_regclass(
+        'public.maintainflow_monitoring_account_schedule'
+      ) is not null
+      and to_regclass(
+        'public.maintainflow_monitoring_account_schedule_due_idx'
       ) is not null
     ) as ready
   `;
@@ -250,7 +284,7 @@ export async function createApprovalRecord({
       id, account_id, operator_id, acting_organization_id,
       actor_membership_role, actor_account_role, recommendation_id, recommendation_title,
       entity_id, request_payload, rollback_payload, evidence_payload, safeguard,
-      monitoring_plan, monitoring_window_days, status
+      monitoring_plan, monitoring_window_days, apply_provider_attempt_id, status
     ) values (
       ${id}, ${accountId}, ${operatorId}, ${access.organizationId},
       ${access.membershipRole}, ${access.accountRole}, ${recommendation.id},
@@ -259,7 +293,7 @@ export async function createApprovalRecord({
       ${sql.json(recommendation.rollback as postgres.JSONValue)},
       ${sql.json(recommendation.evidence as postgres.JSONValue)},
       ${recommendation.safeguard}, ${monitoringPlan},
-      ${monitoringWindowDays}, 'pending'
+      ${monitoringWindowDays}, ${id}, 'pending'
     )
     on conflict (account_id, recommendation_id, entity_id)
       where status in (
@@ -291,7 +325,7 @@ export async function updateApprovalRecord(
     options.response === undefined
       ? null
       : sql.json(options.response as postgres.JSONValue);
-  await sql`
+  const rows = await sql<{ id: string }[]>`
     update ads_approval_records set
       status = ${status}, response_payload = ${responsePayload},
       error_message = ${options.error ?? null},
@@ -316,7 +350,223 @@ export async function updateApprovalRecord(
       rolled_back_at = case when ${status} = 'rolled_back' then now() else rolled_back_at end,
       updated_at = now()
     where id = ${id}
+      and status = 'pending'
+      and apply_provider_attempt_id = ${id}
+    returning id
   `;
+  if (!rows[0]) {
+    throw new ApprovalTransitionError(
+      "This apply operation no longer holds its pending execution lease. Reconcile the durable record before taking another action.",
+    );
+  }
+}
+
+export async function recoverStaleApprovalOperations(options: {
+  accountId?: string;
+  now?: Date;
+  limit?: number;
+} = {}) {
+  const sql = getDatabase();
+  const now = options.now ?? new Date();
+  const staleBefore = new Date(now.getTime() - APPROVAL_OPERATION_LEASE_MS);
+  const limit = Math.max(1, Math.min(500, Math.trunc(options.limit ?? 100)));
+  const accountFilter = options.accountId
+    ? sql`and approval.account_id = ${options.accountId}`
+    : sql``;
+  const rows = await sql<
+    {
+      previous_status: "pending" | "rollback_pending";
+      provider_attempted: boolean;
+    }[]
+  >`
+    with candidates as (
+      select approval.id, approval.status,
+        case approval.status
+          when 'pending' then approval.apply_provider_attempted_at is not null
+          else approval.rollback_provider_attempted_at is not null
+        end as provider_attempted
+      from ads_approval_records approval
+      where approval.status in ('pending', 'rollback_pending')
+        and approval.updated_at < ${staleBefore}
+        ${accountFilter}
+      order by approval.updated_at, approval.id
+      limit ${limit}
+      for update of approval skip locked
+    )
+    update ads_approval_records approval set
+      status = case
+        when candidates.status = 'pending'
+          and not candidates.provider_attempted then 'failed'
+        when candidates.status = 'pending' then 'reconciliation_required'
+        when not candidates.provider_attempted then 'rollback_failed'
+        else 'rollback_reconciliation_required'
+      end,
+      error_message = case candidates.status
+        when 'pending' then case
+          when candidates.provider_attempted then
+            'The apply worker stopped after marking a provider attempt but before persisting a confirmed outcome. Verify the current provider state before recording whether the change was applied.'
+          else
+            'The apply worker stopped before any provider attempt was marked. No mutation was sent; a fresh approval may be created.'
+        end
+        else approval.error_message
+      end,
+      rollback_error_message = case candidates.status
+        when 'rollback_pending' then case
+          when candidates.provider_attempted then
+            'The rollback worker stopped after marking a provider attempt but before persisting a confirmed outcome. Verify the current provider state before recording whether the rollback completed.'
+          else
+            'The rollback worker stopped before any provider attempt was marked. No rollback was sent; the stored rollback remains eligible for a deliberate retry.'
+        end
+        else approval.rollback_error_message
+      end,
+      updated_at = ${now}
+    from candidates
+    where approval.id = candidates.id
+      and approval.status = candidates.status
+    returning candidates.status as previous_status,
+      candidates.provider_attempted
+  `;
+  const apply = rows.filter((row) => row.previous_status === "pending").length;
+  const rollback = rows.length - apply;
+  return {
+    recovered: rows.length,
+    apply,
+    rollback,
+    backlog: rows.length === limit,
+  };
+}
+
+export async function countUnresolvedApprovalOperations(options: {
+  accountId?: string;
+  now?: Date;
+} = {}) {
+  const sql = getDatabase();
+  const now = options.now ?? new Date();
+  const staleBefore = new Date(now.getTime() - APPROVAL_OPERATION_LEASE_MS);
+  const accountFilter = options.accountId
+    ? sql`and approval.account_id = ${options.accountId}`
+    : sql``;
+  const [row] = await sql<{ count: number }[]>`
+    select count(*)::int as count
+    from (
+      select 1
+      from ads_approval_records approval
+      where (
+        approval.status in (
+          'reconciliation_required',
+          'rollback_reconciliation_required'
+        )
+        or (
+          approval.status in ('pending', 'rollback_pending')
+          and approval.updated_at < ${staleBefore}
+        )
+      )
+      ${accountFilter}
+      limit 10001
+    ) unresolved
+  `;
+  return row?.count ?? 0;
+}
+
+export async function markApprovalProviderAttempt(options: {
+  id: string;
+  accountId: string;
+  attemptId: string;
+  status: "pending" | "rollback_pending";
+  now?: Date;
+}) {
+  const sql = getDatabase();
+  const attemptedAt = options.now ?? new Date();
+  const rows = options.status === "pending"
+    ? await sql<{ id: string }[]>`
+        update ads_approval_records set
+          apply_provider_attempted_at = ${attemptedAt},
+          updated_at = ${attemptedAt}
+        where id = ${options.id}
+          and account_id = ${options.accountId}
+          and apply_provider_attempt_id = ${options.attemptId}
+          and status = 'pending'
+          and apply_provider_attempted_at is null
+        returning id
+      `
+    : await sql<{ id: string }[]>`
+        update ads_approval_records set
+          rollback_provider_attempted_at = ${attemptedAt},
+          updated_at = ${attemptedAt}
+        where id = ${options.id}
+          and account_id = ${options.accountId}
+          and rollback_provider_attempt_id = ${options.attemptId}
+          and status = 'rollback_pending'
+          and rollback_provider_attempted_at is null
+        returning id
+      `;
+  if (!rows[0]) {
+    throw new ApprovalTransitionError(
+      "This Ads operation could not mark exactly one provider attempt. Reconcile the durable record before taking another action.",
+    );
+  }
+}
+
+export async function withApprovalProviderSendFence<T>(
+  options: {
+    id: string;
+    accountId: string;
+    attemptId: string;
+    status: "pending" | "rollback_pending";
+    now?: Date;
+  },
+  operation: () => Promise<T>,
+) {
+  const sql = getDatabase();
+  const now = options.now ?? new Date();
+  const freshAfter = new Date(now.getTime() - APPROVAL_OPERATION_LEASE_MS);
+  let operationStarted = false;
+  try {
+    return await sql.begin(async (transaction) => {
+      const rows = options.status === "pending"
+        ? await transaction<{ id: string }[]>`
+            select id
+            from ads_approval_records
+            where id = ${options.id}
+              and account_id = ${options.accountId}
+              and apply_provider_attempt_id = ${options.attemptId}
+              and status = 'pending'
+              and apply_provider_attempted_at is not null
+              and apply_provider_attempted_at > ${freshAfter}
+            for update
+          `
+        : await transaction<{ id: string }[]>`
+            select id
+            from ads_approval_records
+            where id = ${options.id}
+              and account_id = ${options.accountId}
+              and rollback_provider_attempt_id = ${options.attemptId}
+              and status = 'rollback_pending'
+              and rollback_provider_attempted_at is not null
+              and rollback_provider_attempted_at > ${freshAfter}
+            for update
+          `;
+      if (!rows[0]) {
+        throw new ApprovalProviderSendFenceUnavailableError(
+          "This provider attempt is no longer current. No mutation was sent.",
+        );
+      }
+
+      operationStarted = true;
+      return operation();
+    });
+  } catch (error) {
+    if (
+      !operationStarted &&
+      !(error instanceof ApprovalProviderSendFenceUnavailableError)
+    ) {
+      throw new ApprovalProviderSendFenceUnavailableError(
+        "The provider-send database fence could not be established. No mutation was sent.",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 }
 
 export async function listApprovalRecords(accountId: string, limit = 50) {
@@ -399,6 +649,8 @@ export async function listDueMonitoringAccountIds(
     join maintainflow_advertiser_accounts advertiser_account
       on advertiser_account.external_account_id = approval.account_id
       and advertiser_account.status = 'active'
+    left join maintainflow_monitoring_account_schedule schedule
+      on schedule.advertiser_account_id = advertiser_account.id
     where approval.monitoring_evaluated_at is null
       and approval.monitoring_started_at is not null
       and approval.monitoring_ends_at <= ${maturityCutoff}
@@ -406,12 +658,197 @@ export async function listDueMonitoringAccountIds(
         approval.monitoring_evaluation_claimed_at is null
         or approval.monitoring_evaluation_claimed_at < ${now} - interval '15 minutes'
       )
+      and (schedule.backoff_until is null or schedule.backoff_until <= ${now})
+      and (
+        schedule.attempt_lease_until is null
+        or schedule.attempt_lease_until <= ${now}
+      )
       and approval.status in ('applied', 'rollback_failed')
-    group by approval.account_id
-    order by min(approval.monitoring_ends_at), approval.account_id
+    group by approval.account_id, schedule.last_attempted_at
+    order by schedule.last_attempted_at nulls first,
+      min(approval.monitoring_ends_at), approval.account_id
     limit ${safeLimit}
   `;
   return rows.map((row) => row.account_id);
+}
+
+export async function claimDueMonitoringAccounts(options: {
+  attemptId: string;
+  now?: Date;
+  limit?: number;
+}) {
+  const sql = getDatabase();
+  const now = options.now ?? new Date();
+  const attemptLeaseUntil = new Date(
+    now.getTime() + MONITORING_ACCOUNT_ATTEMPT_LEASE_MS,
+  );
+  const safeLimit = Math.max(
+    1,
+    Math.min(50, Math.trunc(options.limit ?? 6)),
+  );
+  const maturityCutoff = monitoringAttributionMaturityCutoff(now);
+  const rows = await sql<
+    {
+      account_id: string;
+      attempt_id: string;
+      due_count: number;
+      oldest_due_at: Date;
+    }[]
+  >`
+    with due_accounts as materialized (
+      select advertiser_account.id as advertiser_account_id,
+        advertiser_account.external_account_id as account_id,
+        least(count(*), 10_001)::int as due_count,
+        min(approval.monitoring_ends_at) as oldest_due_at,
+        schedule.last_attempted_at
+      from maintainflow_advertiser_accounts advertiser_account
+      join ads_approval_records approval
+        on approval.account_id = advertiser_account.external_account_id
+      left join maintainflow_monitoring_account_schedule schedule
+        on schedule.advertiser_account_id = advertiser_account.id
+      where advertiser_account.status = 'active'
+        and approval.monitoring_evaluated_at is null
+        and approval.monitoring_started_at is not null
+        and approval.monitoring_ends_at <= ${maturityCutoff}
+        and (
+          approval.monitoring_evaluation_claimed_at is null
+          or approval.monitoring_evaluation_claimed_at
+            < ${now} - interval '15 minutes'
+        )
+        and approval.status in ('applied', 'rollback_failed')
+        and (
+          schedule.backoff_until is null
+          or schedule.backoff_until <= ${now}
+        )
+        and (
+          schedule.attempt_lease_until is null
+          or schedule.attempt_lease_until <= ${now}
+        )
+      group by advertiser_account.id, advertiser_account.external_account_id,
+        schedule.last_attempted_at
+    ),
+    candidates as (
+      select advertiser_account.id as advertiser_account_id,
+        due_accounts.account_id, due_accounts.due_count,
+        due_accounts.oldest_due_at, due_accounts.last_attempted_at
+      from due_accounts
+      join maintainflow_advertiser_accounts advertiser_account
+        on advertiser_account.id = due_accounts.advertiser_account_id
+      where advertiser_account.status = 'active'
+      order by due_accounts.last_attempted_at nulls first,
+        due_accounts.oldest_due_at, due_accounts.account_id
+      limit ${safeLimit}
+      for update of advertiser_account skip locked
+    ),
+    attempts as (
+      insert into maintainflow_monitoring_account_schedule (
+        advertiser_account_id, current_attempt_id, attempt_count,
+        last_attempted_at, attempt_lease_until, updated_at
+      )
+      select candidates.advertiser_account_id,
+        md5(
+          ${options.attemptId}::text
+            || ':' || candidates.advertiser_account_id::text
+        )::uuid,
+        1, ${now}, ${attemptLeaseUntil}, ${now}
+      from candidates
+      on conflict (advertiser_account_id) do update set
+        current_attempt_id = excluded.current_attempt_id,
+        attempt_count =
+          maintainflow_monitoring_account_schedule.attempt_count + 1,
+        last_attempted_at = excluded.last_attempted_at,
+        attempt_lease_until = excluded.attempt_lease_until,
+        updated_at = excluded.updated_at
+      where (
+          maintainflow_monitoring_account_schedule.attempt_lease_until is null
+          or maintainflow_monitoring_account_schedule.attempt_lease_until
+            <= ${now}
+        )
+        and (
+          maintainflow_monitoring_account_schedule.backoff_until is null
+          or maintainflow_monitoring_account_schedule.backoff_until <= ${now}
+        )
+      returning advertiser_account_id, current_attempt_id
+    )
+    select candidates.account_id,
+      attempts.current_attempt_id as attempt_id, candidates.due_count,
+      candidates.oldest_due_at
+    from candidates
+    join attempts using (advertiser_account_id)
+    order by candidates.last_attempted_at nulls first,
+      candidates.oldest_due_at, candidates.account_id
+  `;
+  return rows.map(
+    (row): DueMonitoringAccount => ({
+      accountId: row.account_id,
+      attemptId: row.attempt_id,
+      dueCount: row.due_count,
+      oldestDueAt: row.oldest_due_at,
+    }),
+  );
+}
+
+export async function completeMonitoringAccountAttempt(options: {
+  accountId: string;
+  attemptId: string;
+  succeeded: boolean;
+  now?: Date;
+}) {
+  const sql = getDatabase();
+  const now = options.now ?? new Date();
+  const backoffBaseSeconds = MONITORING_ACCOUNT_BACKOFF_BASE_MS / 1_000;
+  const backoffMaxSeconds = MONITORING_ACCOUNT_BACKOFF_MAX_MS / 1_000;
+  const rows = options.succeeded
+    ? await sql<{ advertiser_account_id: string }[]>`
+        with locked_account as materialized (
+          select id
+          from maintainflow_advertiser_accounts
+          where external_account_id = ${options.accountId}
+            and status = 'active'
+          for share
+        )
+        update maintainflow_monitoring_account_schedule schedule set
+          current_attempt_id = null,
+          consecutive_failures = 0,
+          last_succeeded_at = ${now},
+          attempt_lease_until = null,
+          backoff_until = null,
+          updated_at = ${now}
+        from locked_account advertiser_account
+        where schedule.advertiser_account_id = advertiser_account.id
+          and schedule.current_attempt_id = ${options.attemptId}
+        returning schedule.advertiser_account_id
+      `
+    : await sql<{ advertiser_account_id: string }[]>`
+        with locked_account as materialized (
+          select id
+          from maintainflow_advertiser_accounts
+          where external_account_id = ${options.accountId}
+            and status = 'active'
+          for share
+        )
+        update maintainflow_monitoring_account_schedule schedule set
+          current_attempt_id = null,
+          consecutive_failures = schedule.consecutive_failures + 1,
+          last_failed_at = ${now},
+          attempt_lease_until = null,
+          backoff_until = ${now} + make_interval(
+            secs => least(
+              ${backoffMaxSeconds}::double precision,
+              ${backoffBaseSeconds}::double precision
+                * power(
+                  2::double precision,
+                  least(schedule.consecutive_failures, 16)
+                )
+            )
+          ),
+          updated_at = ${now}
+        from locked_account advertiser_account
+        where schedule.advertiser_account_id = advertiser_account.id
+          and schedule.current_attempt_id = ${options.attemptId}
+        returning schedule.advertiser_account_id
+      `;
+  return Boolean(rows[0]);
 }
 
 export async function claimDueMonitoringRecords(options: {
@@ -428,12 +865,18 @@ export async function claimDueMonitoringRecords(options: {
   );
   const maturityCutoff = monitoringAttributionMaturityCutoff(now);
   const rows = await sql<ApprovalRow[]>`
-    with candidates as (
+    with locked_account as materialized (
+      select id, external_account_id
+      from maintainflow_advertiser_accounts
+      where external_account_id = ${options.accountId}
+        and status = 'active'
+      for share
+    ),
+    candidates as (
       select approval.id
       from ads_approval_records approval
-      join maintainflow_advertiser_accounts advertiser_account
+      join locked_account advertiser_account
         on advertiser_account.external_account_id = approval.account_id
-        and advertiser_account.status = 'active'
       where approval.account_id = ${options.accountId}
         and approval.monitoring_evaluated_at is null
         and approval.monitoring_started_at is not null
@@ -492,20 +935,28 @@ export async function recordMonitoringOutcome(options: {
   const evaluatedAt = options.evaluatedAt ?? new Date();
   const maturityCutoff = monitoringAttributionMaturityCutoff(evaluatedAt);
   const rows = await sql<{ id: string }[]>`
-    update ads_approval_records set
+    with locked_account as materialized (
+      select id, external_account_id
+      from maintainflow_advertiser_accounts
+      where external_account_id = ${options.accountId}
+        and status = 'active'
+      for share
+    )
+    update ads_approval_records approval set
       monitoring_outcome = ${outcome},
       monitoring_observation = ${sql.json(observation as postgres.JSONValue)},
       monitoring_evaluated_at = ${evaluatedAt},
       monitoring_evaluation_claim_id = null,
       monitoring_evaluation_claimed_at = null,
       updated_at = now()
-    where id = ${options.id}
-      and account_id = ${options.accountId}
-      and monitoring_evaluated_at is null
-      and monitoring_evaluation_claim_id = ${options.claimId}
-      and monitoring_ends_at <= ${maturityCutoff}
-      and status in ('applied', 'rollback_failed')
-    returning id
+    from locked_account advertiser_account
+    where approval.id = ${options.id}
+      and approval.account_id = advertiser_account.external_account_id
+      and approval.monitoring_evaluated_at is null
+      and approval.monitoring_evaluation_claim_id = ${options.claimId}
+      and approval.monitoring_ends_at <= ${maturityCutoff}
+      and approval.status in ('applied', 'rollback_failed')
+    returning approval.id
   `;
   return Boolean(rows[0]);
 }
@@ -532,15 +983,20 @@ export async function claimApprovalRollback(
   transaction?: postgres.TransactionSql,
 ) {
   const sql = transaction ?? getDatabase();
+  const attemptId = randomUUID();
   const rows = await sql<ApprovalRollbackClaimRow[]>`
     update ads_approval_records set
       status = 'rollback_pending', rollback_operator_id = ${operatorId},
       rollback_organization_id = ${access.organizationId},
       rollback_membership_role = ${access.membershipRole},
       rollback_account_role = ${access.accountRole},
-      rollback_error_message = null, updated_at = now()
+      rollback_error_message = null,
+      rollback_provider_attempted_at = null,
+      rollback_provider_attempt_id = ${attemptId},
+      updated_at = now()
     where id = ${id} and account_id = ${accountId}
       and status in ('applied', 'rollback_failed')
+      and monitoring_evaluation_claim_id is null
     returning ${sql(rollbackClaimColumns)}
   `;
   if (!rows[0]) {
@@ -556,27 +1012,42 @@ export async function claimApprovalRollback(
     // without a durable failure outcome.
     mutationPayload: rows[0].request_payload,
     rollbackPayload: rows[0].rollback_payload,
+    attemptId: rows[0].rollback_provider_attempt_id,
   };
 }
 
 export async function updateRollbackRecord(
   id: string,
   status: "rolled_back" | "rollback_failed" | "rollback_reconciliation_required",
-  options: { response?: unknown; error?: string } = {},
+  options: {
+    accountId: string;
+    attemptId: string;
+    response?: unknown;
+    error?: string;
+  },
 ) {
   const sql = getDatabase();
   const responsePayload =
     options.response === undefined
       ? null
       : sql.json(options.response as postgres.JSONValue);
-  await sql`
+  const rows = await sql<{ id: string }[]>`
     update ads_approval_records set
       status = ${status}, rollback_response_payload = ${responsePayload},
       rollback_error_message = ${options.error ?? null},
       rolled_back_at = case when ${status} = 'rolled_back' then now() else rolled_back_at end,
       updated_at = now()
-    where id = ${id} and status = 'rollback_pending'
+    where id = ${id}
+      and account_id = ${options.accountId}
+      and status = 'rollback_pending'
+      and rollback_provider_attempt_id = ${options.attemptId}
+    returning id
   `;
+  if (!rows[0]) {
+    throw new ApprovalTransitionError(
+      "This rollback no longer holds its pending execution lease. Reconcile the durable record before taking another action.",
+    );
+  }
 }
 
 export function getReconciliationTransition(

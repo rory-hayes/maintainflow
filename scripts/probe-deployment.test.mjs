@@ -23,7 +23,7 @@ function htmlResponse(body, status = 200) {
   });
 }
 
-function successfulFetch({ landingHtml } = {}) {
+function successfulFetch({ landingHtml, monitoringOverrides } = {}) {
   return vi
     .fn()
     .mockResolvedValueOnce(
@@ -51,9 +51,12 @@ function successfulFetch({ landingHtml } = {}) {
         monitoringUnavailable: false,
         maintenanceFailed: false,
         maintenanceBacklog: false,
+        approvalOperationsRecovered: 0,
+        unresolvedApprovalOperations: 0,
         accountsFailed: 0,
         failed: 0,
         evaluated: 0,
+        ...monitoringOverrides,
       }),
     )
     .mockResolvedValueOnce(
@@ -278,6 +281,40 @@ describe("hosted deployment probe", () => {
         }),
       )
       .mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    await expect(
+      probeDeployment({
+        origin: "https://staging.maintainflow.io",
+        readinessSecret,
+        cronSecret,
+        expectedRevision: revision,
+        expectedStage: "demo",
+        fetchImpl,
+      }),
+    ).rejects.toThrow("complete maintenance run");
+  });
+
+  it("rejects a maintenance run that recovered an ambiguous Ads operation", async () => {
+    const fetchImpl = successfulFetch({
+      monitoringOverrides: { approvalOperationsRecovered: 1 },
+    });
+
+    await expect(
+      probeDeployment({
+        origin: "https://staging.maintainflow.io",
+        readinessSecret,
+        cronSecret,
+        expectedRevision: revision,
+        expectedStage: "demo",
+        fetchImpl,
+      }),
+    ).rejects.toThrow("complete maintenance run");
+  });
+
+  it("rejects a maintenance run with a persistent unresolved Ads operation", async () => {
+    const fetchImpl = successfulFetch({
+      monitoringOverrides: { unresolvedApprovalOperations: 1 },
+    });
 
     await expect(
       probeDeployment({

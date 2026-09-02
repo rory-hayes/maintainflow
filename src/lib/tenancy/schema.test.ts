@@ -78,23 +78,37 @@ describe("customer tenancy roles", () => {
 });
 
 describe("advertiser account attachment input", () => {
-  it("accepts one trimmed account-scoped Ads key", () => {
+  it("accepts a trimmed key for verification and an exact confirmed account", () => {
     expect(
       advertiserAccountAttachSchema.parse({
+        action: "verify",
         adsApiKey: "  ads_client_secret_123  ",
       }),
-    ).toEqual({ adsApiKey: "ads_client_secret_123" });
+    ).toEqual({ action: "verify", adsApiKey: "ads_client_secret_123" });
+    expect(
+      advertiserAccountAttachSchema.parse({
+        action: "connect",
+        adsApiKey: "ads_client_secret_123",
+        expectedAccountId: "adacct_verified",
+      }),
+    ).toEqual({
+      action: "connect",
+      adsApiKey: "ads_client_secret_123",
+      expectedAccountId: "adacct_verified",
+    });
   });
 
   it("rejects attempts to choose the organization or account in the body", () => {
     expect(() =>
       advertiserAccountAttachSchema.parse({
+        action: "verify",
         adsApiKey: "ads_client_secret_123",
         organizationId: "00000000-0000-4000-8000-000000000001",
       }),
     ).toThrow();
     expect(() =>
       advertiserAccountAttachSchema.parse({
+        action: "verify",
         adsApiKey: "ads_client_secret_123",
         accountId: "adacct_attacker_selected",
       }),

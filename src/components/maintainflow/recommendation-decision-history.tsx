@@ -92,8 +92,7 @@ export function RecommendationDecisionHistory({
             </EmptyHeader>
           </Empty>
         ) : (
-          <div className="max-w-full overflow-x-auto">
-            <Table>
+          <Table scrollAreaLabel="Recommendation decision history">
               <TableHeader>
                 <TableRow>
                   <TableHead>Decision</TableHead>
@@ -171,8 +170,7 @@ export function RecommendationDecisionHistory({
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
-          </div>
+          </Table>
         )}
       </CardContent>
     </Card>

@@ -131,7 +131,7 @@ function LiveMonitoringCard({ window }: { window: MonitoringWindowDto }) {
           <span className="text-muted-foreground">Observation window</span>
           <span className="font-medium">{window.plan.windowDays} days</span>
         </div>
-        <Progress value={window.progress} />
+        <Progress value={window.progress} aria-label="Observation window" />
         <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
           <span>{dateLabel(window.startedAt)}</span>
           <span>{window.progress}% elapsed</span>
@@ -312,7 +312,7 @@ function DemoMonitoringCard({
           <span className="text-muted-foreground">Comparison</span>
           <span className="font-medium">Equal 7-day windows</span>
         </div>
-        <Progress value={100} />
+        <Progress value={100} aria-label="Comparison" />
         <div className="flex justify-between gap-2 text-xs text-muted-foreground">
           <span>Completed sample</span>
           <span>100% evaluated</span>

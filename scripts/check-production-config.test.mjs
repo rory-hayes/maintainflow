@@ -46,6 +46,38 @@ function privateConfig(overrides = {}) {
   };
 }
 
+function firstAccountPrivateReadConfig(overrides = {}) {
+  return privateConfig({
+    OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED: "false",
+    MAINTAINFLOW_TRUST_PROXY_HEADERS: "false",
+    NEXT_PUBLIC_CLERK_SIGN_IN_URL: "/auth/sign-in",
+    NEXT_PUBLIC_CLERK_SIGN_UP_URL: "/auth/sign-up",
+    MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED: "false",
+    MAINTAINFLOW_DATABASE_POOL_MAX: "4",
+    READINESS_TRUST_X_FORWARDED_FOR: "false",
+    ...overrides,
+  });
+}
+
+const firstAccountPrivateReadRequiredKeys = [
+  "MAINTAINFLOW_RELEASE_STAGE",
+  "MAINTAINFLOW_APP_ORIGIN",
+  "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+  "CLERK_SECRET_KEY",
+  "MAINTAINFLOW_LEGAL_ENTITY_NAME",
+  "MAINTAINFLOW_PRIVACY_CONTACT_EMAIL",
+  "MAINTAINFLOW_SUPPORT_CONTACT_EMAIL",
+  "DATABASE_URL",
+  "MAINTAINFLOW_CREDENTIAL_KEYRING",
+  "MAINTAINFLOW_ACTIVE_CREDENTIAL_KEY_ID",
+  "MAINTAINFLOW_READINESS_PROBE_SECRET",
+  "CRON_SECRET",
+  "READINESS_RATE_LIMIT_SECRET",
+  "MAINTAINFLOW_ADMISSION_MODE",
+  "MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS",
+  "OPENAI_ADS_DATA_MODE",
+];
+
 function demoConfig(overrides = {}) {
   return {
     MAINTAINFLOW_RELEASE_STAGE: "demo",
@@ -179,11 +211,24 @@ describe("production release-stage configuration", () => {
   });
 
   it("accepts a private read-only pilot without requiring a global Ads key", () => {
-    expect(validateProductionConfig(privateConfig())).toEqual({
+    const config = firstAccountPrivateReadConfig();
+
+    expect(config.OPENAI_ADS_API_KEY).toBeUndefined();
+    expect(validateProductionConfig(config)).toEqual({
       stage: "private_read",
       issues: [],
     });
   });
+
+  it.each(firstAccountPrivateReadRequiredKeys)(
+    "rejects the hosted first-account fixture without %s",
+    (key) => {
+      const config = firstAccountPrivateReadConfig();
+      delete config[key];
+
+      expect(validateProductionConfig(config).issues.length).toBeGreaterThan(0);
+    },
+  );
 
   it.each([
     ["missing sslmode", "postgres://db.example/maintainflow"],

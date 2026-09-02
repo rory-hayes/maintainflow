@@ -2,6 +2,9 @@
   "name": "maintainflow-ads",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "postcss-selector-parser": "6.1.4"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build --webpack && node scripts/public-build-metadata.mjs",
@@ -24,7 +27,7 @@
     "test:db": "node scripts/run-database-integration.mjs",
     "check:production-config": "node scripts/check-production-config.mjs",
     "probe:deployment": "node scripts/probe-deployment.mjs",
-    "audit:production": "npm audit --omit=dev --audit-level=high",
+    "audit:production": "npm audit --omit=dev --audit-level=low",
     "verify": "npm run lint && npm run typecheck && npm test && npm run test:ads-contract && npm run test:openai-ads-contract-checker && npm run test:production-config && npm run build"
   },
   "dependencies": {

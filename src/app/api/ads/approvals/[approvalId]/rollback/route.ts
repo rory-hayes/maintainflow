@@ -24,6 +24,7 @@ import { fetchLiveAdAccount } from "@/lib/openai-ads/data.server";
 import {
   AccountAccessForbiddenError,
   AdvertiserCredentialUnavailableError,
+  AdvertiserWriteBlockedError,
   getAdsCredentialMaterialForAccount,
   requireAccountAccess,
   TenancyStoreUnavailableError,
@@ -92,6 +93,9 @@ export async function POST(
       return Response.json({ error: error.message }, { status: 403 });
     }
     if (error instanceof ApprovalTransitionError) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof AdvertiserWriteBlockedError) {
       return Response.json({ error: error.message }, { status: 409 });
     }
     if (error instanceof AdsMutationPreconditionFailedError) {

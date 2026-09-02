@@ -177,6 +177,7 @@ export async function POST(request: Request) {
           access,
           expectedCredentialGeneration:
             credentialMaterial.credentialGeneration,
+          requireClearProviderOperationLedger: false,
         },
         async ({ transaction, access: currentAccess }) =>
           dismissRecommendation({
@@ -205,6 +206,7 @@ export async function POST(request: Request) {
         operatorId,
         access,
         expectedCredentialGeneration: credentialMaterial.credentialGeneration,
+        requireClearProviderOperationLedger: false,
       },
       async ({ transaction, access: currentAccess }) =>
         restoreRecommendation({

@@ -7,12 +7,14 @@ const {
   getAdsCredentialMaterialForAccountMock,
   getConversionsApiConnectionStatusMock,
   getLiveWorkbenchMock,
+  listLivePortfolioAccountsMock,
   listAccountAccessesMock,
 } = vi.hoisted(() => ({
   getOptionalOperatorMock: vi.fn(),
   getAdsCredentialMaterialForAccountMock: vi.fn(),
   getConversionsApiConnectionStatusMock: vi.fn(),
   getLiveWorkbenchMock: vi.fn(),
+  listLivePortfolioAccountsMock: vi.fn(),
   listAccountAccessesMock: vi.fn(),
 }));
 
@@ -45,9 +47,18 @@ vi.mock("@/lib/openai-ads/conversions.server", () => ({
 vi.mock("@/lib/openai-ads/live-sync.server", () => ({
   getLiveWorkbench: getLiveWorkbenchMock,
 }));
+vi.mock("@/lib/openai-ads/live-portfolio.server", () => ({
+  listLivePortfolioAccounts: listLivePortfolioAccountsMock,
+}));
 vi.mock("@/lib/audit/approval-store.server", () => ({
   listActiveApprovalRecords: vi.fn(),
   listApprovalRecords: vi.fn(),
+  recoverStaleApprovalOperations: vi.fn(async () => ({
+    recovered: 0,
+    apply: 0,
+    rollback: 0,
+    backlog: false,
+  })),
   verifyApprovalStore: vi.fn(async () => true),
 }));
 vi.mock("@/lib/audit/recommendation-decision-store.server", () => ({
@@ -104,6 +115,8 @@ describe("MaintainFlow app page live failure boundary", () => {
     getAdsCredentialMaterialForAccountMock.mockReset();
     getConversionsApiConnectionStatusMock.mockReset();
     getLiveWorkbenchMock.mockReset();
+    listLivePortfolioAccountsMock.mockReset();
+    listLivePortfolioAccountsMock.mockResolvedValue([]);
     getOptionalOperatorMock.mockReset();
     getOptionalOperatorMock.mockResolvedValue({
       id: "operator_live",
@@ -165,6 +178,9 @@ describe("MaintainFlow app page live failure boundary", () => {
     expect(props.workspaceSetupState).toBe("connection_error");
     expect(props.workspaceAccess).toEqual(access);
     expect(props.agencyClientAttachEnabled).toBe(false);
+    expect(props.livePortfolioVisible).toBe(false);
+    expect(props.livePortfolioAccounts).toEqual([]);
+    expect(listLivePortfolioAccountsMock).not.toHaveBeenCalled();
     expect(props.account.id).toBe(access.accountId);
     expect(props.availableAccounts).toEqual([access]);
     expect(props.workspaceMessage).toContain("replace its client key");
@@ -206,6 +222,16 @@ describe("MaintainFlow app page live failure boundary", () => {
   });
 
   it("enables another client connection only for a ready live agency owner", async () => {
+    listLivePortfolioAccountsMock.mockResolvedValue([
+      {
+        accountId: agencyAccess.accountId,
+        accountName: agencyAccess.accountName,
+        hasConfirmedSnapshot: true,
+        detectedSignalCount: 2,
+        evidenceState: "confirmed_fresh",
+        evidenceAt: "2026-08-31T10:00:00.000Z",
+      },
+    ]);
     listAccountAccessesMock.mockResolvedValue([agencyAccess]);
     getLiveWorkbenchMock.mockResolvedValue({
       data: {
@@ -242,5 +268,16 @@ describe("MaintainFlow app page live failure boundary", () => {
     expect(props.dataSource).toBe("live");
     expect(props.workspaceAccess).toEqual(agencyAccess);
     expect(props.agencyClientAttachEnabled).toBe(true);
+    expect(props.livePortfolioVisible).toBe(true);
+    expect(props.livePortfolioAccounts).toEqual([
+      expect.objectContaining({
+        accountId: agencyAccess.accountId,
+        detectedSignalCount: 2,
+      }),
+    ]);
+    expect(listLivePortfolioAccountsMock).toHaveBeenCalledWith({
+      operatorId: "operator_live",
+      organizationId: agencyAccess.organizationId,
+    });
   });
 });

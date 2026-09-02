@@ -7,6 +7,8 @@ const {
   isReadinessRateLimitConfiguredMock,
   pruneExpiredReadinessRateLimitBucketsMock,
   pruneExpiredLiveSyncSnapshotsMock,
+  countUnresolvedApprovalOperationsMock,
+  recoverStaleApprovalOperationsMock,
   verifyApprovalStoreMock,
   verifyCredentialStoreMock,
   verifyTenancyStoreMock,
@@ -16,6 +18,8 @@ const {
   isReadinessRateLimitConfiguredMock: vi.fn(),
   pruneExpiredReadinessRateLimitBucketsMock: vi.fn(),
   pruneExpiredLiveSyncSnapshotsMock: vi.fn(),
+  countUnresolvedApprovalOperationsMock: vi.fn(),
+  recoverStaleApprovalOperationsMock: vi.fn(),
   verifyApprovalStoreMock: vi.fn(),
   verifyCredentialStoreMock: vi.fn(),
   verifyTenancyStoreMock: vi.fn(),
@@ -23,6 +27,8 @@ const {
 }));
 
 vi.mock("@/lib/audit/approval-store.server", () => ({
+  countUnresolvedApprovalOperations: countUnresolvedApprovalOperationsMock,
+  recoverStaleApprovalOperations: recoverStaleApprovalOperationsMock,
   verifyApprovalStore: verifyApprovalStoreMock,
 }));
 vi.mock("@/lib/openai-ads/monitoring-runner.server", () => ({
@@ -65,6 +71,8 @@ describe("scheduled monitoring route", () => {
     isReadinessRateLimitConfiguredMock.mockReset();
     pruneExpiredReadinessRateLimitBucketsMock.mockReset();
     pruneExpiredLiveSyncSnapshotsMock.mockReset();
+    countUnresolvedApprovalOperationsMock.mockReset();
+    recoverStaleApprovalOperationsMock.mockReset();
     verifyApprovalStoreMock.mockResolvedValue(true);
     verifyCredentialStoreMock.mockResolvedValue(true);
     verifyTenancyStoreMock.mockResolvedValue(true);
@@ -80,6 +88,13 @@ describe("scheduled monitoring route", () => {
     isReadinessRateLimitConfiguredMock.mockReturnValue(true);
     pruneExpiredReadinessRateLimitBucketsMock.mockResolvedValue(0);
     pruneExpiredLiveSyncSnapshotsMock.mockResolvedValue(0);
+    countUnresolvedApprovalOperationsMock.mockResolvedValue(0);
+    recoverStaleApprovalOperationsMock.mockResolvedValue({
+      recovered: 0,
+      apply: 0,
+      rollback: 0,
+      backlog: false,
+    });
   });
 
   afterEach(() => {
@@ -110,6 +125,8 @@ describe("scheduled monitoring route", () => {
       monitoringUnavailable: false,
       maintenanceFailed: false,
       maintenanceBacklog: false,
+      approvalOperationsRecovered: 0,
+      unresolvedApprovalOperations: 0,
       accountsSelected: 2,
       accountsProcessed: 2,
       accountsFailed: 0,
@@ -126,6 +143,15 @@ describe("scheduled monitoring route", () => {
       now: expect.any(Date),
       retentionMs: 86_400_000,
       limit: 5_000,
+    });
+    expect(recoverStaleApprovalOperationsMock).toHaveBeenCalledWith({
+      now: expect.any(Date),
+      limit: 500,
+    });
+    const recoveryNow = recoverStaleApprovalOperationsMock.mock.calls[0]?.[0]
+      ?.now;
+    expect(countUnresolvedApprovalOperationsMock).toHaveBeenCalledWith({
+      now: recoveryNow,
     });
     expect(console.info).toHaveBeenCalledOnce();
     expect(
@@ -232,6 +258,86 @@ describe("scheduled monitoring route", () => {
       maintenanceBacklog: true,
       maintenanceFailed: false,
       evaluated: 3,
+    });
+  });
+
+  it("surfaces recovered interrupted provider operations for operator reconciliation", async () => {
+    recoverStaleApprovalOperationsMock.mockResolvedValue({
+      recovered: 2,
+      apply: 1,
+      rollback: 1,
+      backlog: false,
+    });
+
+    const response = await GET(
+      request(`Bearer ${process.env.CRON_SECRET}`),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe("300");
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      approvalOperationsRecovered: 2,
+      maintenanceFailed: false,
+      maintenanceBacklog: false,
+    });
+  });
+
+  it("keeps the scheduler unhealthy while provider outcomes remain unresolved", async () => {
+    countUnresolvedApprovalOperationsMock.mockResolvedValue(2);
+
+    const response = await GET(
+      request(`Bearer ${process.env.CRON_SECRET}`),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe("300");
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      approvalOperationsRecovered: 0,
+      unresolvedApprovalOperations: 2,
+      maintenanceFailed: false,
+    });
+  });
+
+  it("fails closed when interrupted-operation recovery is unavailable", async () => {
+    recoverStaleApprovalOperationsMock.mockRejectedValue(
+      new Error("private database detail"),
+    );
+
+    const response = await GET(
+      request(`Bearer ${process.env.CRON_SECRET}`),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      approvalOperationsRecovered: 0,
+      maintenanceFailed: true,
+    });
+  });
+
+  it("fails closed when the unresolved-operation ledger cannot be counted", async () => {
+    countUnresolvedApprovalOperationsMock.mockRejectedValue(
+      new Error("private database detail"),
+    );
+
+    const response = await GET(
+      request(`Bearer ${process.env.CRON_SECRET}`),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      unresolvedApprovalOperations: 0,
+      maintenanceFailed: true,
+    });
+    const log = JSON.parse(
+      String(vi.mocked(console.error).mock.calls.at(-2)?.[0]),
+    );
+    expect(log).toMatchObject({
+      event: "monitoring.approval_ledger.failed",
+      errorKind: "application_error",
     });
   });
 

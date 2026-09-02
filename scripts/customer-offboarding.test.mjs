@@ -47,6 +47,7 @@ function snapshot(overrides = {}) {
     recommendationDecisions: [],
     readinessAudits: [],
     liveWorkbenchSnapshots: [],
+    monitoringAccountSchedules: [],
     lifecycleRecords: [],
     ...overrides,
   };
@@ -134,6 +135,19 @@ describe("customer offboarding operator safety", () => {
     );
     expect(customerOffboardingConfirmationToken(first)).toMatch(
       /^OFFBOARD:adacct_customer_exact:[a-f0-9]{64}$/,
+    );
+
+    const changedSchedule = snapshot({
+      monitoringAccountSchedules: [
+        {
+          advertiser_account_id: first.account.id,
+          current_attempt_id: "44444444-4444-4444-8444-444444444444",
+          attempt_lease_until: new Date("2026-08-30T12:15:00.000Z"),
+        },
+      ],
+    });
+    expect(customerOffboardingStateFingerprint(changedSchedule)).not.toBe(
+      customerOffboardingStateFingerprint(first),
     );
 
     const changed = snapshot({

@@ -635,7 +635,7 @@ export function WorkspaceOnboarding({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-5">
-            <Progress value={content.progress} />
+            <Progress value={content.progress} aria-label="Access model" />
             <div className="grid gap-5">
               {setupSteps.map((step, index) => {
                 const Icon = step.icon;
@@ -662,7 +662,7 @@ export function WorkspaceOnboarding({
 
       <Card className="min-w-0 shadow-sm">
         <CardHeader>
-          <div className="flex flex-col justify-between gap-3 min-[640px]:flex-row min-[640px]:items-start">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
             <div className="grid gap-1">
               <CardTitle className="text-base">Connection roadmap</CardTitle>
               <CardDescription>
@@ -702,7 +702,7 @@ export function WorkspaceOnboarding({
 
       <Card className="min-w-0 shadow-sm">
         <CardHeader>
-          <div className="flex flex-col justify-between gap-4 min-[640px]:flex-row min-[640px]:items-start">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
             <div className="grid gap-1">
               <CardTitle className="text-base">
                 {measurementContent.title}
@@ -778,7 +778,7 @@ export function WorkspaceOnboarding({
             </Alert>
           ) : null}
         </CardContent>
-        <CardFooter className="flex-col items-start justify-between gap-3 min-[640px]:flex-row min-[640px]:items-center">
+        <CardFooter className="flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
           <p className="text-xs leading-5 text-muted-foreground">
             A provider 2xx proves only that the dry-run request was accepted. Pixel
             ownership, Ads Manager visibility, matching, and attribution still

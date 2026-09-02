@@ -5,6 +5,7 @@ const testState = vi.hoisted(() => {
   class OperatorUnauthorizedError extends Error {}
   class AccountAccessForbiddenError extends Error {}
   class AdvertiserCredentialUnavailableError extends Error {}
+  class AdvertiserWriteBlockedError extends Error {}
   class TenancyStoreUnavailableError extends Error {}
   class ApprovalStoreUnavailableError extends Error {}
   class ApprovalTransitionError extends Error {}
@@ -72,6 +73,7 @@ const testState = vi.hoisted(() => {
     OperatorUnauthorizedError,
     AccountAccessForbiddenError,
     AdvertiserCredentialUnavailableError,
+    AdvertiserWriteBlockedError,
     TenancyStoreUnavailableError,
     ApprovalStoreUnavailableError,
     ApprovalTransitionError,
@@ -138,6 +140,7 @@ vi.mock("@/lib/tenancy/store.server", () => ({
   AccountAccessForbiddenError: testState.AccountAccessForbiddenError,
   AdvertiserCredentialUnavailableError:
     testState.AdvertiserCredentialUnavailableError,
+  AdvertiserWriteBlockedError: testState.AdvertiserWriteBlockedError,
   TenancyStoreUnavailableError: testState.TenancyStoreUnavailableError,
   getAdsCredentialMaterialForAccount:
     testState.getAdsCredentialMaterialForAccount,
@@ -474,6 +477,27 @@ describe("live recommendation application", () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
       error: "This recommendation is actively dismissed. Restore it first.",
+    });
+  });
+
+  it("blocks a new write while the account has an unresolved provider operation", async () => {
+    testState.applyAdsMutation.mockRejectedValue(
+      new testState.AdvertiserWriteBlockedError(
+        "Resolve the advertiser account's active or uncertain Ads operation before starting another live write.",
+      ),
+    );
+
+    const response = await POST(
+      request({
+        accountId: "adacct_client",
+        recommendationId: recommendation.id,
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "Resolve the advertiser account's active or uncertain Ads operation before starting another live write.",
     });
   });
 });

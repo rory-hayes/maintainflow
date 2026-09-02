@@ -325,7 +325,7 @@ export function ConversionMeasurementCard({
 }) {
   return (
     <Card className="shadow-sm">
-      <CardHeader className="gap-3 border-b bg-muted/20 min-[640px]:flex-row min-[640px]:items-start min-[640px]:justify-between">
+      <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
             <Cable className="size-5" />
@@ -425,7 +425,7 @@ export function MeasurementInstallationCard({
 }) {
   return (
     <Card className="shadow-sm">
-      <CardHeader className="gap-3 border-b bg-muted/20 min-[640px]:flex-row min-[640px]:items-start min-[640px]:justify-between">
+      <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
             <Radar className="size-5" />
@@ -551,7 +551,7 @@ function AuditResults({
       <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
         <Card className="shadow-sm">
           <CardHeader className="pb-3">
-            <CardDescription>Readiness score</CardDescription>
+            <CardDescription>Storefront page score</CardDescription>
             <div className="flex items-end justify-between gap-3">
               <CardTitle className="text-5xl tracking-[-0.05em]">
                 {audit.score}
@@ -569,7 +569,7 @@ function AuditResults({
             </div>
           </CardHeader>
           <CardContent className="grid gap-3">
-            <Progress value={audit.score} />
+            <Progress value={audit.score} aria-label="Storefront page score" />
             <p className="text-xs text-muted-foreground">
               {passed} of {audit.checks.length} checks passed · scanned{" "}
               {formatUtcDateTime(audit.scannedAt, { includeTimeZone: true })}

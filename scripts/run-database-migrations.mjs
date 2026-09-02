@@ -25,6 +25,9 @@ export const REQUIRED_MIGRATION_NAMES = Object.freeze([
   "011_readiness_audit_history.sql",
   "012_live_workbench_snapshots.sql",
   "013_customer_offboarding.sql",
+  "014_approval_operation_recovery.sql",
+  "015_monitoring_account_fairness.sql",
+  "016_live_portfolio_summaries.sql",
 ]);
 
 const DEFAULT_MIGRATIONS_DIRECTORY = fileURLToPath(

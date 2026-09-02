@@ -2,7 +2,7 @@
 
 `npm run db:migrate` is the only application migration command. It applies the
 SQL files in [`database/`](database/) by filename, beginning with the existing
-`001` through `013` set. It connects to the database named by `DATABASE_URL`; it
+`001` through `016` set. It connects to the database named by `DATABASE_URL`; it
 never creates, renames, or drops a database.
 
 ## Safety contract
@@ -88,7 +88,7 @@ remain transaction-safe: do not add `CREATE INDEX CONCURRENTLY`, `VACUUM`, or
 other statements PostgreSQL forbids inside a transaction.
 
 Never edit a migration after it has been applied. If behavior must change, add
-the next sequential file (for example, `014_description.sql`). If drift is
+the next sequential file (for example, `017_description.sql`). If drift is
 reported, restore the applied file byte-for-byte from the deployed revision and
 add a corrective migration; do not update or delete ledger rows by hand.
 

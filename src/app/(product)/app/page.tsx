@@ -5,6 +5,7 @@ import type { WorkspaceSetupState } from "@/components/maintainflow/workspace-on
 import {
   listActiveApprovalRecords,
   listApprovalRecords,
+  recoverStaleApprovalOperations,
   verifyApprovalStore,
 } from "@/lib/audit/approval-store.server";
 import {
@@ -46,6 +47,10 @@ import {
   fetchLiveAdAccount,
 } from "@/lib/openai-ads/data.server";
 import { getLiveWorkbench } from "@/lib/openai-ads/live-sync.server";
+import {
+  listLivePortfolioAccounts,
+} from "@/lib/openai-ads/live-portfolio.server";
+import type { LivePortfolioAccount } from "@/lib/openai-ads/live-portfolio";
 import {
   listCreativeReviewEvents,
   recordCreativeReviewSnapshot,
@@ -144,6 +149,9 @@ export default async function MaintainFlowAppPage({
   let readinessHistoryStoreReady = false;
   let readinessHistoryError: string | undefined;
   let readinessHistory: ReadinessAuditHistoryEntry[] = [];
+  let livePortfolioVisible = false;
+  let livePortfolioAccounts: LivePortfolioAccount[] = [];
+  let livePortfolioError: string | undefined;
 
   if (!authenticatedOperator) {
     if (runtime.dataSource === "live") {
@@ -372,6 +380,10 @@ export default async function MaintainFlowAppPage({
                     "Completed monitoring windows could not be checked during this sync. No rollback was sent.";
                 }
                 try {
+                  await recoverStaleApprovalOperations({
+                    accountId: live.account.id,
+                    limit: 50,
+                  });
                   const [historyRecords, activeRecords] = await Promise.all([
                     listApprovalRecords(live.account.id),
                     listActiveApprovalRecords(live.account.id),
@@ -466,6 +478,24 @@ export default async function MaintainFlowAppPage({
         syncError =
           "Live sync failed. MaintainFlow is showing no account metrics or recommendations and has disabled all external writes; demo fixtures are not substituted for this connected account.";
       }
+    }
+  }
+
+  if (
+    authenticatedOperator &&
+    dataSource === "live" &&
+    workspaceAccess?.organizationType === "agency"
+  ) {
+    livePortfolioVisible = true;
+    try {
+      livePortfolioAccounts = await listLivePortfolioAccounts({
+        operatorId: authenticatedOperator.id,
+        organizationId: workspaceAccess.organizationId,
+      });
+    } catch (error) {
+      log.error("workspace.live_portfolio_load_failed", { error });
+      livePortfolioError =
+        "Stored client evidence could not be loaded. Missing snapshots and detected signals remain unknown.";
     }
   }
 
@@ -579,6 +609,9 @@ export default async function MaintainFlowAppPage({
       simulatorLabel={
         dataSource === "demo" ? simulatedWorkspace.simulatorLabel : ""
       }
+      livePortfolioVisible={livePortfolioVisible}
+      livePortfolioAccounts={livePortfolioAccounts}
+      livePortfolioError={livePortfolioError}
     />
   );
 }

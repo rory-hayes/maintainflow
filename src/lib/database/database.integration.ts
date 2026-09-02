@@ -24,9 +24,15 @@ import {
 } from "../../../scripts/customer-offboarding.mjs";
 
 import {
+  APPROVAL_OPERATION_LEASE_MS,
+  ApprovalProviderSendFenceUnavailableError,
   ApprovalTransitionError,
+  MONITORING_ACCOUNT_ATTEMPT_LEASE_MS,
   claimApprovalRollback,
+  claimDueMonitoringAccounts,
   claimDueMonitoringRecords,
+  completeMonitoringAccountAttempt,
+  countUnresolvedApprovalOperations,
   createApprovalRecord,
   getApprovalAccountId,
   listActiveApprovalRecords,
@@ -35,9 +41,13 @@ import {
   listDueMonitoringRecords,
   reconcileApprovalRecord,
   recordMonitoringOutcome,
+  recoverStaleApprovalOperations,
+  releaseMonitoringClaim,
+  markApprovalProviderAttempt,
   updateApprovalRecord,
   updateRollbackRecord,
   verifyApprovalStore,
+  withApprovalProviderSendFence,
 } from "../audit/approval-store.server";
 import {
   RecommendationDecisionTransitionError,
@@ -77,6 +87,7 @@ import {
   readLiveSyncState,
   verifyLiveSyncStore,
 } from "../openai-ads/live-sync-store.server";
+import { listLivePortfolioAccounts } from "../openai-ads/live-portfolio.server";
 import {
   consumeReadinessAuditQuota,
   pruneExpiredReadinessRateLimitBuckets,
@@ -95,6 +106,7 @@ import {
   AdvertiserAccountAttachConflictError,
   AdvertiserCredentialChangedError,
   AdvertiserCredentialUnavailableError,
+  AdvertiserWriteBlockedError,
   attachAdvertiserAccountToAgency,
   bootstrapWorkspace,
   getAccountAccess,
@@ -102,6 +114,7 @@ import {
   getAdsCredentialMaterialForAccount,
   getConversionsApiCredentialForAccount,
   listAccountAccesses,
+  lockCurrentAccountWriteAccess,
   requireAgencyAccountAttachAuthorization,
   requireAccountAccess,
   rotateAdsApiCredential,
@@ -151,6 +164,9 @@ async function applyMigrations(sql: Sql) {
     "docs/database/011_readiness_audit_history.sql",
     "docs/database/012_live_workbench_snapshots.sql",
     "docs/database/013_customer_offboarding.sql",
+    "docs/database/014_approval_operation_recovery.sql",
+    "docs/database/015_monitoring_account_fairness.sql",
+    "docs/database/016_live_portfolio_summaries.sql",
   ];
   await sql.begin(async (transaction) => {
     for (const migrationFile of migrationFiles) {
@@ -221,6 +237,85 @@ async function addMixedCapabilityAccess(accountId: string) {
         (${writableOrganizationId}, ${account.id}, 'manager', ${ownerOperatorId})
     `;
   });
+}
+
+async function createMonitoringFairnessFixture(options: {
+  prefix: string;
+  now: Date;
+  dueRows: readonly number[];
+}) {
+  const accountIds: string[] = [];
+  for (const [accountIndex, dueRows] of options.dueRows.entries()) {
+    const advertiserAccountId = randomUUID();
+    const accountId = `adacct_${options.prefix}_${accountIndex + 1}`;
+    accountIds.push(accountId);
+    await database`
+      insert into maintainflow_advertiser_accounts (
+        id, external_account_id, name, connection_mode, status
+      ) values (
+        ${advertiserAccountId}, ${accountId},
+        ${`Fairness fixture ${accountIndex + 1}`}, 'environment', 'active'
+      )
+    `;
+    for (let rowIndex = 0; rowIndex < dueRows; rowIndex += 1) {
+      const endsAt = new Date(
+        options.now.getTime()
+          - 4 * 24 * 60 * 60 * 1_000
+          + accountIndex * 60 * 60 * 1_000
+          + rowIndex * 60 * 1_000,
+      );
+      const startedAt = new Date(endsAt.getTime() - 7 * 24 * 60 * 60 * 1_000);
+      await database`
+        insert into ads_approval_records (
+          id, account_id, operator_id, recommendation_id,
+          recommendation_title, entity_id, request_payload,
+          rollback_payload, evidence_payload, safeguard, status,
+          monitoring_plan, monitoring_window_days, monitoring_started_at,
+          monitoring_ends_at, applied_at
+        ) values (
+          ${randomUUID()}, ${accountId}, 'monitoring_fairness_fixture',
+          ${`rec_${options.prefix}_${accountIndex + 1}_${rowIndex + 1}`},
+          'Fair monitoring scheduler',
+          ${`adgroup_${options.prefix}_${accountIndex + 1}_${rowIndex + 1}`},
+          ${database.json({ operation: "update" })},
+          ${database.json({ operation: "update" })},
+          ${database.json({ source: "integration_fixture" })},
+          'Human approval required', 'applied',
+          ${database.json({
+            kind: "click_attributed_conversion_guardrail",
+            windowDays: 7,
+            baseline: {
+              rangeStart: Math.floor(startedAt.getTime() / 1_000),
+              rangeEnd: Math.floor(endsAt.getTime() / 1_000),
+              spend: 2_000,
+              clickAttributedConversions: 100,
+              cpa: 20,
+              configuredBidMicros: 25_000_000,
+              currencyCode: "EUR",
+            },
+            rollbackRule: {
+              metric: "click_attributed_conversions",
+              comparison: "decrease_percent_greater_than",
+              thresholdPercent: 15,
+            },
+          })},
+          7, ${startedAt}, ${endsAt}, ${startedAt}
+        )
+      `;
+    }
+  }
+  return accountIds;
+}
+
+async function removeMonitoringFairnessFixture(accountIds: readonly string[]) {
+  await database`
+    delete from ads_approval_records
+    where account_id = any(${accountIds}::text[])
+  `;
+  await database`
+    delete from maintainflow_advertiser_accounts
+    where external_account_id = any(${accountIds}::text[])
+  `;
 }
 
 describe("PostgreSQL customer and approval boundary", () => {
@@ -367,6 +462,7 @@ describe("PostgreSQL customer and approval boundary", () => {
     });
     expect(first).toMatchObject({
       created: true,
+      credentialUpdated: true,
       access: {
         organizationId: agencyAccess.organizationId,
         organizationType: "agency",
@@ -390,6 +486,7 @@ describe("PostgreSQL customer and approval boundary", () => {
     });
     expect(retry).toMatchObject({
       created: false,
+      credentialUpdated: false,
       access: {
         accountId,
         accountName: "Beacon Additional Client",
@@ -1140,6 +1237,7 @@ describe("PostgreSQL customer and approval boundary", () => {
         access: advertiserAccess,
         expectedCredentialGeneration:
           replacementMaterial.credentialGeneration,
+        requireClearProviderOperationLedger: false,
       },
       async ({ access, credentialMaterial }) => ({
         access,
@@ -1157,10 +1255,76 @@ describe("PostgreSQL customer and approval boundary", () => {
           operatorId: ownerOperatorId,
           access: advertiserAccess,
           expectedCredentialGeneration: initialMaterial.credentialGeneration,
+          requireClearProviderOperationLedger: false,
         },
         async () => undefined,
       ),
     ).rejects.toBeInstanceOf(AdvertiserCredentialChangedError);
+
+    const unresolvedSource = getDemoRecommendation("rec_bid_20");
+    if (!unresolvedSource) {
+      throw new Error("The provider-operation interlock fixture is missing.");
+    }
+    const unresolvedApprovalId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: {
+        ...unresolvedSource,
+        id: "rec_provider_operation_interlock",
+        title: "Provider operation interlock",
+        entityId: `${unresolvedSource.entityId}_operation_interlock`,
+      },
+      access: advertiserAccess,
+    });
+    await updateApprovalRecord(
+      unresolvedApprovalId,
+      "reconciliation_required",
+      { error: "The provider outcome is intentionally unresolved for this test." },
+    );
+    await expect(
+      countUnresolvedApprovalOperations({ accountId: advertiserAccountId }),
+    ).resolves.toBe(1);
+    await expect(
+      withAuthorizedAdsWriteFence(
+        {
+          accountId: advertiserAccountId,
+          operatorId: ownerOperatorId,
+          access: advertiserAccess,
+          expectedCredentialGeneration:
+            replacementMaterial.credentialGeneration,
+          requireClearProviderOperationLedger: true,
+        },
+        async () => undefined,
+      ),
+    ).rejects.toBeInstanceOf(AdvertiserWriteBlockedError);
+    await reconcileApprovalRecord({
+      id: unresolvedApprovalId,
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      action: "mark_not_applied",
+      note: "Ads Manager confirmed that the provider change was not applied.",
+      access: advertiserAccess,
+    });
+    await expect(
+      withAuthorizedAdsWriteFence(
+        {
+          accountId: advertiserAccountId,
+          operatorId: ownerOperatorId,
+          access: advertiserAccess,
+          expectedCredentialGeneration:
+            replacementMaterial.credentialGeneration,
+          requireClearProviderOperationLedger: true,
+        },
+        async () => "write-ledger-clear",
+      ),
+    ).resolves.toMatchObject({ value: "write-ledger-clear" });
+    await expect(
+      countUnresolvedApprovalOperations({ accountId: advertiserAccountId }),
+    ).resolves.toBe(0);
+    await database`
+      delete from ads_approval_records
+      where id = ${unresolvedApprovalId}
+    `;
 
     const versions = await database<
       {
@@ -1181,6 +1345,100 @@ describe("PostgreSQL customer and approval boundary", () => {
       { credential_version: 1, status: "revoked", revoked: true },
       { credential_version: 2, status: "active", revoked: false },
     ]);
+  });
+
+  it("locks the advertiser account before actor authorization rows", async () => {
+    let markAccountLockHeld!: () => void;
+    let startActorLocks!: () => void;
+    let markActorLocksHeld!: () => void;
+    let releaseHolder!: () => void;
+    const accountLockHeld = new Promise<void>((resolve) => {
+      markAccountLockHeld = resolve;
+    });
+    const actorLockStart = new Promise<void>((resolve) => {
+      startActorLocks = resolve;
+    });
+    const actorLocksHeld = new Promise<void>((resolve) => {
+      markActorLocksHeld = resolve;
+    });
+    const holderRelease = new Promise<void>((resolve) => {
+      releaseHolder = resolve;
+    });
+
+    const holder = database.begin(async (transaction) => {
+      await transaction`set local lock_timeout = '2s'`;
+      const [account] = await transaction<{ id: string }[]>`
+        select id
+        from maintainflow_advertiser_accounts
+        where external_account_id = ${advertiserAccountId}
+        for update
+      `;
+      if (!account) throw new Error("The lock-order account is missing.");
+      markAccountLockHeld();
+      await actorLockStart;
+      await transaction`
+        select organization.id
+        from maintainflow_organizations organization
+        join maintainflow_organization_memberships membership
+          on membership.organization_id = organization.id
+        join maintainflow_account_access account_access
+          on account_access.organization_id = organization.id
+        where organization.id = ${advertiserAccess.organizationId}
+          and membership.clerk_user_id = ${ownerOperatorId}
+          and account_access.advertiser_account_id = ${account.id}
+        for update of organization, membership, account_access
+      `;
+      markActorLocksHeld();
+      await holderRelease;
+    });
+    await accountLockHeld;
+
+    const authorization = database.begin(async (transaction) => {
+      await transaction`set local lock_timeout = '2s'`;
+      return lockCurrentAccountWriteAccess({
+        transaction,
+        operatorId: ownerOperatorId,
+        accountId: advertiserAccountId,
+        access: advertiserAccess,
+        forbiddenMessage: "The lock-order authorization failed.",
+      });
+    });
+
+    try {
+      await expect(
+        Promise.race([
+          authorization.then(
+            () => "settled" as const,
+            () => "settled" as const,
+          ),
+          new Promise<"blocked">((resolve) =>
+            setTimeout(() => resolve("blocked"), 100),
+          ),
+        ]),
+      ).resolves.toBe("blocked");
+
+      startActorLocks();
+      await expect(
+        Promise.race([
+          actorLocksHeld.then(() => "locked" as const),
+          new Promise<"timed_out">((resolve) =>
+            setTimeout(() => resolve("timed_out"), 2_500),
+          ),
+        ]),
+      ).resolves.toBe("locked");
+    } finally {
+      startActorLocks();
+      releaseHolder();
+    }
+
+    await expect(holder).resolves.toBeUndefined();
+    await expect(authorization).resolves.toMatchObject({
+      advertiserAccountId: expect.any(String),
+      access: {
+        accountId: advertiserAccountId,
+        organizationId: advertiserAccess.organizationId,
+      },
+    });
   });
 
   it("waits for an in-flight role change and reauthorizes before credential rotation", async () => {
@@ -1346,6 +1604,178 @@ describe("PostgreSQL customer and approval boundary", () => {
         limit: 500,
       }),
     ).resolves.toBe(1);
+  });
+
+  it("lists only credential-matched compact evidence for one active agency organization", async () => {
+    const now = new Date("2026-09-02T12:00:00.000Z");
+    const sourceRecommendation = getDemoRecommendation("rec_bid_20");
+    if (!sourceRecommendation) throw new Error("Missing recommendation fixture.");
+    const agencyCredential = await getAdsCredentialMaterialForAccount(
+      agencyAccountId,
+    );
+    const agencyClaim = await claimLiveSyncRefresh({
+      accountId: agencyAccountId,
+      credentialGeneration: agencyCredential.credentialGeneration,
+      now,
+      leaseMs: 90_000,
+    });
+    expect(agencyClaim).not.toBeNull();
+    await expect(
+      completeLiveSyncRefresh({
+        accountId: agencyAccountId,
+        credentialGeneration: agencyCredential.credentialGeneration,
+        claimId: agencyClaim!.claimId,
+        snapshot: {
+          account: { ...demoAccount, id: agencyAccountId, name: "Beacon Client" },
+          campaigns: demoCampaigns,
+          ads: demoAds,
+          performance: demoCampaignPerformance,
+          recommendations: [
+            { ...sourceRecommendation, source: "live" as const },
+          ],
+          budgetGuardEvidence: [],
+          conversionMeasurement: {
+            source: "live",
+            status: "ready",
+            checkedAt: now.toISOString(),
+            activeConversionCampaigns: 0,
+            healthyCampaigns: 0,
+            eventSettingCount: 0,
+            checks: [],
+            message: "Portfolio integration snapshot.",
+          },
+          syncedAt: now.toISOString(),
+        },
+        now,
+        freshForMs: 120_000,
+        staleForMs: 900_000,
+      }),
+    ).resolves.toBe(true);
+
+    const mismatchedAccountId = `adacct_portfolio_mismatch_${randomUUID()}`;
+    const mismatchedCredential = encryptAdsApiKey({
+      apiKey: "ads-integration-portfolio-mismatch",
+      externalAccountId: mismatchedAccountId,
+    });
+    const attached = await attachAdvertiserAccountToAgency({
+      operatorId: ownerOperatorId,
+      organizationId: agencyAccess.organizationId,
+      accountId: mismatchedAccountId,
+      accountName: "Credential Mismatch Client",
+      credential: mismatchedCredential,
+      verifiedAt: now,
+    });
+    const wrongGeneration = `vault:${randomUUID()}:99`;
+    const wrongClaim = await claimLiveSyncRefresh({
+      accountId: mismatchedAccountId,
+      credentialGeneration: wrongGeneration,
+      now,
+      leaseMs: 90_000,
+    });
+    expect(wrongClaim).not.toBeNull();
+    await expect(
+      completeLiveSyncRefresh({
+        accountId: mismatchedAccountId,
+        credentialGeneration: wrongGeneration,
+        claimId: wrongClaim!.claimId,
+        snapshot: {
+          account: {
+            ...demoAccount,
+            id: mismatchedAccountId,
+            name: attached.access.accountName,
+          },
+          campaigns: [],
+          ads: [],
+          performance: [],
+          recommendations: [],
+          budgetGuardEvidence: [],
+          conversionMeasurement: {
+            source: "live",
+            status: "ready",
+            checkedAt: now.toISOString(),
+            activeConversionCampaigns: 0,
+            healthyCampaigns: 0,
+            eventSettingCount: 0,
+            checks: [],
+            message: "Wrong-generation fixture.",
+          },
+          syncedAt: now.toISOString(),
+        },
+        now,
+        freshForMs: 120_000,
+        staleForMs: 900_000,
+      }),
+    ).resolves.toBe(true);
+
+    try {
+      const portfolio = await listLivePortfolioAccounts({
+        operatorId: ownerOperatorId,
+        organizationId: agencyAccess.organizationId,
+        now: new Date(now.getTime() + 60_000),
+      });
+      expect(portfolio).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            accountId: agencyAccountId,
+            hasConfirmedSnapshot: true,
+            detectedSignalCount: 1,
+            evidenceState: "confirmed_fresh",
+          }),
+          expect.objectContaining({
+            accountId: mismatchedAccountId,
+            hasConfirmedSnapshot: false,
+            detectedSignalCount: null,
+            evidenceState: "not_confirmed",
+          }),
+        ]),
+      );
+      expect(portfolio.map((account) => account.accountId)).not.toContain(
+        advertiserAccountId,
+      );
+
+      await database`
+        update maintainflow_advertiser_accounts set
+          status = 'disconnected', updated_at = now()
+        where external_account_id = ${mismatchedAccountId}
+      `;
+      await expect(
+        listLivePortfolioAccounts({
+          operatorId: ownerOperatorId,
+          organizationId: agencyAccess.organizationId,
+          now: new Date(now.getTime() + 60_000),
+        }),
+      ).resolves.not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ accountId: mismatchedAccountId }),
+        ]),
+      );
+    } finally {
+      await database`
+        delete from maintainflow_live_workbench_snapshots
+        where advertiser_account_id = (
+          select id from maintainflow_advertiser_accounts
+          where external_account_id = ${mismatchedAccountId}
+        )
+      `;
+      await database`
+        delete from maintainflow_advertiser_credentials
+        where advertiser_account_id = (
+          select id from maintainflow_advertiser_accounts
+          where external_account_id = ${mismatchedAccountId}
+        )
+      `;
+      await database`
+        delete from maintainflow_account_access
+        where advertiser_account_id = (
+          select id from maintainflow_advertiser_accounts
+          where external_account_id = ${mismatchedAccountId}
+        )
+      `;
+      await database`
+        delete from maintainflow_advertiser_accounts
+        where external_account_id = ${mismatchedAccountId}
+      `;
+    }
   });
 
   it("encrypts, scopes, and atomically rotates conversion credentials", async () => {
@@ -1908,7 +2338,15 @@ describe("PostgreSQL customer and approval boundary", () => {
     expect(
       rollbackClaims.find((result) => result.status === "rejected"),
     ).toMatchObject({ reason: expect.any(ApprovalTransitionError) });
+    const successfulRollbackClaim = rollbackClaims.find(
+      (result) => result.status === "fulfilled",
+    );
+    if (!successfulRollbackClaim || successfulRollbackClaim.status !== "fulfilled") {
+      throw new Error("The rollback claim fixture did not produce a winner.");
+    }
     await updateRollbackRecord(rollbackApprovalId, "rolled_back", {
+      accountId: advertiserAccountId,
+      attemptId: successfulRollbackClaim.value.attemptId,
       response: { id: recommendation.entityId },
     });
     const [storedRollbackResponse] = await database<
@@ -2373,6 +2811,1033 @@ describe("PostgreSQL customer and approval boundary", () => {
     ).resolves.toBe(true);
   });
 
+  it("does not replace an unexpired account attempt or backoff from a stale claim snapshot", async () => {
+    const now = new Date("2026-08-31T11:00:00.000Z");
+    const leaseUntil = new Date(
+      now.getTime() + MONITORING_ACCOUNT_ATTEMPT_LEASE_MS,
+    );
+    const backoffUntil = new Date(now.getTime() + 5 * 60 * 1_000);
+    const raceDatabase = postgres(databaseUrl, {
+      connect_timeout: 5,
+      idle_timeout: 5,
+      max: 1,
+      prepare: false,
+      connection: { application_name: "maintainflow-monitoring-race-holder" },
+    });
+
+    try {
+      for (const mode of ["lease", "backoff"] as const) {
+        const [accountId] = await createMonitoringFairnessFixture({
+          prefix: `claim_race_${mode}`,
+          now,
+          dueRows: [1],
+        });
+        if (!accountId) throw new Error("The claim race fixture is missing.");
+        let releaseBlocker: (() => void) | undefined;
+        const blockerGate = new Promise<void>((resolve) => {
+          releaseBlocker = resolve;
+        });
+        let signalBlockerReady: ((pid: number) => void) | undefined;
+        const blockerReady = new Promise<number>((resolve) => {
+          signalBlockerReady = resolve;
+        });
+        const winningAttemptId = randomUUID();
+        let blockerTransaction: Promise<unknown> | undefined;
+        let staleClaim:
+          | ReturnType<typeof claimDueMonitoringAccounts>
+          | undefined;
+
+        try {
+          await database`
+            update ads_approval_records set
+              monitoring_started_at = '2019-12-01T00:00:00.000Z',
+              monitoring_ends_at = '2020-01-01T00:00:00.000Z'
+            where account_id = ${accountId}
+          `;
+          await database`
+            insert into maintainflow_monitoring_account_schedule (
+              advertiser_account_id
+            )
+            select id from maintainflow_advertiser_accounts
+            where external_account_id = ${accountId}
+          `;
+
+          blockerTransaction = raceDatabase.begin(async (transaction) => {
+            const [backend] = await transaction<{ pid: number }[]>`
+              select pg_backend_pid()::int as pid
+            `;
+            if (!backend) throw new Error("The blocker backend is missing.");
+            if (mode === "lease") {
+              await transaction`
+                update maintainflow_monitoring_account_schedule schedule set
+                  current_attempt_id = ${winningAttemptId},
+                  attempt_count = 1,
+                  last_attempted_at = ${now},
+                  attempt_lease_until = ${leaseUntil},
+                  updated_at = ${now}
+                from maintainflow_advertiser_accounts advertiser_account
+                where advertiser_account.id = schedule.advertiser_account_id
+                  and advertiser_account.external_account_id = ${accountId}
+              `;
+            } else {
+              await transaction`
+                update maintainflow_monitoring_account_schedule schedule set
+                  attempt_count = 1,
+                  consecutive_failures = 1,
+                  last_attempted_at = ${now},
+                  last_failed_at = ${now},
+                  backoff_until = ${backoffUntil},
+                  updated_at = ${now}
+                from maintainflow_advertiser_accounts advertiser_account
+                where advertiser_account.id = schedule.advertiser_account_id
+                  and advertiser_account.external_account_id = ${accountId}
+              `;
+            }
+            signalBlockerReady?.(backend.pid);
+            await blockerGate;
+          });
+
+          const blockerPid = await blockerReady;
+          staleClaim = claimDueMonitoringAccounts({
+            attemptId: randomUUID(),
+            now,
+            limit: 1,
+          });
+
+          const waitDeadline = Date.now() + 3_000;
+          let observedConflictWait = false;
+          while (Date.now() < waitDeadline) {
+            const [activity] = await database<{ blocked: boolean }[]>`
+              select exists (
+                select 1
+                from pg_stat_activity activity
+                where ${blockerPid}::int = any(pg_blocking_pids(activity.pid))
+                  and activity.wait_event_type = 'Lock'
+                  and activity.query ilike '%with due_accounts as materialized%'
+              ) as blocked
+            `;
+            if (activity?.blocked) {
+              observedConflictWait = true;
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          expect(observedConflictWait).toBe(true);
+
+          releaseBlocker?.();
+          await blockerTransaction;
+          const staleResult = await staleClaim;
+          expect(staleResult).not.toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ accountId }),
+            ]),
+          );
+
+          const [stored] = await database<
+            {
+              attempt_count: number;
+              current_attempt_id: string | null;
+              attempt_lease_until: Date | null;
+              backoff_until: Date | null;
+            }[]
+          >`
+            select schedule.attempt_count::int as attempt_count,
+              schedule.current_attempt_id, schedule.attempt_lease_until,
+              schedule.backoff_until
+            from maintainflow_monitoring_account_schedule schedule
+            join maintainflow_advertiser_accounts advertiser_account
+              on advertiser_account.id = schedule.advertiser_account_id
+            where advertiser_account.external_account_id = ${accountId}
+          `;
+          expect(stored).toEqual(
+            mode === "lease"
+              ? {
+                  attempt_count: 1,
+                  current_attempt_id: winningAttemptId,
+                  attempt_lease_until: leaseUntil,
+                  backoff_until: null,
+                }
+              : {
+                  attempt_count: 1,
+                  current_attempt_id: null,
+                  attempt_lease_until: null,
+                  backoff_until: backoffUntil,
+                },
+          );
+        } finally {
+          releaseBlocker?.();
+          await blockerTransaction?.catch(() => undefined);
+          await staleClaim?.catch(() => undefined);
+          await removeMonitoringFairnessFixture([accountId]);
+        }
+      }
+    } finally {
+      await raceDatabase.end({ timeout: 5 });
+    }
+  });
+
+  it("backs off six broken monitoring accounts so the seventh account is selected next", async () => {
+    const now = new Date("2026-08-31T12:00:00.000Z");
+    const accountIds = await createMonitoringFairnessFixture({
+      prefix: "fair_failure",
+      now,
+      dueRows: [1, 1, 1, 1, 1, 1, 1],
+    });
+    try {
+      const firstAttemptId = randomUUID();
+      const firstSelection = await claimDueMonitoringAccounts({
+        attemptId: firstAttemptId,
+        now,
+        limit: 6,
+      });
+      expect(firstSelection.map((account) => account.accountId)).toEqual(
+        accountIds.slice(0, 6),
+      );
+      expect(firstSelection).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ dueCount: 1, oldestDueAt: expect.any(Date) }),
+        ]),
+      );
+
+      await expect(
+        completeMonitoringAccountAttempt({
+          accountId: accountIds[6]!,
+          attemptId: firstSelection[0]!.attemptId,
+          succeeded: true,
+          now,
+        }),
+      ).resolves.toBe(false);
+      const [stillClaimed] = await database<
+        { current_attempt_id: string | null }[]
+      >`
+        select schedule.current_attempt_id
+        from maintainflow_monitoring_account_schedule schedule
+        join maintainflow_advertiser_accounts advertiser_account
+          on advertiser_account.id = schedule.advertiser_account_id
+        where advertiser_account.external_account_id = ${accountIds[0]!}
+      `;
+      expect(stillClaimed?.current_attempt_id).toBe(
+        firstSelection[0]!.attemptId,
+      );
+
+      await Promise.all(
+        firstSelection.map((account) =>
+          completeMonitoringAccountAttempt({
+            accountId: account.accountId,
+            attemptId: account.attemptId,
+            succeeded: false,
+            now,
+          }),
+        ),
+      ).then((results) => expect(results).toEqual(Array(6).fill(true)));
+
+      const nextRunAt = new Date(now.getTime() + 1_000);
+      const secondAttemptId = randomUUID();
+      const secondSelection = await claimDueMonitoringAccounts({
+        attemptId: secondAttemptId,
+        now: nextRunAt,
+        limit: 6,
+      });
+      expect(secondSelection).toEqual([
+        expect.objectContaining({ accountId: accountIds[6], dueCount: 1 }),
+      ]);
+      await expect(
+        completeMonitoringAccountAttempt({
+          accountId: accountIds[6]!,
+          attemptId: secondSelection[0]!.attemptId,
+          succeeded: true,
+          now: nextRunAt,
+        }),
+      ).resolves.toBe(true);
+
+      const failureState = await database<
+        {
+          external_account_id: string;
+          consecutive_failures: number;
+          backoff_until: Date | null;
+          current_attempt_id: string | null;
+        }[]
+      >`
+        select advertiser_account.external_account_id,
+          schedule.consecutive_failures, schedule.backoff_until,
+          schedule.current_attempt_id
+        from maintainflow_monitoring_account_schedule schedule
+        join maintainflow_advertiser_accounts advertiser_account
+          on advertiser_account.id = schedule.advertiser_account_id
+        where advertiser_account.external_account_id = any(
+          ${accountIds.slice(0, 6)}::text[]
+        )
+        order by advertiser_account.external_account_id
+      `;
+      expect(failureState).toHaveLength(6);
+      expect(failureState).toEqual(
+        expect.arrayContaining(
+          accountIds.slice(0, 6).map((accountId) =>
+            expect.objectContaining({
+              external_account_id: accountId,
+              consecutive_failures: 1,
+              backoff_until: new Date(now.getTime() + 5 * 60 * 1_000),
+              current_attempt_id: null,
+            }),
+          ),
+        ),
+      );
+
+      const resetAttemptAt = new Date(now.getTime() + 5 * 60 * 1_000 + 1);
+      const resetAttemptId = randomUUID();
+      const [resetCandidate] = await claimDueMonitoringAccounts({
+        attemptId: resetAttemptId,
+        now: resetAttemptAt,
+        limit: 1,
+      });
+      expect(resetCandidate?.accountId).toBe(accountIds[0]);
+      await expect(
+        completeMonitoringAccountAttempt({
+          accountId: accountIds[0]!,
+          attemptId: resetCandidate!.attemptId,
+          succeeded: true,
+          now: resetAttemptAt,
+        }),
+      ).resolves.toBe(true);
+      const [resetState] = await database<
+        {
+          consecutive_failures: number;
+          backoff_until: Date | null;
+          last_succeeded_at: Date | null;
+        }[]
+      >`
+        select schedule.consecutive_failures, schedule.backoff_until,
+          schedule.last_succeeded_at
+        from maintainflow_monitoring_account_schedule schedule
+        join maintainflow_advertiser_accounts advertiser_account
+          on advertiser_account.id = schedule.advertiser_account_id
+        where advertiser_account.external_account_id = ${accountIds[0]!}
+      `;
+      expect(resetState).toEqual({
+        consecutive_failures: 0,
+        backoff_until: null,
+        last_succeeded_at: resetAttemptAt,
+      });
+    } finally {
+      await removeMonitoringFairnessFixture(accountIds);
+    }
+  });
+
+  it("rotates successful high-backlog accounts behind an untouched seventh account", async () => {
+    const now = new Date("2026-08-31T13:00:00.000Z");
+    const accountIds = await createMonitoringFairnessFixture({
+      prefix: "fair_success",
+      now,
+      dueRows: [3, 3, 3, 3, 3, 3, 1],
+    });
+    try {
+      const firstAttemptId = randomUUID();
+      const firstSelection = await claimDueMonitoringAccounts({
+        attemptId: firstAttemptId,
+        now,
+        limit: 6,
+      });
+      expect(firstSelection.map((account) => account.accountId)).toEqual(
+        accountIds.slice(0, 6),
+      );
+      expect(firstSelection.every((account) => account.dueCount === 3)).toBe(
+        true,
+      );
+      await Promise.all(
+        firstSelection.map((account) =>
+          completeMonitoringAccountAttempt({
+            accountId: account.accountId,
+            attemptId: account.attemptId,
+            succeeded: true,
+            now,
+          }),
+        ),
+      ).then((results) => expect(results).toEqual(Array(6).fill(true)));
+
+      const secondAttemptId = randomUUID();
+      const nextRunAt = new Date(now.getTime() + 1_000);
+      const secondSelection = await claimDueMonitoringAccounts({
+        attemptId: secondAttemptId,
+        now: nextRunAt,
+        limit: 6,
+      });
+      expect(secondSelection[0]?.accountId).toBe(accountIds[6]);
+      expect(secondSelection.map((account) => account.accountId)).toContain(
+        accountIds[6],
+      );
+      expect(secondSelection.map((account) => account.accountId)).not.toContain(
+        accountIds[5],
+      );
+      await expect(
+        completeMonitoringAccountAttempt({
+          accountId: accountIds[5]!,
+          attemptId: secondSelection[0]!.attemptId,
+          succeeded: false,
+          now: nextRunAt,
+        }),
+      ).resolves.toBe(false);
+      await Promise.all(
+        secondSelection.map((account) =>
+          completeMonitoringAccountAttempt({
+            accountId: account.accountId,
+            attemptId: account.attemptId,
+            succeeded: true,
+            now: nextRunAt,
+          }),
+        ),
+      ).then((results) => expect(results).toEqual(Array(6).fill(true)));
+    } finally {
+      await removeMonitoringFairnessFixture(accountIds);
+    }
+  });
+
+  it("recovers interrupted Ads operations without retrying an unknown provider outcome", async () => {
+    const source = getDemoRecommendation("rec_bid_20");
+    if (!source) throw new Error("The operation recovery fixture is missing.");
+    const now = new Date("2026-08-31T12:00:00.000Z");
+    const staleAt = new Date(
+      now.getTime() - APPROVAL_OPERATION_LEASE_MS - 1_000,
+    );
+    const recommendation = (suffix: string) => ({
+      ...source,
+      id: `rec_operation_recovery_${suffix}`,
+      title: `Operation recovery ${suffix}`,
+      entityId: `${source.entityId}_${suffix}`,
+    });
+
+    const applyNotAttempted = recommendation("apply_not_attempted");
+    const applyNotAttemptedId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: applyNotAttempted,
+      access: advertiserAccess,
+    });
+    await database`
+      update ads_approval_records set updated_at = ${staleAt}
+      where id = ${applyNotAttemptedId}
+    `;
+
+    const applyAttempted = recommendation("apply_attempted");
+    const applyAttemptedId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: applyAttempted,
+      access: advertiserAccess,
+    });
+    await markApprovalProviderAttempt({
+      id: applyAttemptedId,
+      accountId: advertiserAccountId,
+      attemptId: applyAttemptedId,
+      status: "pending",
+      now: staleAt,
+    });
+
+    const rollbackNotAttempted = recommendation("rollback_not_attempted");
+    const rollbackNotAttemptedId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: rollbackNotAttempted,
+      access: advertiserAccess,
+    });
+    await updateApprovalRecord(rollbackNotAttemptedId, "applied");
+    await claimApprovalRollback(
+      rollbackNotAttemptedId,
+      advertiserAccountId,
+      ownerOperatorId,
+      advertiserAccess,
+    );
+    await database`
+      update ads_approval_records set updated_at = ${staleAt}
+      where id = ${rollbackNotAttemptedId}
+    `;
+
+    const rollbackAttempted = recommendation("rollback_attempted");
+    const rollbackAttemptedId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: rollbackAttempted,
+      access: advertiserAccess,
+    });
+    await updateApprovalRecord(rollbackAttemptedId, "applied");
+    const rollbackAttemptedClaim = await claimApprovalRollback(
+      rollbackAttemptedId,
+      advertiserAccountId,
+      ownerOperatorId,
+      advertiserAccess,
+    );
+    await markApprovalProviderAttempt({
+      id: rollbackAttemptedId,
+      accountId: advertiserAccountId,
+      attemptId: rollbackAttemptedClaim.attemptId,
+      status: "rollback_pending",
+      now: staleAt,
+    });
+
+    const freshRecommendation = recommendation("fresh");
+    const freshId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: freshRecommendation,
+      access: advertiserAccess,
+    });
+    const otherAccountRecommendation = recommendation("other_account");
+    const otherAccountId = await createApprovalRecord({
+      accountId: agencyAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: otherAccountRecommendation,
+      access: agencyAccess,
+    });
+    await database`
+      update ads_approval_records set updated_at = ${staleAt}
+      where id = ${otherAccountId}
+    `;
+
+    await expect(
+      recoverStaleApprovalOperations({
+        accountId: advertiserAccountId,
+        now,
+        limit: 10,
+      }),
+    ).resolves.toEqual({
+      recovered: 4,
+      apply: 2,
+      rollback: 2,
+      backlog: false,
+    });
+    await expect(
+      recoverStaleApprovalOperations({
+        accountId: advertiserAccountId,
+        now,
+        limit: 10,
+      }),
+    ).resolves.toEqual({
+      recovered: 0,
+      apply: 0,
+      rollback: 0,
+      backlog: false,
+    });
+
+    const recoveredRows = await database<
+      {
+        id: string;
+        status: string;
+        error_message: string | null;
+        rollback_error_message: string | null;
+      }[]
+    >`
+      select id, status, error_message, rollback_error_message
+      from ads_approval_records
+      where id in (
+        ${applyNotAttemptedId}, ${applyAttemptedId},
+        ${rollbackNotAttemptedId}, ${rollbackAttemptedId},
+        ${freshId}, ${otherAccountId}
+      )
+    `;
+    expect(recoveredRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: applyNotAttemptedId,
+        status: "failed",
+        error_message: expect.stringMatching(/No mutation was sent/i),
+      }),
+      expect.objectContaining({
+        id: applyAttemptedId,
+        status: "reconciliation_required",
+        error_message: expect.stringMatching(/provider attempt/i),
+      }),
+      expect.objectContaining({
+        id: rollbackNotAttemptedId,
+        status: "rollback_failed",
+        rollback_error_message: expect.stringMatching(/No rollback was sent/i),
+      }),
+      expect.objectContaining({
+        id: rollbackAttemptedId,
+        status: "rollback_reconciliation_required",
+        rollback_error_message: expect.stringMatching(/provider attempt/i),
+      }),
+      expect.objectContaining({ id: freshId, status: "pending" }),
+      expect.objectContaining({ id: otherAccountId, status: "pending" }),
+    ]));
+
+    await expect(
+      updateApprovalRecord(applyAttemptedId, "applied"),
+    ).rejects.toBeInstanceOf(ApprovalTransitionError);
+    await expect(
+      updateRollbackRecord(rollbackAttemptedId, "rolled_back", {
+        accountId: advertiserAccountId,
+        attemptId: rollbackAttemptedClaim.attemptId,
+      }),
+    ).rejects.toBeInstanceOf(ApprovalTransitionError);
+
+    const retryApplyId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: applyNotAttempted,
+      access: advertiserAccess,
+    });
+    expect(retryApplyId).toEqual(expect.any(String));
+    await updateApprovalRecord(retryApplyId, "failed");
+    const rollbackNotAttemptedRetry = await claimApprovalRollback(
+      rollbackNotAttemptedId,
+      advertiserAccountId,
+      ownerOperatorId,
+      advertiserAccess,
+    );
+    expect(rollbackNotAttemptedRetry).toMatchObject({ id: rollbackNotAttemptedId });
+    await updateRollbackRecord(rollbackNotAttemptedId, "rolled_back", {
+      accountId: advertiserAccountId,
+      attemptId: rollbackNotAttemptedRetry.attemptId,
+    });
+
+    const retryableRollback = recommendation("rollback_retry_after_rejection");
+    const retryableRollbackId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: retryableRollback,
+      access: advertiserAccess,
+    });
+    await updateApprovalRecord(retryableRollbackId, "applied");
+    const firstRetryableRollbackClaim = await claimApprovalRollback(
+      retryableRollbackId,
+      advertiserAccountId,
+      ownerOperatorId,
+      advertiserAccess,
+    );
+    await markApprovalProviderAttempt({
+      id: retryableRollbackId,
+      accountId: advertiserAccountId,
+      attemptId: firstRetryableRollbackClaim.attemptId,
+      status: "rollback_pending",
+      now: staleAt,
+    });
+    await updateRollbackRecord(retryableRollbackId, "rollback_failed", {
+      accountId: advertiserAccountId,
+      attemptId: firstRetryableRollbackClaim.attemptId,
+      error: "The provider definitively rejected the first rollback.",
+    });
+    const [firstRollbackAttempt] = await database<
+      { rollback_provider_attempted_at: Date | null }[]
+    >`
+      select rollback_provider_attempted_at
+      from ads_approval_records
+      where id = ${retryableRollbackId}
+    `;
+    expect(firstRollbackAttempt?.rollback_provider_attempted_at).toEqual(
+      expect.any(Date),
+    );
+
+    const secondRetryableRollbackClaim = await claimApprovalRollback(
+      retryableRollbackId,
+      advertiserAccountId,
+      ownerOperatorId,
+      advertiserAccess,
+    );
+    const [reclaimedRollback] = await database<
+      { rollback_provider_attempted_at: Date | null }[]
+    >`
+      select rollback_provider_attempted_at
+      from ads_approval_records
+      where id = ${retryableRollbackId}
+    `;
+    expect(reclaimedRollback?.rollback_provider_attempted_at).toBeNull();
+    await expect(
+      markApprovalProviderAttempt({
+        id: retryableRollbackId,
+        accountId: advertiserAccountId,
+        attemptId: secondRetryableRollbackClaim.attemptId,
+        status: "rollback_pending",
+        now,
+      }),
+    ).resolves.toBeUndefined();
+    await updateRollbackRecord(retryableRollbackId, "rolled_back", {
+      accountId: advertiserAccountId,
+      attemptId: secondRetryableRollbackClaim.attemptId,
+    });
+
+    await updateApprovalRecord(freshId, "failed");
+    await recoverStaleApprovalOperations({
+      accountId: agencyAccountId,
+      now,
+      limit: 10,
+    });
+  });
+
+  it("fences apply and rollback provider sends against stale recovery", async () => {
+    const source = getDemoRecommendation("rec_bid_20");
+    if (!source) throw new Error("The provider-send fence fixture is missing.");
+    const startedAt = new Date("2026-08-31T13:00:00.000Z");
+    const recoveryAt = new Date(
+      startedAt.getTime() + APPROVAL_OPERATION_LEASE_MS + 1_000,
+    );
+    const recommendation = (suffix: string) => ({
+      ...source,
+      id: `rec_provider_send_fence_${suffix}`,
+      title: `Provider send fence ${suffix}`,
+      entityId: `${source.entityId}_${suffix}`,
+    });
+
+    const unresolvedBeforeActiveApply =
+      await countUnresolvedApprovalOperations({
+        accountId: advertiserAccountId,
+        now: recoveryAt,
+      });
+    const activeApplyId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: recommendation("active_apply"),
+      access: advertiserAccess,
+    });
+    await expect(
+      markApprovalProviderAttempt({
+        id: activeApplyId,
+        accountId: agencyAccountId,
+        attemptId: activeApplyId,
+        status: "pending",
+        now: startedAt,
+      }),
+    ).rejects.toBeInstanceOf(ApprovalTransitionError);
+    await markApprovalProviderAttempt({
+      id: activeApplyId,
+      accountId: advertiserAccountId,
+      attemptId: activeApplyId,
+      status: "pending",
+      now: startedAt,
+    });
+
+    let releaseApply!: () => void;
+    let markApplyFenceStarted!: () => void;
+    const applyRelease = new Promise<void>((resolve) => {
+      releaseApply = resolve;
+    });
+    const applyFenceStarted = new Promise<void>((resolve) => {
+      markApplyFenceStarted = resolve;
+    });
+    let applyProviderCalls = 0;
+    const activeApply = withApprovalProviderSendFence(
+      {
+        id: activeApplyId,
+        accountId: advertiserAccountId,
+        attemptId: activeApplyId,
+        status: "pending",
+        now: startedAt,
+      },
+      async () => {
+        markApplyFenceStarted();
+        await applyRelease;
+        applyProviderCalls += 1;
+        return "apply-sent";
+      },
+    );
+    await applyFenceStarted;
+    try {
+      await expect(
+        recoverStaleApprovalOperations({
+          accountId: advertiserAccountId,
+          now: recoveryAt,
+          limit: 10,
+        }),
+      ).resolves.toEqual({
+        recovered: 0,
+        apply: 0,
+        rollback: 0,
+        backlog: false,
+      });
+      await expect(
+        countUnresolvedApprovalOperations({
+          accountId: advertiserAccountId,
+          now: recoveryAt,
+        }),
+      ).resolves.toBe(unresolvedBeforeActiveApply + 1);
+      expect(applyProviderCalls).toBe(0);
+    } finally {
+      releaseApply();
+    }
+    await expect(activeApply).resolves.toBe("apply-sent");
+    expect(applyProviderCalls).toBe(1);
+    await updateApprovalRecord(activeApplyId, "applied");
+
+    const recoveredApplyId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: recommendation("recovered_apply"),
+      access: advertiserAccess,
+    });
+    await markApprovalProviderAttempt({
+      id: recoveredApplyId,
+      accountId: advertiserAccountId,
+      attemptId: recoveredApplyId,
+      status: "pending",
+      now: startedAt,
+    });
+    await expect(
+      recoverStaleApprovalOperations({
+        accountId: advertiserAccountId,
+        now: recoveryAt,
+        limit: 10,
+      }),
+    ).resolves.toMatchObject({ recovered: 1, apply: 1, rollback: 0 });
+    let recoveredApplyProviderCalls = 0;
+    await expect(
+      withApprovalProviderSendFence(
+        {
+          id: recoveredApplyId,
+          accountId: advertiserAccountId,
+          attemptId: recoveredApplyId,
+          status: "pending",
+          now: recoveryAt,
+        },
+        async () => {
+          recoveredApplyProviderCalls += 1;
+          return "must-not-send";
+        },
+      ),
+    ).rejects.toBeInstanceOf(ApprovalProviderSendFenceUnavailableError);
+    expect(recoveredApplyProviderCalls).toBe(0);
+
+    const unresolvedBeforeActiveRollback =
+      await countUnresolvedApprovalOperations({
+        accountId: advertiserAccountId,
+        now: recoveryAt,
+      });
+    const activeRollbackId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: recommendation("active_rollback"),
+      access: advertiserAccess,
+    });
+    await updateApprovalRecord(activeRollbackId, "applied");
+    const activeRollbackClaim = await claimApprovalRollback(
+      activeRollbackId,
+      advertiserAccountId,
+      ownerOperatorId,
+      advertiserAccess,
+    );
+    await markApprovalProviderAttempt({
+      id: activeRollbackId,
+      accountId: advertiserAccountId,
+      attemptId: activeRollbackClaim.attemptId,
+      status: "rollback_pending",
+      now: startedAt,
+    });
+
+    let releaseRollback!: () => void;
+    let markRollbackFenceStarted!: () => void;
+    const rollbackRelease = new Promise<void>((resolve) => {
+      releaseRollback = resolve;
+    });
+    const rollbackFenceStarted = new Promise<void>((resolve) => {
+      markRollbackFenceStarted = resolve;
+    });
+    let rollbackProviderCalls = 0;
+    const activeRollback = withApprovalProviderSendFence(
+      {
+        id: activeRollbackId,
+        accountId: advertiserAccountId,
+        attemptId: activeRollbackClaim.attemptId,
+        status: "rollback_pending",
+        now: startedAt,
+      },
+      async () => {
+        markRollbackFenceStarted();
+        await rollbackRelease;
+        rollbackProviderCalls += 1;
+        return "rollback-sent";
+      },
+    );
+    await rollbackFenceStarted;
+    try {
+      await expect(
+        recoverStaleApprovalOperations({
+          accountId: advertiserAccountId,
+          now: recoveryAt,
+          limit: 10,
+        }),
+      ).resolves.toEqual({
+        recovered: 0,
+        apply: 0,
+        rollback: 0,
+        backlog: false,
+      });
+      await expect(
+        countUnresolvedApprovalOperations({
+          accountId: advertiserAccountId,
+          now: recoveryAt,
+        }),
+      ).resolves.toBe(unresolvedBeforeActiveRollback + 1);
+      expect(rollbackProviderCalls).toBe(0);
+    } finally {
+      releaseRollback();
+    }
+    await expect(activeRollback).resolves.toBe("rollback-sent");
+    expect(rollbackProviderCalls).toBe(1);
+    await updateRollbackRecord(activeRollbackId, "rolled_back", {
+      accountId: advertiserAccountId,
+      attemptId: activeRollbackClaim.attemptId,
+    });
+
+    const recoveredRollbackId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: recommendation("recovered_rollback"),
+      access: advertiserAccess,
+    });
+    await updateApprovalRecord(recoveredRollbackId, "applied");
+    const recoveredRollbackClaim = await claimApprovalRollback(
+      recoveredRollbackId,
+      advertiserAccountId,
+      ownerOperatorId,
+      advertiserAccess,
+    );
+    await markApprovalProviderAttempt({
+      id: recoveredRollbackId,
+      accountId: advertiserAccountId,
+      attemptId: recoveredRollbackClaim.attemptId,
+      status: "rollback_pending",
+      now: startedAt,
+    });
+    await expect(
+      recoverStaleApprovalOperations({
+        accountId: advertiserAccountId,
+        now: recoveryAt,
+        limit: 10,
+      }),
+    ).resolves.toMatchObject({ recovered: 1, apply: 0, rollback: 1 });
+    let recoveredRollbackProviderCalls = 0;
+    await expect(
+      withApprovalProviderSendFence(
+        {
+          id: recoveredRollbackId,
+          accountId: advertiserAccountId,
+          attemptId: recoveredRollbackClaim.attemptId,
+          status: "rollback_pending",
+          now: recoveryAt,
+        },
+        async () => {
+          recoveredRollbackProviderCalls += 1;
+          return "must-not-send";
+        },
+      ),
+    ).rejects.toBeInstanceOf(ApprovalProviderSendFenceUnavailableError);
+    expect(recoveredRollbackProviderCalls).toBe(0);
+
+    await reconcileApprovalRecord({
+      id: recoveredRollbackId,
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      action: "mark_still_applied",
+      note: "Ads Manager confirmed that the first rollback was not applied.",
+      access: advertiserAccess,
+    });
+    const replacementRollbackClaim = await claimApprovalRollback(
+      recoveredRollbackId,
+      advertiserAccountId,
+      ownerOperatorId,
+      advertiserAccess,
+    );
+    expect(replacementRollbackClaim.attemptId).not.toBe(
+      recoveredRollbackClaim.attemptId,
+    );
+    const replacementStartedAt = new Date(recoveryAt.getTime() + 1_000);
+    await markApprovalProviderAttempt({
+      id: recoveredRollbackId,
+      accountId: advertiserAccountId,
+      attemptId: replacementRollbackClaim.attemptId,
+      status: "rollback_pending",
+      now: replacementStartedAt,
+    });
+
+    let staleRollbackProviderCalls = 0;
+    await expect(
+      withApprovalProviderSendFence(
+        {
+          id: recoveredRollbackId,
+          accountId: advertiserAccountId,
+          attemptId: recoveredRollbackClaim.attemptId,
+          status: "rollback_pending",
+          now: replacementStartedAt,
+        },
+        async () => {
+          staleRollbackProviderCalls += 1;
+          return "stale-worker-must-not-send";
+        },
+      ),
+    ).rejects.toBeInstanceOf(ApprovalProviderSendFenceUnavailableError);
+    expect(staleRollbackProviderCalls).toBe(0);
+
+    let replacementRollbackProviderCalls = 0;
+    await expect(
+      withApprovalProviderSendFence(
+        {
+          id: recoveredRollbackId,
+          accountId: advertiserAccountId,
+          attemptId: replacementRollbackClaim.attemptId,
+          status: "rollback_pending",
+          now: replacementStartedAt,
+        },
+        async () => {
+          replacementRollbackProviderCalls += 1;
+          return "replacement-rollback-sent";
+        },
+      ),
+    ).resolves.toBe("replacement-rollback-sent");
+    expect(replacementRollbackProviderCalls).toBe(1);
+    await expect(
+      updateRollbackRecord(recoveredRollbackId, "rolled_back", {
+        accountId: advertiserAccountId,
+        attemptId: recoveredRollbackClaim.attemptId,
+      }),
+    ).rejects.toBeInstanceOf(ApprovalTransitionError);
+    await updateRollbackRecord(recoveredRollbackId, "rolled_back", {
+      accountId: advertiserAccountId,
+      attemptId: replacementRollbackClaim.attemptId,
+    });
+
+    const failedSendId = await createApprovalRecord({
+      accountId: advertiserAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: recommendation("failed_send"),
+      access: advertiserAccess,
+    });
+    await markApprovalProviderAttempt({
+      id: failedSendId,
+      accountId: advertiserAccountId,
+      attemptId: failedSendId,
+      status: "pending",
+      now: startedAt,
+    });
+    await expect(
+      withApprovalProviderSendFence(
+        {
+          id: failedSendId,
+          accountId: advertiserAccountId,
+          attemptId: failedSendId,
+          status: "pending",
+          now: startedAt,
+        },
+        async () => {
+          throw new Error("provider connection ended without a response");
+        },
+      ),
+    ).rejects.toThrow("provider connection ended without a response");
+    await expect(
+      recoverStaleApprovalOperations({
+        accountId: advertiserAccountId,
+        now: recoveryAt,
+        limit: 10,
+      }),
+    ).resolves.toMatchObject({ recovered: 1, apply: 1, rollback: 0 });
+    const [failedSend] = await database<
+      { status: string; apply_provider_attempted_at: Date | null }[]
+    >`
+      select status, apply_provider_attempted_at
+      from ads_approval_records
+      where id = ${failedSendId}
+    `;
+    expect(failedSend).toMatchObject({
+      status: "reconciliation_required",
+      apply_provider_attempted_at: expect.any(Date),
+    });
+  });
+
   it("offboards one exact customer account without exposing credentials or crossing tenants", async () => {
     const offboardingAccountId = "adacct_integration_offboarding";
     const offboardingAdsKey = "ads-integration-offboarding-plaintext";
@@ -2410,7 +3875,9 @@ describe("PostgreSQL customer and approval boundary", () => {
     await addReviewOnlyAccess(offboardingAccountId);
 
     const source = getDemoRecommendation("rec_bid_20");
-    if (!source) throw new Error("The offboarding fixture is missing.");
+    if (!source?.monitoringPlan) {
+      throw new Error("The offboarding fixture is missing monitoring evidence.");
+    }
     const unresolvedApprovalId = await createApprovalRecord({
       accountId: offboardingAccountId,
       operatorId: ownerOperatorId,
@@ -2447,11 +3914,209 @@ describe("PostgreSQL customer and approval boundary", () => {
       where id = ${appliedApprovalId}
     `;
 
-    const plan = await prepareCustomerOffboarding(database, {
+    const inFlightMonitoringClaimId = randomUUID();
+    await expect(
+      claimDueMonitoringRecords({
+        accountId: offboardingAccountId,
+        claimId: inFlightMonitoringClaimId,
+        now: new Date("2026-08-30T19:12:00.000Z"),
+        limit: 1,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: appliedApprovalId }),
+    ]);
+    await expect(
+      claimApprovalRollback(
+        appliedApprovalId,
+        offboardingAccountId,
+        ownerOperatorId,
+        access,
+      ),
+    ).rejects.toBeInstanceOf(ApprovalTransitionError);
+    const monitoringBlockedPlan = await prepareCustomerOffboarding(database, {
+      accountId: offboardingAccountId,
+      organizationId: access.organizationId,
+      operatorId: ownerOperatorId,
+      generatedAt: new Date("2026-08-30T19:13:00.000Z"),
+    });
+    expect(monitoringBlockedPlan.confirmationToken).toBeNull();
+    expect(monitoringBlockedPlan.blockers).toEqual([
+      expect.stringMatching(/monitoring evaluation.*active database claim/i),
+    ]);
+    await expect(
+      releaseMonitoringClaim({
+        id: appliedApprovalId,
+        accountId: offboardingAccountId,
+        claimId: inFlightMonitoringClaimId,
+      }),
+    ).resolves.toBe(true);
+
+    const monitoringAccountAttemptId = randomUUID();
+    const monitoringAccountAttemptedAt = new Date(
+      "2026-08-30T19:13:30.000Z",
+    );
+    await database`
+      insert into maintainflow_monitoring_account_schedule (
+        advertiser_account_id, current_attempt_id, attempt_count,
+        last_attempted_at, attempt_lease_until, updated_at
+      )
+      select id, ${monitoringAccountAttemptId}, 1,
+        ${monitoringAccountAttemptedAt},
+        ${new Date("2026-08-30T19:28:30.000Z")},
+        ${monitoringAccountAttemptedAt}
+      from maintainflow_advertiser_accounts
+      where external_account_id = ${offboardingAccountId}
+    `;
+    const accountAttemptBlockedPlan = await prepareCustomerOffboarding(
+      database,
+      {
+        accountId: offboardingAccountId,
+        organizationId: access.organizationId,
+        operatorId: ownerOperatorId,
+        generatedAt: new Date("2026-08-30T19:13:35.000Z"),
+      },
+    );
+    expect(accountAttemptBlockedPlan.confirmationToken).toBeNull();
+    expect(accountAttemptBlockedPlan.inventory.monitoringAccountSchedules).toBe(
+      1,
+    );
+    expect(accountAttemptBlockedPlan.serializedExport).toContain(
+      '"monitoringAccountSchedules"',
+    );
+    expect(accountAttemptBlockedPlan.blockers).toEqual([
+      expect.stringMatching(/scheduled monitoring account attempt.*database lease/i),
+    ]);
+    await expect(
+      completeMonitoringAccountAttempt({
+        accountId: offboardingAccountId,
+        attemptId: monitoringAccountAttemptId,
+        succeeded: true,
+        now: new Date("2026-08-30T19:13:40.000Z"),
+      }),
+    ).resolves.toBe(true);
+
+    const completedMonitoringClaimId = randomUUID();
+    await expect(
+      claimDueMonitoringRecords({
+        accountId: offboardingAccountId,
+        claimId: completedMonitoringClaimId,
+        now: new Date("2026-08-30T19:13:45.000Z"),
+        limit: 1,
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: appliedApprovalId }),
+    ]);
+    const offboardingObservation = {
+      rangeStart: Math.floor(
+        new Date("2026-08-20T00:00:00.000Z").getTime() / 1_000,
+      ),
+      rangeEnd: Math.floor(
+        new Date("2026-08-27T00:00:00.000Z").getTime() / 1_000,
+      ),
+      spend: source.monitoringPlan.baseline.spend,
+      clickAttributedConversions:
+        source.monitoringPlan.baseline.clickAttributedConversions,
+      cpa: source.monitoringPlan.baseline.cpa,
+      conversionChangePercent: 0,
+      baselineClickAttributedConversions:
+        source.monitoringPlan.baseline.clickAttributedConversions,
+      thresholdPercent: source.monitoringPlan.rollbackRule.thresholdPercent,
+      evidenceState: "complete" as const,
+    };
+    await expect(
+      recordMonitoringOutcome({
+        id: appliedApprovalId,
+        accountId: offboardingAccountId,
+        outcome: "within_safeguard",
+        observation: offboardingObservation,
+        claimId: completedMonitoringClaimId,
+        evaluatedAt: new Date("2026-08-30T19:13:46.000Z"),
+      }),
+    ).resolves.toBe(true);
+
+    const orphanedMonitoringAttemptId = randomUUID();
+    await database`
+      update maintainflow_monitoring_account_schedule schedule set
+        current_attempt_id = ${orphanedMonitoringAttemptId},
+        attempt_count = schedule.attempt_count + 1,
+        last_attempted_at = ${new Date("2026-08-30T19:13:50.000Z")},
+        attempt_lease_until = ${new Date("2026-08-30T19:14:50.000Z")},
+        updated_at = ${new Date("2026-08-30T19:13:50.000Z")}
+      from maintainflow_advertiser_accounts account
+      where account.id = schedule.advertiser_account_id
+        and account.external_account_id = ${offboardingAccountId}
+    `;
+    const expiredAttemptPlan = await prepareCustomerOffboarding(database, {
       accountId: offboardingAccountId,
       organizationId: access.organizationId,
       operatorId: ownerOperatorId,
       generatedAt: new Date("2026-08-30T19:15:00.000Z"),
+    });
+    expect(expiredAttemptPlan.blockers).toEqual([]);
+    expect(
+      expiredAttemptPlan.snapshot.monitoringAccountSchedules[0]
+        ?.current_attempt_id,
+    ).toBe(orphanedMonitoringAttemptId);
+
+    const concurrentApprovalId = await createApprovalRecord({
+      accountId: offboardingAccountId,
+      operatorId: ownerOperatorId,
+      recommendation: {
+        ...source,
+        id: "rec_offboarding_concurrent_monitoring",
+      },
+      access,
+    });
+    await updateApprovalRecord(concurrentApprovalId, "applied", {
+      response: { id: source.entityId, status: "ACTIVE" },
+    });
+    await database`
+      update ads_approval_records set
+        monitoring_started_at = ${new Date("2026-08-20T00:00:00.000Z")},
+        monitoring_ends_at = ${new Date("2026-08-27T00:00:00.000Z")}
+      where id = ${concurrentApprovalId}
+    `;
+
+    const offboardingCredential = await getAdsCredentialMaterialForAccount(
+      offboardingAccountId,
+    );
+    const refreshClaimedAt = new Date("2026-08-30T19:15:10.000Z");
+    const inFlightRefresh = await claimLiveSyncRefresh({
+      accountId: offboardingAccountId,
+      credentialGeneration: offboardingCredential.credentialGeneration,
+      now: refreshClaimedAt,
+      leaseMs: 60_000,
+    });
+    expect(inFlightRefresh).toEqual({
+      claimId: expect.any(String),
+      expiresAt: new Date("2026-08-30T19:16:10.000Z"),
+    });
+    const refreshBlockedPlan = await prepareCustomerOffboarding(database, {
+      accountId: offboardingAccountId,
+      organizationId: access.organizationId,
+      operatorId: ownerOperatorId,
+      generatedAt: new Date("2026-08-30T19:15:20.000Z"),
+    });
+    expect(refreshBlockedPlan.confirmationToken).toBeNull();
+    expect(refreshBlockedPlan.blockers).toEqual([
+      expect.stringMatching(/live account refresh.*database claim/i),
+    ]);
+    await expect(
+      failLiveSyncRefresh({
+        accountId: offboardingAccountId,
+        credentialGeneration: offboardingCredential.credentialGeneration,
+        claimId: inFlightRefresh!.claimId,
+        failureCode: "offboarding_drain",
+        retryAfter: new Date("2026-08-30T19:15:30.000Z"),
+        now: new Date("2026-08-30T19:15:30.000Z"),
+      }),
+    ).resolves.toBe(true);
+
+    const plan = await prepareCustomerOffboarding(database, {
+      accountId: offboardingAccountId,
+      organizationId: access.organizationId,
+      operatorId: ownerOperatorId,
+      generatedAt: new Date("2026-08-30T19:16:00.000Z"),
     });
     expect(plan.blockers).toEqual([]);
     expect(plan.confirmationToken).toMatch(
@@ -2461,8 +4126,9 @@ describe("PostgreSQL customer and approval boundary", () => {
       accessGrants: 2,
       advertiserCredentials: 1,
       conversionCredentials: 1,
-      approvals: 2,
+      approvals: 3,
       unresolvedApprovals: 0,
+      monitoringAccountSchedules: 1,
     });
     expect(plan.serializedExport).not.toContain(offboardingAdsKey);
     expect(plan.serializedExport).not.toContain(offboardingCapiKey);
@@ -2491,6 +4157,35 @@ describe("PostgreSQL customer and approval boundary", () => {
       requireAccountAccess(viewerOperatorId, offboardingAccountId, "read"),
     ).resolves.toMatchObject({ accountRole: "viewer" });
 
+    const concurrentReadinessAudit: ReadinessAudit = {
+      requestedUrl: "https://leaving.example/products/final",
+      finalUrl: "https://leaving.example/products/final",
+      scannedAt: "2026-08-30T19:20:30.000Z",
+      score: 90,
+      verdict: "ready",
+      checks: [
+        {
+          id: "oai_searchbot",
+          title: "OAI-SearchBot is allowed",
+          status: "pass",
+          weight: 15,
+          evidence: "No blocking rule applies.",
+          recommendation: "Keep public crawler access available.",
+        },
+      ],
+      measurement: {
+        status: "not_detected",
+        sdkDetected: false,
+        initializationDetected: false,
+        pixelIdDetected: false,
+        imageTagDetected: false,
+        consentSignalDetected: false,
+        eventNames: [],
+        csp: { present: false, compatible: false, missingSources: [] },
+        checks: [],
+      },
+      limitations: ["Static evidence only; no runtime events were fired."],
+    };
     let committedExport = "";
     let releaseValidatedExport!: () => void;
     let markValidatedExportStarted!: () => void;
@@ -2513,6 +4208,12 @@ describe("PostgreSQL customer and approval boundary", () => {
       },
     });
     await validatedExportStarted;
+    const concurrentReadinessSave = recordReadinessAuditRun({
+      accountId: offboardingAccountId,
+      operatorId: ownerOperatorId,
+      access,
+      audit: concurrentReadinessAudit,
+    });
     const concurrentRotation = rotateAdsApiCredential({
       operatorId: ownerOperatorId,
       accountId: offboardingAccountId,
@@ -2523,26 +4224,85 @@ describe("PostgreSQL customer and approval boundary", () => {
       }),
       verifiedAt: new Date("2026-08-30T19:21:00.000Z"),
     });
+    const concurrentLiveRefreshClaim = claimLiveSyncRefresh({
+      accountId: offboardingAccountId,
+      credentialGeneration: offboardingCredential.credentialGeneration,
+      now: new Date("2026-08-30T19:20:30.000Z"),
+      leaseMs: 60_000,
+    });
+    const concurrentMonitoringClaimId = randomUUID();
+    const concurrentMonitoringClaim = claimDueMonitoringRecords({
+      accountId: offboardingAccountId,
+      claimId: concurrentMonitoringClaimId,
+      now: new Date("2026-08-30T19:20:30.000Z"),
+      limit: 1,
+    });
     let concurrentOutcome: "blocked" | "settled" = "blocked";
+    let readinessOutcome: "blocked" | "settled" = "blocked";
+    let refreshClaimOutcome: "blocked" | "settled" = "blocked";
+    let monitoringClaimOutcome: "blocked" | "settled" = "blocked";
     try {
-      concurrentOutcome = await Promise.race([
-        concurrentRotation.then(
-          () => "settled" as const,
-          () => "settled" as const,
-        ),
-        new Promise<"blocked">((resolve) =>
-          setTimeout(() => resolve("blocked"), 100),
-        ),
-      ]);
+      [
+        concurrentOutcome,
+        readinessOutcome,
+        refreshClaimOutcome,
+        monitoringClaimOutcome,
+      ] = await Promise.all([
+          Promise.race([
+            concurrentRotation.then(
+              () => "settled" as const,
+              () => "settled" as const,
+            ),
+            new Promise<"blocked">((resolve) =>
+              setTimeout(() => resolve("blocked"), 100),
+            ),
+          ]),
+          Promise.race([
+            concurrentReadinessSave.then(
+              () => "settled" as const,
+              () => "settled" as const,
+            ),
+            new Promise<"blocked">((resolve) =>
+              setTimeout(() => resolve("blocked"), 100),
+            ),
+          ]),
+          Promise.race([
+            concurrentLiveRefreshClaim.then(
+              () => "settled" as const,
+              () => "settled" as const,
+            ),
+            new Promise<"blocked">((resolve) =>
+              setTimeout(() => resolve("blocked"), 100),
+            ),
+          ]),
+          Promise.race([
+            concurrentMonitoringClaim.then(
+              () => "settled" as const,
+              () => "settled" as const,
+            ),
+            new Promise<"blocked">((resolve) =>
+              setTimeout(() => resolve("blocked"), 100),
+            ),
+          ]),
+        ]);
     } finally {
       releaseValidatedExport();
     }
     expect(concurrentOutcome).toBe("blocked");
+    expect(readinessOutcome).toBe("blocked");
+    expect(refreshClaimOutcome).toBe("blocked");
+    expect(monitoringClaimOutcome).toBe("blocked");
     const result = await offboarding;
     await expect(concurrentRotation).rejects.toBeInstanceOf(
       AccountAccessForbiddenError,
     );
+    await expect(concurrentReadinessSave).rejects.toBeInstanceOf(
+      ReadinessHistoryTransitionError,
+    );
+    await expect(concurrentLiveRefreshClaim).resolves.toBeNull();
+    await expect(concurrentMonitoringClaim).resolves.toEqual([]);
     expect(committedExport).toContain(offboardingAccountId);
+    expect(committedExport).toContain('"monitoringAccountSchedules"');
     expect(committedExport).not.toContain(offboardingAdsKey);
     expect(result.deleted).toEqual({
       accountAccess: 2,
@@ -2558,6 +4318,8 @@ describe("PostgreSQL customer and approval boundary", () => {
         ads_credential_count: number;
         conversion_credential_count: number;
         approval_count: number;
+        readiness_audit_count: number;
+        monitoring_schedule_count: number;
         lifecycle_count: number;
         export_sha256: string;
         provider_revocation_required: boolean;
@@ -2572,6 +4334,10 @@ describe("PostgreSQL customer and approval boundary", () => {
           where advertiser_account_id = account.id) as conversion_credential_count,
         (select count(*)::int from ads_approval_records
           where account_id = account.external_account_id) as approval_count,
+        (select count(*)::int from maintainflow_readiness_audit_runs
+          where advertiser_account_id = account.id) as readiness_audit_count,
+        (select count(*)::int from maintainflow_monitoring_account_schedule
+          where advertiser_account_id = account.id) as monitoring_schedule_count,
         (select count(*)::int from maintainflow_customer_lifecycle_records
           where advertiser_account_id = account.id) as lifecycle_count,
         lifecycle.export_sha256, lifecycle.provider_revocation_required
@@ -2585,11 +4351,85 @@ describe("PostgreSQL customer and approval boundary", () => {
       access_count: 0,
       ads_credential_count: 0,
       conversion_credential_count: 0,
-      approval_count: 2,
+      approval_count: 3,
+      readiness_audit_count: 0,
+      monitoring_schedule_count: 1,
       lifecycle_count: 1,
       export_sha256: result.exportSha256,
       provider_revocation_required: true,
     });
+    const [refreshStateAfterOffboarding] = await database<
+      { refresh_claim_id: string | null }[]
+    >`
+      select snapshot.refresh_claim_id
+      from maintainflow_live_workbench_snapshots snapshot
+      join maintainflow_advertiser_accounts account
+        on account.id = snapshot.advertiser_account_id
+      where account.external_account_id = ${offboardingAccountId}
+        and snapshot.credential_generation =
+          ${offboardingCredential.credentialGeneration}
+    `;
+    expect(refreshStateAfterOffboarding?.refresh_claim_id).toBeNull();
+    const disconnectedMonitoringAttemptId = randomUUID();
+    await database`
+      update maintainflow_monitoring_account_schedule schedule set
+        current_attempt_id = ${disconnectedMonitoringAttemptId},
+        attempt_count = schedule.attempt_count + 1,
+        last_attempted_at = ${new Date("2026-08-30T19:31:00.000Z")},
+        attempt_lease_until = ${new Date("2026-08-30T19:46:00.000Z")},
+        updated_at = ${new Date("2026-08-30T19:31:00.000Z")}
+      from maintainflow_advertiser_accounts account
+      where account.id = schedule.advertiser_account_id
+        and account.external_account_id = ${offboardingAccountId}
+    `;
+    await expect(
+      completeMonitoringAccountAttempt({
+        accountId: offboardingAccountId,
+        attemptId: disconnectedMonitoringAttemptId,
+        succeeded: true,
+        now: new Date("2026-08-30T19:31:01.000Z"),
+      }),
+    ).resolves.toBe(false);
+    const [disconnectedSchedule] = await database<
+      { current_attempt_id: string | null }[]
+    >`
+      select schedule.current_attempt_id
+      from maintainflow_monitoring_account_schedule schedule
+      join maintainflow_advertiser_accounts account
+        on account.id = schedule.advertiser_account_id
+      where account.external_account_id = ${offboardingAccountId}
+    `;
+    expect(disconnectedSchedule?.current_attempt_id).toBe(
+      disconnectedMonitoringAttemptId,
+    );
+    const disconnectedMonitoringClaimId = randomUUID();
+    await database`
+      update ads_approval_records set
+        monitoring_evaluation_claim_id = ${disconnectedMonitoringClaimId},
+        monitoring_evaluation_claimed_at =
+          ${new Date("2026-08-30T19:31:02.000Z")}
+      where id = ${concurrentApprovalId}
+    `;
+    await expect(
+      recordMonitoringOutcome({
+        id: concurrentApprovalId,
+        accountId: offboardingAccountId,
+        outcome: "within_safeguard",
+        observation: offboardingObservation,
+        claimId: disconnectedMonitoringClaimId,
+        evaluatedAt: new Date("2026-08-30T19:31:03.000Z"),
+      }),
+    ).resolves.toBe(false);
+    const [disconnectedMonitoringRecord] = await database<
+      { monitoring_evaluation_claim_id: string | null }[]
+    >`
+      select monitoring_evaluation_claim_id
+      from ads_approval_records
+      where id = ${concurrentApprovalId}
+    `;
+    expect(
+      disconnectedMonitoringRecord?.monitoring_evaluation_claim_id,
+    ).toBe(disconnectedMonitoringClaimId);
     await expect(
       requireAccountAccess(ownerOperatorId, offboardingAccountId, "read"),
     ).rejects.toBeInstanceOf(AccountAccessForbiddenError);

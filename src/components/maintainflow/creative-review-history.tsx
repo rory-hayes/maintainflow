@@ -84,7 +84,7 @@ export function CreativeReviewHistory({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : events.length > 0 ? (
-          <Table>
+          <Table scrollAreaLabel="Recent creative changes">
             <TableHeader>
               <TableRow>
                 <TableHead>Creative</TableHead>
