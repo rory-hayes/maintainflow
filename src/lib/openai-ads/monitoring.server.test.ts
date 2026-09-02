@@ -101,11 +101,63 @@ describe("live monitoring adapter", () => {
       start: String(start),
       end: String(end),
     });
+    expect(adsApiRequestMock.mock.calls[1][2]).toMatchObject({
+      method: "POST",
+      retryOnRateLimit: true,
+    });
     expect(result).toMatchObject({
       outcome: "safeguard_triggered",
       observation: {
         clickAttributedConversions: 84,
         conversionChangePercent: -16,
+      },
+    });
+  });
+
+  it("falls back to total conversions when click-through conversions are absent", async () => {
+    adsApiRequestMock.mockImplementation(async (path: string) => {
+      if (path.startsWith("/ad_groups/adgrp_live/insights?")) {
+        return {
+          object: "list",
+          count: 1,
+          has_more: false,
+          data: [
+            {
+              id: "observed-ad-group",
+              start_time: start,
+              end_time: end,
+              ad_group_id: "adgrp_live",
+              spend: 1_680,
+            },
+          ],
+        };
+      }
+      return {
+        object: "list",
+        count: 1,
+        data: [
+          {
+            entity_id: "adgrp_live",
+            conversions: 84,
+          },
+        ],
+      };
+    });
+
+    const result = await evaluateLiveMonitoringWindow({
+      entityId: "adgrp_live",
+      plan,
+      startedAt: new Date(start * 1_000),
+      endsAt: new Date(end * 1_000),
+      credential: { apiKey: "ads-test-key" },
+    });
+
+    expect(result).toMatchObject({
+      outcome: "safeguard_triggered",
+      observation: {
+        clickAttributedConversions: 84,
+        conversionChangePercent: -16,
+        evidenceState: "complete",
       },
     });
   });

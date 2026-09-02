@@ -44,7 +44,7 @@ describe("database migration deployment readiness", () => {
       ready: true,
       appliedCount: databaseMigrationManifest.length,
       expectedCount: databaseMigrationManifest.length,
-      currentMigration: "012_live_workbench_snapshots.sql",
+      currentMigration: databaseMigrationManifest.at(-1)?.name,
     });
   });
 

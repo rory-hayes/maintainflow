@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { CreativeReviewEvent } from "@/lib/openai-ads/creative-history";
+import { formatUtcDateTime } from "@/lib/formatting";
 
 function statusLabel(status: CreativeReviewEvent["reviewStatus"]) {
   if (status === "in_review") return "In review";
@@ -42,11 +43,7 @@ function reviewVariant(status: CreativeReviewEvent["reviewStatus"]) {
 }
 
 function detectedLabel(detectedAt: string) {
-  return new Intl.DateTimeFormat("en-IE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(detectedAt));
+  return formatUtcDateTime(detectedAt);
 }
 
 export function CreativeReviewHistory({
@@ -71,7 +68,7 @@ export function CreativeReviewHistory({
         </div>
         {dataSource === "demo" ? (
           <Badge className="self-start" variant="secondary">
-            Demo history
+            Simulator history
           </Badge>
         ) : ready ? (
           <Badge className="self-start" variant="outline">
@@ -87,7 +84,7 @@ export function CreativeReviewHistory({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : events.length > 0 ? (
-          <Table>
+          <Table scrollAreaLabel="Recent creative changes">
             <TableHeader>
               <TableRow>
                 <TableHead>Creative</TableHead>

@@ -109,85 +109,100 @@ export async function recordReadinessAuditRun(options: {
   const audit = sanitized.audit;
   const sql = getDatabase();
   const id = randomUUID();
-  const rows = await sql<ReadinessAuditHistoryRow[]>`
-    insert into maintainflow_readiness_audit_runs (
-      id,
-      advertiser_account_id,
-      operator_id,
-      acting_organization_id,
-      actor_membership_role,
-      actor_account_role,
-      payload_schema_version,
-      ruleset_version,
-      scanner_version,
-      source_checked_at,
-      target_association,
-      provider_resource_type,
-      provider_resource_id,
-      query_parameters_redacted,
-      requested_url,
-      final_url,
-      scanned_at,
-      score,
-      verdict,
-      audit_payload
-    )
-    select
-      ${id},
-      account.id,
-      ${options.operatorId},
-      membership.organization_id,
-      membership.role,
-      account_access.role,
-      ${READINESS_HISTORY_PAYLOAD_SCHEMA_VERSION},
-      ${READINESS_HISTORY_RULESET_VERSION},
-      ${READINESS_HISTORY_SCANNER_VERSION},
-      ${READINESS_HISTORY_SOURCE_CHECKED_AT},
-      'manual_unverified',
-      null,
-      null,
-      ${sanitized.queryParametersRedacted},
-      ${audit.requestedUrl},
-      ${audit.finalUrl},
-      ${audit.scannedAt},
-      ${audit.score},
-      ${audit.verdict},
-      ${sql.json(audit as postgres.JSONValue)}
-    from maintainflow_advertiser_accounts account
-    join maintainflow_account_access account_access
-      on account_access.advertiser_account_id = account.id
-      and account_access.organization_id = ${options.access.organizationId}
-      and account_access.role in ('owner', 'manager')
-    join maintainflow_organization_memberships membership
-      on membership.organization_id = account_access.organization_id
-      and membership.clerk_user_id = ${options.operatorId}
-      and membership.role in ('owner', 'admin')
-    join maintainflow_organizations organization
-      on organization.id = membership.organization_id
-      and organization.status = 'active'
-    where account.external_account_id = ${options.accountId}
-      and account.status = 'active'
-    returning
-      id,
-      ${options.accountId}::text as external_account_id,
-      audit_payload,
-      payload_schema_version,
-      ruleset_version,
-      scanner_version,
-      source_checked_at::text,
-      target_association,
-      provider_resource_type,
-      provider_resource_id,
-      query_parameters_redacted,
-      created_at
-  `;
-  const [inserted] = rows;
-  if (!inserted) {
-    throw new ReadinessHistoryTransitionError(
-      "Account write access changed before the readiness audit could be saved.",
-    );
-  }
-  return parseHistoryRow(inserted);
+  return sql.begin(async (transaction) => {
+    const [lockedAccount] = await transaction<{ id: string }[]>`
+      select id
+      from maintainflow_advertiser_accounts
+      where external_account_id = ${options.accountId}
+        and status = 'active'
+      for update
+    `;
+    if (!lockedAccount) {
+      throw new ReadinessHistoryTransitionError(
+        "The advertiser account was disconnected before the readiness audit could be saved.",
+      );
+    }
+
+    const rows = await transaction<ReadinessAuditHistoryRow[]>`
+      insert into maintainflow_readiness_audit_runs (
+        id,
+        advertiser_account_id,
+        operator_id,
+        acting_organization_id,
+        actor_membership_role,
+        actor_account_role,
+        payload_schema_version,
+        ruleset_version,
+        scanner_version,
+        source_checked_at,
+        target_association,
+        provider_resource_type,
+        provider_resource_id,
+        query_parameters_redacted,
+        requested_url,
+        final_url,
+        scanned_at,
+        score,
+        verdict,
+        audit_payload
+      )
+      select
+        ${id},
+        account.id,
+        ${options.operatorId},
+        membership.organization_id,
+        membership.role,
+        account_access.role,
+        ${READINESS_HISTORY_PAYLOAD_SCHEMA_VERSION},
+        ${READINESS_HISTORY_RULESET_VERSION},
+        ${READINESS_HISTORY_SCANNER_VERSION},
+        ${READINESS_HISTORY_SOURCE_CHECKED_AT},
+        'manual_unverified',
+        null,
+        null,
+        ${sanitized.queryParametersRedacted},
+        ${audit.requestedUrl},
+        ${audit.finalUrl},
+        ${audit.scannedAt},
+        ${audit.score},
+        ${audit.verdict},
+        ${transaction.json(audit as postgres.JSONValue)}
+      from maintainflow_advertiser_accounts account
+      join maintainflow_account_access account_access
+        on account_access.advertiser_account_id = account.id
+        and account_access.organization_id = ${options.access.organizationId}
+        and account_access.role in ('owner', 'manager')
+      join maintainflow_organization_memberships membership
+        on membership.organization_id = account_access.organization_id
+        and membership.clerk_user_id = ${options.operatorId}
+        and membership.role in ('owner', 'admin')
+      join maintainflow_organizations organization
+        on organization.id = membership.organization_id
+        and organization.status = 'active'
+      where account.id = ${lockedAccount.id}
+        and account.status = 'active'
+      returning
+        id,
+        ${options.accountId}::text as external_account_id,
+        audit_payload,
+        payload_schema_version,
+        ruleset_version,
+        scanner_version,
+        source_checked_at::text,
+        target_association,
+        provider_resource_type,
+        provider_resource_id,
+        query_parameters_redacted,
+        created_at
+    `;
+    const [inserted] = rows;
+    if (!inserted) {
+      throw new ReadinessHistoryTransitionError(
+        "Account write access changed before the readiness audit could be saved.",
+      );
+    }
+    return parseHistoryRow(inserted);
+  });
 }
 
 export async function listReadinessAuditRuns(options: {

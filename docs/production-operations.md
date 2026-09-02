@@ -20,7 +20,11 @@ Treat these as immediate operator alerts:
 - `deployment.readiness.failed` or `deployment.readiness.unconfigured`;
 - a missing daily `monitoring.run.completed` event;
 - `monitoring.run.completed_with_failures` or `monitoring.run.failed`;
+- `ads.apply.execution_fence_lost` or
+  `ads.rollback.execution_fence_lost` once live writes are enabled;
 - any `reconciliation_required` mutation event once live writes are enabled;
+- any non-zero `unresolvedApprovalOperations` count from the protected daily
+  monitor;
 - repeated credential, authorization, storage, or provider-unavailable events.
 
 Vercel runtime logs are sufficient for the first private staging deployment.
@@ -39,6 +43,11 @@ workflow from `main` with the exact deployed Git SHA and expected stage. The
 workflow deliberately accepts no destination input, so a dispatch cannot send
 either bearer secret to an arbitrary host.
 
+Before it sends either secret, the workflow fetches repository history and
+proves that the full supplied object ID resolves to a commit and is an ancestor
+of `origin/main`. A fabricated hexadecimal label, abbreviated SHA, detached
+commit, or non-main revision therefore cannot count as deployment evidence.
+
 The same probe can be run locally without writing secrets to the repository:
 
 ```bash
@@ -50,17 +59,35 @@ CRON_SECRET='<dedicated cron secret>' \
 npm run probe:deployment
 ```
 
-The probe must prove all four gates in one run:
+The probe must prove all five gate groups in one run:
 
 1. `/api/health` returns the exact compiled revision;
 2. unauthenticated `/api/ready` returns 401;
 3. authenticated `/api/ready` returns the expected stage/revision with every
-   dependency check passed; and
+   dependency check passed;
 4. the protected monitoring route completes successfully, including bounded
-   cleanup.
+   cleanup; and
+5. the public landing page, privacy notice, private-beta terms, registration
+   access gate, and Readiness workspace all return bounded HTML containing
+   their expected product markers.
 
-The script never prints bearer secrets or response bodies. A 503 is deployment
-failure evidence, even if some maintenance or monitoring work completed.
+Those five public surface requests are deliberately unauthenticated, reject
+redirects, and fail if a different application is mounted at the configured
+origin. The script never prints bearer secrets or response bodies. A 503 is
+deployment failure evidence, even if some maintenance or monitoring work
+completed.
+
+Container CI runs this same complete probe against the built image through an
+explicit loopback-only HTTP exception. The exception is accepted only when
+`CI=true`, never for a remote HTTP host, and does not relax the hosted probe's
+credential-free HTTPS-origin requirement.
+
+CI also builds a second standalone image with a syntactically valid non-secret
+test Clerk publishable key. It starts that image in `private_read` against the
+migrated TLS PostgreSQL service and requires all twelve readiness checks, then
+proves that changing the runtime public Clerk key makes startup fail. This
+covers the account-backed image/configuration boundary without contacting
+Clerk or OpenAI and is not evidence of either hosted service working.
 
 ## Alert and retry policy
 
@@ -70,11 +97,43 @@ failure evidence, even if some maintenance or monitoring work completed.
   revision mismatch or an invalid release stage.
 - Require one successful monitoring completion after every deployment and one
   per UTC day. Respect its `Retry-After` header, retry once, then escalate.
+- The deployment probe requires both zero recovered operations for that run and
+  zero persistent unresolved operations. That count includes stale active rows
+  skipped by recovery while a provider-send transaction still holds their lock.
+  The provider-write fence also blocks every new apply or rollback on the
+  affected advertiser until reconciliation.
+- Keep database and transaction-proxy timeouts above the 15-second application
+  HTTP send window. The database lock has no independent 15-second deadline and
+  ends only on commit, rollback, or session cleanup.
 - Never automatically retry an Ads apply or rollback whose transport ended
   without a response, or returned HTTP 408 or 5xx. Those outcomes remain locked
   for manual Ads Manager reconciliation.
+- Treat any failure after the provider-send callback begins, including a
+  transaction commit failure, as an uncertain provider outcome. Disable live
+  writes, verify Ads Manager, and reconcile the durable record; never infer that
+  a database error means the provider request was not sent.
 - A definitive 4xx provider rejection may be corrected and submitted only as a
   new deliberate approval or rollback attempt.
+
+## Scheduled monitoring run contract
+
+- The protected route always performs bounded stale-operation recovery,
+  unresolved-ledger checks, readiness-quota cleanup, and expired live-snapshot
+  cleanup before it starts provider work.
+- In `demo`, provider monitoring is paused: the route does not verify Ads
+  credentials or call OpenAI. It returns only capped aggregate due-account and
+  due-window counts after maintenance; those counts are not live Ads evidence.
+- In `private_read` and `live_write`, one invocation has a 60-second route cap
+  and a shared 45-second provider budget. It selects at most two advertiser
+  accounts and one due monitoring window per account. Both Insights requests
+  for a window share the same abort signal, including rate-limit waits.
+- If that budget expires, unstarted or interrupted account leases are released
+  without increasing their provider-failure backoff. The response still sets
+  `deadlineExhausted=true` and returns `503`, so the scheduler retries rather
+  than treating partial work as a healthy run.
+- Monitoring logs and responses expose capped aggregate counts and ages only;
+  they do not include advertiser account IDs. The deployment probe allows 65
+  seconds for this route and requires `deadlineExhausted=false`.
 
 ## Incident containment
 
@@ -101,9 +160,23 @@ conversion payloads, or customer URLs into tickets or chat.
 - Roll back application code only to an immutable previously verified SHA.
 - Database migrations are forward-only. Prefer a corrective migration; never
   edit an applied migration or restore an older schema under newer code.
-- Before `private_read`, restore the hosted backup into an isolated database,
-  apply the current migration ledger, run `npm run test:db` against the fixture,
-  and record recovery point/time evidence.
+- Before `private_read`, complete the read-only
+  [hosted backup and restore verification](database-backup-restore-verification.md)
+  against a pre-backup source manifest and a distinct isolated restore target,
+  including migration of the clone to the full current ledger before the final
+  read-only verification. `npm run test:db` covers only a disposable database
+  and is not restore proof.
+- Keep application writers and operational jobs stopped between the source
+  capture and the provider backup recovery point. The restore verifier requires
+  exact migration/schema fingerprints and critical aggregate counts, plus zero
+  isolation/orphan violations, inside one bounded read-only transaction.
+- Preserve both mode-`0600` evidence manifests with the release record. Do not
+  set `MAINTAINFLOW_DATABASE_BACKUP_RESTORE_VERIFIED=true` from a provider
+  snapshot notification or disposable database test alone. Hosted production
+  `db:migrate` additionally requires the passing manifest, sealed pre-backup
+  capture, and backup recovery point all to remain no more than 24 hours old,
+  and checks them against the exact target identity, full build SHA, and local
+  migration set before it connects.
 - A production restore decision must account for approvals and reconciliation
   records created after the backup. Do not erase unresolved external-write
   evidence merely to recover availability.

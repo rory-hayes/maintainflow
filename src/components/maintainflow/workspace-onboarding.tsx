@@ -8,12 +8,17 @@ import {
   DatabaseZap,
   KeyRound,
   Loader2,
+  Megaphone,
+  MessagesSquare,
+  Search,
   Send,
   ShieldCheck,
+  ShoppingBag,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ConnectClientAccountDialog } from "@/components/maintainflow/connect-client-account-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +38,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { formatUtcDateTime } from "@/lib/formatting";
 import {
   Field,
   FieldDescription,
@@ -70,6 +76,7 @@ type WorkspaceOnboardingProps = {
   connectedAccountName?: string;
   message?: string;
   conversionsConnection: ConversionsConnectionStatus;
+  agencyClientAttachEnabled?: boolean;
 };
 
 const setupSteps = [
@@ -88,6 +95,33 @@ const setupSteps = [
     title: "Permissioned operations",
     description: "Review, apply, rollback, and reconciliation use account roles on every request.",
     icon: ShieldCheck,
+  },
+] as const;
+
+const connectionRoadmap = [
+  {
+    name: "Shopify",
+    purpose: "Catalog, product-page, and order truth for feed and revenue checks.",
+    status: "Next connector",
+    icon: ShoppingBag,
+  },
+  {
+    name: "Google Ads",
+    purpose: "Read-only baselines, conversion definitions, and landing-page evidence.",
+    status: "Design-partner gate",
+    icon: Search,
+  },
+  {
+    name: "Meta Ads",
+    purpose: "Read-only creative and event-health context across paid channels.",
+    status: "Design-partner gate",
+    icon: Megaphone,
+  },
+  {
+    name: "Slack / Teams",
+    purpose: "Deliver approvals and escalate exceptions to the accountable operator.",
+    status: "Planned",
+    icon: MessagesSquare,
   },
 ] as const;
 
@@ -167,15 +201,9 @@ const measurementStateContent: Record<
   },
 };
 
-const validationTimeFormatter = new Intl.DateTimeFormat("en-IE", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
-
 function formatValidationTime(value: string | null) {
   if (!value) return "No retained validation";
-  return validationTimeFormatter.format(new Date(value));
+  return formatUtcDateTime(value, { includeTimeZone: true });
 }
 
 export function WorkspaceOnboarding({
@@ -184,6 +212,7 @@ export function WorkspaceOnboarding({
   connectedAccountName,
   message,
   conversionsConnection,
+  agencyClientAttachEnabled = false,
 }: WorkspaceOnboardingProps) {
   const router = useRouter();
   const [organizationName, setOrganizationName] = useState("");
@@ -224,6 +253,11 @@ export function WorkspaceOnboarding({
     canManageConnection &&
     conversionsConnection.state !== "unavailable" &&
     conversionsConnection.validationEnabled;
+  const canAttachAgencyClient =
+    agencyClientAttachEnabled &&
+    state === "ready" &&
+    access?.organizationType === "agency" &&
+    (access.membershipRole === "owner" || access.membershipRole === "admin");
 
   function resetMeasurementConnection() {
     setPixelId("");
@@ -455,17 +489,25 @@ export function WorkspaceOnboarding({
                   </Badge>
                 </div>
                 <div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setRotationOpen(true)}
-                    disabled={!canManageConnection}
-                  >
-                    <KeyRound data-icon="inline-start" />
-                    {access.connectionMode === "vault"
-                      ? "Replace client key"
-                      : "Move to encrypted client key"}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setRotationOpen(true)}
+                      disabled={!canManageConnection}
+                    >
+                      <KeyRound data-icon="inline-start" />
+                      {access.connectionMode === "vault"
+                        ? "Replace client key"
+                        : "Move to encrypted client key"}
+                    </Button>
+                    {canAttachAgencyClient ? (
+                      <ConnectClientAccountDialog
+                        organizationId={access.organizationId}
+                        organizationName={access.organizationName}
+                      />
+                    ) : null}
+                  </div>
                   {!canManageConnection ? (
                     <p className="mt-2 text-xs text-muted-foreground">
                       Workspace owners and admins with account-management access
@@ -593,7 +635,7 @@ export function WorkspaceOnboarding({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-5">
-            <Progress value={content.progress} />
+            <Progress value={content.progress} aria-label="Access model" />
             <div className="grid gap-5">
               {setupSteps.map((step, index) => {
                 const Icon = step.icon;
@@ -620,7 +662,47 @@ export function WorkspaceOnboarding({
 
       <Card className="min-w-0 shadow-sm">
         <CardHeader>
-          <div className="flex flex-col justify-between gap-4 min-[640px]:flex-row min-[640px]:items-start">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+            <div className="grid gap-1">
+              <CardTitle className="text-base">Connection roadmap</CardTitle>
+              <CardDescription>
+                OpenAI Ads remains the system of record. Other channels add
+                read-only evidence or route approvals; none are presented as
+                connected before a paid design partner validates the need.
+              </CardDescription>
+            </div>
+            <Badge variant="outline">Scoped integrations</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2">
+          {connectionRoadmap.map((connection) => {
+            const Icon = connection.icon;
+            return (
+              <div
+                key={connection.name}
+                className="flex items-start gap-3 rounded-lg border p-4"
+              >
+                <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+                  <Icon className="size-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium">{connection.name}</p>
+                    <Badge variant="secondary">{connection.status}</Badge>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {connection.purpose}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      <Card className="min-w-0 shadow-sm">
+        <CardHeader>
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
             <div className="grid gap-1">
               <CardTitle className="text-base">
                 {measurementContent.title}
@@ -696,7 +778,7 @@ export function WorkspaceOnboarding({
             </Alert>
           ) : null}
         </CardContent>
-        <CardFooter className="flex-col items-start justify-between gap-3 min-[640px]:flex-row min-[640px]:items-center">
+        <CardFooter className="flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
           <p className="text-xs leading-5 text-muted-foreground">
             A provider 2xx proves only that the dry-run request was accepted. Pixel
             ownership, Ads Manager visibility, matching, and attribution still

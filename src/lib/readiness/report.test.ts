@@ -97,6 +97,7 @@ describe("readiness client report summary", () => {
     });
     expect(empty).toMatchObject({
       canExport: false,
+      isComplete: false,
       completedSections: 0,
       totalSections: 4,
       verdict: "partial",
@@ -110,6 +111,7 @@ describe("readiness client report summary", () => {
     });
     expect(partial).toMatchObject({
       canExport: true,
+      isComplete: false,
       completedSections: 1,
       verdict: "partial",
       verdictLabel: "Partial evidence",
@@ -133,6 +135,7 @@ describe("readiness client report summary", () => {
     });
 
     expect(summary).toMatchObject({
+      isComplete: true,
       completedSections: 4,
       verdict: "ready_for_review",
       verdictLabel: "Ready for human review",
@@ -166,6 +169,12 @@ describe("readiness client report HTML", () => {
     const html = buildReadinessReportHtml(input);
 
     expect(html).toContain("ChatGPT commerce launch readiness");
+    expect(html).toContain('class="partial-report"');
+    expect(html).toContain("Partial report");
+    expect(html).toContain("1 section remains untested");
+    expect(html).toContain("Storefront page score");
+    expect(html).toContain("working record");
+    expect(html).not.toContain("A client-ready record");
     expect(html).toContain("&lt;script&gt;alert(&#039;report&#039;)&lt;/script&gt;");
     expect(html).not.toContain("<script>alert('report')</script>");
     expect(html).not.toContain("Private launch product");
@@ -174,6 +183,32 @@ describe("readiness client report HTML", () => {
     expect(html).toContain("https://developers.openai.com/ads/conversions-api");
     expect(html).toContain("excludes raw product-feed rows");
     expect(readinessReportFileName(input)).toBe(
+      "maintainflow-partial-readiness-shop-example-2026-08-30.html",
+    );
+  });
+
+  it("removes the partial watermark only when all evidence sections are complete", () => {
+    const liveMeasurement: ConversionMeasurementReadiness = {
+      ...accountMeasurement,
+      source: "live",
+      status: "ready",
+      activeConversionCampaigns: 1,
+      healthyCampaigns: 1,
+      eventSettingCount: 1,
+    };
+    const completeInput: ReadinessReportInput = {
+      generatedAt,
+      storefront: { ...storefront, score: 100, verdict: "ready" },
+      productFeed: readyProductFeed(),
+      conversionsApi: readyConversionsApi(),
+      accountMeasurement: liveMeasurement,
+    };
+    const html = buildReadinessReportHtml(completeInput);
+
+    expect(html).not.toContain('class="partial-report"');
+    expect(html).not.toContain('<strong>Partial report</strong>');
+    expect(html).toContain("A client-ready record");
+    expect(readinessReportFileName(completeInput)).toBe(
       "maintainflow-readiness-shop-example-2026-08-30.html",
     );
   });

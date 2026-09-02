@@ -3,7 +3,7 @@ import type {
   Recommendation,
 } from "./demo-data";
 import { buildAdsResourcePath } from "./resource-path";
-import type { AdGroup, Campaign } from "./schema";
+import { adGroupUpdateSchema, type AdGroup, type Campaign } from "./schema";
 
 export type ScopedAdGroup = AdGroup & { campaign_id: string };
 
@@ -34,6 +34,52 @@ function confidenceFor(overageRatio: number, conversions: number) {
   const signal = Math.min(12, Math.round((overageRatio - 1) * 20));
   const volume = Math.min(8, Math.floor(conversions / 5));
   return Math.min(96, 76 + signal + volume);
+}
+
+function projectWritableBiddingConfig(
+  biddingConfig: AdGroup["bidding_config"],
+) {
+  if (biddingConfig.strategy === "automated_bid") return null;
+
+  return {
+    billing_event_type: biddingConfig.billing_event_type,
+    ...(biddingConfig.strategy
+      ? { strategy: biddingConfig.strategy }
+      : {}),
+    ...(biddingConfig.max_bid_micros !== undefined
+      ? { max_bid_micros: biddingConfig.max_bid_micros }
+      : {}),
+    ...(biddingConfig.custom_audience_bid_multipliers
+      ? {
+          custom_audience_bid_multipliers:
+            biddingConfig.custom_audience_bid_multipliers.map((multiplier) => ({
+              custom_audience_id: multiplier.custom_audience_id,
+              bid_multiplier_micros: multiplier.bid_multiplier_micros,
+            })),
+        }
+      : {}),
+  };
+}
+
+function buildValidatedBidChange(
+  biddingConfig: AdGroup["bidding_config"],
+  proposedBidMicros: number,
+) {
+  const writableBiddingConfig = projectWritableBiddingConfig(biddingConfig);
+  if (!writableBiddingConfig) return null;
+
+  const rollback = adGroupUpdateSchema.safeParse({
+    bidding_config: writableBiddingConfig,
+  });
+  const mutation = adGroupUpdateSchema.safeParse({
+    bidding_config: {
+      ...writableBiddingConfig,
+      max_bid_micros: proposedBidMicros,
+    },
+  });
+
+  if (!rollback.success || !mutation.success) return null;
+  return { mutation: mutation.data, rollback: rollback.data };
 }
 
 /**
@@ -92,6 +138,12 @@ export function buildLiveRecommendations({
       1,
       Math.round(maxBidMicros * 0.8),
     );
+    const validatedBidChange = buildValidatedBidChange(
+      adGroup.bidding_config,
+      proposedBidMicros,
+    );
+    if (!validatedBidChange) return [];
+
     const proposedBid = proposedBidMicros / 1_000_000;
     const campaignMetrics = campaignPerformanceById.get(campaign.id);
 
@@ -156,19 +208,12 @@ export function buildLiveRecommendations({
         mutation: {
           method: "POST" as const,
           path: buildAdsResourcePath("ad_groups", adGroup.id),
-          body: {
-            bidding_config: {
-              ...adGroup.bidding_config,
-              max_bid_micros: proposedBidMicros,
-            },
-          },
+          body: validatedBidChange.mutation,
         },
         rollback: {
           method: "POST" as const,
           path: buildAdsResourcePath("ad_groups", adGroup.id),
-          body: {
-            bidding_config: adGroup.bidding_config,
-          },
+          body: validatedBidChange.rollback,
         },
       },
     ];

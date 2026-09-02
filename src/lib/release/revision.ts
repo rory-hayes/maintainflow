@@ -1,4 +1,4 @@
-const GIT_REVISION_PATTERN = /^[a-f0-9]{7,64}$/i;
+const GIT_REVISION_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i;
 
 export function resolveBuildRevision(
   compiledRevision: string | undefined =

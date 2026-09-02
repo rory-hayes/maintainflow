@@ -5,6 +5,7 @@ import type { WorkspaceSetupState } from "@/components/maintainflow/workspace-on
 import {
   listActiveApprovalRecords,
   listApprovalRecords,
+  recoverStaleApprovalOperations,
   verifyApprovalStore,
 } from "@/lib/audit/approval-store.server";
 import {
@@ -47,6 +48,10 @@ import {
 } from "@/lib/openai-ads/data.server";
 import { getLiveWorkbench } from "@/lib/openai-ads/live-sync.server";
 import {
+  listLivePortfolioAccounts,
+} from "@/lib/openai-ads/live-portfolio.server";
+import type { LivePortfolioAccount } from "@/lib/openai-ads/live-portfolio";
+import {
   listCreativeReviewEvents,
   recordCreativeReviewSnapshot,
   verifyCreativeHistoryStore,
@@ -54,12 +59,9 @@ import {
 import type { CreativeReviewEvent } from "@/lib/openai-ads/creative-history";
 import {
   demoAccount,
-  demoAds,
-  demoCampaignPerformance,
-  demoCampaigns,
-  demoCreativeReviewEvents,
-  demoRecommendations,
 } from "@/lib/openai-ads/demo-data";
+import type { BudgetGuardEvidence } from "@/lib/openai-ads/budget-guard";
+import { resolveSimulatedWorkspace } from "@/lib/openai-ads/simulated-workspaces";
 import {
   buildMonitoringWindows,
   suppressRecommendationsUnderActiveApproval,
@@ -103,19 +105,19 @@ export default async function MaintainFlowAppPage({
   const requestedTab = parseAppTab(query.tab);
   const log = createServerLogger("app.workspace");
   const authenticatedOperator = await getOptionalOperator();
-  const operator = authenticatedOperator ?? {
-    id: "demo-operator",
-    name: "Demo operator",
-    initials: "DO",
-  };
+  const simulatedWorkspace = resolveSimulatedWorkspace(requestedAccountId);
+  const operator = authenticatedOperator ?? simulatedWorkspace.operator;
 
   let runtime = getAdsRuntimeMode();
-  let account = demoAccount;
-  let ads = demoAds;
-  let campaigns = demoCampaigns;
-  let performance = demoCampaignPerformance;
-  let recommendations = demoRecommendations;
-  let creativeReviewHistory: CreativeReviewEvent[] = demoCreativeReviewEvents;
+  let account = simulatedWorkspace.account;
+  let ads = simulatedWorkspace.ads;
+  let campaigns = simulatedWorkspace.campaigns;
+  let performance = simulatedWorkspace.performance;
+  let budgetGuardEvidence: BudgetGuardEvidence[] =
+    simulatedWorkspace.budgetGuardEvidence;
+  let recommendations = simulatedWorkspace.recommendations;
+  let creativeReviewHistory: CreativeReviewEvent[] =
+    simulatedWorkspace.creativeReviewHistory;
   let dataSource: "demo" | "live" = "demo";
   let writeMode: "demo" | "live" = "demo";
   let syncedAt: string | undefined;
@@ -147,6 +149,9 @@ export default async function MaintainFlowAppPage({
   let readinessHistoryStoreReady = false;
   let readinessHistoryError: string | undefined;
   let readinessHistory: ReadinessAuditHistoryEntry[] = [];
+  let livePortfolioVisible = false;
+  let livePortfolioAccounts: LivePortfolioAccount[] = [];
+  let livePortfolioError: string | undefined;
 
   if (!authenticatedOperator) {
     if (runtime.dataSource === "live") {
@@ -245,6 +250,7 @@ export default async function MaintainFlowAppPage({
               ads = [];
               campaigns = [];
               performance = [];
+              budgetGuardEvidence = [];
               recommendations = [];
               creativeReviewHistory = [];
               conversionMeasurement = unavailableConversionMeasurement({
@@ -310,6 +316,7 @@ export default async function MaintainFlowAppPage({
               ads = [];
               campaigns = [];
               performance = [];
+              budgetGuardEvidence = [];
               recommendations = [];
               creativeReviewHistory = [];
               const liveResult = await getLiveWorkbench({
@@ -323,6 +330,7 @@ export default async function MaintainFlowAppPage({
               ads = live.ads;
               campaigns = live.campaigns;
               performance = live.performance;
+              budgetGuardEvidence = live.budgetGuardEvidence ?? [];
               recommendations = live.recommendations;
               conversionMeasurement = live.conversionMeasurement;
               dataSource = "live";
@@ -372,6 +380,10 @@ export default async function MaintainFlowAppPage({
                     "Completed monitoring windows could not be checked during this sync. No rollback was sent.";
                 }
                 try {
+                  await recoverStaleApprovalOperations({
+                    accountId: live.account.id,
+                    limit: 50,
+                  });
                   const [historyRecords, activeRecords] = await Promise.all([
                     listApprovalRecords(live.account.id),
                     listActiveApprovalRecords(live.account.id),
@@ -451,6 +463,7 @@ export default async function MaintainFlowAppPage({
           ads = [];
           campaigns = [];
           performance = [];
+          budgetGuardEvidence = [];
           recommendations = [];
           creativeReviewHistory = [];
           approvalHistory = [];
@@ -466,6 +479,32 @@ export default async function MaintainFlowAppPage({
           "Live sync failed. MaintainFlow is showing no account metrics or recommendations and has disabled all external writes; demo fixtures are not substituted for this connected account.";
       }
     }
+  }
+
+  if (
+    authenticatedOperator &&
+    dataSource === "live" &&
+    workspaceAccess?.organizationType === "agency"
+  ) {
+    livePortfolioVisible = true;
+    try {
+      livePortfolioAccounts = await listLivePortfolioAccounts({
+        operatorId: authenticatedOperator.id,
+        organizationId: workspaceAccess.organizationId,
+      });
+    } catch (error) {
+      log.error("workspace.live_portfolio_load_failed", { error });
+      livePortfolioError =
+        "Stored client evidence could not be loaded. Missing snapshots and detected signals remain unknown.";
+    }
+  }
+
+  if (dataSource === "demo") {
+    approvalHistory = simulatedWorkspace.approvalHistory;
+    monitoringWindows = buildMonitoringWindows(
+      approvalHistory,
+      new Date("2026-09-02T12:00:00.000Z"),
+    );
   }
 
   const writeBlockers = [
@@ -490,6 +529,14 @@ export default async function MaintainFlowAppPage({
     workspaceSetupState === "connection_error"
       ? "workspace"
       : "review");
+  const agencyClientAttachEnabled = Boolean(
+    authenticatedOperator &&
+      dataSource === "live" &&
+      workspaceSetupState === "ready" &&
+      workspaceAccess?.organizationType === "agency" &&
+      (workspaceAccess.membershipRole === "owner" ||
+        workspaceAccess.membershipRole === "admin"),
+  );
 
   return (
     <MaintainFlowWorkbench
@@ -505,6 +552,7 @@ export default async function MaintainFlowAppPage({
       creativeHistoryError={creativeHistoryError}
       campaigns={campaigns}
       performance={performance}
+      budgetGuardEvidence={budgetGuardEvidence}
       initialRecommendations={recommendations}
       recommendationApprovalFingerprints={Object.fromEntries(
         recommendations.map((recommendation) => [
@@ -542,6 +590,7 @@ export default async function MaintainFlowAppPage({
       workspaceMessage={workspaceMessage}
       conversionsConnection={conversionsConnection}
       availableAccounts={availableAccounts}
+      agencyClientAttachEnabled={agencyClientAttachEnabled}
       recommendationDecisionReady={
         dataSource === "demo" ||
         (recommendationDecisionStoreReady && !recommendationDecisionError)
@@ -562,6 +611,15 @@ export default async function MaintainFlowAppPage({
       readinessHistoryCanSave={Boolean(
         workspaceAccess && canWriteAccount(workspaceAccess),
       )}
+      simulatedAccounts={
+        dataSource === "demo" ? simulatedWorkspace.accountOptions : []
+      }
+      simulatorLabel={
+        dataSource === "demo" ? simulatedWorkspace.simulatorLabel : ""
+      }
+      livePortfolioVisible={livePortfolioVisible}
+      livePortfolioAccounts={livePortfolioAccounts}
+      livePortfolioError={livePortfolioError}
     />
   );
 }

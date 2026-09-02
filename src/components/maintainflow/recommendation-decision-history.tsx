@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { RecommendationDecisionHistoryDto } from "@/lib/audit/recommendation-decision";
+import { formatUtcDateTime } from "@/lib/formatting";
 
 type RecommendationDecisionHistoryProps = {
   records: RecommendationDecisionHistoryDto[];
@@ -33,11 +34,7 @@ type RecommendationDecisionHistoryProps = {
 };
 
 function decisionTime(value: string) {
-  return `${new Intl.DateTimeFormat("en-IE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(value))} UTC`;
+  return formatUtcDateTime(value, { includeTimeZone: true });
 }
 
 function actorSummary(
@@ -84,19 +81,18 @@ export function RecommendationDecisionHistory({
               </EmptyMedia>
               <EmptyTitle>
                 {dataSource === "demo"
-                  ? "No durable decisions in demo mode"
+                  ? "No durable decisions in simulator mode"
                   : "No recommendation decisions yet"}
               </EmptyTitle>
               <EmptyDescription>
                 {dataSource === "demo"
-                  ? "Demo dismissals remain in the session audit below. Connected accounts retain the full decision and restore trail here."
+                  ? "Simulator dismissals remain in the session audit below. Connected accounts retain the full decision and restore trail here."
                   : "Reason-backed dismissals and restores will appear here for this advertiser account."}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
-          <div className="max-w-full overflow-x-auto">
-            <Table>
+          <Table scrollAreaLabel="Recommendation decision history">
               <TableHeader>
                 <TableRow>
                   <TableHead>Decision</TableHead>
@@ -107,7 +103,9 @@ export function RecommendationDecisionHistory({
               </TableHeader>
               <TableBody>
                 {records.map((record) => (
-                  <TableRow key={record.id}>
+                  <TableRow
+                    key={`${record.recommendationId}:${record.entityId}:${record.dismissedAt}`}
+                  >
                     <TableCell className="min-w-44 align-top">
                       <Badge
                         variant="outline"
@@ -148,11 +146,7 @@ export function RecommendationDecisionHistory({
                           record.accountRole,
                         )}
                       </p>
-                      <p className="font-mono text-xs text-muted-foreground">
-                        {record.operatorId}
-                      </p>
                       {record.restoredAt &&
-                      record.restoredBy &&
                       record.restoredOrganizationName &&
                       record.restoredMembershipRole &&
                       record.restoredAccountRole ? (
@@ -165,17 +159,13 @@ export function RecommendationDecisionHistory({
                               record.restoredAccountRole,
                             )}
                           </p>
-                          <p className="font-mono text-xs text-muted-foreground">
-                            {record.restoredBy}
-                          </p>
                         </div>
                       ) : null}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
-          </div>
+          </Table>
         )}
       </CardContent>
     </Card>

@@ -1,65 +1,6 @@
-export const databaseMigrationManifest = [
-  {
-    name: "001_ads_approval_records.sql",
-    checksumSha256:
-      "77284d71cfa8d4e5ae250d029d35fd7b900eb2b87e042885627ac40b67545955",
-  },
-  {
-    name: "002_customer_tenancy.sql",
-    checksumSha256:
-      "ac0b4e37da13d9525c533b2976c5e7c62f0a1986a1163347298eaafdae0bdc60",
-  },
-  {
-    name: "003_advertiser_credentials.sql",
-    checksumSha256:
-      "61b87059bed993f3fbdef2280836352ff5cb6a286ca9ae8da7a075f67561b7db",
-  },
-  {
-    name: "004_creative_review_history.sql",
-    checksumSha256:
-      "4b0e594bbd246bfbd3a9fb36d7c3d5c80d5906060210ae7d67c53111a5324cb7",
-  },
-  {
-    name: "005_durable_monitoring_windows.sql",
-    checksumSha256:
-      "ca9fb637d7fe64b299b119cf5e2fe2a18fac3c5b2c533c928ed6c5ccc5795238",
-  },
-  {
-    name: "006_monitoring_outcomes.sql",
-    checksumSha256:
-      "df93d82a9da9d511c34dbe0dd2f7d151bf02cb098dcf08a8b81756a980dfa189",
-  },
-  {
-    name: "007_monitoring_evaluation_leases.sql",
-    checksumSha256:
-      "929579a9cab883444a866ffdfba7aad72bdfbcd3f288db15f6fdade2b893712b",
-  },
-  {
-    name: "008_readiness_rate_limits.sql",
-    checksumSha256:
-      "a892207fbf5423c16d9f178243f9ab4a35c76bc73f3849a46febd9cb9e6b49e1",
-  },
-  {
-    name: "009_recommendation_dismissals.sql",
-    checksumSha256:
-      "3546356df7bdcbcc58e09d44d7e6baf872eb6b880998e1dab248922d96cad9e8",
-  },
-  {
-    name: "010_conversion_credentials.sql",
-    checksumSha256:
-      "d3ca1ece9dcca167337f8cec674ee28c29eae72c44fcb70552efa3bd7669bd2e",
-  },
-  {
-    name: "011_readiness_audit_history.sql",
-    checksumSha256:
-      "ef7812ca9a7496a5040ad488c1d2493facd9efd41ae63ef878efba76e02e047d",
-  },
-  {
-    name: "012_live_workbench_snapshots.sql",
-    checksumSha256:
-      "92f8f199449344347898fba8a4700a7e3d154b5d354089eca204ee329c57deae",
-  },
-] as const;
+import manifest from "./migration-manifest.json";
+
+export const databaseMigrationManifest = manifest;
 
 export type DatabaseMigrationManifestEntry =
   (typeof databaseMigrationManifest)[number];

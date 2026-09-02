@@ -1,6 +1,6 @@
 # OpenAI Ads API contract
 
-Verified against the official OpenAI Ads documentation on 30 August 2026.
+Verified against the official OpenAI Ads documentation on 2 September 2026.
 
 ## Authentication boundary
 
@@ -39,8 +39,8 @@ Ad account
         └── Ad
 ```
 
-Campaigns hold daily and/or lifetime spend limits, objective, dates, and targeting. Ad
-groups hold context hints and the bid configuration. Ads hold the complete
+Campaigns hold one selected daily or lifetime spend limit, objective, dates, and
+targeting. Ad groups hold context hints and the bid configuration. Ads hold the complete
 creative, review details, appeal state, and optional serving issues.
 
 A campaign with `mode: product_feed` also references the linked
@@ -68,13 +68,25 @@ CPA and post-click conversion rate must be calculated from click-attributed
 conversions. View-through conversions remain a separate reporting metric and
 must not be included in CPA or bidding decisions.
 
+OpenAI defines a daily budget as an average across an applicable seven-day
+period, permits up to 2x that amount on one day, and caps a stable week at 7x.
+A mid-week budget change is prorated through the next Sunday at midnight. The
+current Campaign resource is not treated as historical proof: live Budget Guard
+remains locked until the exact account-local spend window and continuous budget
+history can establish the applicable limit. Demo evidence is pinned to
+`openai_budget_rules_2026-08`; lifetime budgets require the exact campaign range.
+
 Account, campaign, ad-group, ad-creative, and insight responses are
 schema-validated before use. Campaigns, ad groups, ads, and insights consume
 every documented cursor page with repeated-cursor and page-count safety limits;
 partial pagination is rejected rather than shown as a complete account. Read
 requests have a 15-second timeout, and the already verified account response is
 reused during the full sync. One request-scoped budget caps a sync at 256
-provider attempts, 10,000 returned resources, and five concurrent requests.
+provider attempts, 10,000 returned resources, five concurrent requests, and a
+45-second wall-clock deadline across the complete provider sync.
+Each successful JSON response is streamed through a 16 MiB byte limit before
+schema validation; both declared and chunked oversized bodies are cancelled and
+discarded. Provider error bodies remain unread and opaque.
 Safe `429` retries honour bounded `Retry-After` metadata; mutations and
 timeouts are never retried. A failure in any required dataset aborts the sync,
 so no partially assembled live account is returned or cached across requests.
@@ -136,6 +148,14 @@ Every MaintainFlow recommendation therefore stores:
 4. a human approval record;
 5. a monitoring window and explicit rollback condition.
 
+Immediately before each apply or rollback POST, MaintainFlow performs a detail
+GET with the same account credential and compares a SHA-256 fingerprint of the
+normalized fields controlled by that reviewed request. A changed field records
+`blocked_no_write` and requires fresh review or reconciliation; an unreadable
+resource also blocks the mutation. This closes ordinary stale-review overwrites,
+but there is still a narrow GET-to-POST race because the current API contract
+does not document an atomic conditional-write version token.
+
 For the first live bid rule, the monitoring plan stores the exact Insights Unix
 range, spend, click-attributed conversion count, derived CPA, configured
 `max_bid_micros`, currency, seven-day duration, and 15% conversion-decline
@@ -196,6 +216,41 @@ claimed atomically before it is sent; uncertain rollback outcomes are marked
 `rollback_reconciliation_required`, and an operator must verify Ads Manager and
 record the result with a reconciliation note rather than resend automatically.
 
+Every apply record has an immutable attempt generation, and every rollback
+claim receives a fresh UUID generation. Immediately before each provider POST,
+MaintainFlow commits a one-way marker bound to that exact account, record, and
+generation. It then holds a row lock while invoking the provider send, whose
+HTTP request has a 15-second application abort. Stale recovery uses `FOR UPDATE
+SKIP LOCKED`: if the sender owns the row, recovery skips it; if recovery changes
+the status first, the send fence rejects before invoking the provider callback.
+An older rollback worker cannot borrow a newer claim's marker or finalize its
+result because the fence and terminal update both require the exact generation.
+
+The database transaction itself has no independent 15-second guarantee; its
+lock lasts until commit, rollback, or database-session cleanup. Production
+database and proxy timeouts must therefore exceed the application send window
+and be monitored. Response parsing, provider readback, and final persistence run
+after the send transaction. Abandoned unmarked operations move to a confirmed
+no-write retryable state, while abandoned marked operations move to manual
+reconciliation and retain must-not-retry semantics.
+
+Before creating or claiming any provider write, MaintainFlow locks the account
+and refuses the operation while that account has another active or unresolved
+apply or rollback. Every protected scheduled or deployment-probe maintenance
+run reports the bounded unresolved-operation count, and the deployment probe
+requires zero. The count includes reconciliation states and active operations
+that have exceeded the recovery lease, including rows skipped because a sender
+still holds their lock. Manual reconciliation clears the interlock only after
+Ads Manager is checked.
+
+PostgreSQL and the provider are not one atomic system. A database session loss
+combined with a subsequently resumed JavaScript callback cannot be ruled out
+without provider-enforced idempotency or conditional-write support. The send
+generation fence closes the tested stale-recovery and rollback-ABA races but
+does not justify live writes on its own; live writes remain gated until the
+real-account acceptance plan proves
+the provider behavior and operational controls.
+
 A documented HTTP `200` is necessary but not sufficient for an applied state.
 MaintainFlow parses the campaign, ad-group, or ad acknowledgement through its
 official resource schema, verifies the resource ID, then performs the matching
@@ -204,11 +259,19 @@ the requested fields, or the requested active/paused state for an action. An
 invalid acknowledgement, unexpected success status, failed readback, or state
 mismatch becomes reconciliation-required because the non-idempotent write may
 already have taken effect; the mutation is never retried automatically.
+Mutation and rollback acknowledgements have a stricter 1 MiB streamed response
+limit. If that body is oversized or cannot be safely read after the request was
+sent, MaintainFlow stores no response body, marks the operation for manual
+reconciliation, and preserves the must-not-retry rule.
 
 Completed monitoring does not depend on a browser refresh. The protected daily
-scheduler resolves each selected advertiser's credential independently, claims
-due rows with a recoverable lease, and persists only observations. It never
-sends an Ads mutation or automatic rollback.
+scheduler resolves each selected advertiser's credential independently, waits
+until 48 hours after the stored evidence window, claims due rows with a
+recoverable lease, and persists only observations. Account selection records a
+durable attempt before credential lookup, prioritizes never or least-recently
+attempted accounts, and applies bounded exponential backoff after failure so one
+broken client cannot starve the rest of an agency portfolio. It never sends an
+Ads mutation or automatic rollback.
 
 The first live recommendation rule is deliberately narrow: for active
 conversion campaigns, compare click-attributed CPA with the ad group's
@@ -285,3 +348,5 @@ old version unless the encrypted replacement transaction succeeds.
 - [Image Tag](https://developers.openai.com/ads/image-tag)
 - [Conversions API](https://developers.openai.com/ads/conversions-api)
 - [Supported Events](https://developers.openai.com/ads/supported-events)
+- [Daily budgets](https://help.openai.com/en/articles/20001413-daily-budgets)
+- [Measure results](https://help.openai.com/en/articles/20001214-launch-your-campaign-and-monitor-performance)

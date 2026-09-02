@@ -1,3 +1,4 @@
+import { ZodError } from "zod";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const testState = vi.hoisted(() => {
@@ -43,6 +44,9 @@ const testState = vi.hoisted(() => {
     validateConversionsApiPayload: vi.fn(),
     isSecureSameOriginRequest: vi.fn(),
     readJsonBodyWithLimit: vi.fn(),
+    logInfo: vi.fn(),
+    logWarn: vi.fn(),
+    logError: vi.fn(),
   };
 });
 
@@ -67,6 +71,14 @@ vi.mock("@/lib/openai-ads/conversions.server", () => ({
   ConversionsApiValidationUnavailableError:
     testState.ConversionsApiValidationUnavailableError,
   validateConversionsApiPayload: testState.validateConversionsApiPayload,
+}));
+
+vi.mock("@/lib/observability/logger.server", () => ({
+  createServerLogger: () => ({
+    info: testState.logInfo,
+    warn: testState.logWarn,
+    error: testState.logError,
+  }),
 }));
 
 vi.mock("@/lib/tenancy/store.server", () => ({
@@ -136,6 +148,10 @@ describe("protected Conversions API validation route", () => {
     });
     expect(JSON.stringify(payload)).not.toContain("private_event_id");
     expect(JSON.stringify(payload)).not.toContain("shop.example");
+    expect(testState.logInfo).toHaveBeenCalledWith(
+      "conversions.validate_only.completed",
+      expect.objectContaining({ status: 200, durationMs: expect.any(Number) }),
+    );
   });
 
   it("rejects an insecure or cross-origin request before authentication", async () => {
@@ -205,6 +221,22 @@ describe("protected Conversions API validation route", () => {
     expect(JSON.stringify(payload)).not.toContain("shop.example");
   });
 
+  it("classifies only the request boundary as client schema input", async () => {
+    testState.readJsonBodyWithLimit.mockResolvedValue({
+      accountId: "",
+      payload: {},
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(422);
+    expect(testState.validateConversionsApiPayload).not.toHaveBeenCalled();
+    expect(testState.logWarn).toHaveBeenCalledWith(
+      "conversions.validate_only.rejected",
+      expect.objectContaining({ status: 422 }),
+    );
+  });
+
   it("fails closed when the account-bound validation configuration is unavailable", async () => {
     testState.validateConversionsApiPayload.mockRejectedValue(
       new testState.ConversionsApiValidationUnavailableError("Not configured."),
@@ -232,6 +264,14 @@ describe("protected Conversions API validation route", () => {
       error: "OpenAI rejected validation.",
       providerStatus: 422,
     });
+    expect(testState.logWarn).toHaveBeenCalledWith(
+      "conversions.validate_only.rejected",
+      expect.objectContaining({ status: 502 }),
+    );
+    expect(testState.logError).not.toHaveBeenCalledWith(
+      "conversions.validate_only.failed",
+      expect.anything(),
+    );
   });
 
   it("does not claim a result after an unconfirmed transport failure", async () => {
@@ -247,5 +287,50 @@ describe("protected Conversions API validation route", () => {
     expect(response.status).toBe(502);
     expect(payload).toEqual({ error: "Validation was not confirmed." });
     expect(payload).not.toHaveProperty("status");
+    expect(testState.logError).toHaveBeenCalledWith(
+      "conversions.validate_only.unavailable",
+      expect.objectContaining({ status: 502 }),
+    );
+  });
+
+  it("returns and logs an exact generic 500 for an unexpected validation fault", async () => {
+    const secret = "Bearer PLANTED_CONVERSION_SECRET";
+    testState.validateConversionsApiPayload.mockRejectedValue(new Error(secret));
+
+    const response = await POST(request());
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(payload).toEqual({
+      error: "OpenAI conversion validation could not be completed.",
+    });
+    expect(JSON.stringify(payload)).not.toContain(secret);
+    expect(testState.logError).toHaveBeenCalledWith(
+      "conversions.validate_only.failed",
+      expect.objectContaining({
+        status: 500,
+        error: expect.objectContaining({ message: secret }),
+      }),
+    );
+  });
+
+  it("does not present a downstream schema failure as a 422 client error", async () => {
+    testState.validateConversionsApiPayload.mockRejectedValue(
+      new ZodError([
+        {
+          code: "custom",
+          path: ["provider", "receipt"],
+          message: "PLANTED_PROVIDER_RECEIPT_SECRET",
+        },
+      ]),
+    );
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "OpenAI conversion validation could not be completed.",
+    });
   });
 });

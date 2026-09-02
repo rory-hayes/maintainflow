@@ -3,25 +3,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const {
+  claimDueMonitoringAccountsMock,
   claimDueMonitoringRecordsMock,
+  completeMonitoringAccountAttemptMock,
   evaluateLiveMonitoringWindowMock,
   getAdsApiKeyForAccountMock,
-  listDueMonitoringAccountIdsMock,
   recordMonitoringOutcomeMock,
+  releaseMonitoringAccountAttemptMock,
   releaseMonitoringClaimMock,
 } = vi.hoisted(() => ({
+  claimDueMonitoringAccountsMock: vi.fn(),
   claimDueMonitoringRecordsMock: vi.fn(),
+  completeMonitoringAccountAttemptMock: vi.fn(),
   evaluateLiveMonitoringWindowMock: vi.fn(),
   getAdsApiKeyForAccountMock: vi.fn(),
-  listDueMonitoringAccountIdsMock: vi.fn(),
   recordMonitoringOutcomeMock: vi.fn(),
+  releaseMonitoringAccountAttemptMock: vi.fn(),
   releaseMonitoringClaimMock: vi.fn(),
 }));
 
 vi.mock("../audit/approval-store.server", () => ({
+  claimDueMonitoringAccounts: claimDueMonitoringAccountsMock,
   claimDueMonitoringRecords: claimDueMonitoringRecordsMock,
-  listDueMonitoringAccountIds: listDueMonitoringAccountIdsMock,
+  completeMonitoringAccountAttempt: completeMonitoringAccountAttemptMock,
   recordMonitoringOutcome: recordMonitoringOutcomeMock,
+  releaseMonitoringAccountAttempt: releaseMonitoringAccountAttemptMock,
   releaseMonitoringClaim: releaseMonitoringClaimMock,
 }));
 vi.mock("../tenancy/store.server", () => ({
@@ -82,16 +88,33 @@ function record(accountId: string) {
   };
 }
 
+function dueAccount(
+  accountId: string,
+  dueCount = 1,
+  oldestDueAt = endsAt,
+) {
+  return {
+    accountId,
+    attemptId: `attempt-${accountId}`,
+    dueCount,
+    oldestDueAt,
+  };
+}
+
 describe("scheduled monitoring runner", () => {
   beforeEach(() => {
+    claimDueMonitoringAccountsMock.mockReset();
     claimDueMonitoringRecordsMock.mockReset();
+    completeMonitoringAccountAttemptMock.mockReset();
     evaluateLiveMonitoringWindowMock.mockReset();
     getAdsApiKeyForAccountMock.mockReset();
-    listDueMonitoringAccountIdsMock.mockReset();
     recordMonitoringOutcomeMock.mockReset();
+    releaseMonitoringAccountAttemptMock.mockReset();
     releaseMonitoringClaimMock.mockReset();
+    completeMonitoringAccountAttemptMock.mockResolvedValue(true);
     evaluateLiveMonitoringWindowMock.mockResolvedValue(result);
     recordMonitoringOutcomeMock.mockResolvedValue(true);
+    releaseMonitoringAccountAttemptMock.mockResolvedValue(true);
     releaseMonitoringClaimMock.mockResolvedValue(true);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -102,10 +125,10 @@ describe("scheduled monitoring runner", () => {
   });
 
   it("resolves each account credential independently and preserves successful work", async () => {
-    listDueMonitoringAccountIdsMock.mockResolvedValue([
-      "adacct_alpha",
-      "adacct_beta",
-      "adacct_missing_key",
+    claimDueMonitoringAccountsMock.mockResolvedValue([
+      dueAccount("adacct_alpha"),
+      dueAccount("adacct_beta"),
+      dueAccount("adacct_missing_key"),
     ]);
     getAdsApiKeyForAccountMock.mockImplementation(async (accountId: string) => {
       if (accountId === "adacct_missing_key") {
@@ -130,9 +153,21 @@ describe("scheduled monitoring runner", () => {
       due: 2,
       evaluated: 2,
       failed: 0,
+      selectedBacklogDueCount: 3,
+      selectedBacklogDueCountCapped: false,
+      oldestSelectedBacklogAgeSeconds: 302_400,
+      oldestSelectedBacklogAgeCapped: false,
+      deadlineExhausted: false,
     });
     expect(JSON.stringify(summary)).not.toContain("adacct_");
-    expect(listDueMonitoringAccountIdsMock).toHaveBeenCalledWith(now, 3);
+    expect(claimDueMonitoringAccountsMock).toHaveBeenCalledWith({
+      attemptId: expect.any(String),
+      now,
+      limit: 3,
+    });
+    expect(
+      claimDueMonitoringAccountsMock.mock.invocationCallOrder[0],
+    ).toBeLessThan(getAdsApiKeyForAccountMock.mock.invocationCallOrder[0]);
     expect(getAdsApiKeyForAccountMock).toHaveBeenCalledTimes(3);
     expect(claimDueMonitoringRecordsMock).toHaveBeenCalledTimes(2);
     expect(evaluateLiveMonitoringWindowMock).toHaveBeenCalledWith(
@@ -157,6 +192,241 @@ describe("scheduled monitoring runner", () => {
           expectedAccountId: "adacct_beta",
         },
       }),
+    );
+    expect(completeMonitoringAccountAttemptMock).toHaveBeenCalledWith({
+      accountId: "adacct_alpha",
+      attemptId: "attempt-adacct_alpha",
+      succeeded: true,
+      now,
+    });
+    expect(completeMonitoringAccountAttemptMock).toHaveBeenCalledWith({
+      accountId: "adacct_beta",
+      attemptId: "attempt-adacct_beta",
+      succeeded: true,
+      now,
+    });
+    expect(completeMonitoringAccountAttemptMock).toHaveBeenCalledWith({
+      accountId: "adacct_missing_key",
+      attemptId: "attempt-adacct_missing_key",
+      succeeded: false,
+      now,
+    });
+  });
+
+  it("does not claim provider work without enough route deadline remaining", async () => {
+    await expect(
+      evaluateScheduledMonitoringWindows({
+        now,
+        deadlineAt: 10_000,
+        clock: () => 8_001,
+      }),
+    ).resolves.toEqual({
+      accountsSelected: 0,
+      accountsProcessed: 0,
+      accountsFailed: 0,
+      due: 0,
+      evaluated: 0,
+      failed: 0,
+      selectedBacklogDueCount: 0,
+      selectedBacklogDueCountCapped: false,
+      oldestSelectedBacklogAgeSeconds: 0,
+      oldestSelectedBacklogAgeCapped: false,
+      deadlineExhausted: true,
+    });
+    expect(claimDueMonitoringAccountsMock).not.toHaveBeenCalled();
+  });
+
+  it("releases selected account attempts if the provider deadline expires after selection", async () => {
+    claimDueMonitoringAccountsMock.mockResolvedValue([
+      dueAccount("adacct_alpha"),
+      dueAccount("adacct_beta"),
+    ]);
+    const clock = vi.fn().mockReturnValueOnce(0).mockReturnValue(9_000);
+
+    await expect(
+      evaluateScheduledMonitoringWindows({
+        now,
+        maxAccounts: 2,
+        windowsPerAccount: 1,
+        deadlineAt: 10_000,
+        clock,
+      }),
+    ).resolves.toMatchObject({
+      accountsSelected: 2,
+      accountsProcessed: 0,
+      accountsFailed: 2,
+      deadlineExhausted: true,
+    });
+    expect(getAdsApiKeyForAccountMock).not.toHaveBeenCalled();
+    expect(releaseMonitoringAccountAttemptMock).toHaveBeenCalledWith({
+      accountId: "adacct_alpha",
+      attemptId: "attempt-adacct_alpha",
+      now,
+    });
+    expect(releaseMonitoringAccountAttemptMock).toHaveBeenCalledWith({
+      accountId: "adacct_beta",
+      attemptId: "attempt-adacct_beta",
+      now,
+    });
+    expect(completeMonitoringAccountAttemptMock).not.toHaveBeenCalled();
+  });
+
+  it("releases record and account claims without backoff when the shared provider budget expires", async () => {
+    vi.useFakeTimers();
+    try {
+      claimDueMonitoringAccountsMock.mockResolvedValue([
+        dueAccount("adacct_alpha"),
+      ]);
+      getAdsApiKeyForAccountMock.mockResolvedValue("key-for-adacct_alpha");
+      claimDueMonitoringRecordsMock.mockResolvedValue([
+        record("adacct_alpha"),
+      ]);
+      evaluateLiveMonitoringWindowMock.mockImplementation(
+        async ({ providerBudget }: { providerBudget: { signal: AbortSignal } }) =>
+          new Promise((_resolve, reject) => {
+            providerBudget.signal.addEventListener(
+              "abort",
+              () => reject(providerBudget.signal.reason),
+              { once: true },
+            );
+          }),
+      );
+
+      const pending = evaluateScheduledMonitoringWindows({
+        now,
+        maxAccounts: 1,
+        windowsPerAccount: 1,
+        deadlineAt: 3_000,
+        clock: () => 0,
+      });
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      await expect(pending).resolves.toMatchObject({
+        accountsSelected: 1,
+        accountsProcessed: 0,
+        accountsFailed: 1,
+        deadlineExhausted: true,
+      });
+      expect(releaseMonitoringClaimMock).toHaveBeenCalledOnce();
+      expect(releaseMonitoringAccountAttemptMock).toHaveBeenCalledWith({
+        accountId: "adacct_alpha",
+        attemptId: "attempt-adacct_alpha",
+        now,
+      });
+      expect(completeMonitoringAccountAttemptMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("moves past six broken accounts and processes the seventh account on the next run", async () => {
+    const brokenAccounts = Array.from(
+      { length: 6 },
+      (_, index) => `adacct_broken_${index + 1}`,
+    );
+    claimDueMonitoringAccountsMock
+      .mockResolvedValueOnce(
+        brokenAccounts.map((accountId, index) =>
+          dueAccount(
+            accountId,
+            4,
+            new Date(endsAt.getTime() + index * 60_000),
+          ),
+        ),
+      )
+      .mockResolvedValueOnce([dueAccount("adacct_seventh")]);
+    getAdsApiKeyForAccountMock.mockImplementation(async (accountId: string) => {
+      if (accountId.startsWith("adacct_broken_")) {
+        throw new Error("Credential unavailable");
+      }
+      return `key-for-${accountId}`;
+    });
+    claimDueMonitoringRecordsMock.mockImplementation(
+      async ({ accountId }: { accountId: string }) => [record(accountId)],
+    );
+
+    const first = await evaluateScheduledMonitoringWindows({
+      now,
+      maxAccounts: 6,
+      windowsPerAccount: 1,
+    });
+    const second = await evaluateScheduledMonitoringWindows({
+      now: new Date(now.getTime() + 1_000),
+      maxAccounts: 6,
+      windowsPerAccount: 1,
+    });
+
+    expect(first).toMatchObject({
+      accountsSelected: 6,
+      accountsProcessed: 0,
+      accountsFailed: 6,
+      selectedBacklogDueCount: 24,
+    });
+    expect(second).toMatchObject({
+      accountsSelected: 1,
+      accountsProcessed: 1,
+      accountsFailed: 0,
+      due: 1,
+      evaluated: 1,
+    });
+    expect(claimDueMonitoringRecordsMock).toHaveBeenCalledTimes(1);
+    expect(claimDueMonitoringRecordsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "adacct_seventh" }),
+    );
+    const firstAttemptId =
+      claimDueMonitoringAccountsMock.mock.calls[0]?.[0].attemptId;
+    const secondAttemptId =
+      claimDueMonitoringAccountsMock.mock.calls[1]?.[0].attemptId;
+    expect(firstAttemptId).not.toBe(secondAttemptId);
+    for (const accountId of brokenAccounts) {
+      expect(completeMonitoringAccountAttemptMock).toHaveBeenCalledWith({
+        accountId,
+        attemptId: `attempt-${accountId}`,
+        succeeded: false,
+        now,
+      });
+    }
+    expect(completeMonitoringAccountAttemptMock).toHaveBeenCalledWith({
+      accountId: "adacct_seventh",
+      attemptId: "attempt-adacct_seventh",
+      succeeded: true,
+      now: new Date(now.getTime() + 1_000),
+    });
+  });
+
+  it("rotates a successful high-backlog cohort behind an untouched account", async () => {
+    const firstCohort = Array.from(
+      { length: 6 },
+      (_, index) => `adacct_backlog_${index + 1}`,
+    );
+    claimDueMonitoringAccountsMock
+      .mockResolvedValueOnce(
+        firstCohort.map((accountId) => dueAccount(accountId, 100)),
+      )
+      .mockResolvedValueOnce([dueAccount("adacct_backlog_7", 1)]);
+    getAdsApiKeyForAccountMock.mockImplementation(
+      async (accountId: string) => `key-for-${accountId}`,
+    );
+    claimDueMonitoringRecordsMock.mockImplementation(
+      async ({ accountId }: { accountId: string }) => [record(accountId)],
+    );
+
+    await evaluateScheduledMonitoringWindows({
+      now,
+      maxAccounts: 6,
+      windowsPerAccount: 1,
+    });
+    await evaluateScheduledMonitoringWindows({
+      now: new Date(now.getTime() + 1_000),
+      maxAccounts: 6,
+      windowsPerAccount: 1,
+    });
+
+    expect(claimDueMonitoringRecordsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "adacct_backlog_7" }),
+    );
+    expect(getAdsApiKeyForAccountMock).toHaveBeenCalledWith(
+      "adacct_backlog_7",
     );
   });
 

@@ -1,6 +1,10 @@
 import "server-only";
 
-import { adsApiRequest, type AdsApiCredential } from "./client.server";
+import {
+  adsApiRequest,
+  type AdsApiCredential,
+  type AdsProviderRequestBudget,
+} from "./client.server";
 import {
   evaluateMonitoringObservation,
   type MonitoringPlan,
@@ -58,13 +62,14 @@ export async function evaluateLiveMonitoringWindow(options: {
   startedAt: Date;
   endsAt: Date;
   credential: AdsApiCredential;
+  providerBudget?: AdsProviderRequestBudget;
 }) {
   const range = monitoringRangeFromDates(options.startedAt, options.endsAt);
   const [deliveryResponse, conversionResponse] = await Promise.all([
     adsApiRequest(
       deliveryInsightsPath(options.entityId, range),
       insightListResponseSchema,
-      {},
+      { providerBudget: options.providerBudget },
       options.credential,
     ),
     adsApiRequest(
@@ -83,6 +88,8 @@ export async function evaluateLiveMonitoringWindow(options: {
           ],
           entity_ids: [options.entityId],
         },
+        retryOnRateLimit: true,
+        providerBudget: options.providerBudget,
       },
       options.credential,
     ),
@@ -104,6 +111,6 @@ export async function evaluateLiveMonitoringWindow(options: {
     rangeEnd: range.end,
     spend: delivery?.spend ?? null,
     clickAttributedConversions:
-      conversion?.click_through_conversions ?? null,
+      conversion?.click_through_conversions ?? conversion?.conversions ?? null,
   });
 }

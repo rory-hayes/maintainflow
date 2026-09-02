@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  advertiserAccountAttachSchema,
   canWriteAccount,
+  organizationIdSchema,
   selectBestAccountAccess,
   selectBestAccessPerAccount,
   type AccountAccess,
@@ -72,5 +74,51 @@ describe("customer tenancy roles", () => {
       "adacct_live",
     ]);
     expect(selected[1].accountRole).toBe("owner");
+  });
+});
+
+describe("advertiser account attachment input", () => {
+  it("accepts a trimmed key for verification and an exact confirmed account", () => {
+    expect(
+      advertiserAccountAttachSchema.parse({
+        action: "verify",
+        adsApiKey: "  ads_client_secret_123  ",
+      }),
+    ).toEqual({ action: "verify", adsApiKey: "ads_client_secret_123" });
+    expect(
+      advertiserAccountAttachSchema.parse({
+        action: "connect",
+        adsApiKey: "ads_client_secret_123",
+        expectedAccountId: "adacct_verified",
+      }),
+    ).toEqual({
+      action: "connect",
+      adsApiKey: "ads_client_secret_123",
+      expectedAccountId: "adacct_verified",
+    });
+  });
+
+  it("rejects attempts to choose the organization or account in the body", () => {
+    expect(() =>
+      advertiserAccountAttachSchema.parse({
+        action: "verify",
+        adsApiKey: "ads_client_secret_123",
+        organizationId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).toThrow();
+    expect(() =>
+      advertiserAccountAttachSchema.parse({
+        action: "verify",
+        adsApiKey: "ads_client_secret_123",
+        accountId: "adacct_attacker_selected",
+      }),
+    ).toThrow();
+  });
+
+  it("requires the organization path segment to be a UUID", () => {
+    expect(
+      organizationIdSchema.parse("00000000-0000-4000-8000-000000000001"),
+    ).toBe("00000000-0000-4000-8000-000000000001");
+    expect(() => organizationIdSchema.parse("current-agency")).toThrow();
   });
 });

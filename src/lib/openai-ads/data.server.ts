@@ -5,17 +5,8 @@ import {
   type AdsApiCredential,
   type AdsProviderRequestBudget,
 } from "./client.server";
-import type { CampaignPerformance, Recommendation } from "./demo-data";
-import {
-  buildConversionMeasurementReadiness,
-  measurementReadyCampaignIds,
-  type ConversionMeasurementReadiness,
-} from "./measurement-readiness";
-import {
-  buildLiveRecommendations,
-  type AdsMeasurementWindow,
-  type ScopedAdGroup,
-} from "./recommendations";
+import type { AdsMeasurementWindow, ScopedAdGroup } from "./recommendations";
+import { accountLocalMonthPeriod } from "./account-local-period";
 import {
   adAccountSchema,
   adListResponseSchema,
@@ -26,21 +17,16 @@ import {
   insightListResponseSchema,
   type AdAccount,
   type Campaign,
-  type ConversionInsightRow,
   type ConversionEventSetting,
   type InsightRow,
   type ScopedAd,
 } from "./schema";
+import {
+  buildWorkbenchDataFromProviderSnapshot,
+  type LiveWorkbenchData,
+} from "./workbench-builder";
 
-export type LiveWorkbenchData = {
-  account: AdAccount;
-  campaigns: Campaign[];
-  ads: ScopedAd[];
-  performance: CampaignPerformance[];
-  recommendations: Recommendation[];
-  conversionMeasurement: ConversionMeasurementReadiness;
-  syncedAt: string;
-};
+export type { LiveWorkbenchData } from "./workbench-builder";
 
 const MAX_LIST_PAGES = 100;
 const AD_GROUP_FETCH_BATCH_SIZE = 5;
@@ -50,6 +36,7 @@ export const LIVE_SYNC_PROVIDER_LIMITS = Object.freeze({
   maxRequests: 256,
   maxResources: 10_000,
   maxConcurrency: 5,
+  maxDurationMs: 45_000,
 });
 
 export class AdsProviderBudgetExceededError extends Error {
@@ -67,6 +54,8 @@ type BudgetWaiter = {
 class LiveSyncProviderBudget implements AdsProviderRequestBudget {
   readonly #controller = new AbortController();
   readonly #waiters: BudgetWaiter[] = [];
+  readonly #deadline: Promise<never>;
+  readonly #deadlineTimer: ReturnType<typeof setTimeout>;
   #activeRequests = 0;
   #requestCount: number;
   #resourceCount = 0;
@@ -74,6 +63,18 @@ class LiveSyncProviderBudget implements AdsProviderRequestBudget {
 
   constructor(initialRequests: number) {
     this.#requestCount = initialRequests;
+    let rejectDeadline!: (reason: unknown) => void;
+    this.#deadline = new Promise<never>((_resolve, reject) => {
+      rejectDeadline = reject;
+    });
+    this.#deadlineTimer = setTimeout(() => {
+      const error = new AdsProviderBudgetExceededError(
+        `The live Ads sync exceeded its total wall-clock deadline of ${LIVE_SYNC_PROVIDER_LIMITS.maxDurationMs}ms, so no partial data was accepted.`,
+      );
+      this.abort(error);
+      rejectDeadline(error);
+    }, LIVE_SYNC_PROVIDER_LIMITS.maxDurationMs);
+    this.#deadlineTimer.unref?.();
   }
 
   get signal() {
@@ -89,6 +90,14 @@ class LiveSyncProviderBudget implements AdsProviderRequestBudget {
     this.#failureReason = reason;
     this.#controller.abort(reason);
     for (const waiter of this.#waiters.splice(0)) waiter.reject(reason);
+  }
+
+  runWithinDeadline<T>(operation: () => Promise<T>) {
+    return Promise.race([operation(), this.#deadline]);
+  }
+
+  dispose() {
+    clearTimeout(this.#deadlineTimer);
   }
 
   recordResources(count: number, resource: string) {
@@ -184,17 +193,17 @@ export function fetchLiveAdAccount(
   );
 }
 
-function currentMonthRange() {
-  const now = new Date();
-  const start = Math.floor(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000,
-  );
-  const currentFullHour = Math.floor(now.getTime() / 3_600_000) * 3_600;
+function currentMonthRange(accountTimeZone: string, now = new Date()) {
+  const period = accountLocalMonthPeriod(now, accountTimeZone);
+  const hasCompleteDays = period.completeAccountLocalDays > 0;
+  const rangeEnd = hasCompleteDays
+    ? period.rangeEnd
+    : Math.max(period.rangeStart + 1, Math.floor(now.getTime() / 1_000));
 
   return {
     type: "unix_range" as const,
-    start: Math.min(start, currentFullHour - 3_600),
-    end: currentFullHour,
+    start: period.rangeStart,
+    end: rangeEnd,
   };
 }
 
@@ -522,35 +531,6 @@ async function getConversionInsights(
   return response.data;
 }
 
-function combinePerformance(
-  rows: InsightRow[],
-  conversions: ConversionInsightRow[],
-  idField: "campaign_id" | "ad_group_id",
-): CampaignPerformance[] {
-  const conversionsById = new Map(
-    conversions.map((row) => [row.entity_id, row]),
-  );
-
-  return rows.flatMap((row) => {
-    const entityId = row[idField];
-    if (!entityId) return [];
-
-    const conversion = conversionsById.get(entityId);
-    return [
-      {
-        campaignId: entityId,
-        spend: row.spend ?? 0,
-        impressions: row.impressions ?? 0,
-        clicks: row.clicks ?? 0,
-        conversions:
-          conversion?.click_through_conversions ?? conversion?.conversions ?? 0,
-        viewThroughConversions: conversion?.view_through_conversions ?? 0,
-        trend: "Month to date",
-      },
-    ];
-  });
-}
-
 export async function fetchLiveWorkbenchData(
   prefetchedAccount?: AdAccount,
   credential?: AdsApiCredential,
@@ -561,105 +541,86 @@ export async function fetchLiveWorkbenchData(
   const providerBudget = new LiveSyncProviderBudget(prefetchedAccount ? 1 : 0);
 
   try {
-    const [account, campaigns] = await allOrAbort(
-      providerBudget,
-      [
-        prefetchedAccount
-          ? Promise.resolve(prefetchedAccount)
-          : fetchLiveAdAccount(credential, providerBudget),
-        listCampaigns(credential, providerBudget),
-      ] as const,
-    );
-    providerBudget.recordResources(1, "advertiser account");
+    return await providerBudget.runWithinDeadline(async () => {
+      const [account, campaigns] = await allOrAbort(
+        providerBudget,
+        [
+          prefetchedAccount
+            ? Promise.resolve(prefetchedAccount)
+            : fetchLiveAdAccount(credential, providerBudget),
+          listCampaigns(credential, providerBudget),
+        ] as const,
+      );
+      providerBudget.recordResources(1, "advertiser account");
 
-    const [adGroups, eventSettings] = await allOrAbort(
-      providerBudget,
-      [
-        listAdGroups(campaigns, credential, providerBudget),
-        listConversionEventSettings(credential, providerBudget),
-      ] as const,
-    );
-    const dashboardWindow = currentMonthRange();
-    const recommendationWindow = trailingFullDaysRange(7);
+      const [adGroups, eventSettings] = await allOrAbort(
+        providerBudget,
+        [
+          listAdGroups(campaigns, credential, providerBudget),
+          listConversionEventSettings(credential, providerBudget),
+        ] as const,
+      );
+      const dashboardWindow = currentMonthRange(account.timezone);
+      const recommendationWindow = trailingFullDaysRange(7);
 
-    const [
-      ads,
-      campaignRows,
-      adGroupRows,
-      campaignConversions,
-      adGroupConversions,
-    ] = await allOrAbort(
-      providerBudget,
-      [
-        listAds(adGroups, credential, providerBudget),
-        getInsights(
-          "campaign",
-          dashboardWindow,
-          credential,
-          providerBudget,
-        ),
-        getInsights(
-          "ad_group",
-          recommendationWindow,
-          credential,
-          providerBudget,
-        ),
-        getConversionInsights(
-          "campaign",
-          campaigns.map((campaign) => campaign.id),
-          dashboardWindow,
-          credential,
-          providerBudget,
-        ),
-        getConversionInsights(
-          "ad_group",
-          adGroups.map((adGroup) => adGroup.id),
-          recommendationWindow,
-          credential,
-          providerBudget,
-        ),
-      ] as const,
-    );
+      const [
+        ads,
+        campaignRows,
+        adGroupRows,
+        campaignConversions,
+        adGroupConversions,
+      ] = await allOrAbort(
+        providerBudget,
+        [
+          listAds(adGroups, credential, providerBudget),
+          getInsights(
+            "campaign",
+            dashboardWindow,
+            credential,
+            providerBudget,
+          ),
+          getInsights(
+            "ad_group",
+            recommendationWindow,
+            credential,
+            providerBudget,
+          ),
+          getConversionInsights(
+            "campaign",
+            campaigns.map((campaign) => campaign.id),
+            dashboardWindow,
+            credential,
+            providerBudget,
+          ),
+          getConversionInsights(
+            "ad_group",
+            adGroups.map((adGroup) => adGroup.id),
+            recommendationWindow,
+            credential,
+            providerBudget,
+          ),
+        ] as const,
+      );
 
-    const performance = combinePerformance(
-      campaignRows,
-      campaignConversions,
-      "campaign_id",
-    );
-    const adGroupPerformance = combinePerformance(
-      adGroupRows,
-      adGroupConversions,
-      "ad_group_id",
-    );
-    const syncedAt = new Date().toISOString();
-    const conversionMeasurement = buildConversionMeasurementReadiness({
-      campaigns,
-      eventSettings,
-      checkedAt: syncedAt,
+      const syncedAt = new Date().toISOString();
+      return buildWorkbenchDataFromProviderSnapshot({
+        account,
+        campaigns,
+        adGroups,
+        ads,
+        campaignInsights: campaignRows,
+        adGroupInsights: adGroupRows,
+        campaignConversions,
+        adGroupConversions,
+        eventSettings,
+        recommendationWindow,
+        syncedAt,
+      });
     });
-    const recommendations = buildLiveRecommendations({
-      campaigns,
-      adGroups,
-      performance,
-      adGroupPerformance,
-      currencyCode: account.currency_code,
-      measurementWindow: recommendationWindow,
-      measurementReadyCampaignIds: measurementReadyCampaignIds(
-        conversionMeasurement,
-      ),
-    });
-
-    return {
-      account,
-      campaigns,
-      ads,
-      performance,
-      recommendations,
-      conversionMeasurement,
-      syncedAt,
-    };
   } catch (error) {
     providerBudget.abort(error);
     throw providerBudget.failureReason ?? error;
+  } finally {
+    providerBudget.dispose();
   }
 }

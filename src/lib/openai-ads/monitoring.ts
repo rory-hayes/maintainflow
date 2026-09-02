@@ -1,5 +1,24 @@
 import { z } from "zod";
 
+export const MONITORING_ATTRIBUTION_MATURITY_MS = 48 * 60 * 60 * 1_000;
+
+export function monitoringAttributionMaturityCutoff(now: Date) {
+  const timestamp = now.getTime();
+  if (!Number.isFinite(timestamp)) {
+    throw new Error("A valid monitoring evaluation time is required.");
+  }
+  return new Date(timestamp - MONITORING_ATTRIBUTION_MATURITY_MS);
+}
+
+export function hasMonitoringAttributionMatured(
+  endsAt: Date,
+  now: Date,
+) {
+  const endTimestamp = endsAt.getTime();
+  if (!Number.isFinite(endTimestamp)) return false;
+  return endTimestamp <= monitoringAttributionMaturityCutoff(now).getTime();
+}
+
 export const monitoringPlanSchema = z
   .object({
     kind: z.literal("click_attributed_conversion_guardrail"),

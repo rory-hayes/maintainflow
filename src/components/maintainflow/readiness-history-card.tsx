@@ -29,6 +29,7 @@ import {
   type ReadinessAuditHistoryEntry,
 } from "@/lib/readiness/history";
 import type { AccountAccess } from "@/lib/tenancy/schema";
+import { formatUtcDateTime } from "@/lib/formatting";
 import { cn } from "@/lib/utils";
 
 function verdictLabel(
@@ -40,11 +41,7 @@ function verdictLabel(
 }
 
 function recordedAtLabel(value: string) {
-  return new Intl.DateTimeFormat("en-IE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(value));
+  return formatUtcDateTime(value);
 }
 
 function urlLabel(value: string) {
@@ -69,7 +66,7 @@ export function ReadinessHistoryCard({
 
   return (
     <Card className="shadow-sm">
-      <CardHeader className="gap-3 border-b bg-muted/20 min-[640px]:flex-row min-[640px]:items-start min-[640px]:justify-between">
+      <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
             <History className="size-5" />

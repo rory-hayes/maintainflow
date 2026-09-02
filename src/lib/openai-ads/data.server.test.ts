@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -10,7 +10,10 @@ vi.mock("./client.server", () => ({
   adsApiRequest: adsApiRequestMock,
 }));
 
-import { fetchLiveWorkbenchData } from "./data.server";
+import {
+  fetchLiveWorkbenchData,
+  LIVE_SYNC_PROVIDER_LIMITS,
+} from "./data.server";
 import type { AdAccount, AdGroup, Campaign } from "./schema";
 
 const account: AdAccount = {
@@ -83,7 +86,13 @@ describe("live workbench adapter", () => {
     adsApiRequestMock.mockReset();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("reuses the verified account and consumes every campaign page", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-31T16:00:00.000Z"));
     adsApiRequestMock.mockImplementation(
       async (
         path: string,
@@ -234,6 +243,28 @@ describe("live workbench adapter", () => {
       entityId: adGroup.id,
       source: "live",
     });
+    const campaignDeliveryCall = adsApiRequestMock.mock.calls.find(([path]) => {
+      if (typeof path !== "string" || !path.startsWith("/ad_account/insights?")) {
+        return false;
+      }
+      return (
+        new URL(path, "https://test.invalid").searchParams.get(
+          "aggregation_level",
+        ) === "campaign"
+      );
+    });
+    const campaignRange = JSON.parse(
+      new URL(
+        campaignDeliveryCall![0],
+        "https://test.invalid",
+      ).searchParams.get("time_ranges[]")!,
+    );
+    expect(campaignRange).toMatchObject({
+      type: "unix_range",
+      start: Date.parse("2026-07-31T23:00:00.000Z") / 1_000,
+      end: Date.parse("2026-08-30T23:00:00.000Z") / 1_000,
+    });
+    expect(result.budgetGuardEvidence).toEqual([]);
     const deliveryCall = adsApiRequestMock.mock.calls.find(([path]) => {
       if (typeof path !== "string" || !path.startsWith("/ad_account/insights?")) {
         return false;
@@ -283,5 +314,38 @@ describe("live workbench adapter", () => {
     await expect(fetchLiveWorkbenchData(account)).rejects.toThrow(
       "Campaign pagination returned an invalid cursor",
     );
+  });
+
+  it("aborts the complete provider sync at one wall-clock deadline", async () => {
+    vi.useFakeTimers();
+    let providerSignal: AbortSignal | undefined;
+    adsApiRequestMock.mockImplementation(
+      (
+        _path: string,
+        _schema: unknown,
+        init?: { providerBudget?: { signal: AbortSignal } },
+      ) =>
+        new Promise((_resolve, reject) => {
+          providerSignal = init?.providerBudget?.signal;
+          const signal = providerSignal;
+          if (!signal) return;
+          const rejectFromAbort = () => reject(signal.reason);
+          if (signal.aborted) rejectFromAbort();
+          else signal.addEventListener("abort", rejectFromAbort, { once: true });
+        }),
+    );
+
+    const sync = fetchLiveWorkbenchData(account);
+    const rejection = expect(sync).rejects.toThrow(
+      `wall-clock deadline of ${LIVE_SYNC_PROVIDER_LIMITS.maxDurationMs}ms`,
+    );
+    await vi.advanceTimersByTimeAsync(
+      LIVE_SYNC_PROVIDER_LIMITS.maxDurationMs - 1,
+    );
+    expect(providerSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await rejection;
+    expect(providerSignal?.aborted).toBe(true);
   });
 });

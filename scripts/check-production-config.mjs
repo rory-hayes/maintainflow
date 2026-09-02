@@ -11,6 +11,13 @@ const PRODUCTION_SECRET_KEYS = [
   "CRON_SECRET",
   "READINESS_RATE_LIMIT_SECRET",
 ];
+const RESERVED_CONTACT_DOMAINS = new Set([
+  "example.com",
+  "example.net",
+  "example.org",
+]);
+const SAFE_CONTACT_EMAIL_PATTERN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9._+-]{0,62}[A-Za-z0-9])?@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 
 function present(value) {
   return typeof value === "string" && value.trim().length > 0;
@@ -40,12 +47,24 @@ function requireDistinctSecrets(issues, env, keys, minimumLength = 32) {
 
 function requireContactEmail(issues, env, key) {
   const value = env[key];
+  const domain = present(value)
+    ? value.slice(value.lastIndexOf("@") + 1).toLowerCase().replace(/\.$/, "")
+    : "";
   if (
     !present(value) ||
     value.length > 254 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+    !SAFE_CONTACT_EMAIL_PATTERN.test(value) ||
+    value.slice(0, value.indexOf("@")).includes("..") ||
+    [...RESERVED_CONTACT_DOMAINS].some(
+      (reserved) => domain === reserved || domain.endsWith(`.${reserved}`),
+    ) ||
+    [".test", ".invalid", ".example", ".localhost", ".local"].some(
+      (suffix) => domain.endsWith(suffix),
+    )
   ) {
-    issues.push(`${key} must be a valid monitored email address.`);
+    issues.push(
+      `${key} must be a valid non-placeholder monitored email address.`,
+    );
   }
 }
 

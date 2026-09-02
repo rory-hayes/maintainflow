@@ -9,8 +9,28 @@ const testState = vi.hoisted(() => {
   class OperatorUnauthorizedError extends Error {}
   class AccountAccessForbiddenError extends Error {}
   class AdvertiserCredentialUnavailableError extends Error {}
+  class AdvertiserWriteBlockedError extends Error {}
   class TenancyStoreUnavailableError extends Error {}
   class RequestBodyTooLargeError extends Error {}
+  class AdsMutationPreconditionFailedError extends Error {
+    approvalId: string;
+    operation = "rollback" as const;
+    reason: "provider_state_changed" | "provider_state_unavailable";
+    requiresFreshReview: boolean;
+    persistenceWarning: boolean;
+
+    constructor(
+      approvalId: string,
+      reason: "provider_state_changed" | "provider_state_unavailable",
+      persistenceWarning = false,
+    ) {
+      super("provider detail must not escape");
+      this.approvalId = approvalId;
+      this.reason = reason;
+      this.requiresFreshReview = reason === "provider_state_changed";
+      this.persistenceWarning = persistenceWarning;
+    }
+  }
   class AdsMutationReconciliationRequiredError extends Error {
     approvalId: string;
     operation = "rollback" as const;
@@ -38,8 +58,10 @@ const testState = vi.hoisted(() => {
     OperatorUnauthorizedError,
     AccountAccessForbiddenError,
     AdvertiserCredentialUnavailableError,
+    AdvertiserWriteBlockedError,
     TenancyStoreUnavailableError,
     RequestBodyTooLargeError,
+    AdsMutationPreconditionFailedError,
     AdsMutationReconciliationRequiredError,
     AdsMutationRejectedError,
     getApprovalAccountId: vi.fn(),
@@ -73,6 +95,8 @@ vi.mock("@/lib/http/request-security.server", () => ({
 }));
 
 vi.mock("@/lib/openai-ads/client.server", () => ({
+  AdsMutationPreconditionFailedError:
+    testState.AdsMutationPreconditionFailedError,
   AdsMutationReconciliationRequiredError:
     testState.AdsMutationReconciliationRequiredError,
   AdsMutationRejectedError: testState.AdsMutationRejectedError,
@@ -88,6 +112,7 @@ vi.mock("@/lib/tenancy/store.server", () => ({
   AccountAccessForbiddenError: testState.AccountAccessForbiddenError,
   AdvertiserCredentialUnavailableError:
     testState.AdvertiserCredentialUnavailableError,
+  AdvertiserWriteBlockedError: testState.AdvertiserWriteBlockedError,
   TenancyStoreUnavailableError: testState.TenancyStoreUnavailableError,
   getAdsCredentialMaterialForAccount:
     testState.getAdsCredentialMaterialForAccount,
@@ -212,5 +237,46 @@ describe("approval rollback route", () => {
       persistenceWarning: true,
     });
     expect(JSON.stringify(payload)).not.toContain("provider detail");
+  });
+
+  it("returns a no-write conflict when rollback precondition state drifted", async () => {
+    testState.applyStoredRollback.mockRejectedValue(
+      new testState.AdsMutationPreconditionFailedError(
+        approvalId,
+        "provider_state_changed",
+      ),
+    );
+
+    const response = await POST(request(), context);
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload).toEqual({
+      error:
+        "OpenAI Ads changed after this rollback became eligible. No rollback was sent; reconcile the live state before retrying.",
+      code: "provider_state_changed",
+      approvalId,
+      operation: "rollback",
+      noMutationSent: true,
+      requiresFreshReview: true,
+      persistenceWarning: false,
+    });
+    expect(JSON.stringify(payload)).not.toContain("provider detail");
+  });
+
+  it("blocks rollback while the account has an unresolved provider operation", async () => {
+    testState.applyStoredRollback.mockRejectedValue(
+      new testState.AdvertiserWriteBlockedError(
+        "Resolve the advertiser account's active or uncertain Ads operation before starting another live write.",
+      ),
+    );
+
+    const response = await POST(request(), context);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "Resolve the advertiser account's active or uncertain Ads operation before starting another live write.",
+    });
   });
 });

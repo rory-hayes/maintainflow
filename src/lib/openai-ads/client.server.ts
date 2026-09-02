@@ -1,16 +1,22 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import type { ZodType } from "zod";
 
 import {
+  ApprovalProviderSendFenceUnavailableError,
   ApprovalStoreUnavailableError,
   claimApprovalRollback,
   createApprovalRecord,
   isApprovalStoreConfigured,
+  markApprovalProviderAttempt,
   updateApprovalRecord,
   updateRollbackRecord,
   verifyApprovalStore,
+  withApprovalProviderSendFence,
 } from "../audit/approval-store.server";
+import { storedAdsMutationSchema } from "../audit/approval-schema";
 import {
   verifyRecommendationDecisionStore,
 } from "../audit/recommendation-decision-store.server";
@@ -41,6 +47,11 @@ const ADS_READ_TIMEOUT_MS = 15_000;
 const ADS_RATE_LIMIT_MAX_ATTEMPTS = 3;
 const ADS_RATE_LIMIT_BACKOFF_MS = 100;
 const ADS_RATE_LIMIT_MAX_DELAY_MS = 2_000;
+
+export const ADS_RESPONSE_LIMITS = {
+  readBytes: 16 * 1024 * 1024,
+  mutationBytes: 1024 * 1024,
+} as const;
 
 export function validateAdsMutation(mutation: AdsMutation) {
   let target: ReturnType<typeof parseAdsResourcePath>;
@@ -180,6 +191,18 @@ export class OpenAIAdsApiError extends Error {
   }
 }
 
+export class OpenAIAdsResponseTooLargeError extends Error {
+  readonly maximumBytes: number;
+
+  constructor(maximumBytes: number) {
+    super(
+      `The OpenAI Ads API response exceeded the ${maximumBytes}-byte safety limit.`,
+    );
+    this.name = "OpenAIAdsResponseTooLargeError";
+    this.maximumBytes = maximumBytes;
+  }
+}
+
 export class OpenAIAdsLiveReadUnavailableError extends Error {
   constructor() {
     super(
@@ -221,8 +244,102 @@ export class AdsMutationRejectedError extends Error {
   }
 }
 
+export class AdsMutationPreconditionFailedError extends Error {
+  readonly approvalId: string;
+  readonly operation: "apply" | "rollback";
+  readonly reason: "provider_state_changed" | "provider_state_unavailable";
+  readonly noMutationSent = true;
+  readonly requiresFreshReview: boolean;
+  readonly expectedStateFingerprint: string;
+  readonly actualStateFingerprint: string | null;
+  readonly persistenceWarning: boolean;
+
+  constructor(
+    approvalId: string,
+    operation: "apply" | "rollback",
+    reason: "provider_state_changed" | "provider_state_unavailable",
+    options: {
+      expectedStateFingerprint: string;
+      actualStateFingerprint?: string | null;
+      cause?: unknown;
+      persistenceWarning?: boolean;
+    },
+  ) {
+    super(
+      reason === "provider_state_changed"
+        ? "The provider resource changed after review. No mutation was sent. Refresh and review the current state before trying again."
+        : "The provider resource could not be verified immediately before the write. No mutation was sent.",
+      { cause: options.cause },
+    );
+    this.name = "AdsMutationPreconditionFailedError";
+    this.approvalId = approvalId;
+    this.operation = operation;
+    this.reason = reason;
+    this.requiresFreshReview = reason === "provider_state_changed";
+    this.expectedStateFingerprint = options.expectedStateFingerprint;
+    this.actualStateFingerprint = options.actualStateFingerprint ?? null;
+    this.persistenceWarning = options.persistenceWarning ?? false;
+  }
+}
+
 function isAmbiguousMutationStatus(status: number) {
   return status === 408 || status >= 500;
+}
+
+function cancelResponseBody(response: Response) {
+  try {
+    void response.body?.cancel().catch(() => undefined);
+  } catch {
+    // Cancellation is best-effort after the response has already been rejected.
+  }
+}
+
+async function readJsonResponseWithLimit(
+  response: Response,
+  maximumBytes: number,
+): Promise<unknown> {
+  const contentLength = response.headers.get("Content-Length")?.trim();
+  if (contentLength && /^\d+$/.test(contentLength)) {
+    const declaredBytes = Number(contentLength);
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes > maximumBytes) {
+      cancelResponseBody(response);
+      throw new OpenAIAdsResponseTooLargeError(maximumBytes);
+    }
+  }
+
+  if (!response.body) return null;
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let receivedBytes = 0;
+  let text = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      receivedBytes += value.byteLength;
+      if (receivedBytes > maximumBytes) {
+        try {
+          void reader.cancel().catch(() => undefined);
+        } catch {
+          // Preserve the bounded-response error if cancellation itself fails.
+        }
+        throw new OpenAIAdsResponseTooLargeError(maximumBytes);
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 function parseRetryAfterMs(
@@ -443,6 +560,111 @@ type MutationConfirmationTarget = {
   schema: ZodType<Record<string, unknown>>;
 };
 
+type MutationProviderPrecondition = {
+  detailPath: string;
+  entityId: string;
+  expectedState: unknown;
+  expectedStateFingerprint: string;
+  schema: ZodType<Record<string, unknown>>;
+};
+
+const missingControlledState = Object.freeze({
+  __maintainflow_missing_controlled_state__: true,
+});
+
+function canonicalizeControlledState(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeControlledState);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, canonicalizeControlledState(item)]),
+    );
+  }
+  return value;
+}
+
+function controlledStateFingerprint(value: unknown) {
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalizeControlledState(value)))
+    .digest("hex");
+}
+
+function projectExpectedControlledState(
+  expectedCurrent: unknown,
+  requestedState: unknown,
+  path = "resource",
+): unknown {
+  if (Array.isArray(requestedState)) {
+    return Array.isArray(expectedCurrent)
+      ? expectedCurrent.map(canonicalizeControlledState)
+      : canonicalizeControlledState(expectedCurrent);
+  }
+
+  if (requestedState !== null && typeof requestedState === "object") {
+    if (
+      expectedCurrent === null ||
+      typeof expectedCurrent !== "object" ||
+      Array.isArray(expectedCurrent)
+    ) {
+      return canonicalizeControlledState(expectedCurrent);
+    }
+
+    const expectedRecord = expectedCurrent as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(requestedState as Record<string, unknown>).map(
+        ([key, requestedValue]) => {
+          if (!Object.prototype.hasOwnProperty.call(expectedRecord, key)) {
+            throw new Error(
+              `The reviewed inverse request does not restore controlled field ${path}.${key}.`,
+            );
+          }
+          return [
+            key,
+            projectExpectedControlledState(
+              expectedRecord[key],
+              requestedValue,
+              `${path}.${key}`,
+            ),
+          ];
+        },
+      ),
+    );
+  }
+
+  return canonicalizeControlledState(expectedCurrent);
+}
+
+function projectObservedControlledState(
+  actual: unknown,
+  expectedState: unknown,
+): unknown {
+  if (Array.isArray(expectedState)) {
+    return Array.isArray(actual)
+      ? actual.map(canonicalizeControlledState)
+      : missingControlledState;
+  }
+
+  if (expectedState !== null && typeof expectedState === "object") {
+    if (actual === null || typeof actual !== "object" || Array.isArray(actual)) {
+      return missingControlledState;
+    }
+    const actualRecord = actual as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(expectedState as Record<string, unknown>).map(
+        ([key, expectedValue]) => [
+          key,
+          Object.prototype.hasOwnProperty.call(actualRecord, key)
+            ? projectObservedControlledState(actualRecord[key], expectedValue)
+            : missingControlledState,
+        ],
+      ),
+    );
+  }
+
+  return canonicalizeControlledState(actual);
+}
+
 function mutationConfirmationTarget(
   mutation: AdsMutation,
   body: unknown,
@@ -462,6 +684,67 @@ function mutationConfirmationTarget(
       ? { status: action === "activate" ? "active" : "paused" }
       : body,
     schema,
+  };
+}
+
+function deriveMutationProviderPrecondition(
+  mutation: AdsMutation,
+  mutationBody: unknown,
+  expectedCurrentMutation: AdsMutation,
+  expectedCurrentBody: unknown,
+): MutationProviderPrecondition {
+  const requestedTarget = mutationConfirmationTarget(mutation, mutationBody);
+  const expectedCurrentTarget = mutationConfirmationTarget(
+    expectedCurrentMutation,
+    expectedCurrentBody,
+  );
+  if (
+    requestedTarget.detailPath !== expectedCurrentTarget.detailPath ||
+    requestedTarget.entityId !== expectedCurrentTarget.entityId
+  ) {
+    throw new Error(
+      "The reviewed request and inverse request do not address the same provider resource.",
+    );
+  }
+
+  const expectedState = projectExpectedControlledState(
+    expectedCurrentTarget.expectedState,
+    requestedTarget.expectedState,
+  );
+  return {
+    detailPath: requestedTarget.detailPath,
+    entityId: requestedTarget.entityId,
+    expectedState,
+    expectedStateFingerprint: controlledStateFingerprint(expectedState),
+    schema: requestedTarget.schema,
+  };
+}
+
+async function verifyMutationProviderPrecondition(
+  precondition: MutationProviderPrecondition,
+  credential: AdsApiCredential,
+) {
+  const readback = await adsApiRequest(
+    precondition.detailPath,
+    precondition.schema,
+    {},
+    credential,
+  );
+  if (readback.id !== precondition.entityId) {
+    throw new Error(
+      "The Ads API precondition read referenced a different resource.",
+    );
+  }
+
+  const actualState = projectObservedControlledState(
+    readback,
+    precondition.expectedState,
+  );
+  const actualStateFingerprint = controlledStateFingerprint(actualState);
+  return {
+    matches: actualStateFingerprint === precondition.expectedStateFingerprint,
+    expectedStateFingerprint: precondition.expectedStateFingerprint,
+    actualStateFingerprint,
   };
 }
 
@@ -551,9 +834,14 @@ export async function adsApiRequest<T>(
     }
 
     if (response.ok) {
-      const payload: unknown = await response.json().catch(() => null);
+      const payload = await readJsonResponseWithLimit(
+        response,
+        ADS_RESPONSE_LIMITS.readBytes,
+      );
       return schema.parse(payload);
     }
+
+    cancelResponseBody(response);
 
     const retryAfter = response.headers.get("Retry-After");
     const retryAfterMs = parseRetryAfterMs(retryAfter);
@@ -635,6 +923,22 @@ export async function applyAdsMutation(
     );
   }
 
+  let providerPrecondition: MutationProviderPrecondition;
+  try {
+    const expectedCurrentBody = validateAdsMutation(recommendation.rollback);
+    providerPrecondition = deriveMutationProviderPrecondition(
+      recommendation.mutation,
+      body,
+      recommendation.rollback,
+      expectedCurrentBody,
+    );
+  } catch (error) {
+    throw new Error(
+      "The reviewed rollback cannot establish a complete provider-state precondition for this change.",
+      { cause: error },
+    );
+  }
+
   if (
     !(await verifyApprovalStore()) ||
     !(await verifyRecommendationDecisionStore())
@@ -650,6 +954,7 @@ export async function applyAdsMutation(
       operatorId: options.operatorId,
       access: options.access,
       expectedCredentialGeneration: options.credentialGeneration,
+      requireClearProviderOperationLedger: true,
     },
     async ({ transaction, access }) =>
       createApprovalRecord(
@@ -668,15 +973,120 @@ export async function applyAdsMutation(
     secret: prepared.credentialMaterial.apiKey,
     expectedAccountId: options.accountId,
   };
-
-  let response: Response;
+  let providerState: Awaited<
+    ReturnType<typeof verifyMutationProviderPrecondition>
+  >;
   try {
-    response = await sendAdsMutation(
-      recommendation.mutation,
-      body,
+    providerState = await verifyMutationProviderPrecondition(
+      providerPrecondition,
       credential,
     );
   } catch (error) {
+    let persistenceWarning = false;
+    try {
+      await updateApprovalRecord(approvalId, "failed", {
+        response: {
+          precondition: {
+            outcome: "blocked_no_write",
+            reason: "provider_state_unavailable",
+            expectedStateFingerprint:
+              providerPrecondition.expectedStateFingerprint,
+          },
+        },
+        error:
+          "Provider state could not be verified immediately before apply. No mutation was sent.",
+      });
+    } catch {
+      persistenceWarning = true;
+    }
+    log.warn("ads.apply.precondition_blocked");
+    throw new AdsMutationPreconditionFailedError(
+      approvalId,
+      "apply",
+      "provider_state_unavailable",
+      {
+        expectedStateFingerprint:
+          providerPrecondition.expectedStateFingerprint,
+        cause: error,
+        persistenceWarning,
+      },
+    );
+  }
+
+  if (!providerState.matches) {
+    let persistenceWarning = false;
+    try {
+      await updateApprovalRecord(approvalId, "failed", {
+        response: {
+          precondition: {
+            outcome: "blocked_no_write",
+            reason: "provider_state_changed",
+            expectedStateFingerprint:
+              providerState.expectedStateFingerprint,
+            actualStateFingerprint: providerState.actualStateFingerprint,
+          },
+        },
+        error:
+          "Provider-controlled fields changed after review. No mutation was sent; refresh and approve a newly generated recommendation.",
+      });
+    } catch {
+      persistenceWarning = true;
+    }
+    log.warn("ads.apply.precondition_blocked");
+    throw new AdsMutationPreconditionFailedError(
+      approvalId,
+      "apply",
+      "provider_state_changed",
+      {
+        expectedStateFingerprint: providerState.expectedStateFingerprint,
+        actualStateFingerprint: providerState.actualStateFingerprint,
+        persistenceWarning,
+      },
+    );
+  }
+
+  try {
+    await markApprovalProviderAttempt({
+      id: approvalId,
+      accountId: options.accountId,
+      attemptId: approvalId,
+      status: "pending",
+    });
+  } catch (error) {
+    log.warn("ads.apply.execution_lease_lost", { error });
+    throw new AdsMutationReconciliationRequiredError(
+      approvalId,
+      "apply",
+      `Approval ${approvalId} no longer holds its execution lease. No new mutation was sent; reconcile the durable record before taking another action.`,
+      { cause: error },
+    );
+  }
+
+  let response: Response;
+  try {
+    response = await withApprovalProviderSendFence(
+      {
+        id: approvalId,
+        accountId: options.accountId,
+        attemptId: approvalId,
+        status: "pending",
+      },
+      () => sendAdsMutation(
+        recommendation.mutation,
+        body,
+        credential,
+      ),
+    );
+  } catch (error) {
+    if (error instanceof ApprovalProviderSendFenceUnavailableError) {
+      log.warn("ads.apply.execution_fence_lost", { error });
+      throw new AdsMutationReconciliationRequiredError(
+        approvalId,
+        "apply",
+        `Approval ${approvalId} no longer holds its provider-send fence. No new mutation was sent; reconcile the durable record before taking another action.`,
+        { cause: error },
+      );
+    }
     let persistenceWarning = false;
     try {
       await updateApprovalRecord(approvalId, "reconciliation_required", {
@@ -697,7 +1107,35 @@ export async function applyAdsMutation(
     );
   }
 
-  const payload = await response.json().catch(() => null);
+  let payload: unknown;
+  try {
+    payload = await readJsonResponseWithLimit(
+      response,
+      ADS_RESPONSE_LIMITS.mutationBytes,
+    );
+  } catch (error) {
+    let persistenceWarning = false;
+    try {
+      await updateApprovalRecord(approvalId, "reconciliation_required", {
+        error:
+          error instanceof OpenAIAdsResponseTooLargeError
+            ? "OpenAI Ads API mutation response exceeded the bounded response limit and was not retained."
+            : "OpenAI Ads API mutation response could not be safely read and was not retained.",
+      });
+    } catch {
+      persistenceWarning = true;
+    }
+    log.error("ads.apply.reconciliation_required", {
+      status: response.status,
+      error,
+    });
+    throw new AdsMutationReconciliationRequiredError(
+      approvalId,
+      "apply",
+      `The Ads API response could not be safely confirmed. Approval ${approvalId} requires manual reconciliation and must not be retried automatically.`,
+      { cause: error, persistenceWarning },
+    );
+  }
 
   if (!response.ok && isAmbiguousMutationStatus(response.status)) {
     let persistenceWarning = false;
@@ -851,6 +1289,7 @@ export async function applyStoredRollback(options: {
       operatorId: options.operatorId,
       access: options.access,
       expectedCredentialGeneration: options.credentialGeneration,
+      requireClearProviderOperationLedger: true,
     },
     async ({ transaction, access }) =>
       claimApprovalRollback(
@@ -867,35 +1306,166 @@ export async function applyStoredRollback(options: {
     secret: prepared.credentialMaterial.apiKey,
     expectedAccountId: options.accountId,
   };
+  const rollbackAttempt = {
+    accountId: options.accountId,
+    attemptId: approval.attemptId,
+  };
 
+  let rollbackMutation: AdsMutation;
   let body: unknown;
+  let providerPrecondition: MutationProviderPrecondition;
   try {
-    body = validateAdsMutation(approval.rollback);
+    rollbackMutation = storedAdsMutationSchema.parse(approval.rollbackPayload);
+    const appliedMutation = storedAdsMutationSchema.parse(
+      approval.mutationPayload,
+    );
+    body = validateAdsMutation(rollbackMutation);
+    const expectedCurrentBody = validateAdsMutation(appliedMutation);
+    providerPrecondition = deriveMutationProviderPrecondition(
+      rollbackMutation,
+      body,
+      appliedMutation,
+      expectedCurrentBody,
+    );
   } catch (error) {
     await updateRollbackRecord(approval.id, "rollback_failed", {
+      ...rollbackAttempt,
       error:
         error instanceof Error
           ? error.message
-          : "The stored rollback request is invalid.",
+          : "The stored request pair cannot establish a rollback precondition.",
     });
     log.warn("ads.rollback.invalid_stored_request", { error });
     throw error;
   }
 
-  let response: Response;
+  let providerState: Awaited<
+    ReturnType<typeof verifyMutationProviderPrecondition>
+  >;
   try {
-    response = await sendAdsMutation(
-      approval.rollback,
-      body,
+    providerState = await verifyMutationProviderPrecondition(
+      providerPrecondition,
       credential,
     );
   } catch (error) {
+    let persistenceWarning = false;
+    try {
+      await updateRollbackRecord(approval.id, "rollback_failed", {
+        ...rollbackAttempt,
+        response: {
+          precondition: {
+            outcome: "blocked_no_write",
+            reason: "provider_state_unavailable",
+            expectedStateFingerprint:
+              providerPrecondition.expectedStateFingerprint,
+          },
+        },
+        error:
+          "Provider state could not be verified immediately before rollback. No mutation was sent.",
+      });
+    } catch {
+      persistenceWarning = true;
+    }
+    log.warn("ads.rollback.precondition_blocked");
+    throw new AdsMutationPreconditionFailedError(
+      approval.id,
+      "rollback",
+      "provider_state_unavailable",
+      {
+        expectedStateFingerprint:
+          providerPrecondition.expectedStateFingerprint,
+        cause: error,
+        persistenceWarning,
+      },
+    );
+  }
+
+  if (!providerState.matches) {
     let persistenceWarning = false;
     try {
       await updateRollbackRecord(
         approval.id,
         "rollback_reconciliation_required",
         {
+          ...rollbackAttempt,
+          response: {
+            precondition: {
+              outcome: "blocked_no_write",
+              reason: "provider_state_changed",
+              expectedStateFingerprint:
+                providerState.expectedStateFingerprint,
+              actualStateFingerprint: providerState.actualStateFingerprint,
+            },
+          },
+          error:
+            "Provider-controlled fields changed after apply. No rollback was sent; reconcile the current provider state before taking another action.",
+        },
+      );
+    } catch {
+      persistenceWarning = true;
+    }
+    log.warn("ads.rollback.precondition_blocked");
+    throw new AdsMutationPreconditionFailedError(
+      approval.id,
+      "rollback",
+      "provider_state_changed",
+      {
+        expectedStateFingerprint: providerState.expectedStateFingerprint,
+        actualStateFingerprint: providerState.actualStateFingerprint,
+        persistenceWarning,
+      },
+    );
+  }
+
+  try {
+    await markApprovalProviderAttempt({
+      id: approval.id,
+      accountId: options.accountId,
+      attemptId: approval.attemptId,
+      status: "rollback_pending",
+    });
+  } catch (error) {
+    log.warn("ads.rollback.execution_lease_lost", { error });
+    throw new AdsMutationReconciliationRequiredError(
+      approval.id,
+      "rollback",
+      `Approval ${approval.id} no longer holds its rollback execution lease. No new rollback was sent; reconcile the durable record before taking another action.`,
+      { cause: error },
+    );
+  }
+
+  let response: Response;
+  try {
+    response = await withApprovalProviderSendFence(
+      {
+        id: approval.id,
+        accountId: options.accountId,
+        attemptId: approval.attemptId,
+        status: "rollback_pending",
+      },
+      () => sendAdsMutation(
+        rollbackMutation,
+        body,
+        credential,
+      ),
+    );
+  } catch (error) {
+    if (error instanceof ApprovalProviderSendFenceUnavailableError) {
+      log.warn("ads.rollback.execution_fence_lost", { error });
+      throw new AdsMutationReconciliationRequiredError(
+        approval.id,
+        "rollback",
+        `Approval ${approval.id} no longer holds its rollback provider-send fence. No new rollback was sent; reconcile the durable record before taking another action.`,
+        { cause: error },
+      );
+    }
+    let persistenceWarning = false;
+    try {
+      await updateRollbackRecord(
+        approval.id,
+        "rollback_reconciliation_required",
+        {
+          ...rollbackAttempt,
           error:
             error instanceof Error
               ? error.message
@@ -914,7 +1484,40 @@ export async function applyStoredRollback(options: {
     );
   }
 
-  const payload = await response.json().catch(() => null);
+  let payload: unknown;
+  try {
+    payload = await readJsonResponseWithLimit(
+      response,
+      ADS_RESPONSE_LIMITS.mutationBytes,
+    );
+  } catch (error) {
+    let persistenceWarning = false;
+    try {
+      await updateRollbackRecord(
+        approval.id,
+        "rollback_reconciliation_required",
+        {
+          ...rollbackAttempt,
+          error:
+            error instanceof OpenAIAdsResponseTooLargeError
+              ? "OpenAI Ads API rollback response exceeded the bounded response limit and was not retained."
+              : "OpenAI Ads API rollback response could not be safely read and was not retained.",
+        },
+      );
+    } catch {
+      persistenceWarning = true;
+    }
+    log.error("ads.rollback.reconciliation_required", {
+      status: response.status,
+      error,
+    });
+    throw new AdsMutationReconciliationRequiredError(
+      approval.id,
+      "rollback",
+      `The Ads API rollback response could not be safely confirmed. Approval ${approval.id} requires manual reconciliation and must not be retried automatically.`,
+      { cause: error, persistenceWarning },
+    );
+  }
   if (!response.ok && isAmbiguousMutationStatus(response.status)) {
     let persistenceWarning = false;
     try {
@@ -922,6 +1525,7 @@ export async function applyStoredRollback(options: {
         approval.id,
         "rollback_reconciliation_required",
         {
+          ...rollbackAttempt,
           response: payload,
           error: `OpenAI Ads API returned an uncertain HTTP ${response.status} rollback outcome.`,
         },
@@ -942,6 +1546,7 @@ export async function applyStoredRollback(options: {
 
   if (!response.ok) {
     await updateRollbackRecord(approval.id, "rollback_failed", {
+      ...rollbackAttempt,
       response: payload,
       error: `OpenAI Ads API returned HTTP ${response.status}.`,
     });
@@ -956,6 +1561,7 @@ export async function applyStoredRollback(options: {
         approval.id,
         "rollback_reconciliation_required",
         {
+          ...rollbackAttempt,
           response: payload,
           error: `OpenAI Ads API returned unexpected success status ${response.status}.`,
         },
@@ -977,7 +1583,7 @@ export async function applyStoredRollback(options: {
   let confirmation: Awaited<ReturnType<typeof confirmAdsMutation>>;
   try {
     confirmation = await confirmAdsMutation(
-      approval.rollback,
+      rollbackMutation,
       body,
       payload,
       credential,
@@ -989,6 +1595,7 @@ export async function applyStoredRollback(options: {
         approval.id,
         "rollback_reconciliation_required",
         {
+          ...rollbackAttempt,
           response: payload,
           error:
             error instanceof Error
@@ -1010,6 +1617,7 @@ export async function applyStoredRollback(options: {
 
   try {
     await updateRollbackRecord(approval.id, "rolled_back", {
+      ...rollbackAttempt,
       response: confirmation,
     });
   } catch {

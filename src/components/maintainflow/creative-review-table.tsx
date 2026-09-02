@@ -132,7 +132,7 @@ export function CreativeReviewTable({ ads }: { ads: ScopedAd[] }) {
       <CardContent className="min-w-0">
         {ads.length > 0 ? (
           visibleAds.length > 0 ? (
-            <Table>
+            <Table scrollAreaLabel="Creative review">
               <TableHeader>
                 <TableRow>
                   <TableHead>Ad</TableHead>

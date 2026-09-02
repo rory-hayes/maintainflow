@@ -6,38 +6,59 @@ real PostgreSQL server without requiring Clerk or an OpenAI Ads credential.
 
 ## Run it
 
-Start a local PostgreSQL server whose current user can create and drop
-databases, then run:
+Start an isolated, disposable PostgreSQL server on the local machine. Its admin
+connection must target the `postgres` database and must be a superuser, then
+run:
 
 ```bash
 npm run test:db
 ```
 
-The runner connects to `postgres://localhost/postgres` by default. To use a
-dedicated non-production admin connection instead:
+The runner connects to `postgres://localhost/postgres` by default. To use an
+explicit local disposable admin connection instead:
 
 ```bash
-MAINTAINFLOW_TEST_ADMIN_DATABASE_URL=postgres://user:password@host/postgres npm run test:db
+MAINTAINFLOW_TEST_ADMIN_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres npm run test:db
 ```
 
-Do not point this at a production database server. The supplied role must be
-allowed to create and drop a temporary database.
+The harness fails closed unless the URL uses `postgres://` or `postgresql://`,
+has a loopback host (`localhost`, a full four-component IPv4 address in
+`127.0.0.0/8`, or `::1`), targets exactly
+`/postgres`, and has no query string or fragment. It also verifies that the
+connected role is a superuser before creating fixtures. PostgreSQL restricts
+event-trigger creation and ownership to superusers; the suite therefore cannot
+run with only `CREATEDB` permission.
+
+Do not point this at a shared developer, hosted, staging, or production
+PostgreSQL cluster. In addition to three temporary databases, the harness may
+create cluster-wide `anon`, `authenticated`, `service_role`, `postgres`, and
+randomly named `maintainflow_fixture_owner_*` roles when they are absent. These
+fixtures are serialized and removed after the run, but an ungraceful process or
+machine termination can still require tearing down the disposable cluster.
 
 ## Safety boundary
 
 The runner:
 
 1. generates a unique database name beginning with
-   `maintainflow_ads_test_`;
-2. creates only that database, then starts two production migration processes
-   concurrently with mutation permission scoped to those child processes;
-3. verifies the migration ledger contains the filename and exact SHA-256
-   checksum for every SQL file before passing the URL to isolated Vitest;
-4. generates a temporary AES keyring and readiness HMAC secret, and removes
+   `maintainflow_ads_test_` for each of three independent database paths;
+2. verifies both accepted empty-bootstrap states independently: truly empty
+   `public`, and the exact official Supabase RLS helper baseline;
+3. fingerprints the unrelated hosted-platform event trigger and function before
+   and after each bootstrap, including ownership, enabled state, event, tags,
+   function binding, source, configuration, execution/security attributes, and
+   extension membership;
+4. starts two production migration processes against a separate fresh,
+   helper-free database while every migration is still pending, then verifies a
+   subsequent checksum-only no-op runner;
+5. verifies the migration ledger contains the filename and exact SHA-256
+   checksum for every SQL file before passing only the helper-free database to
+   isolated Vitest;
+6. generates a temporary AES keyring and readiness HMAC secret, and removes
    provider Ads credentials from the child environment;
-5. terminates connections to the exact generated database and drops only that
-   database in a `finally` cleanup;
-6. never contacts the OpenAI Ads API.
+7. attempts every database, role, advisory-lock, and connection cleanup even if
+   an earlier cleanup step fails, then reports all cleanup failures; and
+8. never contacts the OpenAI Ads API.
 
 The production command in [`database-migrations.md`](database-migrations.md)
 never creates or drops a database. Database creation/deletion exists only in
@@ -45,10 +66,17 @@ this explicitly disposable harness.
 
 ## What it proves
 
-- migrations `001` through `011` apply together on PostgreSQL in filename
+- migrations `001` through `018` apply together on PostgreSQL in filename
   order;
-- concurrent migration runners serialize, record one immutable SHA-256 ledger
-  row per file, and a subsequent runner is a checksum-verifying no-op;
+- two concurrent migration runners begin on one fresh database with all
+  migrations pending, serialize, record one immutable SHA-256 ledger row per
+  file, and a subsequent runner is a checksum-verifying no-op;
+- the exact Supabase helper baseline and a truly empty `public` schema each
+  bootstrap successfully without changing an unrelated platform event trigger
+  or its function;
+- tenant and RLS integration tests run on the separate helper-free migration
+  database, so the Supabase auto-enable helper cannot mask a missing explicit
+  `ENABLE ROW LEVEL SECURITY` statement in an application migration;
 - advertiser owners and agency managers receive their intended account roles;
 - analysts/viewers can read but cannot write, unknown users are denied, and an
   already-claimed advertiser account cannot be claimed again;
@@ -67,9 +95,14 @@ this explicitly disposable harness.
 - successful and reconciled applies start an exact seven-day monitoring window,
   while one partial unique index allows only one active or uncertain approval
   for each account, recommendation, and entity;
-- due monitoring rows stay account-scoped, concurrent workers claim a row once,
-  abandoned claims become eligible after 15 minutes, and exactly one typed
-  observation and safeguard outcome persists;
+- due monitoring rows stay account-scoped and unavailable until exactly 48
+  hours after their evidence window ends, concurrent workers claim a row once,
+  abandoned claims become eligible after 15 minutes, and exactly one
+  maturity-gated typed observation and safeguard outcome persists;
+- scheduler account attempts persist before credential resolution, broken
+  accounts enter bounded exponential backoff, successful attempts clear that
+  failure state, and least-recently-attempted ordering prevents six broken or
+  high-backlog accounts from starving an untouched seventh account;
 - concurrent public-audit checks enforce six requests per client and 30 per
   target host per fixed hour, reset at the next hour, retain only HMACed
   subjects, and prune expired buckets;
@@ -81,8 +114,29 @@ this explicitly disposable harness.
   before persistence, retain the scanner/ruleset provenance needed for safe
   comparison, and deny a review-only operator at the insertion query itself;
 - only one concurrent rollback claim succeeds;
+- apply and rollback provider sends hold an account-scoped, generation-bound
+  row fence against stale recovery; after recovery, reconciliation, and a fresh
+  rollback claim, the old generation cannot send or finalize against the new
+  generation;
+- any active or unresolved provider operation blocks a second account write,
+  and a successful manual reconciliation releases that account-wide interlock;
+- stale active operations remain visible to the persistent health count even
+  while their provider-send row lock causes recovery to skip them;
+- advertiser-account write authorization takes the account row lock before its
+  organization, membership, and access rows, matching offboarding order and
+  preventing the tested partial-acquisition deadlock;
 - ambiguous outcomes can be reconciled into a terminal audit state with the
   acting organization and roles preserved.
+- offboarding requires a current locked inventory and exact confirmation token,
+  deletes local access and credential rows, and leaves a lifecycle receipt;
+- externally completed provider revocation can be recorded only against that
+  disconnected lifecycle record, without any provider API call or customer
+  identifiers in its evidence;
+- retention purge refuses early, unresolved, oversized, stale-token, or
+  re-credentialed targets; account locking holds across the exact bounded
+  deletion, retained account rows are removed in foreign-key-safe order, the
+  lifecycle receipt is de-identified, and shared organizations, memberships,
+  and an unrelated advertiser account survive.
 
 ## What it does not prove
 

@@ -8,6 +8,7 @@ import {
   CircleAlert,
   CircleX,
   ExternalLink,
+  FileText,
   Globe2,
   Loader2,
   Radar,
@@ -30,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ProductFeedPreflight } from "@/components/maintainflow/product-feed-preflight";
 import { ConversionsApiPreflight } from "@/components/maintainflow/conversions-api-preflight";
+import { AttributionReadinessCard } from "@/components/maintainflow/attribution-readiness-card";
 import { ReadinessReportCard } from "@/components/maintainflow/readiness-report-card";
 import { ReadinessHistoryCard } from "@/components/maintainflow/readiness-history-card";
 import type { ConversionPayloadAudit } from "@/lib/readiness/conversions-api";
@@ -41,7 +43,11 @@ import type {
   ReadinessCheck,
 } from "@/lib/readiness/schema";
 import type { ConversionMeasurementReadiness } from "@/lib/openai-ads/measurement-readiness";
+import { buildCampaignAttributionReadiness } from "@/lib/openai-ads/attribution-readiness";
+import type { Campaign } from "@/lib/openai-ads/schema";
+import { createSampleStorefrontAudit } from "@/lib/readiness/demo-audit";
 import type { AccountAccess } from "@/lib/tenancy/schema";
+import { formatUtcDateTime } from "@/lib/formatting";
 import { cn } from "@/lib/utils";
 
 const statusOrder: Record<ReadinessCheck["status"], number> = {
@@ -63,15 +69,13 @@ function checkIcon(status: ReadinessCheck["status"]) {
 }
 
 function checkedAtLabel(value: string) {
-  return new Intl.DateTimeFormat("en-IE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(value));
+  return formatUtcDateTime(value);
 }
 
 export function ReadinessWorkbench({
   conversionMeasurement,
+  campaigns,
+  dataSource,
   account,
   historyReady,
   historyError,
@@ -79,6 +83,8 @@ export function ReadinessWorkbench({
   canSaveHistory,
 }: {
   conversionMeasurement: ConversionMeasurementReadiness;
+  campaigns: Campaign[];
+  dataSource: "demo" | "live";
   account?: Pick<AccountAccess, "accountId" | "accountName">;
   historyReady: boolean;
   historyError?: string;
@@ -95,6 +101,11 @@ export function ReadinessWorkbench({
   const [history, setHistory] = useState(initialHistory);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sampleResult, setSampleResult] = useState(false);
+  const attributionReadiness = useMemo(
+    () => buildCampaignAttributionReadiness({ campaigns }),
+    [campaigns],
+  );
 
   const priorityFixes = useMemo(
     () =>
@@ -113,6 +124,7 @@ export function ReadinessWorkbench({
     event.preventDefault();
     setLoading(true);
     setError(null);
+    setSampleResult(false);
 
     try {
       const response = await fetch("/api/readiness/audit", {
@@ -158,6 +170,17 @@ export function ReadinessWorkbench({
     }
   }
 
+  function loadSampleAudit() {
+    const result = createSampleStorefrontAudit();
+    setAudit(result);
+    setUrl(result.finalUrl);
+    setError(null);
+    setSampleResult(true);
+    toast.success("Sample storefront audit loaded", {
+      description: "Illustrative data only · no website request was made",
+    });
+  }
+
   return (
     <section className="mx-auto grid max-w-7xl gap-6 p-4 md:p-6 lg:p-8">
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
@@ -201,6 +224,16 @@ export function ReadinessWorkbench({
               )}
               {loading ? "Auditing page" : "Run readiness audit"}
             </Button>
+            <Button
+              className="h-11 md:min-w-40"
+              type="button"
+              variant="outline"
+              onClick={loadSampleAudit}
+              disabled={loading}
+            >
+              <FileText data-icon="inline-start" />
+              Load sample audit
+            </Button>
           </form>
           <p className="mt-3 text-xs text-muted-foreground">
             MaintainFlow makes a read-only request and does not submit, edit, or
@@ -208,6 +241,18 @@ export function ReadinessWorkbench({
           </p>
         </CardContent>
       </Card>
+
+      {sampleResult ? (
+        <Alert>
+          <FileText />
+          <AlertTitle>Illustrative storefront result</AlertTitle>
+          <AlertDescription>
+            This schema-valid fixture demonstrates the audit and downloadable
+            report without requesting a website. It is not saved to account
+            history and is not evidence about a real shop or OpenAI review.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {error ? (
         <Alert variant="destructive">
@@ -218,7 +263,11 @@ export function ReadinessWorkbench({
       ) : null}
 
       {audit ? (
-        <AuditResults audit={audit} priorityFixes={priorityFixes} />
+        <AuditResults
+          audit={audit}
+          priorityFixes={priorityFixes}
+          sample={sampleResult}
+        />
       ) : (
         <ReadinessEmptyState />
       )}
@@ -229,6 +278,11 @@ export function ReadinessWorkbench({
         error={historyError}
         entries={history}
         canSave={canSaveHistory}
+      />
+
+      <AttributionReadinessCard
+        readiness={attributionReadiness}
+        dataSource={dataSource}
       />
 
       <ConversionMeasurementCard readiness={conversionMeasurement} />
@@ -271,7 +325,7 @@ export function ConversionMeasurementCard({
 }) {
   return (
     <Card className="shadow-sm">
-      <CardHeader className="gap-3 border-b bg-muted/20 min-[640px]:flex-row min-[640px]:items-start min-[640px]:justify-between">
+      <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
             <Cable className="size-5" />
@@ -356,7 +410,7 @@ export function ConversionMeasurementCard({
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
-            Demo mode does not fabricate event-setting evidence.
+            Simulator mode does not fabricate event-setting evidence.
           </p>
         )}
       </CardContent>
@@ -371,7 +425,7 @@ export function MeasurementInstallationCard({
 }) {
   return (
     <Card className="shadow-sm">
-      <CardHeader className="gap-3 border-b bg-muted/20 min-[640px]:flex-row min-[640px]:items-start min-[640px]:justify-between">
+      <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
             <Radar className="size-5" />
@@ -484,9 +538,11 @@ function ReadinessEmptyState() {
 function AuditResults({
   audit,
   priorityFixes,
+  sample,
 }: {
   audit: ReadinessAudit;
   priorityFixes: ReadinessCheck[];
+  sample: boolean;
 }) {
   const passed = audit.checks.filter((item) => item.status === "pass").length;
 
@@ -495,7 +551,7 @@ function AuditResults({
       <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
         <Card className="shadow-sm">
           <CardHeader className="pb-3">
-            <CardDescription>Readiness score</CardDescription>
+            <CardDescription>Storefront page score</CardDescription>
             <div className="flex items-end justify-between gap-3">
               <CardTitle className="text-5xl tracking-[-0.05em]">
                 {audit.score}
@@ -513,10 +569,10 @@ function AuditResults({
             </div>
           </CardHeader>
           <CardContent className="grid gap-3">
-            <Progress value={audit.score} />
+            <Progress value={audit.score} aria-label="Storefront page score" />
             <p className="text-xs text-muted-foreground">
               {passed} of {audit.checks.length} checks passed · scanned{" "}
-              {new Date(audit.scannedAt).toLocaleString()}
+              {formatUtcDateTime(audit.scannedAt, { includeTimeZone: true })}
             </p>
           </CardContent>
         </Card>
@@ -566,12 +622,16 @@ function AuditResults({
             <CardTitle className="text-base">Observed checks</CardTitle>
             <CardDescription className="break-all">{audit.finalUrl}</CardDescription>
           </div>
-          <Button variant="outline" size="sm" asChild>
-            <a href={audit.finalUrl} target="_blank" rel="noreferrer">
-              Open page
-              <ExternalLink data-icon="inline-end" />
-            </a>
-          </Button>
+          {sample ? (
+            <Badge variant="secondary">Sample data</Badge>
+          ) : (
+            <Button variant="outline" size="sm" asChild>
+              <a href={audit.finalUrl} target="_blank" rel="noreferrer">
+                Open page
+                <ExternalLink data-icon="inline-end" />
+              </a>
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2">
           {audit.checks.map((item) => {

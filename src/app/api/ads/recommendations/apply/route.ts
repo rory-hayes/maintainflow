@@ -1,4 +1,5 @@
 import {
+  AdsMutationPreconditionFailedError,
   AdsMutationReconciliationRequiredError,
   AdsMutationRejectedError,
   applyAdsMutation,
@@ -29,6 +30,7 @@ import {
 import {
   AccountAccessForbiddenError,
   AdvertiserCredentialUnavailableError,
+  AdvertiserWriteBlockedError,
   getAdsCredentialMaterialForAccount,
   requireAccountAccess,
   TenancyStoreUnavailableError,
@@ -174,6 +176,32 @@ export async function POST(request: Request) {
     }
     if (error instanceof ApprovalTransitionError) {
       return Response.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof AdvertiserWriteBlockedError) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof AdsMutationPreconditionFailedError) {
+      const providerUnavailable =
+        error.reason === "provider_state_unavailable";
+      return Response.json(
+        {
+          error: providerUnavailable
+            ? "MaintainFlow could not verify the current OpenAI Ads state. No write was sent; retry after provider reads recover."
+            : "OpenAI Ads changed after this recommendation was reviewed. No write was sent; refresh and review the current recommendation.",
+          code: error.reason,
+          approvalId: error.approvalId,
+          operation: error.operation,
+          noMutationSent: true,
+          requiresFreshReview: error.requiresFreshReview,
+          persistenceWarning: error.persistenceWarning,
+        },
+        {
+          status: providerUnavailable ? 503 : 409,
+          ...(providerUnavailable
+            ? { headers: { "Retry-After": "30" } }
+            : {}),
+        },
+      );
     }
     if (error instanceof AdsMutationReconciliationRequiredError) {
       return Response.json(

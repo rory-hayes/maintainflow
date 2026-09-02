@@ -13,6 +13,9 @@
 # testing
 /coverage
 /reports/
+/playwright-report/
+/test-results/
+/.pnpm-store/
 
 # next.js
 /.next/

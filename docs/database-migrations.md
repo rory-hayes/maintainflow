@@ -1,9 +1,10 @@
 # Production-safe PostgreSQL migrations
 
-`npm run db:migrate` is the only application migration command. It applies the
-SQL files in [`database/`](database/) by filename, beginning with the existing
-`001` through `012` set. It connects to the database named by `DATABASE_URL`; it
-never creates, renames, or drops a database.
+`npm run db:migrate` is the production application migration command. It
+applies every SQL file in [`database/`](database/) by contiguous filename
+order. `npm run db:restore:migrate` uses the same runner only for the explicitly
+identified isolated restore rehearsal. Neither command creates, renames, or
+drops a database.
 
 ## Safety contract
 
@@ -12,15 +13,23 @@ The runner refuses to connect or mutate unless
 The value is exact and case-sensitive. Do not make this a permanent application
 environment variable.
 
-For a hosted `DATABASE_URL`, two additional gates are enforced:
+For a hosted `DATABASE_URL`, additional gates are enforced:
 
 1. The URL must include exactly one `sslmode=verify-full` parameter so the
    connection verifies both the provider's trusted certificate chain and the
    database hostname. `require`, `verify-ca`, `disable`, `allow`, `prefer`, a
    missing or duplicate mode, and non-PostgreSQL URLs are rejected.
-2. `MAINTAINFLOW_DATABASE_BACKUP_RESTORE_VERIFIED=true` must attest that the
-   recovery gate below has passed for the target release. The flag is an
-   operator acknowledgement, not proof by itself.
+2. The credential-free endpoint and provider target reference are hashed and
+   compared separately as well as through the reviewed composite target
+   identity. An isolated restore must not reuse the production endpoint even
+   under a different reference.
+3. The full build SHA and a checksummed mode-`0600` evidence manifest must
+   match the exact local migration manifest. The final evidence, sealed
+   pre-backup capture, and backup recovery point must each be no more than 24
+   hours old when production consumes them.
+4. Production additionally requires
+   `MAINTAINFLOW_DATABASE_BACKUP_RESTORE_VERIFIED=true`; that acknowledgement is
+   never accepted without the bound passing restore manifest.
 
 The runner does not print `DATABASE_URL`, usernames, passwords, provider keys,
 tokens, or other configured secrets. Success output contains only migration
@@ -37,19 +46,29 @@ separate, short-lived privileged connection.
 
 Before changing a hosted database that contains data:
 
-1. create a provider snapshot or logical backup immediately before the release;
-2. restore that backup into a separate, non-production PostgreSQL database;
-3. verify the restored schema, critical row counts, account isolation, and one
-   read path used by the application;
-4. record the backup identifier/time, restore target, restore duration, checks,
-   operator, and rollback decision point in the release evidence;
-5. only then set `MAINTAINFLOW_DATABASE_BACKUP_RESTORE_VERIFIED=true` for the
+1. seal the hosted source state in the mode-`0600` pre-backup evidence
+   manifest;
+2. create a provider snapshot or logical backup immediately before the release;
+3. restore that backup into a separate, non-production PostgreSQL database;
+4. apply the current checkout migrations to that explicitly identified clone
+   with `npm run db:restore:migrate`;
+5. run the read-only verifier against the migrated restored target and preserve its
+   mode-`0600` passing evidence manifest;
+6. only then set `MAINTAINFLOW_DATABASE_BACKUP_RESTORE_VERIFIED=true` for the
    migration process.
 
 A backup that has not been restored is not a verified recovery path. A newly
 created disposable integration database has no customer data to recover, but
 the integration harness still sets the acknowledgement only inside that child
-process.
+process. Follow the executable
+[hosted database backup and restore runbook](database-backup-restore-verification.md)
+for exact target identities, read-only roles, schema/count/isolation checks,
+required metadata, and the complete evidence boundary.
+
+For the first initialization of a confirmed-empty hosted database, use the
+separate [one-time empty hosted database bootstrap](empty-hosted-database-bootstrap.md).
+That path refuses any existing public-schema object and is not valid for later
+schema changes or a database that may contain customer state.
 
 ## Run the migration
 
@@ -59,11 +78,18 @@ in shell history. After the applicable recovery checks:
 ```bash
 MAINTAINFLOW_APPLY_DATABASE_MIGRATIONS=true \
 MAINTAINFLOW_DATABASE_BACKUP_RESTORE_VERIFIED=true \
+MAINTAINFLOW_DATABASE_TARGET_REFERENCE='<production provider target reference>' \
+MAINTAINFLOW_PRODUCTION_DATABASE_IDENTITY_SHA256='<reviewed production identity>' \
+MAINTAINFLOW_BUILD_SHA='<full Git SHA used by the evidence>' \
+MAINTAINFLOW_DATABASE_RESTORE_EVIDENCE_PATH='/restricted/evidence/restore-verification.json' \
 npm run db:migrate
 ```
 
-The backup/restore flag is not required for a loopback URL such as
-`postgres://localhost/maintainflow`, but the mutation opt-in is always required.
+The backup/restore manifest and flag are not required for a loopback URL such
+as `postgres://localhost/maintainflow`, but the mutation opt-in is always
+required. The isolated hosted-clone command and its pre-backup evidence inputs
+are documented in
+[`database-backup-restore-verification.md`](database-backup-restore-verification.md).
 
 ## Ledger, ordering, and concurrency
 
@@ -88,9 +114,28 @@ remain transaction-safe: do not add `CREATE INDEX CONCURRENTLY`, `VACUUM`, or
 other statements PostgreSQL forbids inside a transaction.
 
 Never edit a migration after it has been applied. If behavior must change, add
-the next sequential file (for example, `013_description.sql`). If drift is
+the next sequential migration file. If drift is
 reported, restore the applied file byte-for-byte from the deployed revision and
 add a corrective migration; do not update or delete ledger rows by hand.
+
+Migration `017_customer_retention_purge.sql` extends the immutable customer
+lifecycle receipt with externally confirmed provider-revocation evidence, a
+finite retention deadline, and purge completion evidence. Its constraints keep
+pre-purge identifiers complete and require them to be null after purge; the
+partial `(retain_until, id)` index supports bounded due-retention discovery.
+
+Migration `018_supabase_data_api_hardening.sql` adds the three missing
+organization foreign-key indexes, enables row-level security without Data API
+policies on every MaintainFlow table and the migration ledger, and revokes
+ambient schema, table, sequence, and function privileges from `PUBLIC` and any
+present Supabase `anon`, `authenticated`, and `service_role` roles. It also
+revokes matching default privileges for future public-schema objects.
+MaintainFlow uses Clerk plus its server-only PostgreSQL connection rather than
+Supabase Auth or PostgREST; keep the Supabase Data API disabled for this schema
+and run hosted migrations as the privileged `postgres` migration role so its
+defaults are hardened. Application access through a non-owner database role
+requires a separate reviewed grant/RLS policy migration before changing runtime
+roles.
 
 The application compiles the same ordered names and SHA-256 checksums into its
 deployment-readiness contract. `/api/ready` compares that immutable manifest

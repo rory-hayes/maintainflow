@@ -10,6 +10,13 @@ OpenAI Ads API key is available. It makes read-only requests to one public
 landing page, `/robots.txt`, and `/sitemap.xml`; it does not access an Ads
 account or imply that OpenAI has approved the destination.
 
+For account-free sales demonstrations, `Load sample audit` renders a
+schema-valid illustrative result entirely in the browser. It makes no website
+request, is never added to account history, hides the external-page action, and
+labels both the result and exported report limitations as sample evidence. The
+sample exercises presentation and report composition only; it does not test the
+public-fetch or quota path.
+
 The same response is inspected for static ChatGPT Ads measurement evidence.
 OpenAI documents a browser SDK loaded from `bzrcdn.openai.com`, initialization
 with a Pixel ID, standard event calls, consent control, an image-tag path, and

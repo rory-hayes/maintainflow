@@ -14,6 +14,8 @@ describe("process liveness route", () => {
       service: "maintainflow-ads",
       scope: "process_liveness",
     });
-    expect(payload.revision).toMatch(/^(unknown|[a-f0-9]{7,64})$/);
+    expect(payload.revision).toMatch(
+      /^(?:unknown|[a-f0-9]{40}|[a-f0-9]{64})$/,
+    );
   });
 });

@@ -19,7 +19,7 @@ export default {
       },
     },
     screens: {
-      sm: "375px",
+      sm: "640px",
       md: "768px",
       lg: "1200px",
     },
@@ -37,7 +37,7 @@ export default {
           foreground: "hsl(var(--popover-foreground))",
         },
         primary: {
-          DEFAULT: "#0BA5EC",
+          DEFAULT: "#0369A1",
           foreground: "hsl(var(--primary-foreground))",
         },
         secondary: {

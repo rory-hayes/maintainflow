@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import {
@@ -24,12 +25,18 @@ import {
   Target,
   X,
 } from "lucide-react";
+import {
+  formatGroupedInteger,
+  formatUtcDateTime,
+} from "@/lib/formatting";
 import { toast } from "sonner";
 
 import { MaintainFlowBrand } from "@/components/maintainflow/brand";
 import { ApprovalHistory } from "@/components/maintainflow/approval-history";
+import { ChangeAssuranceReportCard } from "@/components/maintainflow/change-assurance-report-card";
 import { CreativeReviewHistory } from "@/components/maintainflow/creative-review-history";
 import { CreativeReviewTable } from "@/components/maintainflow/creative-review-table";
+import { BudgetGuard } from "@/components/maintainflow/budget-guard";
 import { MonitoringWindows } from "@/components/maintainflow/monitoring-windows";
 import { ReadinessWorkbench } from "@/components/maintainflow/readiness-workbench";
 import { RecommendationDecisionHistory } from "@/components/maintainflow/recommendation-decision-history";
@@ -110,15 +117,32 @@ import type { ApprovalRecordDto } from "@/lib/audit/approval-schema";
 import type { RecommendationDecisionHistoryDto } from "@/lib/audit/recommendation-decision";
 import type { CreativeReviewEvent } from "@/lib/openai-ads/creative-history";
 import type { MonitoringWindowDto } from "@/lib/openai-ads/monitoring";
+import { buildMonitoringWindows } from "@/lib/openai-ads/recommendation-lifecycle";
 import type { ConversionMeasurementReadiness } from "@/lib/openai-ads/measurement-readiness";
+import type { BudgetGuardEvidence } from "@/lib/openai-ads/budget-guard";
 import type { ConversionsConnectionStatus } from "@/lib/openai-ads/conversions-connection";
+import {
+  livePortfolioOperationalExceptionCount,
+  livePortfolioUrgency,
+  oldestLivePortfolioExceptionAt,
+  rankLivePortfolioAccounts,
+  summarizeLivePortfolioEvidence,
+  type LivePortfolioAccount,
+  type LivePortfolioEvidenceState,
+  type LivePortfolioExceptionEvidence,
+  type LivePortfolioUrgency,
+} from "@/lib/openai-ads/live-portfolio";
 import type { ReadinessAuditHistoryEntry } from "@/lib/readiness/history";
-import type { AccountAccess } from "@/lib/tenancy/schema";
+import {
+  canWriteAccount,
+  type AccountAccess,
+} from "@/lib/tenancy/schema";
 import type {
   CampaignPerformance,
   Recommendation,
   RecommendationStatus,
 } from "@/lib/openai-ads/demo-data";
+import type { SimulatedAccountOption } from "@/lib/openai-ads/simulated-workspaces";
 import { cn } from "@/lib/utils";
 
 type WorkbenchProps = {
@@ -130,6 +154,7 @@ type WorkbenchProps = {
   creativeHistoryError?: string;
   campaigns: Campaign[];
   performance: CampaignPerformance[];
+  budgetGuardEvidence: BudgetGuardEvidence[];
   initialRecommendations: Recommendation[];
   recommendationApprovalFingerprints: Record<string, string>;
   recommendationFingerprints: Record<string, string>;
@@ -155,6 +180,12 @@ type WorkbenchProps = {
   workspaceMessage?: string;
   conversionsConnection: ConversionsConnectionStatus;
   availableAccounts: AccountAccess[];
+  agencyClientAttachEnabled: boolean;
+  simulatedAccounts: SimulatedAccountOption[];
+  simulatorLabel: string;
+  livePortfolioVisible: boolean;
+  livePortfolioAccounts: LivePortfolioAccount[];
+  livePortfolioError?: string;
   recommendationDecisionReady: boolean;
   recommendationDecisionError?: string;
   canManageRecommendationDecisions: boolean;
@@ -173,6 +204,139 @@ type AuditEvent = {
   outcome: string;
   mode: "demo" | "live";
 };
+
+type RecommendationApplyResponse = {
+  applied?: boolean;
+  error?: string;
+  message?: string;
+  mode?: "demo" | "live";
+};
+
+export function isConfirmedLiveApplyResponse(
+  result: RecommendationApplyResponse,
+) {
+  return result.mode === "live" && result.applied === true;
+}
+
+export function canReconcileApprovalHistory(
+  approvalHistoryReady: boolean,
+  workspaceAccess: AccountAccess | undefined,
+) {
+  return Boolean(
+    approvalHistoryReady &&
+      workspaceAccess &&
+      canWriteAccount(workspaceAccess),
+  );
+}
+
+export function RecommendationApprovalConfirmation({
+  account,
+  recommendation,
+  dataSource,
+  writeMode,
+  syncedAt,
+}: {
+  account: AdAccount;
+  recommendation: Recommendation;
+  dataSource: "demo" | "live";
+  writeMode: "demo" | "live";
+  syncedAt?: string;
+}) {
+  const liveWrite = dataSource === "live" && writeMode === "live";
+  const sourceLabel =
+    dataSource === "demo"
+      ? "Labelled simulator fixture"
+      : syncedAt
+        ? `Confirmed ${formatUtcDateTime(syncedAt, { includeTimeZone: true })}`
+        : "No confirmed live snapshot";
+
+  return (
+    <div className="grid gap-3 text-sm">
+      <Alert
+        className={cn(
+          liveWrite && "border-warning/30 bg-warning/10 text-foreground",
+        )}
+      >
+        <ShieldCheck />
+        <AlertTitle>
+          {liveWrite
+            ? `Live write to ${account.name}`
+            : dataSource === "demo"
+              ? "Simulator approval only"
+              : "External write is locked"}
+        </AlertTitle>
+        <AlertDescription>
+          {liveWrite
+            ? "Confirm the advertiser, exact API request, stored rollback, and safeguard before sending this non-idempotent change."
+            : dataSource === "demo"
+              ? "This records a local workflow example. It does not contact OpenAI Ads."
+              : "MaintainFlow will not contact OpenAI Ads until every live-write gate is restored."}
+        </AlertDescription>
+      </Alert>
+
+      <dl className="grid gap-3 rounded-lg border bg-muted/40 p-4">
+        <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+          <dt className="text-muted-foreground">Advertiser</dt>
+          <dd className="min-w-0">
+            <span className="font-medium">{account.name}</span>
+            <span className="sr-only">, advertiser ID </span>
+            <span
+              aria-hidden="true"
+              className="mx-2 text-muted-foreground"
+            >
+              ·
+            </span>
+            <span className="break-all font-mono text-xs text-muted-foreground">
+              {account.id}
+            </span>
+          </dd>
+        </div>
+        <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+          <dt className="text-muted-foreground">Evidence source</dt>
+          <dd>{sourceLabel}</dd>
+        </div>
+        <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+          <dt className="text-muted-foreground">API request</dt>
+          <dd className="break-all font-mono text-xs">
+            {recommendation.mutation.method} {recommendation.mutation.path}
+          </dd>
+        </div>
+        <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+          <dt className="text-muted-foreground">Stored rollback</dt>
+          <dd className="break-all font-mono text-xs">
+            {recommendation.rollback.method} {recommendation.rollback.path}
+          </dd>
+        </div>
+        <div className="grid gap-1 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4">
+          <dt className="text-muted-foreground">Change</dt>
+          <dd
+            aria-label={`Current ${recommendation.currentValue}; proposed ${recommendation.proposedValue}`}
+          >
+            <span aria-hidden="true" className="font-medium">
+              {recommendation.currentValue}
+            </span>
+            <span className="mx-2 text-muted-foreground" aria-hidden="true">
+              →
+            </span>
+            <span aria-hidden="true" className="font-medium text-primary">
+              {recommendation.proposedValue}
+            </span>
+          </dd>
+        </div>
+      </dl>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <CodePayload title="Exact request body" mutation={recommendation.mutation} />
+        <CodePayload title="Exact stored rollback body" mutation={recommendation.rollback} />
+      </div>
+
+      <div className="grid gap-1 rounded-lg border p-4">
+        <p className="font-medium">Safeguard and human rollback review</p>
+        <p className="text-muted-foreground">{recommendation.safeguard}</p>
+      </div>
+    </div>
+  );
+}
 
 function moneyFormatter(currencyCode: string) {
   return new Intl.NumberFormat("en", {
@@ -205,6 +369,7 @@ export function MaintainFlowWorkbench({
   creativeHistoryError,
   campaigns,
   performance,
+  budgetGuardEvidence,
   initialRecommendations,
   recommendationApprovalFingerprints,
   recommendationFingerprints,
@@ -230,6 +395,12 @@ export function MaintainFlowWorkbench({
   workspaceMessage,
   conversionsConnection,
   availableAccounts,
+  agencyClientAttachEnabled,
+  simulatedAccounts,
+  simulatorLabel,
+  livePortfolioVisible,
+  livePortfolioAccounts,
+  livePortfolioError,
   recommendationDecisionReady,
   recommendationDecisionError,
   canManageRecommendationDecisions,
@@ -242,11 +413,24 @@ export function MaintainFlowWorkbench({
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<AppTab>(initialTab);
   const tabListRef = useRef<HTMLDivElement>(null);
+  const approvalTitleRef = useRef<HTMLHeadingElement>(null);
   const [demoRecommendations, setDemoRecommendations] = useState(
     initialRecommendations,
   );
+  const [demoApprovalHistory, setDemoApprovalHistory] = useState(
+    dataSource === "demo" ? approvalHistory : [],
+  );
   const recommendations =
     dataSource === "live" ? initialRecommendations : demoRecommendations;
+  const visibleApprovalHistory =
+    dataSource === "demo" ? demoApprovalHistory : approvalHistory;
+  const visibleMonitoringWindows = useMemo(
+    () =>
+      dataSource === "demo"
+        ? buildMonitoringWindows(demoApprovalHistory)
+        : monitoringWindows,
+    [dataSource, demoApprovalHistory, monitoringWindows],
+  );
   const [selectedId, setSelectedId] = useState(
     initialRecommendations[0]?.id ?? "",
   );
@@ -260,7 +444,7 @@ export function MaintainFlowWorkbench({
   const initialAuditEvent: AuditEvent | null = snapshotAvailable
     ? {
         id: "initial-review",
-        occurredAt: syncedAt ?? "Demo snapshot",
+        occurredAt: syncedAt ?? "Simulator snapshot",
         action: "Account review completed",
         entity: account.name,
         outcome: `${initialRecommendations.length} recommendations prepared`,
@@ -312,6 +496,72 @@ export function MaintainFlowWorkbench({
     (recommendation) => recommendation.status === "ready",
   ).length;
 
+  const connectionStatusTone =
+    syncError && dataSource === "live"
+      ? "border-destructive/30 bg-destructive/10 text-destructive"
+      : syncWarning && dataSource === "live"
+        ? "border-warning/30 bg-warning/10 text-warning-foreground"
+        : dataSource === "live"
+          ? "border-success/30 bg-success/10 text-success"
+          : "border-warning/30 bg-warning/10 text-warning-foreground";
+  const connectionStatusDot =
+    syncError && dataSource === "live"
+      ? "bg-destructive"
+      : syncWarning && dataSource === "live"
+        ? "bg-warning"
+        : dataSource === "live"
+          ? "bg-success"
+          : "bg-warning";
+  const connectionStatusTitle =
+    syncError && dataSource === "live"
+      ? "The connected account has no confirmed live snapshot"
+      : syncWarning && dataSource === "live"
+        ? "The last confirmed snapshot is visible, but live writes are locked until refresh succeeds"
+        : syncedAt
+          ? `Last synced ${formatUtcDateTime(syncedAt, { includeTimeZone: true })}`
+          : dataSource === "live"
+            ? "Live account connected; awaiting a confirmed snapshot"
+            : simulatorLabel;
+  const connectionStatusText =
+    workspaceSetupState === "needs_setup"
+      ? "Setup required"
+      : workspaceSetupState === "unavailable" && dataSource === "demo"
+        ? "Access locked"
+        : syncError && dataSource === "live"
+          ? "Live sync unavailable"
+          : syncWarning && dataSource === "live"
+            ? "Live data · stale"
+            : dataSource === "demo"
+              ? "Simulator data"
+              : writeMode === "live"
+                ? "Live · writes on"
+                : "Live data · writes off";
+  const accountSelectorVisible =
+    workspaceSetupState === "demo" ||
+    workspaceSetupState === "ready" ||
+    workspaceSetupState === "connection_error";
+  const selectableAccounts: SimulatedAccountOption[] =
+    dataSource === "demo"
+      ? simulatedAccounts
+      : availableAccounts.map((item) => ({
+          accountId: item.accountId,
+          accountName: item.accountName,
+        }));
+  const accountSelectorOptions =
+    selectableAccounts.length > 0
+      ? selectableAccounts
+      : [{ accountId: account.id, accountName: account.name }];
+  const selectedAccountId =
+    dataSource === "demo"
+      ? account.id
+      : workspaceAccess?.accountId ?? account.id;
+
+  function changeAccount(accountId: string) {
+    if (accountSelectorOptions.some((item) => item.accountId === accountId)) {
+      openAccount(accountId);
+    }
+  }
+
   function updateStatus(
     id: string,
     status: RecommendationStatus,
@@ -346,42 +596,112 @@ export function MaintainFlowWorkbench({
 
     setApplying(true);
     try {
+      if (dataSource === "demo") {
+        updateStatus(selected.id, "monitoring");
+        const startedAt = new Date();
+        const monitoringEndsAt = selected.monitoringPlan
+          ? new Date(
+              startedAt.getTime() +
+                selected.monitoringPlan.windowDays * 24 * 60 * 60 * 1_000,
+            ).toISOString()
+          : null;
+        setDemoApprovalHistory((current) => [
+          {
+            id: crypto.randomUUID(),
+            accountId: account.id,
+            organizationName: `${account.name} simulator`,
+            membershipRole: null,
+            accountRole: null,
+            recommendationId: selected.id,
+            recommendationTitle: selected.title,
+            entityId: selected.entityId,
+            mutation: selected.mutation,
+            rollbackMethod: selected.rollback.method,
+            rollbackPath: selected.rollback.path,
+            rollbackBody: selected.rollback.body,
+            evidence: selected.evidence,
+            safeguard: selected.safeguard,
+            status: "applied",
+            errorMessage: null,
+            reconciliationNote: null,
+            monitoringPlan: selected.monitoringPlan ?? null,
+            monitoringStartedAt: selected.monitoringPlan
+              ? startedAt.toISOString()
+              : null,
+            monitoringEndsAt,
+            monitoringOutcome: null,
+            monitoringObservation: null,
+            monitoringEvaluatedAt: null,
+            createdAt: startedAt.toISOString(),
+            updatedAt: startedAt.toISOString(),
+            appliedAt: startedAt.toISOString(),
+            rolledBackAt: null,
+          },
+          ...current,
+        ]);
+        const message =
+          "Simulated approval recorded locally. No OpenAI Ads request was sent.";
+        addAuditEvent({
+          action: "Simulated approval recorded",
+          entity: selected.entityLabel,
+          outcome: message,
+          mode: "demo",
+        });
+        setApprovalOpen(false);
+        toast.success("Simulator approval recorded", {
+          description: message,
+        });
+        return;
+      }
+      if (!workspaceAccess) {
+        throw new Error("Select an authorized advertiser account first.");
+      }
+
       const response = await fetch("/api/ads/recommendations/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           recommendationId: selected.id,
-          accountId: workspaceAccess?.accountId,
+          accountId: workspaceAccess.accountId,
           recommendationSource: selected.source,
           recommendationFingerprint:
             recommendationApprovalFingerprints[selected.id],
         }),
       });
-      const result = (await response.json()) as {
-        error?: string;
-        message?: string;
-        mode?: "demo" | "live";
-      };
+      const result = (await response.json()) as RecommendationApplyResponse;
 
       if (!response.ok) throw new Error(result.error ?? "Approval failed.");
+      if (!isConfirmedLiveApplyResponse(result)) {
+        const message =
+          result.message ??
+          "MaintainFlow did not send a live Ads change because the release gates changed.";
+        addAuditEvent({
+          action: "No live change sent",
+          entity: selected.entityLabel,
+          outcome: message,
+          mode: result.mode === "live" ? "live" : "demo",
+        });
+        setApprovalOpen(false);
+        toast.warning("No live change sent", {
+          description: `${message} Refresh the workspace before reviewing again.`,
+        });
+        router.refresh();
+        return;
+      }
 
-      if (result.mode !== "live") updateStatus(selected.id, "monitoring");
       addAuditEvent({
-        action: result.mode === "live" ? "Change applied" : "Approval recorded",
+        action: "Change applied",
         entity: selected.entityLabel,
         outcome:
           result.message ?? "Recommendation moved to its monitoring window.",
-        mode: result.mode === "live" ? "live" : "demo",
+        mode: "live",
       });
       setApprovalOpen(false);
-      toast.success(
-        result.mode === "live" ? "Change applied" : "Demo approval recorded",
-        {
-          description:
-            result.message ?? "The recommendation is now being monitored.",
-        },
-      );
-      if (result.mode === "live") router.refresh();
+      toast.success("Change applied", {
+        description:
+          result.message ?? "The recommendation is now being monitored.",
+      });
+      router.refresh();
     } catch (error) {
       toast.error("Unable to approve recommendation", {
         description:
@@ -498,12 +818,12 @@ export function MaintainFlowWorkbench({
 
     await new Promise((resolve) => window.setTimeout(resolve, 450));
     addAuditEvent({
-      action: "Demo review completed",
+      action: "Simulator review completed",
       entity: account.name,
       outcome: `${initialRecommendations.length} schema-valid checks evaluated.`,
       mode: "demo",
     });
-    toast.success("Demo review complete", {
+    toast.success("Simulator review complete", {
       description: `${initialRecommendations.length} schema-valid checks were evaluated without contacting the Ads API.`,
     });
     setReviewing(false);
@@ -511,12 +831,13 @@ export function MaintainFlowWorkbench({
 
   function resetDemoState() {
     setDemoRecommendations(initialRecommendations);
+    setDemoApprovalHistory(approvalHistory);
     setSelectedId(initialRecommendations[0]?.id ?? "");
     setFilter("all");
     setDismissalOpen(false);
     setDismissalReason("");
     setAuditEvents(initialAuditEvent ? [initialAuditEvent] : []);
-    toast.success("Demo reset", {
+    toast.success("Simulator reset", {
       description: "Recommendation statuses and this session's audit trail were restored.",
     });
   }
@@ -532,67 +853,17 @@ export function MaintainFlowWorkbench({
               variant="outline"
               className={cn(
                 "hidden gap-1.5 md:inline-flex",
-                syncError && dataSource === "live"
-                  ? "border-destructive/30 bg-destructive/10 text-destructive"
-                  : syncWarning && dataSource === "live"
-                    ? "border-warning/30 bg-warning/10 text-warning-foreground"
-                  : dataSource === "live"
-                  ? "border-success/30 bg-success/10 text-success"
-                  : "border-warning/30 bg-warning/10 text-warning-foreground",
+                connectionStatusTone,
               )}
-              title={
-                syncError && dataSource === "live"
-                  ? "The connected account has no confirmed live snapshot"
-                  : syncWarning && dataSource === "live"
-                    ? "The last confirmed snapshot is visible, but live writes are locked until refresh succeeds"
-                  : syncedAt
-                  ? `Last synced ${new Date(syncedAt).toLocaleString()}`
-                  : dataSource === "live"
-                    ? "Live account connected; awaiting a confirmed snapshot"
-                    : "Local demo snapshot"
-              }
+              title={connectionStatusTitle}
             >
               <span
-                className={cn(
-                  "size-1.5 rounded-full",
-                  syncError && dataSource === "live"
-                    ? "bg-destructive"
-                    : syncWarning && dataSource === "live"
-                      ? "bg-warning"
-                    : dataSource === "live"
-                      ? "bg-success"
-                      : "bg-warning",
-                )}
+                className={cn("size-1.5 rounded-full", connectionStatusDot)}
               />
-              {workspaceSetupState === "needs_setup"
-                ? "Setup required"
-                : workspaceSetupState === "unavailable" && dataSource === "demo"
-                  ? "Access locked"
-                  : syncError && dataSource === "live"
-                    ? "Live sync unavailable"
-                    : syncWarning && dataSource === "live"
-                      ? "Live data · stale"
-                  : dataSource === "demo"
-                ? "Demo data"
-                : writeMode === "live"
-                  ? "Live · writes on"
-                  : "Live data · writes off"}
+              {connectionStatusText}
             </Badge>
-            {workspaceSetupState === "demo" ||
-            workspaceSetupState === "ready" ||
-            workspaceSetupState === "connection_error" ? (
-              <Select
-                value={workspaceAccess?.accountId ?? account.id}
-                onValueChange={(accountId) => {
-                  if (
-                    availableAccounts.some(
-                      (item) => item.accountId === accountId,
-                    )
-                  ) {
-                    openAccount(accountId);
-                  }
-                }}
-              >
+            {accountSelectorVisible ? (
+              <Select value={selectedAccountId} onValueChange={changeAccount}>
                 <SelectTrigger
                   className="hidden w-[190px] bg-background md:flex"
                   aria-label="Ad account"
@@ -601,22 +872,22 @@ export function MaintainFlowWorkbench({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {availableAccounts.length > 0 ? (
-                      availableAccounts.map((item) => (
-                        <SelectItem key={item.accountId} value={item.accountId}>
-                          {item.accountName}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <SelectItem value={account.id}>{account.name}</SelectItem>
-                    )}
+                    {accountSelectorOptions.map((item) => (
+                      <SelectItem key={item.accountId} value={item.accountId}>
+                        {item.accountName}
+                      </SelectItem>
+                    ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>
             ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-10 gap-2 px-2">
+                <Button
+                  variant="ghost"
+                  className="h-10 gap-2 px-2"
+                  aria-label="Open profile menu"
+                >
                   <Avatar className="size-7">
                     <AvatarFallback className="bg-primary text-xs font-semibold text-primary-foreground">
                       {operator.initials}
@@ -630,7 +901,9 @@ export function MaintainFlowWorkbench({
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <DropdownMenuItem disabled>
-                    {operatorAuthenticated ? "Authenticated operator" : "Demo operator"}
+                    {operatorAuthenticated
+                      ? "Authenticated operator"
+                      : "Simulator operator"}
                   </DropdownMenuItem>
                   {!operatorAuthenticated ? (
                     <DropdownMenuItem asChild>
@@ -653,17 +926,29 @@ export function MaintainFlowWorkbench({
                     </SignOutButton>
                   ) : null}
                 </DropdownMenuGroup>
-                {availableAccounts.length > 0 ? (
+                {(dataSource === "demo"
+                  ? simulatedAccounts.length > 1
+                  : availableAccounts.length > 0) ? (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuLabel>Advertiser accounts</DropdownMenuLabel>
+                    <DropdownMenuLabel>
+                      {dataSource === "demo"
+                        ? "Simulated advertiser accounts"
+                        : "Advertiser accounts"}
+                    </DropdownMenuLabel>
                     <DropdownMenuGroup>
-                      {availableAccounts.map((item) => (
+                      {(dataSource === "demo"
+                        ? simulatedAccounts
+                        : availableAccounts
+                      ).map((item) => (
                         <DropdownMenuItem
                           key={item.accountId}
                           onSelect={() => openAccount(item.accountId)}
                         >
-                          {item.accountId === workspaceAccess?.accountId ? (
+                          {item.accountId ===
+                          (dataSource === "demo"
+                            ? account.id
+                            : workspaceAccess?.accountId) ? (
                             <Check data-icon="inline-start" />
                           ) : null}
                           {item.accountName}
@@ -675,6 +960,41 @@ export function MaintainFlowWorkbench({
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+        </div>
+        <div
+          className="flex items-center gap-2 border-t px-4 py-2 md:hidden"
+          role="group"
+          aria-label="Mobile data source and account"
+        >
+          <Badge
+            variant="outline"
+            className={cn("shrink-0 gap-1.5", connectionStatusTone)}
+            title={connectionStatusTitle}
+          >
+            <span
+              className={cn("size-1.5 rounded-full", connectionStatusDot)}
+            />
+            {connectionStatusText}
+          </Badge>
+          {accountSelectorVisible ? (
+            <Select value={selectedAccountId} onValueChange={changeAccount}>
+              <SelectTrigger
+                className="h-8 min-w-0 flex-1 bg-background text-xs"
+                aria-label="Mobile ad account"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {accountSelectorOptions.map((item) => (
+                    <SelectItem key={item.accountId} value={item.accountId}>
+                      {item.accountName}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          ) : null}
         </div>
       </header>
 
@@ -772,8 +1092,8 @@ export function MaintainFlowWorkbench({
         </div>
 
         <TabsContent value="review" className="m-0">
-          <section className="grid min-h-[calc(100vh-7rem)] min-[640px]:grid-cols-[270px_minmax(0,1fr)] lg:grid-cols-[340px_minmax(0,1fr)]">
-            <aside className="border-b bg-background min-[640px]:border-b-0 min-[640px]:border-r">
+          <section className="grid min-h-[calc(100vh-7rem)] sm:grid-cols-[270px_minmax(0,1fr)] lg:grid-cols-[340px_minmax(0,1fr)]">
+            <aside className="border-b bg-background sm:border-b-0 sm:border-r">
               <div className="flex items-start justify-between gap-3 border-b p-4 md:p-5">
                 <div className="grid gap-1">
                   <h1 className="text-base font-semibold">Recommendations</h1>
@@ -795,7 +1115,7 @@ export function MaintainFlowWorkbench({
                 </Select>
               </div>
 
-              <div className="grid max-h-[42vh] overflow-y-auto p-2 min-[640px]:max-h-[calc(100vh-12rem)]">
+              <div className="grid max-h-[42vh] overflow-y-auto p-2 sm:max-h-[calc(100vh-12rem)]">
                 {filteredRecommendations.map((recommendation) => (
                   <button
                     key={recommendation.id}
@@ -883,25 +1203,39 @@ export function MaintainFlowWorkbench({
             dataSource={dataSource}
             campaigns={campaigns}
             performance={performance}
+            budgetGuardEvidence={budgetGuardEvidence}
             currencyCode={account.currency_code}
             recommendationCount={readyCount}
             onReview={runAccountReview}
             reviewing={reviewing}
             snapshotAvailable={snapshotAvailable}
+            portfolioAccounts={
+              dataSource === "demo" ? simulatedAccounts : []
+            }
+            livePortfolioVisible={livePortfolioVisible}
+            livePortfolioAccounts={livePortfolioAccounts}
+            livePortfolioError={livePortfolioError}
+            currentAccountId={account.id}
+            onOpenAccount={openAccount}
           />
         </TabsContent>
 
         <TabsContent value="experiments" className="m-0">
           <ExperimentsView
+            account={{ id: account.id, name: account.name }}
             recommendations={recommendations}
             dataSource={dataSource}
-            monitoringWindows={monitoringWindows}
+            currencyCode={account.currency_code}
+            monitoringWindows={visibleMonitoringWindows}
             monitoringEvaluationError={monitoringEvaluationError}
             auditEvents={auditEvents}
-            approvalHistory={approvalHistory}
+            approvalHistory={visibleApprovalHistory}
             approvalHistoryError={approvalHistoryError}
-            approvalHistoryReady={approvalHistoryReady}
             canRollback={writeMode === "live"}
+            canReconcile={canReconcileApprovalHistory(
+              approvalHistoryReady,
+              workspaceAccess,
+            )}
             recommendationDecisionHistory={recommendationDecisionHistory}
             recommendationDecisionError={recommendationDecisionError}
           />
@@ -911,6 +1245,8 @@ export function MaintainFlowWorkbench({
           <ReadinessWorkbench
             key={workspaceAccess?.accountId ?? "public-readiness"}
             conversionMeasurement={conversionMeasurement}
+            campaigns={campaigns}
+            dataSource={dataSource}
             account={workspaceAccess}
             historyReady={readinessHistoryReady}
             historyError={readinessHistoryError}
@@ -926,34 +1262,40 @@ export function MaintainFlowWorkbench({
             connectedAccountName={workspaceAccountName}
             message={workspaceMessage}
             conversionsConnection={conversionsConnection}
+            agencyClientAttachEnabled={agencyClientAttachEnabled}
           />
         </TabsContent>
       </Tabs>
 
       <Dialog open={approvalOpen && Boolean(selected)} onOpenChange={setApprovalOpen}>
-        <DialogContent>
+        <DialogContent
+          className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            approvalTitleRef.current?.focus();
+          }}
+        >
           <DialogHeader>
-            <DialogTitle>Approve this change?</DialogTitle>
+            <DialogTitle ref={approvalTitleRef} tabIndex={-1}>
+              Approve this change?
+            </DialogTitle>
             <DialogDescription>
               MaintainFlow will use the exact request shown in the review and retain
               the rollback payload. {dataSource === "live" && writeMode !== "live"
                 ? "External changes are locked until every live-write gate is restored."
                 : writeMode === "demo"
-                  ? "No external write will be made in demo mode."
+                  ? "This is a simulator action. No external write will be made."
                   : "This live recommendation is connected for an external write."}
             </DialogDescription>
           </DialogHeader>
           {selected ? (
-            <div className="grid gap-3 rounded-lg border bg-muted/40 p-4 text-sm">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">Current</span>
-                <span className="font-medium">{selected.currentValue}</span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">Proposed</span>
-                <span className="font-medium text-primary">{selected.proposedValue}</span>
-              </div>
-            </div>
+            <RecommendationApprovalConfirmation
+              account={account}
+              recommendation={selected}
+              dataSource={dataSource}
+              writeMode={writeMode}
+              syncedAt={syncedAt}
+            />
           ) : null}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setApprovalOpen(false)}>
@@ -973,8 +1315,8 @@ export function MaintainFlowWorkbench({
               {dataSource === "live" && writeMode !== "live"
                 ? "External changes locked"
                 : writeMode === "demo"
-                  ? "Record demo approval"
-                  : "Approve and apply"}
+                  ? "Record simulator approval"
+                  : "Approve and apply live change"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1078,10 +1420,13 @@ function RecommendationDetail({
   return (
     <article className="min-w-0 p-4 md:p-6 lg:p-8">
       <div className="mx-auto grid max-w-5xl gap-6">
-        <div className="flex flex-col justify-between gap-4 min-[640px]:flex-row min-[640px]:items-start">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
           <div className="grid max-w-3xl gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">{recommendation.entityLabel}</Badge>
+              {dataSource === "demo" ? (
+                <Badge variant="secondary">Simulator</Badge>
+              ) : null}
               {statusBadge(recommendation.status)}
             </div>
             <div className="grid gap-2">
@@ -1095,7 +1440,7 @@ function RecommendationDetail({
           </div>
         </div>
 
-        <div className="grid gap-3 min-[640px]:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           {recommendation.evidence.map((metric, index) => {
             const icons = [CircleDollarSign, Target, BarChart3];
             const Icon = icons[index] ?? Gauge;
@@ -1128,7 +1473,7 @@ function RecommendationDetail({
               </Badge>
             </div>
           </CardHeader>
-          <CardContent className="grid gap-5 p-5 min-[640px]:grid-cols-[1fr_auto_1fr] min-[640px]:p-6">
+          <CardContent className="grid gap-5 p-5 sm:grid-cols-[1fr_auto_1fr] sm:p-6">
             <div className="grid gap-1 rounded-lg border bg-background p-4">
               <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Current
@@ -1136,8 +1481,8 @@ function RecommendationDetail({
               <span className="text-lg font-semibold">{recommendation.currentValue}</span>
             </div>
             <div className="grid place-items-center text-muted-foreground">
-              <ArrowRight className="hidden min-[640px]:block" />
-              <ArrowDownRight className="min-[640px]:hidden" />
+              <ArrowRight className="hidden sm:block" />
+              <ArrowDownRight className="sm:hidden" />
             </div>
             <div className="grid gap-1 rounded-lg border border-primary/20 bg-primary/5 p-4">
               <span className="text-xs font-medium uppercase tracking-wider text-primary">
@@ -1159,7 +1504,7 @@ function RecommendationDetail({
           </CardFooter>
         </Card>
 
-        <div className="grid gap-4 min-[640px]:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Alert className="bg-background">
             <ShieldCheck className="size-4" />
             <AlertTitle>Safeguard and rollback</AlertTitle>
@@ -1190,7 +1535,7 @@ function RecommendationDetail({
             <ChevronDown className="size-4 text-muted-foreground transition group-open:rotate-180" />
           </summary>
           <Separator />
-          <div className="grid gap-4 p-4 min-[640px]:grid-cols-2">
+          <div className="grid gap-4 p-4 sm:grid-cols-2">
             <CodePayload title="Request" mutation={recommendation.mutation} />
             <CodePayload title="Rollback" mutation={recommendation.rollback} />
           </div>
@@ -1236,7 +1581,7 @@ function RecommendationDetail({
                     ? "Approve and apply"
                     : dataSource === "live"
                       ? "External changes locked"
-                      : "Approve in demo"}
+                      : "Approve in simulator"}
               </Button>
             </>
           )}
@@ -1307,6 +1652,91 @@ function NoRecommendations({
   );
 }
 
+function livePortfolioEvidenceLabel(state: LivePortfolioEvidenceState) {
+  switch (state) {
+    case "confirmed_fresh":
+      return "Fresh";
+    case "confirmed_stale":
+      return "Stale";
+    case "confirmed_expired":
+      return "Expired";
+    case "invalid":
+      return "Rejected";
+    case "refresh_required":
+      return "Refresh required";
+    default:
+      return "Not captured";
+  }
+}
+
+function livePortfolioEvidenceTone(state: LivePortfolioEvidenceState) {
+  if (state === "confirmed_fresh") {
+    return "border-success/30 bg-success/10 text-success";
+  }
+  if (state === "confirmed_stale") {
+    return "border-warning/30 bg-warning/10 text-warning-foreground";
+  }
+  if (state === "confirmed_expired" || state === "invalid") {
+    return "border-destructive/30 bg-destructive/10 text-destructive";
+  }
+  if (state === "refresh_required") {
+    return "border-warning/30 bg-warning/10 text-warning-foreground";
+  }
+  return "text-muted-foreground";
+}
+
+function livePortfolioUrgencyLabel(urgency: LivePortfolioUrgency) {
+  if (urgency === "critical") return "Urgent action";
+  if (urgency === "attention") return "Action needed";
+  if (urgency === "review") return "Evidence review";
+  return "No exception";
+}
+
+function livePortfolioUrgencyVariant(
+  urgency: LivePortfolioUrgency,
+): "destructive" | "secondary" | "outline" {
+  if (urgency === "critical") return "destructive";
+  if (urgency === "attention") return "secondary";
+  return "outline";
+}
+
+function exceptionCountLabel(
+  count: number,
+  singular: string,
+  plural = `${singular}s`,
+) {
+  return `${formatGroupedInteger(count)} ${count === 1 ? singular : plural}`;
+}
+
+function LivePortfolioExceptionItem({
+  evidence,
+  singular,
+  plural,
+  variant,
+}: {
+  evidence: LivePortfolioExceptionEvidence;
+  singular: string;
+  plural?: string;
+  variant: "destructive" | "secondary";
+}) {
+  if (evidence.count === 0) return null;
+
+  return (
+    <div className="flex min-w-72 items-center justify-between gap-3">
+      <Badge variant={variant}>
+        {exceptionCountLabel(evidence.count, singular, plural)}
+      </Badge>
+      <span className="whitespace-nowrap text-xs text-muted-foreground">
+        {evidence.oldestAt
+          ? `Oldest ${formatUtcDateTime(evidence.oldestAt, {
+              includeTimeZone: true,
+            })}`
+          : "Timestamp unavailable"}
+      </span>
+    </div>
+  );
+}
+
 export function CampaignsView({
   ads,
   creativeReviewHistory,
@@ -1315,11 +1745,18 @@ export function CampaignsView({
   dataSource,
   campaigns,
   performance,
+  budgetGuardEvidence,
   currencyCode,
   recommendationCount,
   onReview,
   reviewing,
   snapshotAvailable,
+  portfolioAccounts,
+  livePortfolioVisible,
+  livePortfolioAccounts,
+  livePortfolioError,
+  currentAccountId,
+  onOpenAccount,
 }: {
   ads: ScopedAd[];
   creativeReviewHistory: CreativeReviewEvent[];
@@ -1328,17 +1765,45 @@ export function CampaignsView({
   dataSource: "demo" | "live";
   campaigns: Campaign[];
   performance: CampaignPerformance[];
+  budgetGuardEvidence: BudgetGuardEvidence[];
   currencyCode: string;
   recommendationCount: number;
   onReview: () => void;
   reviewing: boolean;
   snapshotAvailable: boolean;
+  portfolioAccounts: SimulatedAccountOption[];
+  livePortfolioVisible: boolean;
+  livePortfolioAccounts: LivePortfolioAccount[];
+  livePortfolioError?: string;
+  currentAccountId: string;
+  onOpenAccount: (accountId: string) => void;
 }) {
   const currency = moneyFormatter(currencyCode);
   const totalSpend = performance.reduce((sum, item) => sum + item.spend, 0);
   const totalConversions = performance.reduce(
     (sum, item) => sum + item.conversions,
     0,
+  );
+  const portfolioRows = portfolioAccounts.filter(
+    (item) => item.portfolioSummary,
+  );
+  const portfolioExposure = portfolioRows.reduce(
+    (sum, item) => sum + (item.portfolioSummary?.projectedExposure ?? 0),
+    0,
+  );
+  const portfolioReviews = portfolioRows.reduce(
+    (sum, item) => sum + (item.portfolioSummary?.openReviews ?? 0),
+    0,
+  );
+  const portfolioTemplateFixes = portfolioRows.reduce(
+    (sum, item) => sum + (item.portfolioSummary?.campaignTemplateFixes ?? 0),
+    0,
+  );
+  const livePortfolioSummary = summarizeLivePortfolioEvidence(
+    livePortfolioAccounts,
+  );
+  const rankedLivePortfolioAccounts = rankLivePortfolioAccounts(
+    livePortfolioAccounts,
   );
 
   return (
@@ -1363,6 +1828,311 @@ export function CampaignsView({
           {reviewing ? "Reloading snapshot" : "Reload account snapshot"}
         </Button>
       </div>
+
+      {portfolioRows.length > 1 ? (
+        <Card className="min-w-0 shadow-sm">
+          <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
+            <div className="grid gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle className="text-base">Agency exception queue</CardTitle>
+                <Badge variant="secondary">Simulator portfolio</Badge>
+              </div>
+              <CardDescription>
+                Triage money at risk, open reviews, and campaign-template gaps
+                across clients before opening one advertiser account.
+              </CardDescription>
+            </div>
+            <Badge variant="outline">{portfolioRows.length} client accounts</Badge>
+          </CardHeader>
+          <CardContent className="grid gap-4 p-4 md:p-5">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <MetricCard
+                label="Projected weekly exposure"
+                value={currency.format(portfolioExposure)}
+                detail="Illustrative confirmed-budget windows"
+              />
+              <MetricCard
+                label="Open reviews"
+                value={formatGroupedInteger(portfolioReviews)}
+                detail="Across the simulated agency portfolio"
+              />
+              <MetricCard
+                label="Campaign template fixes"
+                value={formatGroupedInteger(portfolioTemplateFixes)}
+                detail="Campaign-level checks only"
+              />
+            </div>
+            <Table
+              scrollAreaLabel="Agency account exception queue"
+              scrollAreaClassName="pb-2"
+            >
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Client account</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Money at risk</TableHead>
+                    <TableHead className="text-right">Open reviews</TableHead>
+                    <TableHead className="text-right">Template fixes</TableHead>
+                    <TableHead className="text-right">Workspace</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {portfolioRows.map((item) => {
+                    const summary = item.portfolioSummary!;
+                    const selected = item.accountId === currentAccountId;
+                    return (
+                      <TableRow key={item.accountId}>
+                        <TableCell>
+                          <div className="flex min-w-44 items-center gap-2">
+                            <span className="font-medium">{item.accountName}</span>
+                            {selected ? <Badge variant="outline">Open</Badge> : null}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "whitespace-nowrap",
+                              summary.status === "critical"
+                                ? "border-destructive/30 bg-destructive/10 text-destructive"
+                                : summary.status === "attention"
+                                  ? "border-warning/30 bg-warning/10 text-warning-foreground"
+                                  : "border-success/30 bg-success/10 text-success",
+                            )}
+                          >
+                            {summary.status === "critical"
+                              ? "Budget risk"
+                              : summary.status === "attention"
+                                ? "Review needed"
+                                : "No exception"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {currency.format(summary.projectedExposure)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {summary.openReviews}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {summary.campaignTemplateFixes}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={selected ? "secondary" : "outline"}
+                            disabled={selected}
+                            onClick={() => onOpenAccount(item.accountId)}
+                          >
+                            {selected ? "Current" : "Open account"}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {dataSource === "live" && livePortfolioVisible ? (
+        <Card className="min-w-0 shadow-sm">
+          <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
+            <div className="grid gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle className="text-base">Live agency exception queue</CardTitle>
+                <Badge variant="secondary">Agency portfolio</Badge>
+              </div>
+              <CardDescription>
+                Reconciliation and monitoring exceptions are ranked ahead of
+                read-only snapshot signals. Missing evidence is never counted as zero.
+              </CardDescription>
+            </div>
+            <Badge variant="outline">
+              {livePortfolioError
+                ? "Account count unavailable"
+                : `${livePortfolioAccounts.length} active client${livePortfolioAccounts.length === 1 ? "" : "s"}`}
+            </Badge>
+          </CardHeader>
+          <CardContent className="grid gap-4 p-4 md:p-5">
+            {livePortfolioError ? (
+              <Alert>
+                <Info />
+                <AlertTitle>Live portfolio evidence unavailable</AlertTitle>
+                <AlertDescription>{livePortfolioError}</AlertDescription>
+              </Alert>
+            ) : (
+              <>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <MetricCard
+                    label="Accounts requiring action"
+                    value={formatGroupedInteger(
+                      livePortfolioSummary.operationalExceptionAccountCount,
+                    )}
+                    detail={`Across ${livePortfolioAccounts.length} active client${livePortfolioAccounts.length === 1 ? "" : "s"}`}
+                  />
+                  <MetricCard
+                    label="Unresolved reconciliation"
+                    value={formatGroupedInteger(
+                      livePortfolioSummary.reconciliationRequiredCount,
+                    )}
+                    detail="Provider outcomes requiring an Ads Manager check"
+                  />
+                  <MetricCard
+                    label="Monitoring exceptions"
+                    value={formatGroupedInteger(
+                      livePortfolioSummary.monitoringExceptionCount,
+                    )}
+                    detail="Safeguard breaches, evidence gaps, and failed evaluations"
+                  />
+                </div>
+
+                <Table
+                  scrollAreaLabel="Live agency client evidence"
+                  scrollAreaClassName="pb-2"
+                >
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Client account</TableHead>
+                      <TableHead>Priority</TableHead>
+                      <TableHead>Operational exceptions</TableHead>
+                      <TableHead>Oldest attention</TableHead>
+                      <TableHead>Snapshot evidence</TableHead>
+                      <TableHead className="text-right">Review</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rankedLivePortfolioAccounts.map((item) => {
+                      const selected = item.accountId === currentAccountId;
+                      const urgency = livePortfolioUrgency(item);
+                      const oldestExceptionAt =
+                        oldestLivePortfolioExceptionAt(item);
+                      const hasOperationalExceptions =
+                        livePortfolioOperationalExceptionCount(item) > 0;
+                      return (
+                        <TableRow key={item.accountId}>
+                          <TableCell>
+                            <div className="flex min-w-44 items-center gap-2">
+                              <span className="font-medium">
+                                {item.accountName}
+                              </span>
+                              {selected ? (
+                                <Badge variant="outline">Open</Badge>
+                              ) : null}
+                            </div>
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {item.accountId}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={livePortfolioUrgencyVariant(urgency)}
+                              className="whitespace-nowrap"
+                            >
+                              {livePortfolioUrgencyLabel(urgency)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="grid min-w-80 gap-1.5">
+                              <LivePortfolioExceptionItem
+                                evidence={
+                                  item.operationalExceptions
+                                    .reconciliationRequired
+                                }
+                                singular="reconciliation"
+                                variant="destructive"
+                              />
+                              <LivePortfolioExceptionItem
+                                evidence={
+                                  item.operationalExceptions.monitoringFailures
+                                }
+                                singular="monitoring failure"
+                                variant="destructive"
+                              />
+                              <LivePortfolioExceptionItem
+                                evidence={
+                                  item.operationalExceptions.safeguardTriggered
+                                }
+                                singular="safeguard breach"
+                                plural="safeguard breaches"
+                                variant="secondary"
+                              />
+                              <LivePortfolioExceptionItem
+                                evidence={
+                                  item.operationalExceptions.insufficientEvidence
+                                }
+                                singular="evidence gap"
+                                variant="secondary"
+                              />
+                              {!hasOperationalExceptions ? (
+                                <Badge variant="outline">
+                                  No active monitoring exception
+                                </Badge>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">
+                            {oldestExceptionAt
+                              ? formatUtcDateTime(oldestExceptionAt, {
+                                  includeTimeZone: true,
+                                })
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="min-w-48">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "whitespace-nowrap",
+                                livePortfolioEvidenceTone(item.evidenceState),
+                              )}
+                            >
+                              {livePortfolioEvidenceLabel(item.evidenceState)}
+                            </Badge>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {item.detectedSignalCount === null
+                                ? "Detected signals unknown"
+                                : `${formatGroupedInteger(item.detectedSignalCount)} detected signal${item.detectedSignalCount === 1 ? "" : "s"}`}
+                            </p>
+                            {item.evidenceAt ? (
+                              <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
+                                {formatUtcDateTime(item.evidenceAt, {
+                                  includeTimeZone: true,
+                                })}
+                              </p>
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              asChild
+                              size="sm"
+                              variant={
+                                hasOperationalExceptions ? "default" : "outline"
+                              }
+                            >
+                              <Link
+                                href={buildAppHref({
+                                  tab: "experiments",
+                                  accountId: item.accountId,
+                                })}
+                              >
+                                {hasOperationalExceptions
+                                  ? "Review exceptions"
+                                  : "Open history"}
+                                <ArrowRight data-icon="inline-end" />
+                              </Link>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {!snapshotAvailable ? (
         <Empty className="border bg-background py-12 shadow-sm">
@@ -1393,19 +2163,26 @@ export function CampaignsView({
         <MetricCard
           label="Month-to-date spend"
           value={currency.format(totalSpend)}
-          detail={`Across ${campaigns.length} campaigns`}
+          detail={`Current account snapshot · ${campaigns.length} campaigns`}
         />
         <MetricCard
           label="Click-attributed conversions"
-          value={totalConversions.toLocaleString()}
+          value={formatGroupedInteger(totalConversions)}
           detail="View-through shown separately"
         />
         <MetricCard
           label="Open recommendations"
-          value={recommendationCount.toLocaleString()}
+          value={formatGroupedInteger(recommendationCount)}
           detail="Only evidence-backed changes"
         />
       </div>
+
+      <BudgetGuard
+        campaigns={campaigns}
+        evidence={budgetGuardEvidence}
+        currencyCode={currencyCode}
+        dataSource={dataSource}
+      />
 
       <Card className="min-w-0 shadow-sm">
         <CardHeader>
@@ -1414,7 +2191,7 @@ export function CampaignsView({
         </CardHeader>
         <CardContent className="min-w-0">
           {campaigns.length > 0 ? (
-            <Table>
+            <Table scrollAreaLabel="Campaign performance">
             <TableHeader>
               <TableRow>
                 <TableHead>Campaign</TableHead>
@@ -1463,7 +2240,7 @@ export function CampaignsView({
                       {currency.format(metrics?.spend ?? 0)}
                     </TableCell>
                     <TableCell className="text-right">
-                      {(metrics?.clicks ?? 0).toLocaleString()}
+                      {formatGroupedInteger(metrics?.clicks ?? 0)}
                     </TableCell>
                     <TableCell className="text-right">
                       {cpa === null ? "—" : currency.format(cpa)}
@@ -1538,27 +2315,31 @@ function MetricCard({
 }
 
 function ExperimentsView({
+  account,
   recommendations,
   dataSource,
+  currencyCode,
   monitoringWindows,
   monitoringEvaluationError,
   auditEvents,
   approvalHistory,
   approvalHistoryError,
-  approvalHistoryReady,
   canRollback,
+  canReconcile,
   recommendationDecisionHistory,
   recommendationDecisionError,
 }: {
+  account: { id: string; name: string };
   recommendations: Recommendation[];
   dataSource: "demo" | "live";
+  currencyCode: string;
   monitoringWindows: MonitoringWindowDto[];
   monitoringEvaluationError?: string;
   auditEvents: AuditEvent[];
   approvalHistory: ApprovalRecordDto[];
   approvalHistoryError?: string;
-  approvalHistoryReady: boolean;
   canRollback: boolean;
+  canReconcile: boolean;
   recommendationDecisionHistory: RecommendationDecisionHistoryDto[];
   recommendationDecisionError?: string;
 }) {
@@ -1571,13 +2352,14 @@ function ExperimentsView({
         </h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Every approved change gets a baseline, success rule, rollback rule, and
-          audit trail. Demo experiments are clearly separated from live results.
+          audit trail. Simulator experiments are clearly separated from live results.
         </p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
         <MonitoringWindows
           dataSource={dataSource}
+          currencyCode={currencyCode}
           windows={monitoringWindows}
           recommendations={recommendations}
           error={monitoringEvaluationError}
@@ -1595,10 +2377,17 @@ function ExperimentsView({
         </AlertDescription>
       </Alert>
 
+      <ChangeAssuranceReportCard
+        account={account}
+        dataSource={dataSource}
+        records={approvalHistory}
+      />
+
       <ApprovalHistory
         records={approvalHistory}
+        dataSource={dataSource}
         canRollback={canRollback}
-        canReconcile={approvalHistoryReady}
+        canReconcile={canReconcile}
         error={approvalHistoryError}
       />
 
@@ -1623,8 +2412,7 @@ function ExperimentsView({
           </div>
         </CardHeader>
         <CardContent className="min-w-0">
-          <div className="max-w-full overflow-x-auto">
-          <Table>
+          <Table scrollAreaLabel="Session audit trail">
             <TableHeader>
               <TableRow>
                 <TableHead>Time</TableHead>
@@ -1636,13 +2424,13 @@ function ExperimentsView({
             </TableHeader>
             <TableBody>
               {auditEvents.map((event) => {
-                const parsedTime = Date.parse(event.occurredAt);
                 return (
                   <TableRow key={event.id}>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {Number.isNaN(parsedTime)
-                        ? event.occurredAt
-                        : new Date(parsedTime).toLocaleString()}
+                      {formatUtcDateTime(event.occurredAt, {
+                        fallback: event.occurredAt,
+                        includeTimeZone: true,
+                      })}
                     </TableCell>
                     <TableCell className="font-medium">{event.action}</TableCell>
                     <TableCell>{event.entity}</TableCell>
@@ -1659,7 +2447,6 @@ function ExperimentsView({
               })}
             </TableBody>
           </Table>
-          </div>
         </CardContent>
       </Card>
     </section>

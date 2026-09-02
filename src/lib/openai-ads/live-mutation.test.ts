@@ -14,7 +14,12 @@ vi.mock("../observability/logger.server", () => ({
 }));
 
 const approvalMocks = vi.hoisted(() => ({
+  FenceUnavailable: class ApprovalProviderSendFenceUnavailableError extends Error {},
   create: vi.fn(async () => "approval-test-123"),
+  markAttempt: vi.fn(async () => undefined),
+  sendFence: vi.fn(
+    async (_options: unknown, operation: () => Promise<unknown>) => operation(),
+  ),
   update: vi.fn(async () => undefined),
   claim: vi.fn(),
   updateRollback: vi.fn(async () => undefined),
@@ -26,13 +31,16 @@ const writeFenceMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../audit/approval-store.server", () => ({
+  ApprovalProviderSendFenceUnavailableError: approvalMocks.FenceUnavailable,
   ApprovalStoreUnavailableError: class ApprovalStoreUnavailableError extends Error {},
   createApprovalRecord: approvalMocks.create,
   claimApprovalRollback: approvalMocks.claim,
   isApprovalStoreConfigured: () => Boolean(process.env.DATABASE_URL),
+  markApprovalProviderAttempt: approvalMocks.markAttempt,
   updateApprovalRecord: approvalMocks.update,
   updateRollbackRecord: approvalMocks.updateRollback,
   verifyApprovalStore: approvalMocks.verify,
+  withApprovalProviderSendFence: approvalMocks.sendFence,
 }));
 
 vi.mock("../audit/recommendation-decision-store.server", () => ({
@@ -44,6 +52,8 @@ vi.mock("../tenancy/store.server", () => ({
 }));
 
 import {
+  ADS_RESPONSE_LIMITS,
+  AdsMutationPreconditionFailedError,
   AdsMutationReconciliationRequiredError,
   AdsMutationRejectedError,
   adsApiRequest,
@@ -51,8 +61,9 @@ import {
   applyStoredRollback,
   buildAdsRequestHeaders,
   OpenAIAdsApiError,
+  OpenAIAdsResponseTooLargeError,
 } from "./client.server";
-import { demoRecommendations } from "./demo-data";
+import { demoRecommendations, type AdsMutation } from "./demo-data";
 import { buildAdsResourcePath } from "./resource-path";
 import type { AccountAccess } from "../tenancy/schema";
 
@@ -80,6 +91,7 @@ const environmentKeys = [
 const originalEnvironment = new Map<string, string | undefined>();
 const originalFetch = globalThis.fetch;
 const credentialGeneration = "vault:test-credential:1";
+const rollbackAttemptId = "00000000-0000-4000-8000-000000000002";
 
 function adGroupResponse(id: string, maxBidMicros: number) {
   return {
@@ -95,6 +107,52 @@ function adGroupResponse(id: string, maxBidMicros: number) {
       max_bid_micros: maxBidMicros,
     },
   } as const;
+}
+
+function queueApplyPrecondition(
+  recommendation: (typeof demoRecommendations)[number],
+  maxBidMicros = 270_000_000,
+) {
+  vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+    new Response(
+      JSON.stringify(adGroupResponse(recommendation.entityId, maxBidMicros)),
+      { status: 200 },
+    ),
+  );
+}
+
+function rollbackClaim(
+  id: string,
+  rollback: AdsMutation,
+  appliedMaxBidMicros = 216_000_000,
+) {
+  return {
+    id,
+    attemptId: rollbackAttemptId,
+    mutationPayload: {
+      method: "POST" as const,
+      path: rollback.path,
+      body: {
+        bidding_config: {
+          billing_event_type: "click",
+          max_bid_micros: appliedMaxBidMicros,
+        },
+      },
+    },
+    rollbackPayload: rollback,
+  };
+}
+
+function queueRollbackPrecondition(
+  entityId: string,
+  appliedMaxBidMicros = 216_000_000,
+) {
+  vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+    new Response(
+      JSON.stringify(adGroupResponse(entityId, appliedMaxBidMicros)),
+      { status: 200 },
+    ),
+  );
 }
 
 function armLiveInfrastructure() {
@@ -115,6 +173,12 @@ beforeEach(() => {
   process.env.OPENAI_ADS_DATA_MODE = "live";
   process.env.MAINTAINFLOW_RELEASE_STAGE = "private_read";
   approvalMocks.create.mockClear();
+  approvalMocks.markAttempt.mockReset();
+  approvalMocks.markAttempt.mockResolvedValue(undefined);
+  approvalMocks.sendFence.mockReset();
+  approvalMocks.sendFence.mockImplementation(
+    async (_options: unknown, operation: () => Promise<unknown>) => operation(),
+  );
   approvalMocks.update.mockClear();
   approvalMocks.claim.mockReset();
   approvalMocks.updateRollback.mockClear();
@@ -168,6 +232,7 @@ describe("guarded live mutations", () => {
     armLiveInfrastructure();
     const recommendation = { ...demoRecommendations[0], source: "live" as const };
     const confirmed = adGroupResponse(recommendation.entityId, 216_000_000);
+    queueApplyPrecondition(recommendation);
     vi.mocked(globalThis.fetch).mockImplementation(async () =>
       new Response(JSON.stringify(confirmed), {
         status: 200,
@@ -191,6 +256,30 @@ describe("guarded live mutations", () => {
     expect(approvalMocks.create.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(globalThis.fetch).mock.invocationCallOrder[0],
     );
+    expect(approvalMocks.markAttempt).toHaveBeenCalledWith({
+      id: "approval-test-123",
+      accountId: "account-test",
+      attemptId: "approval-test-123",
+      status: "pending",
+    });
+    expect(vi.mocked(globalThis.fetch).mock.invocationCallOrder[0]).toBeLessThan(
+      approvalMocks.markAttempt.mock.invocationCallOrder[0],
+    );
+    expect(approvalMocks.markAttempt.mock.invocationCallOrder[0]).toBeLessThan(
+      approvalMocks.sendFence.mock.invocationCallOrder[0],
+    );
+    expect(approvalMocks.sendFence).toHaveBeenCalledWith(
+      {
+        id: "approval-test-123",
+        accountId: "account-test",
+        attemptId: "approval-test-123",
+        status: "pending",
+      },
+      expect.any(Function),
+    );
+    expect(approvalMocks.sendFence.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(globalThis.fetch).mock.invocationCallOrder[1],
+    );
     expect(approvalMocks.update).toHaveBeenCalledWith(
       "approval-test-123",
       "applied",
@@ -202,9 +291,197 @@ describe("guarded live mutations", () => {
       },
     );
     expect(logMocks.info).toHaveBeenCalledWith("ads.apply.completed");
-    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
-    expect(String(vi.mocked(globalThis.fetch).mock.calls[1][0])).toContain(
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(3);
+    expect(String(vi.mocked(globalThis.fetch).mock.calls[2][0])).toContain(
       `/ad_groups/${recommendation.entityId}`,
+    );
+  });
+
+  it("fails closed before POST when controlled provider state changed after review", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify(adGroupResponse(recommendation.entityId, 255_000_000)),
+        { status: 200 },
+      ),
+    );
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationPreconditionFailedError);
+    expect(outcome).toMatchObject({
+      approvalId: "approval-test-123",
+      operation: "apply",
+      reason: "provider_state_changed",
+      noMutationSent: true,
+      requiresFreshReview: true,
+      expectedStateFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+      actualStateFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+      persistenceWarning: false,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]?.method).toBe("GET");
+    expect(approvalMocks.update).toHaveBeenCalledWith(
+      "approval-test-123",
+      "failed",
+      {
+        response: {
+          precondition: {
+            outcome: "blocked_no_write",
+            reason: "provider_state_changed",
+            expectedStateFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+            actualStateFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+          },
+        },
+        error:
+          "Provider-controlled fields changed after review. No mutation was sent; refresh and approve a newly generated recommendation.",
+      },
+    );
+    expect(logMocks.warn).toHaveBeenCalledWith(
+      "ads.apply.precondition_blocked",
+    );
+  });
+
+  it("does not send when the durable provider-attempt marker cannot be claimed", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    queueApplyPrecondition(recommendation);
+    approvalMocks.markAttempt.mockRejectedValueOnce(
+      new Error("The pending operation was already recovered."),
+    );
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId: "approval-test-123",
+      operation: "apply",
+      mustNotRetry: true,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]?.method).toBe("GET");
+    expect(approvalMocks.update).not.toHaveBeenCalledWith(
+      "approval-test-123",
+      "applied",
+      expect.anything(),
+    );
+  });
+
+  it("does not send when stale recovery wins before the apply send fence", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    queueApplyPrecondition(recommendation);
+    approvalMocks.sendFence.mockRejectedValueOnce(
+      new approvalMocks.FenceUnavailable(
+        "The pending operation was recovered before the provider send.",
+      ),
+    );
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId: "approval-test-123",
+      operation: "apply",
+      mustNotRetry: true,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]?.method).toBe("GET");
+    expect(logMocks.warn).toHaveBeenCalledWith(
+      "ads.apply.execution_fence_lost",
+      { error: expect.any(approvalMocks.FenceUnavailable) },
+    );
+  });
+
+  it("keeps a post-send transaction failure must-not-retry", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    queueApplyPrecondition(recommendation);
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify(adGroupResponse(recommendation.entityId, 216_000_000)),
+        { status: 200 },
+      ),
+    );
+    approvalMocks.sendFence.mockImplementationOnce(
+      async (_options: unknown, operation: () => Promise<unknown>) => {
+        await operation();
+        throw new Error("provider-send transaction commit failed");
+      },
+    );
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId: "approval-test-123",
+      operation: "apply",
+      mustNotRetry: true,
+      persistenceWarning: false,
+    });
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(globalThis.fetch).mock.calls[1][1]?.method).toBe("POST");
+    expect(approvalMocks.update).toHaveBeenCalledWith(
+      "approval-test-123",
+      "reconciliation_required",
+      { error: "provider-send transaction commit failed" },
+    );
+  });
+
+  it("fails closed before POST when the apply precondition cannot be read", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    vi.mocked(globalThis.fetch).mockRejectedValue(new Error("read unavailable"));
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationPreconditionFailedError);
+    expect(outcome).toMatchObject({
+      operation: "apply",
+      reason: "provider_state_unavailable",
+      noMutationSent: true,
+      requiresFreshReview: false,
+      actualStateFingerprint: null,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(approvalMocks.update).toHaveBeenCalledWith(
+      "approval-test-123",
+      "failed",
+      expect.objectContaining({
+        response: {
+          precondition: {
+            outcome: "blocked_no_write",
+            reason: "provider_state_unavailable",
+            expectedStateFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+          },
+        },
+      }),
     );
   });
 
@@ -213,6 +490,7 @@ describe("guarded live mutations", () => {
     delete process.env.OPENAI_ADS_API_KEY;
     const recommendation = { ...demoRecommendations[0], source: "live" as const };
     const confirmed = adGroupResponse(recommendation.entityId, 216_000_000);
+    queueApplyPrecondition(recommendation);
     vi.mocked(globalThis.fetch).mockImplementation(async () =>
       new Response(JSON.stringify(confirmed), {
         status: 200,
@@ -248,6 +526,7 @@ describe("guarded live mutations", () => {
       rollback: { ...demoRecommendations[0].rollback, path },
     };
     const confirmed = adGroupResponse(entityId, 216_000_000);
+    queueApplyPrecondition(recommendation);
     vi.mocked(globalThis.fetch).mockImplementation(async () =>
       new Response(JSON.stringify(confirmed), { status: 200 }),
     );
@@ -261,7 +540,7 @@ describe("guarded live mutations", () => {
       }),
     ).resolves.toMatchObject({ applied: true, mode: "live" });
 
-    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(3);
     for (const [input] of vi.mocked(globalThis.fetch).mock.calls) {
       expect(String(input)).toBe(`https://api.ads.openai.com/v1${path}`);
       expect(String(input)).not.toContain(entityId);
@@ -294,6 +573,7 @@ describe("guarded live mutations", () => {
   it("requires reconciliation when a successful response violates the resource schema", async () => {
     armLiveInfrastructure();
     const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    queueApplyPrecondition(recommendation);
     vi.mocked(globalThis.fetch).mockResolvedValue(
       new Response(JSON.stringify({ id: recommendation.entityId }), {
         status: 200,
@@ -316,7 +596,7 @@ describe("guarded live mutations", () => {
         error: expect.stringContaining("Required"),
       }),
     );
-    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
   });
 
   it("requires reconciliation when readback does not contain the requested state", async () => {
@@ -330,6 +610,7 @@ describe("guarded live mutations", () => {
       recommendation.entityId,
       270_000_000,
     );
+    queueApplyPrecondition(recommendation);
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce(
         new Response(JSON.stringify(acknowledgement), { status: 200 }),
@@ -354,7 +635,7 @@ describe("guarded live mutations", () => {
         error: "The Ads API readback did not confirm the requested resource state.",
       },
     );
-    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(3);
   });
 
   it("requires an operator before creating or sending a live change", async () => {
@@ -423,6 +704,7 @@ describe("guarded live mutations", () => {
   it("marks an ambiguous network outcome for reconciliation", async () => {
     armLiveInfrastructure();
     const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    queueApplyPrecondition(recommendation);
     vi.mocked(globalThis.fetch).mockRejectedValue(new Error("socket closed"));
 
     await expect(
@@ -440,6 +722,44 @@ describe("guarded live mutations", () => {
     );
   });
 
+  it("requires reconciliation without retaining an oversized apply response", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    queueApplyPrecondition(recommendation);
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response("{}", {
+        status: 200,
+        headers: {
+          "Content-Length": String(ADS_RESPONSE_LIMITS.mutationBytes + 1),
+        },
+      }),
+    );
+
+    const outcome = await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId: "approval-test-123",
+      operation: "apply",
+      mustNotRetry: true,
+      persistenceWarning: false,
+    });
+    expect(approvalMocks.update).toHaveBeenCalledWith(
+      "approval-test-123",
+      "reconciliation_required",
+      {
+        error:
+          "OpenAI Ads API mutation response exceeded the bounded response limit and was not retained.",
+      },
+    );
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
+  });
+
   it.each([408, 500, 502, 503, 504])(
     "treats HTTP %s after an apply request as uncertain and must-not-retry",
     async (status) => {
@@ -449,6 +769,7 @@ describe("guarded live mutations", () => {
         source: "live" as const,
       };
       const providerPayload = { error: "upstream response unavailable" };
+      queueApplyPrecondition(recommendation);
       vi.mocked(globalThis.fetch).mockResolvedValue(
         new Response(JSON.stringify(providerPayload), { status }),
       );
@@ -479,7 +800,7 @@ describe("guarded live mutations", () => {
         "ads.apply.reconciliation_required",
         { status },
       );
-      expect(globalThis.fetch).toHaveBeenCalledOnce();
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     },
   );
 
@@ -487,6 +808,7 @@ describe("guarded live mutations", () => {
     armLiveInfrastructure();
     const recommendation = { ...demoRecommendations[0], source: "live" as const };
     const providerPayload = { error: "invalid bid" };
+    queueApplyPrecondition(recommendation);
     vi.mocked(globalThis.fetch).mockResolvedValue(
       new Response(JSON.stringify(providerPayload), { status: 422 }),
     );
@@ -519,6 +841,7 @@ describe("guarded live mutations", () => {
   it("preserves must-not-retry semantics when an uncertain HTTP outcome cannot be persisted", async () => {
     armLiveInfrastructure();
     const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    queueApplyPrecondition(recommendation);
     vi.mocked(globalThis.fetch).mockResolvedValue(
       new Response(JSON.stringify({ error: "gateway failure" }), {
         status: 503,
@@ -539,12 +862,13 @@ describe("guarded live mutations", () => {
       mustNotRetry: true,
       persistenceWarning: true,
     });
-    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
   it("preserves must-not-retry semantics when reconciliation persistence also fails", async () => {
     armLiveInfrastructure();
     const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    queueApplyPrecondition(recommendation);
     vi.mocked(globalThis.fetch).mockRejectedValue(new Error("socket closed"));
     approvalMocks.update.mockRejectedValueOnce(new Error("database unavailable"));
 
@@ -562,7 +886,7 @@ describe("guarded live mutations", () => {
       mustNotRetry: true,
       persistenceWarning: true,
     });
-    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
   it("does not claim or send when the final authority or credential fence fails", async () => {
@@ -583,6 +907,7 @@ describe("guarded live mutations", () => {
     expect(writeFenceMocks.run).toHaveBeenCalledWith(
       expect.objectContaining({
         expectedCredentialGeneration: credentialGeneration,
+        requireClearProviderOperationLedger: true,
       }),
       expect.any(Function),
     );
@@ -620,11 +945,14 @@ describe("guarded live mutations", () => {
         },
       },
     };
-    approvalMocks.claim.mockResolvedValue({
-      id: "00000000-0000-4000-8000-000000000001",
-      rollback,
-    });
+    approvalMocks.claim.mockResolvedValue(
+      rollbackClaim(
+        "00000000-0000-4000-8000-000000000001",
+        rollback,
+      ),
+    );
     const confirmed = adGroupResponse("adgrp_live", 250_000_000);
+    queueRollbackPrecondition("adgrp_live");
     vi.mocked(globalThis.fetch).mockImplementation(async () =>
       new Response(JSON.stringify(confirmed), { status: 200 }),
     );
@@ -638,13 +966,43 @@ describe("guarded live mutations", () => {
         credentialGeneration,
       }),
     ).resolves.toMatchObject({ applied: true });
+    expect(writeFenceMocks.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedCredentialGeneration: credentialGeneration,
+        requireClearProviderOperationLedger: true,
+      }),
+      expect.any(Function),
+    );
     expect(approvalMocks.claim.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(globalThis.fetch).mock.invocationCallOrder[0],
+    );
+    expect(approvalMocks.markAttempt).toHaveBeenCalledWith({
+      id: "00000000-0000-4000-8000-000000000001",
+      accountId: "account-test",
+      attemptId: rollbackAttemptId,
+      status: "rollback_pending",
+    });
+    expect(approvalMocks.markAttempt.mock.invocationCallOrder[0]).toBeLessThan(
+      approvalMocks.sendFence.mock.invocationCallOrder[0],
+    );
+    expect(approvalMocks.sendFence).toHaveBeenCalledWith(
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        accountId: "account-test",
+        attemptId: rollbackAttemptId,
+        status: "rollback_pending",
+      },
+      expect.any(Function),
+    );
+    expect(approvalMocks.sendFence.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(globalThis.fetch).mock.invocationCallOrder[1],
     );
     expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
       "rolled_back",
       {
+        accountId: "account-test",
+        attemptId: rollbackAttemptId,
         response: {
           acknowledgement: confirmed,
           readback: confirmed,
@@ -653,11 +1011,111 @@ describe("guarded live mutations", () => {
     );
   });
 
-  it("marks an ambiguous rollback and forbids automatic retry", async () => {
+  it("does not send when stale recovery wins before the rollback send fence", async () => {
     armLiveInfrastructure();
+    const approvalId = "00000000-0000-4000-8000-000000000001";
+    const rollback = {
+      method: "POST" as const,
+      path: "/ad_groups/adgrp_live",
+      body: {
+        bidding_config: {
+          billing_event_type: "click",
+          max_bid_micros: 250_000_000,
+        },
+      },
+    };
+    approvalMocks.claim.mockResolvedValue(rollbackClaim(approvalId, rollback));
+    queueRollbackPrecondition("adgrp_live");
+    approvalMocks.sendFence.mockRejectedValueOnce(
+      new approvalMocks.FenceUnavailable(
+        "The rollback was recovered before the provider send.",
+      ),
+    );
+
+    const outcome = await applyStoredRollback({
+      approvalId,
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId,
+      operation: "rollback",
+      mustNotRetry: true,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]?.method).toBe("GET");
+    expect(logMocks.warn).toHaveBeenCalledWith(
+      "ads.rollback.execution_fence_lost",
+      { error: expect.any(approvalMocks.FenceUnavailable) },
+    );
+  });
+
+  it("fails closed before rollback POST when applied provider state drifted", async () => {
+    armLiveInfrastructure();
+    const approvalId = "00000000-0000-4000-8000-000000000001";
+    const rollback = {
+      method: "POST" as const,
+      path: "/ad_groups/adgrp_live",
+      body: {
+        bidding_config: {
+          billing_event_type: "click",
+          max_bid_micros: 250_000_000,
+        },
+      },
+    };
+    approvalMocks.claim.mockResolvedValue(rollbackClaim(approvalId, rollback));
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify(adGroupResponse("adgrp_live", 205_000_000)), {
+        status: 200,
+      }),
+    );
+
+    const outcome = await applyStoredRollback({
+      approvalId,
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationPreconditionFailedError);
+    expect(outcome).toMatchObject({
+      approvalId,
+      operation: "rollback",
+      reason: "provider_state_changed",
+      noMutationSent: true,
+      requiresFreshReview: true,
+    });
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]?.method).toBe("GET");
+    expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
+      approvalId,
+      "rollback_reconciliation_required",
+      expect.objectContaining({
+        response: {
+          precondition: {
+            outcome: "blocked_no_write",
+            reason: "provider_state_changed",
+            expectedStateFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+            actualStateFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+          },
+        },
+      }),
+    );
+  });
+
+  it("records malformed stored request pairs as rollback failed without provider access", async () => {
+    armLiveInfrastructure();
+    const approvalId = "00000000-0000-4000-8000-000000000001";
     approvalMocks.claim.mockResolvedValue({
-      id: "00000000-0000-4000-8000-000000000001",
-      rollback: {
+      id: approvalId,
+      attemptId: rollbackAttemptId,
+      mutationPayload: { method: "PATCH", path: "/ad_groups/adgrp_live" },
+      rollbackPayload: {
         method: "POST",
         path: "/ad_groups/adgrp_live",
         body: {
@@ -668,6 +1126,40 @@ describe("guarded live mutations", () => {
         },
       },
     });
+
+    await expect(
+      applyStoredRollback({
+        approvalId,
+        accountId: "account-test",
+        operatorId: "user_founder",
+        access: accountAccess,
+        credentialGeneration,
+      }),
+    ).rejects.toThrow();
+
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
+      approvalId,
+      "rollback_failed",
+      expect.objectContaining({ error: expect.any(String) }),
+    );
+  });
+
+  it("marks an ambiguous rollback and forbids automatic retry", async () => {
+    armLiveInfrastructure();
+    approvalMocks.claim.mockResolvedValue(
+      rollbackClaim("00000000-0000-4000-8000-000000000001", {
+        method: "POST",
+        path: "/ad_groups/adgrp_live",
+        body: {
+          bidding_config: {
+            billing_event_type: "click",
+            max_bid_micros: 250_000_000,
+          },
+        },
+      }),
+    );
+    queueRollbackPrecondition("adgrp_live");
     vi.mocked(globalThis.fetch).mockRejectedValue(new Error("socket closed"));
 
     await expect(
@@ -682,8 +1174,65 @@ describe("guarded live mutations", () => {
     expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
       "rollback_reconciliation_required",
-      { error: "socket closed" },
+      {
+        accountId: "account-test",
+        attemptId: rollbackAttemptId,
+        error: "socket closed",
+      },
     );
+  });
+
+  it("requires reconciliation without retaining an oversized rollback response", async () => {
+    armLiveInfrastructure();
+    const approvalId = "00000000-0000-4000-8000-000000000001";
+    approvalMocks.claim.mockResolvedValue(
+      rollbackClaim(approvalId, {
+        method: "POST",
+        path: "/ad_groups/adgrp_live",
+        body: {
+          bidding_config: {
+            billing_event_type: "click",
+            max_bid_micros: 250_000_000,
+          },
+        },
+      }),
+    );
+    queueRollbackPrecondition("adgrp_live");
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response("{}", {
+        status: 200,
+        headers: {
+          "Content-Length": String(ADS_RESPONSE_LIMITS.mutationBytes + 1),
+        },
+      }),
+    );
+
+    const outcome = await applyStoredRollback({
+      approvalId,
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: accountAccess,
+      credentialGeneration,
+    }).catch((error: unknown) => error);
+
+    expect(outcome).toBeInstanceOf(AdsMutationReconciliationRequiredError);
+    expect(outcome).toMatchObject({
+      approvalId,
+      operation: "rollback",
+      mustNotRetry: true,
+      persistenceWarning: false,
+    });
+    expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
+      approvalId,
+      "rollback_reconciliation_required",
+      {
+        accountId: "account-test",
+        attemptId: rollbackAttemptId,
+        error:
+          "OpenAI Ads API rollback response exceeded the bounded response limit and was not retained.",
+      },
+    );
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
   });
 
   it.each([408, 502])(
@@ -691,9 +1240,8 @@ describe("guarded live mutations", () => {
     async (status) => {
       armLiveInfrastructure();
       const approvalId = "00000000-0000-4000-8000-000000000001";
-      approvalMocks.claim.mockResolvedValue({
-        id: approvalId,
-        rollback: {
+      approvalMocks.claim.mockResolvedValue(
+        rollbackClaim(approvalId, {
           method: "POST",
           path: "/ad_groups/adgrp_live",
           body: {
@@ -702,9 +1250,10 @@ describe("guarded live mutations", () => {
               max_bid_micros: 250_000_000,
             },
           },
-        },
-      });
+        }),
+      );
       const providerPayload = { error: "upstream response unavailable" };
+      queueRollbackPrecondition("adgrp_live");
       vi.mocked(globalThis.fetch).mockResolvedValue(
         new Response(JSON.stringify(providerPayload), { status }),
       );
@@ -728,6 +1277,8 @@ describe("guarded live mutations", () => {
         approvalId,
         "rollback_reconciliation_required",
         {
+          accountId: "account-test",
+          attemptId: rollbackAttemptId,
           response: providerPayload,
           error: `OpenAI Ads API returned an uncertain HTTP ${status} rollback outcome.`,
         },
@@ -736,15 +1287,14 @@ describe("guarded live mutations", () => {
         "ads.rollback.reconciliation_required",
         { status },
       );
-      expect(globalThis.fetch).toHaveBeenCalledOnce();
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     },
   );
 
   it("keeps rollback must-not-retry semantics when audit persistence fails", async () => {
     armLiveInfrastructure();
-    approvalMocks.claim.mockResolvedValue({
-      id: "00000000-0000-4000-8000-000000000001",
-      rollback: {
+    approvalMocks.claim.mockResolvedValue(
+      rollbackClaim("00000000-0000-4000-8000-000000000001", {
         method: "POST",
         path: "/ad_groups/adgrp_live",
         body: {
@@ -753,8 +1303,9 @@ describe("guarded live mutations", () => {
             max_bid_micros: 250_000_000,
           },
         },
-      },
-    });
+      }),
+    );
+    queueRollbackPrecondition("adgrp_live");
     vi.mocked(globalThis.fetch).mockRejectedValue(new Error("socket closed"));
     approvalMocks.updateRollback.mockRejectedValueOnce(
       new Error("database unavailable"),
@@ -781,7 +1332,13 @@ describe("guarded live mutations", () => {
     armLiveInfrastructure();
     approvalMocks.claim.mockResolvedValue({
       id: "00000000-0000-4000-8000-000000000001",
-      rollback: {
+      attemptId: rollbackAttemptId,
+      mutationPayload: {
+        method: "POST",
+        path: "/campaigns/cmpn_live",
+        body: { name: "Current campaign" },
+      },
+      rollbackPayload: {
         method: "POST",
         path: "/campaigns/cmpn_live/archive",
         body: null,
@@ -801,7 +1358,11 @@ describe("guarded live mutations", () => {
     expect(approvalMocks.updateRollback).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
       "rollback_failed",
-      { error: "This mutation path is not enabled in the MVP." },
+      {
+        accountId: "account-test",
+        attemptId: rollbackAttemptId,
+        error: "This mutation path is not enabled in the MVP.",
+      },
     );
   });
 
@@ -878,6 +1439,54 @@ describe("guarded live reads", () => {
     await expect(
       adsApiRequest("/ad_account", z.object({ id: z.string() })),
     ).rejects.toThrow("did not return a confirmed response");
+  });
+
+  it("rejects a declared oversized read response before accepting its body", async () => {
+    process.env.OPENAI_ADS_API_KEY = "ads-test-key";
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response("{}", {
+        status: 200,
+        headers: {
+          "Content-Length": String(ADS_RESPONSE_LIMITS.readBytes + 1),
+        },
+      }),
+    );
+
+    const error = await adsApiRequest(
+      "/ad_account",
+      z.object({ id: z.string() }),
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(OpenAIAdsResponseTooLargeError);
+    expect(error).toMatchObject({ maximumBytes: ADS_RESPONSE_LIMITS.readBytes });
+  });
+
+  it("stops a chunked read once the streamed byte limit is crossed", async () => {
+    process.env.OPENAI_ADS_API_KEY = "ads-test-key";
+    let cancelled = false;
+    let emittedBytes = 0;
+    const chunk = new Uint8Array(256 * 1024).fill(32);
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(chunk);
+        emittedBytes += chunk.byteLength;
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(
+      adsApiRequest("/ad_account", z.object({ id: z.string() })),
+    ).rejects.toBeInstanceOf(OpenAIAdsResponseTooLargeError);
+    expect(emittedBytes).toBeGreaterThan(ADS_RESPONSE_LIMITS.readBytes);
+    expect(cancelled).toBe(true);
   });
 
   it("uses an explicit account credential without a process-wide Ads key", async () => {

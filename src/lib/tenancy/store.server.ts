@@ -37,6 +37,26 @@ type CredentialRotationAccessRow = AccessRow & {
   advertiser_account_id: string;
 };
 
+type AgencyAccountAttachAuthorizationRow = {
+  organization_id: string;
+  organization_name: string;
+  membership_role: "owner" | "admin";
+};
+
+type AdvertiserAccountIdentityRow = {
+  id: string;
+  external_account_id: string;
+  name: string;
+  owner_organization_id: string | null;
+  connection_mode: AccountConnectionMode;
+  status: "active" | "disconnected";
+};
+
+type ExistingAgencyAttachmentRow = {
+  account_role: "manager";
+  credential_id: string;
+};
+
 type CredentialRow = {
   id: string;
   external_account_id: string;
@@ -81,6 +101,15 @@ export class AccountAccessForbiddenError extends Error {
   }
 }
 
+export class AdvertiserAccountAttachConflictError extends Error {
+  constructor(
+    message = "This Ads account is already connected to another workspace.",
+  ) {
+    super(message);
+    this.name = "AdvertiserAccountAttachConflictError";
+  }
+}
+
 export class AdvertiserCredentialUnavailableError extends Error {
   constructor(message = "The advertiser account credential is unavailable.") {
     super(message);
@@ -94,6 +123,15 @@ export class AdvertiserCredentialChangedError extends AdvertiserCredentialUnavai
   ) {
     super(message);
     this.name = "AdvertiserCredentialChangedError";
+  }
+}
+
+export class AdvertiserWriteBlockedError extends Error {
+  constructor(
+    message = "Resolve the advertiser account's active or uncertain Ads operation before starting another live write.",
+  ) {
+    super(message);
+    this.name = "AdvertiserWriteBlockedError";
   }
 }
 
@@ -123,6 +161,20 @@ function parseAccess(row: AccessRow) {
   });
 }
 
+async function lockActiveAdvertiserAccount(
+  transaction: postgres.TransactionSql,
+  accountId: string,
+) {
+  const [account] = await transaction<{ id: string }[]>`
+    select id
+    from maintainflow_advertiser_accounts
+    where external_account_id = ${accountId}
+      and status = 'active'
+    for update
+  `;
+  return account?.id ?? null;
+}
+
 export async function verifyTenancyStore() {
   if (!process.env.DATABASE_URL) return false;
   const sql = getDatabase();
@@ -143,6 +195,22 @@ export async function verifyCredentialStore() {
   const [result] = await sql<{ ready: boolean }[]>`
     select (
       to_regclass('public.maintainflow_advertiser_credentials') is not null
+    ) as ready
+  `;
+  return result?.ready === true;
+}
+
+export async function verifyAdvertiserAccountAttachStore() {
+  if (!process.env.DATABASE_URL) return false;
+  const sql = getDatabase();
+  const [result] = await sql<{ ready: boolean }[]>`
+    select (
+      to_regclass('public.maintainflow_organizations') is not null
+      and to_regclass('public.maintainflow_organization_memberships') is not null
+      and to_regclass('public.maintainflow_advertiser_accounts') is not null
+      and to_regclass('public.maintainflow_account_access') is not null
+      and to_regclass('public.maintainflow_advertiser_credentials') is not null
+      and to_regclass('public.maintainflow_customer_lifecycle_records') is not null
     ) as ready
   `;
   return result?.ready === true;
@@ -285,6 +353,7 @@ export async function withAuthorizedAdsWriteFence<T>(
     accountId: string;
     access: AccountAccess;
     expectedCredentialGeneration: string;
+    requireClearProviderOperationLedger: boolean;
   },
   operation: (context: {
     transaction: postgres.TransactionSql;
@@ -303,48 +372,37 @@ export async function withAuthorizedAdsWriteFence<T>(
 
   const sql = getDatabase();
   return sql.begin(async (transaction) => {
-    const [row] = await transaction<CredentialRotationAccessRow[]>`
-      select
-        account.id as advertiser_account_id,
-        organization.id as organization_id,
-        organization.name as organization_name,
-        organization.customer_type as organization_type,
-        account.external_account_id as account_id,
-        account.name as account_name,
-        account.connection_mode as connection_mode,
-        membership.role as membership_role,
-        account_access.role as account_role
-      from maintainflow_organizations organization
-      join maintainflow_organization_memberships membership
-        on membership.organization_id = organization.id
-      join maintainflow_account_access account_access
-        on account_access.organization_id = organization.id
-      join maintainflow_advertiser_accounts account
-        on account.id = account_access.advertiser_account_id
-      where organization.id = ${options.access.organizationId}
-        and organization.status = 'active'
-        and membership.clerk_user_id = ${options.operatorId}
-        and membership.role in ('owner', 'admin')
-        and account.external_account_id = ${options.accountId}
-        and account.status = 'active'
-        and account_access.role in ('owner', 'manager')
-      for update of organization, membership, account_access, account
-    `;
-    if (!row) {
-      throw new AccountAccessForbiddenError(
+    const authorized = await lockCurrentAccountWriteAccess({
+      transaction,
+      operatorId: options.operatorId,
+      accountId: options.accountId,
+      access: options.access,
+      forbiddenMessage:
         "Write access changed while live data was being reviewed. Refresh before trying again.",
-      );
-    }
+    });
+    const access = authorized.access;
 
-    const access = parseAccess(row);
-    if (!canWriteAccount(access)) {
-      throw new AccountAccessForbiddenError(
-        "Write access changed while live data was being reviewed. Refresh before trying again.",
-      );
+    if (options.requireClearProviderOperationLedger) {
+      const [operationLedger] = await transaction<{ blocked: boolean }[]>`
+        select exists (
+          select 1
+          from ads_approval_records approval
+          where approval.account_id = ${options.accountId}
+            and approval.status in (
+              'pending',
+              'reconciliation_required',
+              'rollback_pending',
+              'rollback_reconciliation_required'
+            )
+        ) as blocked
+      `;
+      if (operationLedger?.blocked) {
+        throw new AdvertiserWriteBlockedError();
+      }
     }
 
     let credentialMaterial: AdsCredentialMaterial;
-    if (row.connection_mode === "environment") {
+    if (access.connectionMode === "environment") {
       const apiKey = process.env.OPENAI_ADS_API_KEY;
       if (!apiKey) throw new AdvertiserCredentialUnavailableError();
       credentialMaterial = {
@@ -366,7 +424,7 @@ export async function withAuthorizedAdsWriteFence<T>(
         from maintainflow_advertiser_credentials credential
         join maintainflow_advertiser_accounts account
           on account.id = credential.advertiser_account_id
-        where account.id = ${row.advertiser_account_id}
+        where account.id = ${authorized.advertiserAccountId}
           and account.status = 'active'
           and credential.status = 'active'
         order by credential.credential_version desc
@@ -499,6 +557,13 @@ export async function lockCurrentAccountWriteAccess(options: {
     throw new AccountAccessForbiddenError(options.forbiddenMessage);
   }
 
+  const advertiserAccountId = await lockActiveAdvertiserAccount(
+    options.transaction,
+    options.accountId,
+  );
+  if (!advertiserAccountId) {
+    throw new AccountAccessForbiddenError(options.forbiddenMessage);
+  }
   const [row] = await options.transaction<CredentialRotationAccessRow[]>`
     select
       account.id as advertiser_account_id,
@@ -521,10 +586,10 @@ export async function lockCurrentAccountWriteAccess(options: {
       and organization.status = 'active'
       and membership.clerk_user_id = ${options.operatorId}
       and membership.role in ('owner', 'admin')
-      and account.external_account_id = ${options.accountId}
+      and account.id = ${advertiserAccountId}
       and account.status = 'active'
       and account_access.role in ('owner', 'manager')
-    for update of organization, membership, account_access, account
+    for update of organization, membership, account_access
   `;
   if (!row) {
     throw new AccountAccessForbiddenError(options.forbiddenMessage);
@@ -676,6 +741,226 @@ export async function rotateConversionsApiCredential(options: {
   });
 }
 
+async function lockAdvertiserAccountIdentity(
+  transaction: postgres.TransactionSql,
+  externalAccountId: string,
+) {
+  await transaction`
+    select pg_advisory_xact_lock(
+      hashtextextended(${`maintainflow:advertiser-account:${externalAccountId}`}, 0)
+    )
+  `;
+  const [account] = await transaction<AdvertiserAccountIdentityRow[]>`
+    select id, external_account_id, name, owner_organization_id,
+      connection_mode, status
+    from maintainflow_advertiser_accounts
+    where external_account_id = ${externalAccountId}
+    for update
+  `;
+  return account ?? null;
+}
+
+async function lockAgencyAccountAttachAuthorization(
+  transaction: postgres.TransactionSql,
+  operatorId: string,
+  organizationId: string,
+) {
+  const [authorization] =
+    await transaction<AgencyAccountAttachAuthorizationRow[]>`
+      select organization.id as organization_id,
+        organization.name as organization_name,
+        membership.role as membership_role
+      from maintainflow_organizations organization
+      join maintainflow_organization_memberships membership
+        on membership.organization_id = organization.id
+      where organization.id = ${organizationId}
+        and organization.customer_type = 'agency'
+        and organization.status = 'active'
+        and membership.clerk_user_id = ${operatorId}
+        and membership.role in ('owner', 'admin')
+      for update of organization, membership
+    `;
+  if (!authorization) {
+    throw new AccountAccessForbiddenError(
+      "An active agency owner or admin must connect advertiser accounts.",
+    );
+  }
+  return authorization;
+}
+
+export async function requireAgencyAccountAttachAuthorization(
+  operatorId: string,
+  organizationId: string,
+) {
+  if (!(await verifyTenancyStore())) {
+    throw new TenancyStoreUnavailableError(
+      "The customer tenancy database migration is not ready.",
+    );
+  }
+  const sql = getDatabase();
+  const [authorization] =
+    await sql<AgencyAccountAttachAuthorizationRow[]>`
+      select organization.id as organization_id,
+        organization.name as organization_name,
+        membership.role as membership_role
+      from maintainflow_organizations organization
+      join maintainflow_organization_memberships membership
+        on membership.organization_id = organization.id
+      where organization.id = ${organizationId}
+        and organization.customer_type = 'agency'
+        and organization.status = 'active'
+        and membership.clerk_user_id = ${operatorId}
+        and membership.role in ('owner', 'admin')
+    `;
+  if (!authorization) {
+    throw new AccountAccessForbiddenError(
+      "An active agency owner or admin must connect advertiser accounts.",
+    );
+  }
+  return {
+    organizationId: authorization.organization_id,
+    organizationName: authorization.organization_name,
+    membershipRole: authorization.membership_role,
+  };
+}
+
+export async function attachAdvertiserAccountToAgency(options: {
+  operatorId: string;
+  organizationId: string;
+  accountId: string;
+  accountName: string;
+  credential: EncryptedCredential;
+  verifiedAt: Date;
+}) {
+  if (!(await verifyAdvertiserAccountAttachStore())) {
+    throw new TenancyStoreUnavailableError(
+      "The advertiser account connection database migrations are not ready.",
+    );
+  }
+
+  const sql = getDatabase();
+  return sql.begin(async (transaction) => {
+    const existingAccount = await lockAdvertiserAccountIdentity(
+      transaction,
+      options.accountId,
+    );
+    const authorization = await lockAgencyAccountAttachAuthorization(
+      transaction,
+      options.operatorId,
+      options.organizationId,
+    );
+    const [lifecycle] = existingAccount
+      ? await transaction<{ id: string }[]>`
+          select id
+          from maintainflow_customer_lifecycle_records
+          where advertiser_account_id = ${existingAccount.id}
+             or external_account_id = ${options.accountId}
+          limit 1
+        `
+      : await transaction<{ id: string }[]>`
+          select id
+          from maintainflow_customer_lifecycle_records
+          where external_account_id = ${options.accountId}
+          limit 1
+        `;
+
+    if (existingAccount?.status === "disconnected" || lifecycle) {
+      throw new AdvertiserAccountAttachConflictError(
+        "This Ads account was previously disconnected and cannot be reconnected automatically.",
+      );
+    }
+
+    if (existingAccount) {
+      if (
+        existingAccount.status !== "active" ||
+        existingAccount.owner_organization_id !== null ||
+        existingAccount.connection_mode !== "vault"
+      ) {
+        throw new AdvertiserAccountAttachConflictError();
+      }
+      const [existingAttachment] =
+        await transaction<ExistingAgencyAttachmentRow[]>`
+          select account_access.role as account_role,
+            credential.id as credential_id
+          from maintainflow_account_access account_access
+          join maintainflow_advertiser_credentials credential
+            on credential.advertiser_account_id =
+              account_access.advertiser_account_id
+          where account_access.organization_id = ${options.organizationId}
+            and account_access.advertiser_account_id = ${existingAccount.id}
+            and account_access.role = 'manager'
+            and credential.provider = 'openai_ads'
+            and credential.status = 'active'
+          for update of account_access, credential
+        `;
+      if (!existingAttachment) {
+        throw new AdvertiserAccountAttachConflictError();
+      }
+      return {
+        created: false,
+        credentialUpdated: false,
+        access: accountAccessSchema.parse({
+          organizationId: authorization.organization_id,
+          organizationName: authorization.organization_name,
+          organizationType: "agency",
+          accountId: existingAccount.external_account_id,
+          accountName: existingAccount.name,
+          connectionMode: existingAccount.connection_mode,
+          membershipRole: authorization.membership_role,
+          accountRole: existingAttachment.account_role,
+        }),
+      };
+    }
+
+    const advertiserAccountId = randomUUID();
+    await transaction`
+      insert into maintainflow_advertiser_accounts (
+        id, external_account_id, name, owner_organization_id, connection_mode
+      ) values (
+        ${advertiserAccountId}, ${options.accountId}, ${options.accountName},
+        null, 'vault'
+      )
+    `;
+    await transaction`
+      insert into maintainflow_account_access (
+        organization_id, advertiser_account_id, role, granted_by
+      ) values (
+        ${options.organizationId}, ${advertiserAccountId}, 'manager',
+        ${options.operatorId}
+      )
+    `;
+    await transaction`
+      insert into maintainflow_advertiser_credentials (
+        id, advertiser_account_id, provider, algorithm, key_id,
+        ciphertext, initialization_vector, authentication_tag,
+        created_by, verified_at
+      ) values (
+        ${options.credential.id}, ${advertiserAccountId},
+        ${options.credential.provider}, ${options.credential.algorithm},
+        ${options.credential.keyId}, ${options.credential.ciphertext},
+        ${options.credential.initializationVector},
+        ${options.credential.authenticationTag}, ${options.operatorId},
+        ${options.verifiedAt}
+      )
+    `;
+
+    return {
+      created: true,
+      credentialUpdated: true,
+      access: accountAccessSchema.parse({
+        organizationId: authorization.organization_id,
+        organizationName: authorization.organization_name,
+        organizationType: "agency",
+        accountId: options.accountId,
+        accountName: options.accountName,
+        connectionMode: "vault",
+        membershipRole: authorization.membership_role,
+        accountRole: "manager",
+      }),
+    };
+  });
+}
+
 export async function requireAccountAccess(
   operatorId: string,
   accountId: string,
@@ -726,11 +1011,10 @@ export async function bootstrapWorkspace(options: {
   }
   const sql = getDatabase();
   return sql.begin(async (transaction) => {
-    const [existing] = await transaction<{ id: string }[]>`
-      select id from maintainflow_advertiser_accounts
-      where external_account_id = ${options.accountId}
-      for update
-    `;
+    const existing = await lockAdvertiserAccountIdentity(
+      transaction,
+      options.accountId,
+    );
     if (existing) {
       throw new AccountAccessForbiddenError(
         "This Ads account is already claimed. An existing workspace owner must grant access.",

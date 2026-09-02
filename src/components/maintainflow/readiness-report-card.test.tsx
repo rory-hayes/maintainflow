@@ -14,7 +14,7 @@ const accountMeasurement: ConversionMeasurementReadiness = {
   healthyCampaigns: 0,
   eventSettingCount: 0,
   checks: [],
-  message: "Demo mode does not fabricate event-setting evidence.",
+  message: "Simulator mode does not fabricate event-setting evidence.",
 };
 
 const productFeed: ProductFeedAudit = {
@@ -39,7 +39,7 @@ describe("readiness client report card", () => {
       />,
     );
 
-    expect(html).toContain("Client-ready launch report");
+    expect(html).toContain("Launch readiness report");
     expect(html).toContain("0 of 4 evaluated");
     expect(html).toContain("disabled");
     expect(html).toContain("excludes raw feed rows");
@@ -57,6 +57,10 @@ describe("readiness client report card", () => {
     );
 
     expect(html).toContain("1 of 4 evaluated");
+    expect(html).toContain("Partial launch readiness report");
+    expect(html).toContain("Partial · ");
+    expect(html).toContain("3 sections not evaluated");
+    expect(html).toContain("Download partial report");
     expect(html).toContain("Products need attention");
     expect(html).toContain("Needs work");
     expect(html).not.toContain('disabled=""');

@@ -1,3 +1,4 @@
+import { ZodError } from "zod";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -8,12 +9,22 @@ const testState = vi.hoisted(() => {
   class AccountAccessForbiddenError extends Error {}
   class TenancyStoreUnavailableError extends Error {}
   class CredentialVaultUnavailableError extends Error {}
+  class OpenAIAdsApiError extends Error {
+    status: number;
+
+    constructor(status: number) {
+      super(`Provider status ${status}`);
+      this.name = "OpenAIAdsApiError";
+      this.status = status;
+    }
+  }
   return {
     OperatorAuthUnavailableError,
     OperatorUnauthorizedError,
     AccountAccessForbiddenError,
     TenancyStoreUnavailableError,
     CredentialVaultUnavailableError,
+    OpenAIAdsApiError,
     requireOperatorId: vi.fn(),
     isBootstrapOperator: vi.fn(),
     isWorkspaceAdmissionAllowed: vi.fn(),
@@ -23,6 +34,9 @@ const testState = vi.hoisted(() => {
     verifyCredentialStore: vi.fn(),
     verifyTenancyStore: vi.fn(),
     bootstrapWorkspace: vi.fn(),
+    logInfo: vi.fn(),
+    logWarn: vi.fn(),
+    logError: vi.fn(),
   };
 });
 
@@ -39,6 +53,18 @@ vi.mock("@/lib/auth/operator.server", () => ({
 
 vi.mock("@/lib/openai-ads/data.server", () => ({
   fetchLiveAdAccount: testState.fetchLiveAdAccount,
+}));
+
+vi.mock("@/lib/openai-ads/client.server", () => ({
+  OpenAIAdsApiError: testState.OpenAIAdsApiError,
+}));
+
+vi.mock("@/lib/observability/logger.server", () => ({
+  createServerLogger: () => ({
+    info: testState.logInfo,
+    warn: testState.logWarn,
+    error: testState.logError,
+  }),
 }));
 
 vi.mock("@/lib/credentials/crypto.server", () => ({
@@ -165,11 +191,15 @@ describe("customer workspace onboarding", () => {
       }),
     );
     expect(JSON.stringify(payload)).not.toContain("ads_client_secret_123");
+    expect(testState.logInfo).toHaveBeenCalledWith(
+      "onboarding.workspace.completed",
+      expect.objectContaining({ status: 200, durationMs: expect.any(Number) }),
+    );
   });
 
   it("does not encrypt or persist a client key when provider validation fails", async () => {
     testState.fetchLiveAdAccount.mockRejectedValue(
-      new Error("The provider rejected the candidate key."),
+      new testState.OpenAIAdsApiError(401),
     );
 
     const response = await POST(
@@ -183,6 +213,10 @@ describe("customer workspace onboarding", () => {
     expect(response.status).toBe(400);
     expect(testState.encryptAdsApiKey).not.toHaveBeenCalled();
     expect(testState.bootstrapWorkspace).not.toHaveBeenCalled();
+    expect(testState.logWarn).toHaveBeenCalledWith(
+      "onboarding.workspace.rejected",
+      expect.objectContaining({ status: 400 }),
+    );
   });
 
   it("does not expose unexpected workspace persistence errors", async () => {
@@ -198,8 +232,44 @@ describe("customer workspace onboarding", () => {
       }),
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
+      error: "Unable to create workspace safely.",
+    });
+    expect(testState.logError).toHaveBeenCalledWith(
+      "onboarding.workspace.failed",
+      expect.objectContaining({
+        status: 500,
+        error: expect.any(Error),
+      }),
+    );
+  });
+
+  it("treats only request-schema errors as client faults", async () => {
+    const invalidRequest = await POST(
+      request({ organizationName: "x", organizationType: "agency" }),
+    );
+    expect(invalidRequest.status).toBe(422);
+
+    testState.fetchLiveAdAccount.mockRejectedValue(
+      new ZodError([
+        {
+          code: "custom",
+          path: ["provider", "account"],
+          message: "PLANTED_PROVIDER_SCHEMA_SECRET",
+        },
+      ]),
+    );
+    const providerSchemaFailure = await POST(
+      request({
+        organizationName: "Northstar Agency",
+        organizationType: "agency",
+        adsApiKey: "ads_client_secret_123",
+      }),
+    );
+
+    expect(providerSchemaFailure.status).toBe(500);
+    await expect(providerSchemaFailure.json()).resolves.toEqual({
       error: "Unable to create workspace safely.",
     });
   });

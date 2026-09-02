@@ -27,5 +27,8 @@ describe("creative review table", () => {
     expect(html).toContain(
       'href="https://cdn.openai.com/ads/reviews/ad_505.png"',
     );
+    expect(html).toContain('role="region"');
+    expect(html).toContain('aria-label="Creative review"');
+    expect(html).toContain('tabindex="0"');
   });
 });

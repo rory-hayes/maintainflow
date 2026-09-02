@@ -1,3 +1,4 @@
+import { ZodError } from "zod";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const testState = vi.hoisted(() => {
@@ -40,6 +41,9 @@ const testState = vi.hoisted(() => {
     withAuthorizedAdsWriteFence: vi.fn(),
     dismissRecommendation: vi.fn(),
     restoreRecommendation: vi.fn(),
+    logInfo: vi.fn(),
+    logWarn: vi.fn(),
+    logError: vi.fn(),
   };
 });
 
@@ -77,6 +81,14 @@ vi.mock("@/lib/openai-ads/client.server", () => ({
 vi.mock("@/lib/openai-ads/live-sync.server", () => ({
   LiveSyncUnavailableError: testState.LiveSyncUnavailableError,
   getLiveWorkbench: testState.getLiveWorkbench,
+}));
+
+vi.mock("@/lib/observability/logger.server", () => ({
+  createServerLogger: () => ({
+    info: testState.logInfo,
+    warn: testState.logWarn,
+    error: testState.logError,
+  }),
 }));
 
 vi.mock("@/lib/tenancy/store.server", () => ({
@@ -201,6 +213,10 @@ describe("durable recommendation decisions", () => {
         recommendation,
         reason: "Budget is committed to the current bid test.",
       }),
+    );
+    expect(testState.logInfo).toHaveBeenCalledWith(
+      "ads.recommendation_decision.completed",
+      expect.objectContaining({ status: 200, durationMs: expect.any(Number) }),
     );
   });
 
@@ -333,6 +349,67 @@ describe("durable recommendation decisions", () => {
 
     expect(response.status).toBe(409);
     expect(testState.dismissRecommendation).toHaveBeenCalledOnce();
+    expect(testState.logWarn).toHaveBeenCalledWith(
+      "ads.recommendation_decision.rejected",
+      expect.objectContaining({ status: 409 }),
+    );
+    expect(testState.logError).not.toHaveBeenCalledWith(
+      "ads.recommendation_decision.failed",
+      expect.anything(),
+    );
+  });
+
+  it("returns and logs an exact generic 500 for an unexpected durable-write failure", async () => {
+    const secret = "postgres://PLANTED_RECOMMENDATION_SECRET";
+    testState.dismissRecommendation.mockRejectedValue(new Error(secret));
+
+    const response = await POST(
+      request({
+        accountId: "adacct_client",
+        recommendationId: recommendation.id,
+        action: "dismiss",
+        reason: "The client wants to defer this change.",
+      }),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload).toEqual({
+      error: "Unable to record the recommendation decision safely.",
+    });
+    expect(JSON.stringify(payload)).not.toContain(secret);
+    expect(testState.logError).toHaveBeenCalledWith(
+      "ads.recommendation_decision.failed",
+      expect.objectContaining({
+        status: 500,
+        error: expect.objectContaining({ message: secret }),
+      }),
+    );
+  });
+
+  it("does not misclassify a downstream schema failure as bad client input", async () => {
+    testState.getLiveWorkbench.mockRejectedValue(
+      new ZodError([
+        {
+          code: "custom",
+          path: ["provider", "recommendations"],
+          message: "PLANTED_LIVE_SCHEMA_SECRET",
+        },
+      ]),
+    );
+
+    const response = await POST(
+      request({
+        accountId: "adacct_client",
+        recommendationId: recommendation.id,
+        action: "restore",
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unable to record the recommendation decision safely.",
+    });
   });
 
   it("does not store a decision when authority changes during snapshot review", async () => {

@@ -71,10 +71,14 @@ export const demoCampaigns: Campaign[] = [
     description: "Conversion campaign for modular storage products.",
     status: "active",
     start_time: 1776038400,
-    end_time: 1788134400,
-    budget: { lifetime_spend_limit_micros: 40_000_000_000 },
+    end_time: null,
+    budget: { daily_spend_limit_micros: 330_000_000 },
     bidding_type: "conversions",
     conversion_event_setting_ids: ["ces_purchase"],
+    landing_page_configuration: {
+      query_string_template:
+        "utm_source=chatgpt&utm_medium=paid&utm_campaign={campaign_id}&utm_content={ad_id}",
+    },
     mode: null,
     product_feed_id: null,
   },
@@ -86,10 +90,14 @@ export const demoCampaigns: Campaign[] = [
     description: "Click campaign for apartment-friendly furniture.",
     status: "active",
     start_time: 1776038400,
-    end_time: 1788134400,
-    budget: { lifetime_spend_limit_micros: 24_000_000_000 },
+    end_time: null,
+    budget: { daily_spend_limit_micros: 350_000_000 },
     bidding_type: "clicks",
     conversion_event_setting_ids: [],
+    landing_page_configuration: {
+      query_string_template:
+        "utm_source=chatgpt&utm_medium=paid&utm_campaign=small_space_living",
+    },
     mode: null,
     product_feed_id: null,
   },
