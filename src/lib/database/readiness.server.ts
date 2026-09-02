@@ -54,6 +54,12 @@ type RuntimeTablePrivilegeRow = {
   can_reference_any_column: boolean;
 };
 
+type RuntimeTransactionIdentityRow = {
+  role_name: string;
+  backend_pid: number;
+  transaction_marker: string;
+};
+
 const runtimeTablePrivileges = new Map<
   string,
   Readonly<{ select: boolean; insert: boolean; update: boolean; delete: boolean }>
@@ -259,6 +265,48 @@ export async function verifyRuntimeDatabaseRole(
         );
       })
     );
+  } catch {
+    return false;
+  }
+}
+
+export async function verifyRuntimeDatabaseTransaction(
+  database?: Sql,
+): Promise<boolean> {
+  const connectionString = process.env.DATABASE_URL;
+  if (!database && !connectionString) return false;
+
+  try {
+    const sql = database ?? getRuntimeDatabase(connectionString!);
+    return await sql.begin(async (transaction) => {
+      const [identity] = await transaction<RuntimeTransactionIdentityRow[]>`
+        select current_user as role_name,
+          pg_backend_pid() as backend_pid,
+          set_config(
+            'maintainflow.readiness_transaction',
+            'active',
+            true
+          ) as transaction_marker
+      `;
+      const [confirmed] = await transaction<
+        Pick<
+          RuntimeTransactionIdentityRow,
+          "backend_pid" | "transaction_marker"
+        >[]
+      >`
+        select pg_backend_pid() as backend_pid,
+          current_setting(
+            'maintainflow.readiness_transaction',
+            true
+          ) as transaction_marker
+      `;
+      return (
+        identity?.role_name === "maintainflow_app" &&
+        identity.transaction_marker === "active" &&
+        confirmed?.backend_pid === identity.backend_pid &&
+        confirmed.transaction_marker === "active"
+      );
+    });
   } catch {
     return false;
   }

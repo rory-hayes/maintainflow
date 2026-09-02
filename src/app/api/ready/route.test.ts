@@ -5,6 +5,7 @@ vi.mock("server-only", () => ({}));
 const state = vi.hoisted(() => ({
   verifyDatabaseMigrationLedger: vi.fn(),
   verifyRuntimeDatabaseRole: vi.fn(),
+  verifyRuntimeDatabaseTransaction: vi.fn(),
   verifyReadinessRateLimitStore: vi.fn(),
   verifyTenancyStore: vi.fn(),
   verifyCredentialStore: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock("@/lib/database/client.server", () => ({
 vi.mock("@/lib/database/readiness.server", () => ({
   verifyDatabaseMigrationLedger: state.verifyDatabaseMigrationLedger,
   verifyRuntimeDatabaseRole: state.verifyRuntimeDatabaseRole,
+  verifyRuntimeDatabaseTransaction: state.verifyRuntimeDatabaseTransaction,
 }));
 vi.mock("@/lib/readiness/rate-limit.server", () => ({
   verifyReadinessRateLimitStore: state.verifyReadinessRateLimitStore,
@@ -75,6 +77,7 @@ beforeEach(() => {
   state.createReadinessDatabase.mockReturnValue({ end: state.probeEnd });
   state.verifyDatabaseMigrationLedger.mockResolvedValue({ ready: true });
   state.verifyRuntimeDatabaseRole.mockResolvedValue(true);
+  state.verifyRuntimeDatabaseTransaction.mockResolvedValue(true);
   for (const check of [
     state.verifyReadinessRateLimitStore,
     state.verifyTenancyStore,
@@ -114,7 +117,7 @@ describe("deployment readiness route", () => {
       scope: "deployment_readiness",
       stage: "demo",
       revision: "a".repeat(40),
-      checks: { passed: 6, total: 6 },
+      checks: { passed: 7, total: 7 },
     });
     expect(state.verifyTenancyStore).not.toHaveBeenCalled();
     expect(state.createReadinessDatabase).toHaveBeenCalledOnce();
@@ -128,7 +131,7 @@ describe("deployment readiness route", () => {
     ).toMatchObject({
       event: "deployment.readiness.completed",
       status: 200,
-      counts: { checksPassed: 6, checksTotal: 6 },
+      counts: { checksPassed: 7, checksTotal: 7 },
     });
   });
 
@@ -140,7 +143,7 @@ describe("deployment readiness route", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
       stage: "demo",
-      checks: { passed: 5, total: 6 },
+      checks: { passed: 6, total: 7 },
     });
     expect(state.verifyLiveSyncStore).toHaveBeenCalledTimes(1);
     expect(lastErrorRecord()).toMatchObject({
@@ -156,11 +159,27 @@ describe("deployment readiness route", () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
-      checks: { passed: 5, total: 6 },
+      checks: { passed: 6, total: 7 },
     });
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
       failedChecks: ["database_runtime_role"],
+    });
+  });
+
+  it("fails when the bundled database driver cannot complete an isolated transaction", async () => {
+    state.verifyRuntimeDatabaseTransaction.mockResolvedValue(false);
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      checks: { passed: 6, total: 7 },
+    });
+    expect(lastErrorRecord()).toMatchObject({
+      event: "deployment.readiness.failed",
+      failedChecks: ["database_transaction"],
     });
   });
 
@@ -176,7 +195,7 @@ describe("deployment readiness route", () => {
       ok: false,
       stage: "demo",
       revision: "unknown",
-      checks: { passed: 4, total: 6 },
+      checks: { passed: 5, total: 7 },
     });
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
@@ -194,13 +213,14 @@ describe("deployment readiness route", () => {
     expect(payload).toMatchObject({
       ok: false,
       stage: "private_read",
-      checks: { passed: 12, total: 13 },
+      checks: { passed: 13, total: 14 },
     });
     expect(state.verifyTenancyStore).toHaveBeenCalledTimes(1);
     expect(state.verifyApprovalStore).toHaveBeenCalledTimes(1);
     const dedicatedDatabase = state.createReadinessDatabase.mock.results[0].value;
     for (const check of [
       state.verifyRuntimeDatabaseRole,
+      state.verifyRuntimeDatabaseTransaction,
       state.verifyDatabaseMigrationLedger,
       state.verifyReadinessRateLimitStore,
       state.verifyLiveSyncStore,
@@ -226,6 +246,7 @@ describe("deployment readiness route", () => {
     expect(response.status).toBe(401);
     expect(state.verifyDatabaseMigrationLedger).not.toHaveBeenCalled();
     expect(state.verifyRuntimeDatabaseRole).not.toHaveBeenCalled();
+    expect(state.verifyRuntimeDatabaseTransaction).not.toHaveBeenCalled();
     expect(state.verifyReadinessRateLimitStore).not.toHaveBeenCalled();
     expect(state.createReadinessDatabase).not.toHaveBeenCalled();
     expect(state.probeEnd).not.toHaveBeenCalled();
@@ -252,9 +273,10 @@ describe("deployment readiness route", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
       stage: "demo",
-      checks: { passed: 2, total: 6 },
+      checks: { passed: 2, total: 7 },
     });
     expect(state.verifyRuntimeDatabaseRole).not.toHaveBeenCalled();
+    expect(state.verifyRuntimeDatabaseTransaction).not.toHaveBeenCalled();
     expect(state.verifyDatabaseMigrationLedger).not.toHaveBeenCalled();
     expect(state.verifyReadinessRateLimitStore).not.toHaveBeenCalled();
     expect(state.verifyLiveSyncStore).not.toHaveBeenCalled();
@@ -284,7 +306,7 @@ describe("deployment readiness route", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
       stage: "demo",
-      checks: { passed: 4, total: 6 },
+      checks: { passed: 5, total: 7 },
     });
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",

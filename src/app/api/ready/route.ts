@@ -7,6 +7,7 @@ import { verifyRecommendationDecisionStore } from "@/lib/audit/recommendation-de
 import {
   verifyDatabaseMigrationLedger,
   verifyRuntimeDatabaseRole,
+  verifyRuntimeDatabaseTransaction,
 } from "@/lib/database/readiness.server";
 import { createReadinessDatabase } from "@/lib/database/client.server";
 import { createServerLogger } from "@/lib/observability/logger.server";
@@ -46,6 +47,12 @@ function dependencyChecks(stage: string, database?: Sql): ReadinessCheck[] {
     [
       "database_runtime_role",
       database ? () => verifyRuntimeDatabaseRole(database) : unavailable,
+    ],
+    [
+      "database_transaction",
+      database
+        ? () => verifyRuntimeDatabaseTransaction(database)
+        : unavailable,
     ],
     [
       "database_migrations",

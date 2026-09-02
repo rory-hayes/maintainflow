@@ -181,57 +181,6 @@ jobs:
           test "$app_ready" = "true"
           node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('health.json','utf8')); if (!value.ok || value.scope !== 'process_liveness' || value.revision !== process.env.GITHUB_SHA) process.exit(1);"
 
-          timeout 20s docker exec maintainflow-ads-ci node -e '
-            const postgres = require("postgres");
-            const sql = postgres(process.env.DATABASE_URL, {
-              connect_timeout: 5,
-              max: 1,
-              max_pipeline: 0,
-              prepare: false,
-              ssl: {
-                ca: process.env.MAINTAINFLOW_DATABASE_CA_CERT,
-                rejectUnauthorized: true,
-              },
-            });
-            (async () => {
-              let deadline;
-              try {
-                await Promise.race([
-                  sql.begin(async (transaction) => {
-                    const rows = await transaction.unsafe(
-                      "select true as ready",
-                    );
-                    if (rows[0]?.ready !== true) {
-                      throw new Error("Patched postgres transaction probe failed.");
-                    }
-                  }),
-                  new Promise((_, reject) => {
-                    deadline = setTimeout(
-                      () =>
-                        reject(
-                          new Error(
-                            "Patched postgres transaction probe timed out.",
-                          ),
-                        ),
-                      10_000,
-                    );
-                  }),
-                ]);
-              } finally {
-                clearTimeout(deadline);
-              }
-              await sql.end({ timeout: 1 });
-            })().catch(async (error) => {
-              await sql.end({ timeout: 0 }).catch(() => undefined);
-              console.error(
-                error instanceof Error
-                  ? error.message
-                  : "Patched postgres transaction probe failed.",
-              );
-              process.exit(1);
-            });
-          '
-
           unauthorized_status="$(curl --silent --output unauthorized-ready.json \
             --write-out '%{http_code}' http://127.0.0.1:3000/api/ready)"
           test "$unauthorized_status" = "401"
@@ -246,7 +195,7 @@ jobs:
             sleep 1
           done
           test "$dependencies_ready" = "true"
-          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('ready.json','utf8')); if (!value.ok || value.scope !== 'deployment_readiness' || value.stage !== 'demo' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 6) process.exit(1);"
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('ready.json','utf8')); if (!value.ok || value.scope !== 'deployment_readiness' || value.stage !== 'demo' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 7) process.exit(1);"
 
           CI=true \
             MAINTAINFLOW_PROBE_ALLOW_INSECURE_LOOPBACK=true \
@@ -301,7 +250,7 @@ jobs:
             sleep 1
           done
           test "$private_read_ready" = "true"
-          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('private-read-ready.json','utf8')); if (!value.ok || value.stage !== 'private_read' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 13) process.exit(1);"
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('private-read-ready.json','utf8')); if (!value.ok || value.stage !== 'private_read' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 14) process.exit(1);"
 
           docker rm --force maintainflow-ads-private-read-ci
           docker run --detach --name maintainflow-ads-config-mismatch-ci \

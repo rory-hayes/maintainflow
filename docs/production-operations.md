@@ -106,7 +106,9 @@ Clerk or OpenAI and is not evidence of either hosted service working.
   query therefore returns a logged `503` instead of reaching the platform's
   function timeout; a timed-out probe destroys only its dedicated readiness
   pool so its losing work cannot retain connection slots or interrupt customer
-  traffic.
+  traffic. The authenticated probe must also open, use, and commit an isolated
+  database transaction, proving the patched driver inside the actual deployed
+  server bundle rather than only the source installation.
 - Alert after two consecutive liveness/readiness failures; page immediately on
   revision mismatch or an invalid release stage.
 - Require one successful monitoring completion after every deployment and one

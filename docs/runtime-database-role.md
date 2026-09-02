@@ -120,8 +120,8 @@ Before promotion, record non-secret evidence that:
 5. strict TLS succeeds through the transaction pooler using the configured CA;
 6. the role's `rolconfig` and effective settings expose all three timeout
    bounds through a fresh pooler connection;
-7. unauthenticated readiness is rejected and the authenticated readiness check
-   passes for the exact deployed SHA; and
+7. unauthenticated readiness is rejected and authenticated readiness commits
+   its isolated driver transaction and passes for the exact deployed SHA; and
 8. the Supabase project Data API schema list is empty.
 
 Counts or a successful local test are not substitutes for the hosted role,
