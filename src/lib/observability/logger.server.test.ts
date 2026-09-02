@@ -51,6 +51,8 @@ describe("privacy-safe server logging", () => {
         failedChecks: ["live_sync", secret],
         timedOutChecks: ["database_runtime_role", secret],
         counts: { checksPassed: 3, checksTotal: 5, [secret]: 99 },
+        diagnosticCode: secret,
+        databaseErrorCode: secret,
       },
     );
 
@@ -77,6 +79,37 @@ describe("privacy-safe server logging", () => {
       timedOutChecks: ["database_runtime_role", "unknown_check"],
       counts: { checksPassed: 3, checksTotal: 5 },
     });
+    expect(JSON.parse(line)).not.toHaveProperty("diagnosticCode");
+    expect(JSON.parse(line)).not.toHaveProperty("databaseErrorCode");
+  });
+
+  it("emits only allowlisted transaction diagnostics and PostgreSQL error codes", () => {
+    createServerLogger("api.deployment.ready").error(
+      "deployment.readiness.failed",
+      {
+        status: 503,
+        failedChecks: ["database_transaction"],
+        diagnosticCode: "transaction_begin_failed",
+        databaseErrorCode: "XX000",
+      },
+    );
+
+    const line = String(vi.mocked(console.error).mock.calls[0][0]);
+    expect(JSON.parse(line)).toMatchObject({
+      diagnosticCode: "transaction_begin_failed",
+      databaseErrorCode: "XX000",
+    });
+
+    createServerLogger("api.deployment.ready").error(
+      "deployment.readiness.failed",
+      {
+        diagnosticCode: "transaction_begin_failed",
+        databaseErrorCode: "CONNECTION_CLOSED",
+      },
+    );
+    expect(
+      JSON.parse(String(vi.mocked(console.error).mock.calls[1][0])),
+    ).toMatchObject({ databaseErrorCode: "CONNECTION_CLOSED" });
   });
 
   it("replaces an injectable event name and never emits a second line", () => {

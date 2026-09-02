@@ -6,6 +6,12 @@ import { describe, expect, it } from "vitest";
 
 import nextConfig from "./next.config";
 
+describe("server dependency boundaries", () => {
+  it("loads the install-time patched postgres driver outside the Next server bundle", () => {
+    expect(nextConfig.serverExternalPackages).toContain("postgres");
+  });
+});
+
 async function configuredResponse(url: string) {
   return unstable_getResponseFromNextConfig({ url, nextConfig });
 }
