@@ -7,6 +7,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import {
+  canReconcileApprovalHistory,
   CampaignsView,
   isConfirmedLiveApplyResponse,
   MaintainFlowWorkbench,
@@ -19,6 +20,37 @@ import {
 import { unavailableConversionMeasurement } from "@/lib/openai-ads/measurement-readiness";
 
 describe("CampaignsView", () => {
+  it("requires a write-capable account role before reconciliation is enabled", () => {
+    const baseAccess = {
+      organizationId: "00000000-0000-4000-8000-000000000001",
+      organizationName: "Northstar Agency",
+      organizationType: "agency" as const,
+      accountId: "adacct_client",
+      accountName: "Client",
+      connectionMode: "vault" as const,
+      membershipRole: "admin" as const,
+    };
+
+    expect(
+      canReconcileApprovalHistory(true, {
+        ...baseAccess,
+        accountRole: "manager",
+      }),
+    ).toBe(true);
+    expect(
+      canReconcileApprovalHistory(true, {
+        ...baseAccess,
+        accountRole: "viewer",
+      }),
+    ).toBe(false);
+    expect(
+      canReconcileApprovalHistory(false, {
+        ...baseAccess,
+        accountRole: "owner",
+      }),
+    ).toBe(false);
+  });
+
   it("never treats a downgraded 2xx no-write response as a live change", () => {
     expect(
       isConfirmedLiveApplyResponse({ mode: "demo", applied: false }),
@@ -122,6 +154,15 @@ describe("CampaignsView", () => {
             detectedSignalCount: 4,
             evidenceState: "confirmed_fresh",
             evidenceAt: "2026-09-02T11:55:00.000Z",
+            operationalExceptions: {
+              safeguardTriggered: {
+                count: 2,
+                oldestAt: "2026-09-01T10:00:00.000Z",
+              },
+              insufficientEvidence: { count: 0, oldestAt: null },
+              monitoringFailures: { count: 0, oldestAt: null },
+              reconciliationRequired: { count: 0, oldestAt: null },
+            },
           },
           {
             accountId: "adacct_missing",
@@ -130,6 +171,15 @@ describe("CampaignsView", () => {
             detectedSignalCount: null,
             evidenceState: "not_confirmed",
             evidenceAt: null,
+            operationalExceptions: {
+              safeguardTriggered: { count: 0, oldestAt: null },
+              insufficientEvidence: { count: 0, oldestAt: null },
+              monitoringFailures: { count: 0, oldestAt: null },
+              reconciliationRequired: {
+                count: 1,
+                oldestAt: "2026-08-31T09:00:00.000Z",
+              },
+            },
           },
           {
             accountId: "adacct_legacy",
@@ -138,6 +188,12 @@ describe("CampaignsView", () => {
             detectedSignalCount: null,
             evidenceState: "refresh_required",
             evidenceAt: "2026-09-01T09:00:00.000Z",
+            operationalExceptions: {
+              safeguardTriggered: { count: 0, oldestAt: null },
+              insufficientEvidence: { count: 0, oldestAt: null },
+              monitoringFailures: { count: 0, oldestAt: null },
+              reconciliationRequired: { count: 0, oldestAt: null },
+            },
           },
         ]}
         currentAccountId="adacct_current"
@@ -145,17 +201,22 @@ describe("CampaignsView", () => {
       />,
     );
 
-    expect(markup).toContain("Live client evidence");
+    expect(markup).toContain("Live agency exception queue");
     expect(markup).toContain("3 active clients");
-    expect(markup).toContain("Usable snapshots");
-    expect(markup).toContain(
-      "2 expired, missing, rejected, or requiring refresh",
-    );
-    expect(markup).toContain("Detected signals");
-    expect(markup).toContain("unknown accounts excluded");
-    expect(markup).toContain("Unknown");
+    expect(markup).toContain("Accounts requiring action");
+    expect(markup).toContain("Unresolved reconciliation");
+    expect(markup).toContain("Monitoring exceptions");
+    expect(markup).toContain("1 reconciliation");
+    expect(markup).toContain("2 safeguard breaches");
+    expect(markup).toContain("Detected signals unknown");
     expect(markup).toContain("Refresh required");
-    expect(markup).toContain("Open account");
+    expect(markup).toContain("Review exceptions");
+    expect(markup).toContain(
+      "/app?tab=experiments&amp;account=adacct_missing",
+    );
+    expect(markup.indexOf("Oak &amp; Thread")).toBeLessThan(
+      markup.indexOf("Harbour Home"),
+    );
     expect(markup).not.toContain("Projected weekly exposure");
     expect(markup).not.toContain("$0");
   });

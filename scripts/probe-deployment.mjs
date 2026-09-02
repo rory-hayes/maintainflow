@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 
 const MAX_JSON_RESPONSE_BYTES = 64 * 1024;
 const MAX_HTML_RESPONSE_BYTES = 512 * 1024;
-const REVISION_PATTERN = /^[a-f0-9]{7,64}$/i;
+const REVISION_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i;
 const RELEASE_STAGES = new Set(["demo", "private_read", "live_write"]);
 
 export class DeploymentProbeError extends Error {
@@ -19,7 +19,7 @@ function requiredString(value, label, minimumLength = 1) {
   return value.trim();
 }
 
-function deploymentOrigin(value) {
+function deploymentOrigin(value, { allowInsecureLoopback = false } = {}) {
   const configured = requiredString(value, "Deployment origin");
   let url;
   try {
@@ -27,8 +27,12 @@ function deploymentOrigin(value) {
   } catch {
     throw new DeploymentProbeError("Deployment origin is invalid.");
   }
+  const insecureLoopback =
+    allowInsecureLoopback &&
+    url.protocol === "http:" &&
+    new Set(["127.0.0.1", "[::1]"]).has(url.hostname);
   if (
-    url.protocol !== "https:" ||
+    (url.protocol !== "https:" && !insecureLoopback) ||
     url.username ||
     url.password ||
     url.pathname !== "/" ||
@@ -118,13 +122,13 @@ async function assertHtmlSurface(
   }
 }
 
-async function request(fetchImpl, url, label, init = {}) {
+async function request(fetchImpl, url, label, init = {}, timeoutMs = 10_000) {
   try {
     return await fetchImpl(url, {
       ...init,
       cache: "no-store",
       redirect: "error",
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     throw new DeploymentProbeError(`${label} request did not complete.`);
@@ -140,7 +144,9 @@ function assertStatus(response, expected, label) {
 }
 
 export async function probeDeployment(options) {
-  const origin = deploymentOrigin(options.origin);
+  const origin = deploymentOrigin(options.origin, {
+    allowInsecureLoopback: options.allowInsecureLoopback === true,
+  });
   const readinessSecret = requiredString(
     options.readinessSecret,
     "Readiness probe secret",
@@ -221,11 +227,20 @@ export async function probeDeployment(options) {
     `${origin}/api/jobs/monitoring/evaluate`,
     "Monitoring probe",
     { headers: { Authorization: `Bearer ${cronSecret}` } },
+    65_000,
   );
   assertStatus(cronResponse, 200, "Monitoring probe");
   const monitoring = await responseJson(cronResponse, "Monitoring probe");
   if (
     monitoring?.ok !== true ||
+    monitoring?.releaseStage !== expectedStage ||
+    monitoring?.providerMonitoringPaused !== (expectedStage === "demo") ||
+    !Number.isInteger(monitoring?.pausedBacklog?.dueAccounts) ||
+    monitoring.pausedBacklog.dueAccounts < 0 ||
+    !Number.isInteger(monitoring?.pausedBacklog?.dueWindows) ||
+    monitoring.pausedBacklog.dueWindows < 0 ||
+    typeof monitoring?.pausedBacklog?.dueAccountsCapped !== "boolean" ||
+    typeof monitoring?.pausedBacklog?.dueWindowsCapped !== "boolean" ||
     monitoring?.monitoringUnavailable !== false ||
     monitoring?.maintenanceFailed !== false ||
     monitoring?.maintenanceBacklog !== false ||
@@ -236,7 +251,8 @@ export async function probeDeployment(options) {
     !Number.isInteger(monitoring?.accountsFailed) ||
     monitoring.accountsFailed !== 0 ||
     !Number.isInteger(monitoring?.failed) ||
-    monitoring.failed !== 0
+    monitoring.failed !== 0 ||
+    monitoring?.deadlineExhausted !== false
   ) {
     throw new DeploymentProbeError(
       "Monitoring probe did not confirm a complete maintenance run.",
@@ -247,7 +263,10 @@ export async function probeDeployment(options) {
     {
       path: "/",
       label: "Public landing page",
-      requiredText: ["Make every ad change", "Audit your store"],
+      requiredText: [
+        "Deploy every ChatGPT Ads change",
+        "Audit your store",
+      ],
     },
     {
       path: "/privacy",
@@ -298,6 +317,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     cronSecret: process.env.CRON_SECRET,
     expectedRevision: process.env.MAINTAINFLOW_EXPECTED_BUILD_SHA,
     expectedStage: process.env.MAINTAINFLOW_EXPECTED_RELEASE_STAGE,
+    allowInsecureLoopback:
+      process.env.CI === "true" &&
+      process.env.MAINTAINFLOW_PROBE_ALLOW_INSECURE_LOOPBACK === "true",
   })
     .then((result) => {
       console.log(

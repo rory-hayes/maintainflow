@@ -101,11 +101,87 @@ decision, readiness, and live-snapshot evidence is retained until its signed
 schedule authorizes a separate deletion; disconnected accounts are excluded from
 scheduled monitoring claims.
 
-The command cannot revoke the source credentials held by OpenAI. Immediately
-instruct the customer to revoke Ads and Conversions keys in Ads Manager, record
-that external confirmation with the pilot evidence, remove Clerk access where
-the organization itself is ending, and record backup-expiry implications. Test
-the full procedure on a disposable hosted customer fixture and independently
-verify the export hash, authorization denial, credential-row deletion, retained
-history, source-key revocation, and recovery evidence before treating hosted
-offboarding as production-proven.
+The command cannot revoke source credentials held by OpenAI. Immediately
+instruct the customer to revoke Ads and Conversions keys in Ads Manager. Actual
+provider revocation is always an external, manual action: MaintainFlow never
+simulates it and the lifecycle command below never calls a provider API.
+
+## Record external provider revocation
+
+After independently verifying the externally completed revocation, use the
+offboarding lifecycle UUID and an opaque support-case or evidence reference.
+The reference must not itself be a customer identifier, provider credential, or
+secret. Record the agreement-specific retention deadline with a dry run first:
+
+```bash
+npm run customer:confirm-revocation -- \
+  --lifecycle-id '00000000-0000-4000-8000-000000000000' \
+  --provider-revoked-at '2026-09-02T10:00:00.000Z' \
+  --evidence-ref 'case_external_revocation_20260902' \
+  --retain-until '2026-10-02T10:00:00.000Z' \
+  --evidence-file '/absolute/new/path/provider-revocation-dry-run.json'
+```
+
+The command accepts one lifecycle UUID only, checks that its advertiser account
+is already disconnected, and writes a new mode-`0600` evidence file containing
+only hashes, timestamps, state, and blockers. It excludes the lifecycle,
+advertiser, provider-account, organization, and operator identifiers. Review
+the evidence and externally held source proof, then apply with the current
+token and a second new evidence path:
+
+```bash
+npm run customer:confirm-revocation -- \
+  --lifecycle-id '00000000-0000-4000-8000-000000000000' \
+  --provider-revoked-at '2026-09-02T10:00:00.000Z' \
+  --evidence-ref 'case_external_revocation_20260902' \
+  --retain-until '2026-10-02T10:00:00.000Z' \
+  --evidence-file '/absolute/new/path/provider-revocation-final.json' \
+  --apply \
+  --confirm 'RECORD-EXTERNAL-REVOCATION:<dry-run-state-hash>'
+```
+
+Apply locks the exact advertiser account before its lifecycle row and records
+the external revocation time, confirmation time, opaque evidence reference,
+evidence SHA-256, and finite retention deadline. The durable database row and
+its matching evidence hash are the completion receipt; an evidence file alone
+does not prove that the transaction committed.
+
+## Purge retained account data
+
+Once the recorded retention deadline has elapsed, generate a current bounded
+inventory without changing the database:
+
+```bash
+npm run customer:purge-retention -- \
+  --lifecycle-id '00000000-0000-4000-8000-000000000000' \
+  --evidence-file '/absolute/new/path/retention-purge-dry-run.json'
+```
+
+No apply token is issued if provider revocation is unconfirmed, the deadline
+has not elapsed, an unresolved provider mutation remains, access or credential
+rows have reappeared, or any table exceeds its reviewed deletion bound. Apply
+re-locks the account, re-counts every covered table, and rejects a stale token:
+
+```bash
+npm run customer:purge-retention -- \
+  --lifecycle-id '00000000-0000-4000-8000-000000000000' \
+  --evidence-file '/absolute/new/path/retention-purge-final.json' \
+  --apply \
+  --confirm 'PURGE-RETAINED-DATA:<dry-run-state-hash>'
+```
+
+The bounded transaction deletes the disconnected account and its retained
+approval, monitoring, creative-review, recommendation-decision, readiness, and
+live-snapshot rows in foreign-key-safe order. It preserves shared organizations
+and memberships, then removes customer and operator identifiers from the
+lifecycle row while retaining the non-secret revocation and purge receipt
+hashes and completion times. Mode-`0600` purge evidence contains counts and
+hashes, not customer identifiers or secrets.
+
+Removing Clerk access for an ending organization, expiring provider backups,
+and deleting any separately retained exports remain external operational steps;
+record and independently verify them under the customer agreement. Test the
+full workflow on a disposable hosted customer fixture and verify the database
+receipt, evidence hashes, authorization denial, credential removal, source-key
+revocation, bounded purge counts, shared-tenant preservation, and recovery
+evidence before treating hosted offboarding as production-proven.

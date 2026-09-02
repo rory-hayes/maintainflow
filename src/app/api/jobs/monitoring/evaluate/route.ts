@@ -3,10 +3,12 @@ import { timingSafeEqual } from "node:crypto";
 import {
   countUnresolvedApprovalOperations,
   recoverStaleApprovalOperations,
+  summarizeDueMonitoringBacklog,
   verifyApprovalStore,
 } from "@/lib/audit/approval-store.server";
 import { createServerLogger } from "@/lib/observability/logger.server";
 import { evaluateScheduledMonitoringWindows } from "@/lib/openai-ads/monitoring-runner.server";
+import { resolveReleaseStage } from "@/lib/release/stage";
 import {
   pruneExpiredLiveSyncSnapshots,
   verifyLiveSyncStore,
@@ -26,6 +28,9 @@ export const maxDuration = 60;
 const LIVE_SNAPSHOT_CLEANUP_LIMIT = 5_000;
 const RATE_LIMIT_CLEANUP_LIMIT = 5_000;
 const APPROVAL_RECOVERY_LIMIT = 500;
+const MONITORING_PROVIDER_DEADLINE_MS = 45_000;
+const MONITORING_MAX_ACCOUNTS_PER_RUN = 2;
+const MONITORING_WINDOWS_PER_ACCOUNT = 1;
 
 const emptyMonitoringSummary = {
   accountsSelected: 0,
@@ -34,6 +39,18 @@ const emptyMonitoringSummary = {
   due: 0,
   evaluated: 0,
   failed: 0,
+  selectedBacklogDueCount: 0,
+  selectedBacklogDueCountCapped: false,
+  oldestSelectedBacklogAgeSeconds: 0,
+  oldestSelectedBacklogAgeCapped: false,
+  deadlineExhausted: false,
+};
+
+const emptyPausedBacklog = {
+  dueAccounts: 0,
+  dueWindows: 0,
+  dueAccountsCapped: false,
+  dueWindowsCapped: false,
 };
 
 function hasAuthorizedCronHeader(request: Request, secret: string) {
@@ -63,28 +80,28 @@ export async function GET(request: Request) {
   }
 
   try {
+    const releaseStage = resolveReleaseStage();
+    const providerMonitoringPaused = releaseStage === "demo";
     let monitoringUnavailable = false;
     let approvalStoreReady = false;
+    let tenancyStoreReady = false;
+    let credentialStoreReady = false;
     let summary = emptyMonitoringSummary;
+    let pausedBacklog = emptyPausedBacklog;
     try {
-      const [approvalReady, tenancyStoreReady, credentialStoreReady] =
+      const [approvalReady, tenancyReady, credentialReady] =
         await Promise.all([
           verifyApprovalStore(),
           verifyTenancyStore(),
-          verifyCredentialStore(),
+          providerMonitoringPaused
+            ? Promise.resolve(true)
+            : verifyCredentialStore(),
         ]);
       approvalStoreReady = approvalReady;
-      if (
-        !approvalStoreReady ||
-        !tenancyStoreReady ||
-        !credentialStoreReady
-      ) {
-        monitoringUnavailable = true;
-      } else {
-        summary = await evaluateScheduledMonitoringWindows();
-      }
+      tenancyStoreReady = tenancyReady;
+      credentialStoreReady = credentialReady;
     } catch (error) {
-      log.error("monitoring.evaluation.unavailable", { error });
+      log.error("monitoring.store_verification.unavailable", { error });
       monitoringUnavailable = true;
     }
 
@@ -144,10 +161,44 @@ export async function GET(request: Request) {
         maintenanceFailed = true;
       }
     }
+
+    if (!monitoringUnavailable) {
+      if (!approvalStoreReady || !tenancyStoreReady) {
+        monitoringUnavailable = true;
+      } else if (providerMonitoringPaused) {
+        try {
+          pausedBacklog = await summarizeDueMonitoringBacklog(new Date());
+        } catch (error) {
+          log.error("monitoring.paused_backlog.unavailable", { error });
+          monitoringUnavailable = true;
+        }
+      } else if (
+        releaseStage === "private_read" ||
+        releaseStage === "live_write"
+      ) {
+        if (!credentialStoreReady) {
+          monitoringUnavailable = true;
+        } else {
+          try {
+            summary = await evaluateScheduledMonitoringWindows({
+              maxAccounts: MONITORING_MAX_ACCOUNTS_PER_RUN,
+              windowsPerAccount: MONITORING_WINDOWS_PER_ACCOUNT,
+              deadlineAt: startedAt + MONITORING_PROVIDER_DEADLINE_MS,
+            });
+          } catch (error) {
+            log.error("monitoring.evaluation.unavailable", { error });
+            monitoringUnavailable = true;
+          }
+        }
+      } else {
+        monitoringUnavailable = true;
+      }
+    }
     const hasFailures =
       monitoringUnavailable ||
       summary.accountsFailed > 0 ||
       summary.failed > 0 ||
+      summary.deadlineExhausted ||
       approvalOperationsRecovered > 0 ||
       unresolvedApprovalOperations > 0 ||
       maintenanceFailed ||
@@ -162,6 +213,8 @@ export async function GET(request: Request) {
         due: summary.due,
         evaluated: summary.evaluated,
         failed: summary.failed,
+        pausedDueAccounts: pausedBacklog.dueAccounts,
+        pausedDueWindows: pausedBacklog.dueWindows,
         approvalOperationsRecovered,
         unresolvedApprovalOperations,
       },
@@ -171,6 +224,9 @@ export async function GET(request: Request) {
     return Response.json(
       {
         ok: !hasFailures,
+        releaseStage,
+        providerMonitoringPaused,
+        pausedBacklog,
         monitoringUnavailable,
         maintenanceFailed,
         maintenanceBacklog,

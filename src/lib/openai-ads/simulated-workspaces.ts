@@ -9,11 +9,13 @@ import {
   type Recommendation,
 } from "./demo-data";
 import type { CreativeReviewEvent } from "./creative-history";
+import type { ApprovalRecordDto } from "../audit/approval-schema";
 import {
   OPENAI_BUDGET_POLICY_VERSION,
   type BudgetGuardEvidence,
 } from "./budget-guard";
 import type { AdAccount, Campaign, ScopedAd } from "./schema";
+import { evaluateMonitoringObservation } from "./monitoring";
 import { agencySimulatorEntryAccountId } from "./simulator-links";
 
 export { agencySimulatorEntryAccountId } from "./simulator-links";
@@ -37,6 +39,7 @@ export type SimulatedWorkspace = {
   budgetGuardEvidence: BudgetGuardEvidence[];
   recommendations: Recommendation[];
   creativeReviewHistory: CreativeReviewEvent[];
+  approvalHistory: ApprovalRecordDto[];
   accountOptions: SimulatedAccountOption[];
   portfolioKind: "direct" | "agency";
   simulatorLabel: string;
@@ -302,6 +305,113 @@ function createAgencyWorkspace(
       adName: rewriteText(event.adName, config),
     }),
   );
+  const workspaceOrdinal =
+    agencyAccountConfigs.findIndex((item) => item.slug === config.slug) + 1;
+  const approvalId = (offset: number) =>
+    `00000000-0000-4000-8000-${String(1_000 + workspaceOrdinal * 10 + offset).padStart(12, "0")}`;
+  const monitoredSource = rewriteValue(
+    demoRecommendations.find((recommendation) => recommendation.monitoringPlan)!,
+    config,
+  ) as Recommendation;
+  const uncertainSource = rewriteValue(
+    demoRecommendations.find(
+      (recommendation) => recommendation.id === "rec_creative_test",
+    )!,
+    config,
+  ) as Recommendation;
+  const sourceMonitoringPlan = monitoredSource.monitoringPlan!;
+  const monitoringPlan = {
+    ...sourceMonitoringPlan,
+    baseline: {
+      ...sourceMonitoringPlan.baseline,
+      spend: scaled(
+        sourceMonitoringPlan.baseline.spend,
+        config.spendMultiplier,
+      ),
+      clickAttributedConversions: Math.max(
+        1,
+        Math.round(
+          sourceMonitoringPlan.baseline.clickAttributedConversions *
+            config.spendMultiplier,
+        ),
+      ),
+      currencyCode: "EUR",
+    },
+  };
+  const observedConversions = Math.max(
+    1,
+    Math.round(monitoringPlan.baseline.clickAttributedConversions * 0.93),
+  );
+  const observed = evaluateMonitoringObservation({
+    plan: monitoringPlan,
+    rangeStart: monitoringPlan.baseline.rangeEnd + 3_600,
+    rangeEnd:
+      monitoringPlan.baseline.rangeEnd +
+      monitoringPlan.windowDays * 24 * 60 * 60,
+    spend: scaled(monitoringPlan.baseline.spend, 0.96),
+    clickAttributedConversions: observedConversions,
+  });
+  const approvalHistory: ApprovalRecordDto[] = [
+    {
+      id: approvalId(1),
+      accountId: config.accountId,
+      organizationName: "Harbour Growth demo",
+      membershipRole: "admin",
+      accountRole: "manager",
+      recommendationId: `${monitoredSource.id}_historical_demo`,
+      recommendationTitle: monitoredSource.title,
+      entityId: monitoredSource.entityId,
+      mutation: monitoredSource.mutation,
+      rollbackMethod: monitoredSource.rollback.method,
+      rollbackPath: monitoredSource.rollback.path,
+      rollbackBody: monitoredSource.rollback.body,
+      evidence: monitoredSource.evidence,
+      safeguard: monitoredSource.safeguard,
+      status: "applied",
+      errorMessage: null,
+      reconciliationNote: null,
+      monitoringPlan,
+      monitoringStartedAt: "2026-08-20T00:00:00.000Z",
+      monitoringEndsAt: "2026-08-27T00:00:00.000Z",
+      monitoringOutcome: observed.outcome,
+      monitoringObservation: observed.observation,
+      monitoringEvaluatedAt: "2026-08-29T01:00:00.000Z",
+      createdAt: "2026-08-19T16:30:00.000Z",
+      updatedAt: "2026-08-29T01:00:00.000Z",
+      appliedAt: "2026-08-19T16:35:00.000Z",
+      rolledBackAt: null,
+    },
+    {
+      id: approvalId(2),
+      accountId: config.accountId,
+      organizationName: "Harbour Growth demo",
+      membershipRole: "admin",
+      accountRole: "manager",
+      recommendationId: `${uncertainSource.id}_historical_demo`,
+      recommendationTitle: uncertainSource.title,
+      entityId: uncertainSource.entityId,
+      mutation: uncertainSource.mutation,
+      rollbackMethod: uncertainSource.rollback.method,
+      rollbackPath: uncertainSource.rollback.path,
+      rollbackBody: uncertainSource.rollback.body,
+      evidence: uncertainSource.evidence,
+      safeguard: uncertainSource.safeguard,
+      status: "reconciliation_required",
+      errorMessage:
+        "The simulator models a transport ending before the provider outcome was confirmed.",
+      reconciliationNote: null,
+      monitoringPlan: null,
+      monitoringStartedAt: null,
+      monitoringEndsAt: null,
+      monitoringOutcome: null,
+      monitoringObservation: null,
+      monitoringEvaluatedAt: null,
+      createdAt: "2026-08-31T09:00:00.000Z",
+      updatedAt: "2026-08-31T09:01:00.000Z",
+      appliedAt: null,
+      rolledBackAt: null,
+    },
+  ];
 
   return {
     account,
@@ -311,6 +421,7 @@ function createAgencyWorkspace(
     budgetGuardEvidence,
     recommendations,
     creativeReviewHistory,
+    approvalHistory,
     accountOptions,
     portfolioKind: "agency",
     simulatorLabel: "Agency portfolio simulator",
@@ -389,6 +500,12 @@ const directWorkspaceBase = createAgencyWorkspace(
 
 const directWorkspace: SimulatedWorkspace = {
   ...directWorkspaceBase,
+  approvalHistory: directWorkspaceBase.approvalHistory.map((record) => ({
+    ...record,
+    organizationName: "Harbour Home demo",
+    membershipRole: "owner",
+    accountRole: "owner",
+  })),
   portfolioKind: "direct",
   simulatorLabel: "Direct merchant simulator",
   operator: {

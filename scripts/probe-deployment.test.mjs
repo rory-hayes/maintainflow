@@ -48,6 +48,14 @@ function successfulFetch({ landingHtml, monitoringOverrides } = {}) {
     .mockResolvedValueOnce(
       jsonResponse({
         ok: true,
+        releaseStage: "demo",
+        providerMonitoringPaused: true,
+        pausedBacklog: {
+          dueAccounts: 0,
+          dueWindows: 0,
+          dueAccountsCapped: false,
+          dueWindowsCapped: false,
+        },
         monitoringUnavailable: false,
         maintenanceFailed: false,
         maintenanceBacklog: false,
@@ -55,6 +63,7 @@ function successfulFetch({ landingHtml, monitoringOverrides } = {}) {
         unresolvedApprovalOperations: 0,
         accountsFailed: 0,
         failed: 0,
+        deadlineExhausted: false,
         evaluated: 0,
         ...monitoringOverrides,
       }),
@@ -62,7 +71,7 @@ function successfulFetch({ landingHtml, monitoringOverrides } = {}) {
     .mockResolvedValueOnce(
       htmlResponse(
         landingHtml ??
-          "<main><h1>Make every ad change</h1><p>Audit your store</p></main>",
+          "<main><h1>Deploy every ChatGPT Ads change</h1><p>Audit your store</p></main>",
       ),
     )
     .mockResolvedValueOnce(
@@ -206,6 +215,7 @@ describe("hosted deployment probe", () => {
   it("rejects insecure or credential-bearing deployment origins", async () => {
     for (const origin of [
       "http://staging.maintainflow.io",
+      "http://127.0.0.1:3000",
       "https://user:password@staging.maintainflow.io",
       "https://staging.maintainflow.io/not-the-deployment-root",
       "https://staging.maintainflow.io?token=unsafe",
@@ -221,6 +231,51 @@ describe("hosted deployment probe", () => {
         }),
       ).rejects.toThrow("credential-free HTTPS origin");
     }
+  });
+
+  it("requires a full immutable Git object id for the expected revision", async () => {
+    for (const expectedRevision of ["a".repeat(7), "b".repeat(41)]) {
+      await expect(
+        probeDeployment({
+          origin: "https://staging.maintainflow.io",
+          readinessSecret,
+          cronSecret,
+          expectedRevision,
+          expectedStage: "demo",
+          fetchImpl: successfulFetch(),
+        }),
+      ).rejects.toThrow("Expected build revision is invalid");
+    }
+  });
+
+  it("allows an explicit loopback-only HTTP probe for container CI", async () => {
+    await expect(
+      probeDeployment({
+        origin: "http://127.0.0.1:3000",
+        readinessSecret,
+        cronSecret,
+        expectedRevision: revision,
+        expectedStage: "demo",
+        allowInsecureLoopback: true,
+        fetchImpl: successfulFetch(),
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      revision,
+      surfaceChecks: 5,
+    });
+
+    await expect(
+      probeDeployment({
+        origin: "http://staging.maintainflow.io",
+        readinessSecret,
+        cronSecret,
+        expectedRevision: revision,
+        expectedStage: "demo",
+        allowInsecureLoopback: true,
+        fetchImpl: successfulFetch(),
+      }),
+    ).rejects.toThrow("credential-free HTTPS origin");
   });
 
   it("rejects an empty readiness check set", async () => {

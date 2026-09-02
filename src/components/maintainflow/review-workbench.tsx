@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import {
@@ -32,6 +33,7 @@ import { toast } from "sonner";
 
 import { MaintainFlowBrand } from "@/components/maintainflow/brand";
 import { ApprovalHistory } from "@/components/maintainflow/approval-history";
+import { ChangeAssuranceReportCard } from "@/components/maintainflow/change-assurance-report-card";
 import { CreativeReviewHistory } from "@/components/maintainflow/creative-review-history";
 import { CreativeReviewTable } from "@/components/maintainflow/creative-review-table";
 import { BudgetGuard } from "@/components/maintainflow/budget-guard";
@@ -115,16 +117,26 @@ import type { ApprovalRecordDto } from "@/lib/audit/approval-schema";
 import type { RecommendationDecisionHistoryDto } from "@/lib/audit/recommendation-decision";
 import type { CreativeReviewEvent } from "@/lib/openai-ads/creative-history";
 import type { MonitoringWindowDto } from "@/lib/openai-ads/monitoring";
+import { buildMonitoringWindows } from "@/lib/openai-ads/recommendation-lifecycle";
 import type { ConversionMeasurementReadiness } from "@/lib/openai-ads/measurement-readiness";
 import type { BudgetGuardEvidence } from "@/lib/openai-ads/budget-guard";
 import type { ConversionsConnectionStatus } from "@/lib/openai-ads/conversions-connection";
 import {
+  livePortfolioOperationalExceptionCount,
+  livePortfolioUrgency,
+  oldestLivePortfolioExceptionAt,
+  rankLivePortfolioAccounts,
   summarizeLivePortfolioEvidence,
   type LivePortfolioAccount,
   type LivePortfolioEvidenceState,
+  type LivePortfolioExceptionEvidence,
+  type LivePortfolioUrgency,
 } from "@/lib/openai-ads/live-portfolio";
 import type { ReadinessAuditHistoryEntry } from "@/lib/readiness/history";
-import type { AccountAccess } from "@/lib/tenancy/schema";
+import {
+  canWriteAccount,
+  type AccountAccess,
+} from "@/lib/tenancy/schema";
 import type {
   CampaignPerformance,
   Recommendation,
@@ -204,6 +216,17 @@ export function isConfirmedLiveApplyResponse(
   result: RecommendationApplyResponse,
 ) {
   return result.mode === "live" && result.applied === true;
+}
+
+export function canReconcileApprovalHistory(
+  approvalHistoryReady: boolean,
+  workspaceAccess: AccountAccess | undefined,
+) {
+  return Boolean(
+    approvalHistoryReady &&
+      workspaceAccess &&
+      canWriteAccount(workspaceAccess),
+  );
 }
 
 export function RecommendationApprovalConfirmation({
@@ -394,8 +417,20 @@ export function MaintainFlowWorkbench({
   const [demoRecommendations, setDemoRecommendations] = useState(
     initialRecommendations,
   );
+  const [demoApprovalHistory, setDemoApprovalHistory] = useState(
+    dataSource === "demo" ? approvalHistory : [],
+  );
   const recommendations =
     dataSource === "live" ? initialRecommendations : demoRecommendations;
+  const visibleApprovalHistory =
+    dataSource === "demo" ? demoApprovalHistory : approvalHistory;
+  const visibleMonitoringWindows = useMemo(
+    () =>
+      dataSource === "demo"
+        ? buildMonitoringWindows(demoApprovalHistory)
+        : monitoringWindows,
+    [dataSource, demoApprovalHistory, monitoringWindows],
+  );
   const [selectedId, setSelectedId] = useState(
     initialRecommendations[0]?.id ?? "",
   );
@@ -563,6 +598,47 @@ export function MaintainFlowWorkbench({
     try {
       if (dataSource === "demo") {
         updateStatus(selected.id, "monitoring");
+        const startedAt = new Date();
+        const monitoringEndsAt = selected.monitoringPlan
+          ? new Date(
+              startedAt.getTime() +
+                selected.monitoringPlan.windowDays * 24 * 60 * 60 * 1_000,
+            ).toISOString()
+          : null;
+        setDemoApprovalHistory((current) => [
+          {
+            id: crypto.randomUUID(),
+            accountId: account.id,
+            organizationName: `${account.name} simulator`,
+            membershipRole: null,
+            accountRole: null,
+            recommendationId: selected.id,
+            recommendationTitle: selected.title,
+            entityId: selected.entityId,
+            mutation: selected.mutation,
+            rollbackMethod: selected.rollback.method,
+            rollbackPath: selected.rollback.path,
+            rollbackBody: selected.rollback.body,
+            evidence: selected.evidence,
+            safeguard: selected.safeguard,
+            status: "applied",
+            errorMessage: null,
+            reconciliationNote: null,
+            monitoringPlan: selected.monitoringPlan ?? null,
+            monitoringStartedAt: selected.monitoringPlan
+              ? startedAt.toISOString()
+              : null,
+            monitoringEndsAt,
+            monitoringOutcome: null,
+            monitoringObservation: null,
+            monitoringEvaluatedAt: null,
+            createdAt: startedAt.toISOString(),
+            updatedAt: startedAt.toISOString(),
+            appliedAt: startedAt.toISOString(),
+            rolledBackAt: null,
+          },
+          ...current,
+        ]);
         const message =
           "Simulated approval recorded locally. No OpenAI Ads request was sent.";
         addAuditEvent({
@@ -755,6 +831,7 @@ export function MaintainFlowWorkbench({
 
   function resetDemoState() {
     setDemoRecommendations(initialRecommendations);
+    setDemoApprovalHistory(approvalHistory);
     setSelectedId(initialRecommendations[0]?.id ?? "");
     setFilter("all");
     setDismissalOpen(false);
@@ -1145,16 +1222,20 @@ export function MaintainFlowWorkbench({
 
         <TabsContent value="experiments" className="m-0">
           <ExperimentsView
+            account={{ id: account.id, name: account.name }}
             recommendations={recommendations}
             dataSource={dataSource}
             currencyCode={account.currency_code}
-            monitoringWindows={monitoringWindows}
+            monitoringWindows={visibleMonitoringWindows}
             monitoringEvaluationError={monitoringEvaluationError}
             auditEvents={auditEvents}
-            approvalHistory={approvalHistory}
+            approvalHistory={visibleApprovalHistory}
             approvalHistoryError={approvalHistoryError}
-            approvalHistoryReady={approvalHistoryReady}
             canRollback={writeMode === "live"}
+            canReconcile={canReconcileApprovalHistory(
+              approvalHistoryReady,
+              workspaceAccess,
+            )}
             recommendationDecisionHistory={recommendationDecisionHistory}
             recommendationDecisionError={recommendationDecisionError}
           />
@@ -1604,6 +1685,58 @@ function livePortfolioEvidenceTone(state: LivePortfolioEvidenceState) {
   return "text-muted-foreground";
 }
 
+function livePortfolioUrgencyLabel(urgency: LivePortfolioUrgency) {
+  if (urgency === "critical") return "Urgent action";
+  if (urgency === "attention") return "Action needed";
+  if (urgency === "review") return "Evidence review";
+  return "No exception";
+}
+
+function livePortfolioUrgencyVariant(
+  urgency: LivePortfolioUrgency,
+): "destructive" | "secondary" | "outline" {
+  if (urgency === "critical") return "destructive";
+  if (urgency === "attention") return "secondary";
+  return "outline";
+}
+
+function exceptionCountLabel(
+  count: number,
+  singular: string,
+  plural = `${singular}s`,
+) {
+  return `${formatGroupedInteger(count)} ${count === 1 ? singular : plural}`;
+}
+
+function LivePortfolioExceptionItem({
+  evidence,
+  singular,
+  plural,
+  variant,
+}: {
+  evidence: LivePortfolioExceptionEvidence;
+  singular: string;
+  plural?: string;
+  variant: "destructive" | "secondary";
+}) {
+  if (evidence.count === 0) return null;
+
+  return (
+    <div className="flex min-w-72 items-center justify-between gap-3">
+      <Badge variant={variant}>
+        {exceptionCountLabel(evidence.count, singular, plural)}
+      </Badge>
+      <span className="whitespace-nowrap text-xs text-muted-foreground">
+        {evidence.oldestAt
+          ? `Oldest ${formatUtcDateTime(evidence.oldestAt, {
+              includeTimeZone: true,
+            })}`
+          : "Timestamp unavailable"}
+      </span>
+    </div>
+  );
+}
+
 export function CampaignsView({
   ads,
   creativeReviewHistory,
@@ -1667,6 +1800,9 @@ export function CampaignsView({
     0,
   );
   const livePortfolioSummary = summarizeLivePortfolioEvidence(
+    livePortfolioAccounts,
+  );
+  const rankedLivePortfolioAccounts = rankLivePortfolioAccounts(
     livePortfolioAccounts,
   );
 
@@ -1805,13 +1941,12 @@ export function CampaignsView({
           <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
             <div className="grid gap-1">
               <div className="flex flex-wrap items-center gap-2">
-                <CardTitle className="text-base">Live client evidence</CardTitle>
+                <CardTitle className="text-base">Live agency exception queue</CardTitle>
                 <Badge variant="secondary">Agency portfolio</Badge>
               </div>
               <CardDescription>
-                Read-only evidence from stored snapshots matched to each
-                account&apos;s active credential. Missing or rejected evidence is
-                never counted as zero.
+                Reconciliation and monitoring exceptions are ranked ahead of
+                read-only snapshot signals. Missing evidence is never counted as zero.
               </CardDescription>
             </div>
             <Badge variant="outline">
@@ -1831,31 +1966,25 @@ export function CampaignsView({
               <>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <MetricCard
-                    label="Active client accounts"
-                    value={formatGroupedInteger(livePortfolioAccounts.length)}
-                    detail="Selected agency organization only"
-                  />
-                  <MetricCard
-                    label="Usable snapshots"
+                    label="Accounts requiring action"
                     value={formatGroupedInteger(
-                      livePortfolioSummary.usableSnapshotCount,
+                      livePortfolioSummary.operationalExceptionAccountCount,
                     )}
-                    detail={`${livePortfolioSummary.unavailableSnapshotCount} expired, missing, rejected, or requiring refresh`}
+                    detail={`Across ${livePortfolioAccounts.length} active client${livePortfolioAccounts.length === 1 ? "" : "s"}`}
                   />
                   <MetricCard
-                    label="Detected signals"
-                    value={
-                      livePortfolioSummary.detectedSignalCount === null
-                        ? "—"
-                        : formatGroupedInteger(
-                            livePortfolioSummary.detectedSignalCount,
-                          )
-                    }
-                    detail={
-                      livePortfolioSummary.usableSnapshotCount > 0
-                        ? `Across ${livePortfolioSummary.usableSnapshotCount} fresh or stale snapshot${livePortfolioSummary.usableSnapshotCount === 1 ? "" : "s"}; expired and unknown accounts excluded`
-                        : "No current snapshot evidence to count"
-                    }
+                    label="Unresolved reconciliation"
+                    value={formatGroupedInteger(
+                      livePortfolioSummary.reconciliationRequiredCount,
+                    )}
+                    detail="Provider outcomes requiring an Ads Manager check"
+                  />
+                  <MetricCard
+                    label="Monitoring exceptions"
+                    value={formatGroupedInteger(
+                      livePortfolioSummary.monitoringExceptionCount,
+                    )}
+                    detail="Safeguard breaches, evidence gaps, and failed evaluations"
                   />
                 </div>
 
@@ -1866,18 +1995,21 @@ export function CampaignsView({
                   <TableHeader>
                     <TableRow>
                       <TableHead>Client account</TableHead>
-                      <TableHead>Snapshot</TableHead>
-                      <TableHead className="text-right">
-                        Detected signals
-                      </TableHead>
-                      <TableHead>Evidence state</TableHead>
-                      <TableHead>Evidence time</TableHead>
-                      <TableHead className="text-right">Workspace</TableHead>
+                      <TableHead>Priority</TableHead>
+                      <TableHead>Operational exceptions</TableHead>
+                      <TableHead>Oldest attention</TableHead>
+                      <TableHead>Snapshot evidence</TableHead>
+                      <TableHead className="text-right">Review</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {livePortfolioAccounts.map((item) => {
+                    {rankedLivePortfolioAccounts.map((item) => {
                       const selected = item.accountId === currentAccountId;
+                      const urgency = livePortfolioUrgency(item);
+                      const oldestExceptionAt =
+                        oldestLivePortfolioExceptionAt(item);
+                      const hasOperationalExceptions =
+                        livePortfolioOperationalExceptionCount(item) > 0;
                       return (
                         <TableRow key={item.accountId}>
                           <TableCell>
@@ -1894,18 +2026,60 @@ export function CampaignsView({
                             </span>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline">
-                              {item.hasConfirmedSnapshot
-                                ? "1 confirmed"
-                                : "Not confirmed"}
+                            <Badge
+                              variant={livePortfolioUrgencyVariant(urgency)}
+                              className="whitespace-nowrap"
+                            >
+                              {livePortfolioUrgencyLabel(urgency)}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-right font-medium">
-                            {item.detectedSignalCount === null
-                              ? "Unknown"
-                              : formatGroupedInteger(item.detectedSignalCount)}
-                          </TableCell>
                           <TableCell>
+                            <div className="grid min-w-80 gap-1.5">
+                              <LivePortfolioExceptionItem
+                                evidence={
+                                  item.operationalExceptions
+                                    .reconciliationRequired
+                                }
+                                singular="reconciliation"
+                                variant="destructive"
+                              />
+                              <LivePortfolioExceptionItem
+                                evidence={
+                                  item.operationalExceptions.monitoringFailures
+                                }
+                                singular="monitoring failure"
+                                variant="destructive"
+                              />
+                              <LivePortfolioExceptionItem
+                                evidence={
+                                  item.operationalExceptions.safeguardTriggered
+                                }
+                                singular="safeguard breach"
+                                plural="safeguard breaches"
+                                variant="secondary"
+                              />
+                              <LivePortfolioExceptionItem
+                                evidence={
+                                  item.operationalExceptions.insufficientEvidence
+                                }
+                                singular="evidence gap"
+                                variant="secondary"
+                              />
+                              {!hasOperationalExceptions ? (
+                                <Badge variant="outline">
+                                  No active monitoring exception
+                                </Badge>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-muted-foreground">
+                            {oldestExceptionAt
+                              ? formatUtcDateTime(oldestExceptionAt, {
+                                  includeTimeZone: true,
+                                })
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="min-w-48">
                             <Badge
                               variant="outline"
                               className={cn(
@@ -1915,23 +2089,38 @@ export function CampaignsView({
                             >
                               {livePortfolioEvidenceLabel(item.evidenceState)}
                             </Badge>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap text-muted-foreground">
-                            {item.evidenceAt
-                              ? formatUtcDateTime(item.evidenceAt, {
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {item.detectedSignalCount === null
+                                ? "Detected signals unknown"
+                                : `${formatGroupedInteger(item.detectedSignalCount)} detected signal${item.detectedSignalCount === 1 ? "" : "s"}`}
+                            </p>
+                            {item.evidenceAt ? (
+                              <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
+                                {formatUtcDateTime(item.evidenceAt, {
                                   includeTimeZone: true,
-                                })
-                              : "—"}
+                                })}
+                              </p>
+                            ) : null}
                           </TableCell>
                           <TableCell className="text-right">
                             <Button
-                              type="button"
+                              asChild
                               size="sm"
-                              variant={selected ? "secondary" : "outline"}
-                              disabled={selected}
-                              onClick={() => onOpenAccount(item.accountId)}
+                              variant={
+                                hasOperationalExceptions ? "default" : "outline"
+                              }
                             >
-                              {selected ? "Current" : "Open account"}
+                              <Link
+                                href={buildAppHref({
+                                  tab: "experiments",
+                                  accountId: item.accountId,
+                                })}
+                              >
+                                {hasOperationalExceptions
+                                  ? "Review exceptions"
+                                  : "Open history"}
+                                <ArrowRight data-icon="inline-end" />
+                              </Link>
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -2126,6 +2315,7 @@ function MetricCard({
 }
 
 function ExperimentsView({
+  account,
   recommendations,
   dataSource,
   currencyCode,
@@ -2134,11 +2324,12 @@ function ExperimentsView({
   auditEvents,
   approvalHistory,
   approvalHistoryError,
-  approvalHistoryReady,
   canRollback,
+  canReconcile,
   recommendationDecisionHistory,
   recommendationDecisionError,
 }: {
+  account: { id: string; name: string };
   recommendations: Recommendation[];
   dataSource: "demo" | "live";
   currencyCode: string;
@@ -2147,8 +2338,8 @@ function ExperimentsView({
   auditEvents: AuditEvent[];
   approvalHistory: ApprovalRecordDto[];
   approvalHistoryError?: string;
-  approvalHistoryReady: boolean;
   canRollback: boolean;
+  canReconcile: boolean;
   recommendationDecisionHistory: RecommendationDecisionHistoryDto[];
   recommendationDecisionError?: string;
 }) {
@@ -2186,10 +2377,17 @@ function ExperimentsView({
         </AlertDescription>
       </Alert>
 
+      <ChangeAssuranceReportCard
+        account={account}
+        dataSource={dataSource}
+        records={approvalHistory}
+      />
+
       <ApprovalHistory
         records={approvalHistory}
+        dataSource={dataSource}
         canRollback={canRollback}
-        canReconcile={approvalHistoryReady}
+        canReconcile={canReconcile}
         error={approvalHistoryError}
       />
 

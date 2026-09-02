@@ -117,6 +117,32 @@ test("simulator exposes actionable attribution and monitoring evidence", async (
   await expect(
     page.getByText(/no rollback or other external action was taken/i).first(),
   ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Client change assurance report" }),
+  ).toBeVisible();
+  await expect(page.getByText("Simulator evidence", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Durable approval history" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Illustrative approvals, rollback requests, monitoring/i),
+  ).toBeVisible();
+
+  const assuranceDownloadPromise = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Download assurance report" })
+    .click();
+  const assuranceDownload = await assuranceDownloadPromise;
+  expect(assuranceDownload.suggestedFilename()).toMatch(
+    /^maintainflow-change-assurance-northstar-home-\d{4}-\d{2}-\d{2}\.html$/,
+  );
+  const assurancePath = await assuranceDownload.path();
+  expect(assurancePath).not.toBeNull();
+  const assuranceHtml = await readFile(assurancePath!, "utf8");
+  expect(assuranceHtml).toContain("SIMULATOR — NOT LIVE EVIDENCE");
+  expect(assuranceHtml).toContain("Operator attention is still required");
+  expect(assuranceHtml).toContain("Exact approved request");
+  expect(assuranceHtml).not.toContain("demo-agency-operator");
   expect(browserErrors).toEqual([]);
 });
 
@@ -220,6 +246,15 @@ test("simulator approval is local-only and reload restores the fixture", async (
   ).toBeVisible();
   expect(mutationRequests).toEqual([]);
 
+  await page.getByRole("tab", { name: "Experiments" }).click();
+  await expect(
+    page.getByRole("row", { name: /Lower the CPA bid by 20%/ }).first(),
+  ).toContainText("Applied");
+  await expect(
+    page.getByRole("button", { name: "Download assurance report" }),
+  ).toBeEnabled();
+
+  await page.getByRole("tab", { name: /^Review/ }).click();
   await page.reload();
   await expect(
     page.getByRole("button", { name: "Approve in simulator" }),

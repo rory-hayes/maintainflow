@@ -23,6 +23,14 @@ export const storedAdsMutationSchema = z.object({
   body: z.record(z.string(), z.unknown()).nullable(),
 });
 
+export const storedRecommendationEvidenceSchema = z.array(
+  z.object({
+    label: z.string(),
+    value: z.string(),
+    detail: z.string(),
+  }),
+);
+
 export const approvalRecordSchema = z.object({
   id: z.string().uuid(),
   accountId: z.string(),
@@ -34,7 +42,9 @@ export const approvalRecordSchema = z.object({
   recommendationId: z.string(),
   recommendationTitle: z.string(),
   entityId: z.string(),
+  mutation: storedAdsMutationSchema.nullable().default(null),
   rollback: storedAdsMutationSchema,
+  evidence: storedRecommendationEvidenceSchema.default([]),
   safeguard: z.string(),
   status: approvalStatusSchema,
   errorMessage: z.string().nullable(),
@@ -52,8 +62,16 @@ export const approvalRecordSchema = z.object({
 });
 
 export const approvalRecordDtoSchema = approvalRecordSchema
-  .omit({ rollback: true })
+  .omit({
+    rollback: true,
+    mutation: true,
+    evidence: true,
+    operatorId: true,
+    organizationId: true,
+  })
   .extend({
+    mutation: storedAdsMutationSchema.nullable().optional(),
+    evidence: storedRecommendationEvidenceSchema.optional(),
     rollbackMethod: z.literal("POST"),
     rollbackPath: z.string(),
     rollbackBody: z.record(z.string(), z.unknown()).nullable(),

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 
-const GIT_REVISION_PATTERN = /^[a-f0-9]{7,64}$/i;
+const GIT_REVISION_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i;
 const EXPLICIT_REVISION_KEYS = [
   "MAINTAINFLOW_BUILD_SHA",
   "VERCEL_GIT_COMMIT_SHA",
@@ -15,7 +15,7 @@ function normalizeBuildRevision(value: string | undefined) {
   if (!normalized) return null;
   if (!GIT_REVISION_PATTERN.test(normalized)) {
     throw new Error(
-      "The configured build revision must be a 7-64 character hexadecimal Git SHA.",
+      "The configured build revision must be a full 40- or 64-character hexadecimal Git SHA.",
     );
   }
   return normalized.toLowerCase();
@@ -37,8 +37,20 @@ export function resolveBuildTimeRevision(
   env: RevisionEnvironment = process.env,
   git: GitCommand = runGit,
 ) {
-  for (const key of EXPLICIT_REVISION_KEYS) {
-    if (env[key]?.trim()) return normalizeBuildRevision(env[key]);
+  const explicitRevisions = EXPLICIT_REVISION_KEYS.flatMap((key) => {
+    if (!env[key]?.trim()) return [];
+    return [{ key, revision: normalizeBuildRevision(env[key]) }];
+  });
+  const distinctExplicitRevisions = new Set(
+    explicitRevisions.map(({ revision }) => revision),
+  );
+  if (distinctExplicitRevisions.size > 1) {
+    throw new Error(
+      `Conflicting build revision provenance was supplied through ${explicitRevisions.map(({ key }) => key).join(", ")}.`,
+    );
+  }
+  if (explicitRevisions.length > 0) {
+    return explicitRevisions[0].revision;
   }
 
   try {

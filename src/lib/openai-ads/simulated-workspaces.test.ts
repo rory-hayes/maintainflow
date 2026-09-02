@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { approvalRecordDtoSchema } from "../audit/approval-schema";
 import { parseAdsResourcePath } from "./resource-path";
 import {
   adAccountSchema,
@@ -58,6 +59,25 @@ describe("simulated sales workspaces", () => {
           (recommendation) => recommendation.source === "demo",
         ),
       ).toBe(true);
+      expect(
+        workspace.approvalHistory.map((record) =>
+          approvalRecordDtoSchema.parse(record),
+        ),
+      ).toHaveLength(2);
+      expect(
+        workspace.approvalHistory.every(
+          (record) => record.accountId === workspace.account.id,
+        ),
+      ).toBe(true);
+      expect(workspace.approvalHistory).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ status: "reconciliation_required" }),
+          expect.objectContaining({
+            status: "applied",
+            monitoringOutcome: "within_safeguard",
+          }),
+        ]),
+      );
     }
   });
 

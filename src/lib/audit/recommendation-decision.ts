@@ -47,7 +47,17 @@ export const recommendationDecisionHistorySchema =
 
 export const recommendationDecisionHistoryDtoSchema =
   recommendationDecisionHistorySchema
-    .omit({ dismissedAt: true, restoredAt: true })
+    .omit({
+      id: true,
+      accountId: true,
+      operatorId: true,
+      organizationId: true,
+      fingerprint: true,
+      restoredBy: true,
+      restoredOrganizationId: true,
+      dismissedAt: true,
+      restoredAt: true,
+    })
     .extend({
       dismissedAt: z.string().datetime(),
       restoredAt: z.string().datetime().nullable(),

@@ -103,7 +103,9 @@ export function RecommendationDecisionHistory({
               </TableHeader>
               <TableBody>
                 {records.map((record) => (
-                  <TableRow key={record.id}>
+                  <TableRow
+                    key={`${record.recommendationId}:${record.entityId}:${record.dismissedAt}`}
+                  >
                     <TableCell className="min-w-44 align-top">
                       <Badge
                         variant="outline"
@@ -144,11 +146,7 @@ export function RecommendationDecisionHistory({
                           record.accountRole,
                         )}
                       </p>
-                      <p className="font-mono text-xs text-muted-foreground">
-                        {record.operatorId}
-                      </p>
                       {record.restoredAt &&
-                      record.restoredBy &&
                       record.restoredOrganizationName &&
                       record.restoredMembershipRole &&
                       record.restoredAccountRole ? (
@@ -160,9 +158,6 @@ export function RecommendationDecisionHistory({
                               record.restoredMembershipRole,
                               record.restoredAccountRole,
                             )}
-                          </p>
-                          <p className="font-mono text-xs text-muted-foreground">
-                            {record.restoredBy}
                           </p>
                         </div>
                       ) : null}

@@ -9,6 +9,7 @@ const {
   pruneExpiredLiveSyncSnapshotsMock,
   countUnresolvedApprovalOperationsMock,
   recoverStaleApprovalOperationsMock,
+  summarizeDueMonitoringBacklogMock,
   verifyApprovalStoreMock,
   verifyCredentialStoreMock,
   verifyTenancyStoreMock,
@@ -20,6 +21,7 @@ const {
   pruneExpiredLiveSyncSnapshotsMock: vi.fn(),
   countUnresolvedApprovalOperationsMock: vi.fn(),
   recoverStaleApprovalOperationsMock: vi.fn(),
+  summarizeDueMonitoringBacklogMock: vi.fn(),
   verifyApprovalStoreMock: vi.fn(),
   verifyCredentialStoreMock: vi.fn(),
   verifyTenancyStoreMock: vi.fn(),
@@ -29,6 +31,7 @@ const {
 vi.mock("@/lib/audit/approval-store.server", () => ({
   countUnresolvedApprovalOperations: countUnresolvedApprovalOperationsMock,
   recoverStaleApprovalOperations: recoverStaleApprovalOperationsMock,
+  summarizeDueMonitoringBacklog: summarizeDueMonitoringBacklogMock,
   verifyApprovalStore: verifyApprovalStoreMock,
 }));
 vi.mock("@/lib/openai-ads/monitoring-runner.server", () => ({
@@ -51,6 +54,7 @@ vi.mock("@/lib/tenancy/store.server", () => ({
 import { GET } from "./route";
 
 const originalSecret = process.env.CRON_SECRET;
+const originalReleaseStage = process.env.MAINTAINFLOW_RELEASE_STAGE;
 
 function request(authorization?: string) {
   return new Request("https://maintainflow.example/api/jobs/monitoring/evaluate", {
@@ -63,6 +67,7 @@ describe("scheduled monitoring route", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "info").mockImplementation(() => undefined);
     process.env.CRON_SECRET = "cron-secret-at-least-32-characters";
+    process.env.MAINTAINFLOW_RELEASE_STAGE = "private_read";
     verifyApprovalStoreMock.mockReset();
     verifyCredentialStoreMock.mockReset();
     verifyTenancyStoreMock.mockReset();
@@ -73,6 +78,7 @@ describe("scheduled monitoring route", () => {
     pruneExpiredLiveSyncSnapshotsMock.mockReset();
     countUnresolvedApprovalOperationsMock.mockReset();
     recoverStaleApprovalOperationsMock.mockReset();
+    summarizeDueMonitoringBacklogMock.mockReset();
     verifyApprovalStoreMock.mockResolvedValue(true);
     verifyCredentialStoreMock.mockResolvedValue(true);
     verifyTenancyStoreMock.mockResolvedValue(true);
@@ -84,6 +90,7 @@ describe("scheduled monitoring route", () => {
       due: 3,
       evaluated: 3,
       failed: 0,
+      deadlineExhausted: false,
     });
     isReadinessRateLimitConfiguredMock.mockReturnValue(true);
     pruneExpiredReadinessRateLimitBucketsMock.mockResolvedValue(0);
@@ -95,11 +102,22 @@ describe("scheduled monitoring route", () => {
       rollback: 0,
       backlog: false,
     });
+    summarizeDueMonitoringBacklogMock.mockResolvedValue({
+      dueAccounts: 0,
+      dueWindows: 0,
+      dueAccountsCapped: false,
+      dueWindowsCapped: false,
+    });
   });
 
   afterEach(() => {
     if (originalSecret === undefined) delete process.env.CRON_SECRET;
     else process.env.CRON_SECRET = originalSecret;
+    if (originalReleaseStage === undefined) {
+      delete process.env.MAINTAINFLOW_RELEASE_STAGE;
+    } else {
+      process.env.MAINTAINFLOW_RELEASE_STAGE = originalReleaseStage;
+    }
     vi.restoreAllMocks();
   });
 
@@ -122,6 +140,14 @@ describe("scheduled monitoring route", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(payload).toEqual({
       ok: true,
+      releaseStage: "private_read",
+      providerMonitoringPaused: false,
+      pausedBacklog: {
+        dueAccounts: 0,
+        dueWindows: 0,
+        dueAccountsCapped: false,
+        dueWindowsCapped: false,
+      },
       monitoringUnavailable: false,
       maintenanceFailed: false,
       maintenanceBacklog: false,
@@ -133,6 +159,7 @@ describe("scheduled monitoring route", () => {
       due: 3,
       evaluated: 3,
       failed: 0,
+      deadlineExhausted: false,
     });
     expect(JSON.stringify(payload)).not.toContain("adacct_");
     expect(pruneExpiredReadinessRateLimitBucketsMock).toHaveBeenCalledWith(
@@ -153,6 +180,11 @@ describe("scheduled monitoring route", () => {
     expect(countUnresolvedApprovalOperationsMock).toHaveBeenCalledWith({
       now: recoveryNow,
     });
+    expect(evaluateScheduledMonitoringWindowsMock).toHaveBeenCalledWith({
+      maxAccounts: 2,
+      windowsPerAccount: 1,
+      deadlineAt: expect.any(Number),
+    });
     expect(console.info).toHaveBeenCalledOnce();
     expect(
       JSON.parse(String(vi.mocked(console.info).mock.calls[0][0])),
@@ -160,6 +192,38 @@ describe("scheduled monitoring route", () => {
       event: "monitoring.run.completed",
       status: 200,
       counts: { accountsProcessed: 2, evaluated: 3 },
+    });
+  });
+
+  it("pauses provider monitoring in demo while reporting due work and completing maintenance", async () => {
+    process.env.MAINTAINFLOW_RELEASE_STAGE = "demo";
+    summarizeDueMonitoringBacklogMock.mockResolvedValue({
+      dueAccounts: 2,
+      dueWindows: 7,
+      dueAccountsCapped: false,
+      dueWindowsCapped: false,
+    });
+
+    const response = await GET(
+      request(`Bearer ${process.env.CRON_SECRET}`),
+    );
+
+    expect(response.status).toBe(200);
+    expect(evaluateScheduledMonitoringWindowsMock).not.toHaveBeenCalled();
+    expect(recoverStaleApprovalOperationsMock).toHaveBeenCalledOnce();
+    expect(pruneExpiredLiveSyncSnapshotsMock).toHaveBeenCalledOnce();
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      releaseStage: "demo",
+      providerMonitoringPaused: true,
+      pausedBacklog: {
+        dueAccounts: 2,
+        dueWindows: 7,
+        dueAccountsCapped: false,
+        dueWindowsCapped: false,
+      },
+      accountsProcessed: 0,
+      failed: 0,
     });
   });
 

@@ -45,11 +45,16 @@ jobs:
         run: npm run check:openai-ads-contract
 
       - name: Build production container
-        run: >-
-          docker build
-          --build-arg MAINTAINFLOW_BUILD_SHA=${{ github.sha }}
-          --tag maintainflow-ads:ci
-          .
+        run: |
+          docker build \
+            --build-arg MAINTAINFLOW_BUILD_SHA=${{ github.sha }} \
+            --tag maintainflow-ads:ci \
+            .
+          docker build \
+            --build-arg MAINTAINFLOW_BUILD_SHA=${{ github.sha }} \
+            --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_bWFpbnRhaW5mbG93LWNpLmNsZXJrLmFjY291bnRzLmRldiQ= \
+            --tag maintainflow-ads:private-read-ci \
+            .
 
       - name: Smoke-test production container, database readiness, and revision
         run: |
@@ -58,8 +63,12 @@ jobs:
           ci_network="maintainflow-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           cleanup() {
             docker logs maintainflow-ads-ci || true
+            docker logs maintainflow-ads-private-read-ci || true
+            docker logs maintainflow-ads-config-mismatch-ci || true
             docker logs maintainflow-postgres-ci || true
             docker rm --force maintainflow-ads-ci || true
+            docker rm --force maintainflow-ads-private-read-ci || true
+            docker rm --force maintainflow-ads-config-mismatch-ci || true
             docker rm --force maintainflow-postgres-ci || true
             docker network rm "$ci_network" || true
           }
@@ -163,7 +172,94 @@ jobs:
           test "$dependencies_ready" = "true"
           node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('ready.json','utf8')); if (!value.ok || value.scope !== 'deployment_readiness' || value.stage !== 'demo' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 5) process.exit(1);"
 
+          CI=true \
+            MAINTAINFLOW_PROBE_ALLOW_INSECURE_LOOPBACK=true \
+            MAINTAINFLOW_PROBE_ORIGIN=http://127.0.0.1:3000 \
+            MAINTAINFLOW_EXPECTED_BUILD_SHA="$GITHUB_SHA" \
+            MAINTAINFLOW_EXPECTED_RELEASE_STAGE=demo \
+            MAINTAINFLOW_READINESS_PROBE_SECRET=pppppppppppppppppppppppppppppppp \
+            CRON_SECRET=cccccccccccccccccccccccccccccccc \
+            npm run probe:deployment
+
           PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npm run test:e2e
+
+          docker rm --force maintainflow-ads-ci
+          docker run --detach --name maintainflow-ads-private-read-ci \
+            --publish 3000:3000 \
+            --network "$ci_network" \
+            --volume "$ci_cert_dir/ca.crt:/tls/ca.crt:ro" \
+            --env NODE_EXTRA_CA_CERTS=/tls/ca.crt \
+            --env MAINTAINFLOW_BUILD_SHA=0000000000000000000000000000000000000000 \
+            --env MAINTAINFLOW_RELEASE_STAGE=private_read \
+            --env OPENAI_ADS_DATA_MODE=live \
+            --env OPENAI_ADS_LIVE_WRITES_ENABLED=false \
+            --env OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED=false \
+            --env MAINTAINFLOW_APP_ORIGIN=https://maintainflow.test \
+            --env MAINTAINFLOW_LEGAL_ENTITY_NAME="MaintainFlow CI" \
+            --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.test \
+            --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.test \
+            --env DATABASE_URL='postgres://maintainflow:maintainflow@postgres:5432/maintainflow?sslmode=verify-full' \
+            --env CRON_SECRET=cccccccccccccccccccccccccccccccc \
+            --env READINESS_RATE_LIMIT_SECRET=rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr \
+            --env MAINTAINFLOW_READINESS_PROBE_SECRET=pppppppppppppppppppppppppppppppp \
+            --env MAINTAINFLOW_ADMISSION_MODE=private_beta \
+            --env MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED=false \
+            --env MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS=user_ci \
+            --env NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_bWFpbnRhaW5mbG93LWNpLmNsZXJrLmFjY291bnRzLmRldiQ= \
+            --env CLERK_SECRET_KEY=sk_test_maintainflow_ci_only \
+            --env MAINTAINFLOW_ACTIVE_CREDENTIAL_KEY_ID=ci \
+            --env 'MAINTAINFLOW_CREDENTIAL_KEYRING={"ci":"Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M="}' \
+            maintainflow-ads:private-read-ci
+          private_read_ready=false
+          for _attempt in {1..20}; do
+            if curl --fail --silent \
+              --header 'Authorization: Bearer pppppppppppppppppppppppppppppppp' \
+              http://127.0.0.1:3000/api/ready > private-read-ready.json; then
+              private_read_ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$private_read_ready" = "true"
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('private-read-ready.json','utf8')); if (!value.ok || value.stage !== 'private_read' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 12) process.exit(1);"
+
+          docker rm --force maintainflow-ads-private-read-ci
+          docker run --detach --name maintainflow-ads-config-mismatch-ci \
+            --network "$ci_network" \
+            --volume "$ci_cert_dir/ca.crt:/tls/ca.crt:ro" \
+            --env NODE_EXTRA_CA_CERTS=/tls/ca.crt \
+            --env MAINTAINFLOW_RELEASE_STAGE=private_read \
+            --env OPENAI_ADS_DATA_MODE=live \
+            --env OPENAI_ADS_LIVE_WRITES_ENABLED=false \
+            --env OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED=false \
+            --env MAINTAINFLOW_APP_ORIGIN=https://maintainflow.test \
+            --env MAINTAINFLOW_LEGAL_ENTITY_NAME="MaintainFlow CI" \
+            --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.test \
+            --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.test \
+            --env DATABASE_URL='postgres://maintainflow:maintainflow@postgres:5432/maintainflow?sslmode=verify-full' \
+            --env CRON_SECRET=cccccccccccccccccccccccccccccccc \
+            --env READINESS_RATE_LIMIT_SECRET=rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr \
+            --env MAINTAINFLOW_READINESS_PROBE_SECRET=pppppppppppppppppppppppppppppppp \
+            --env MAINTAINFLOW_ADMISSION_MODE=private_beta \
+            --env MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED=false \
+            --env MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS=user_ci \
+            --env NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_bWlzbWF0Y2guY2xlcmsuYWNjb3VudHMuZGV2JA== \
+            --env CLERK_SECRET_KEY=sk_test_maintainflow_ci_only \
+            --env MAINTAINFLOW_ACTIVE_CREDENTIAL_KEY_ID=ci \
+            --env 'MAINTAINFLOW_CREDENTIAL_KEYRING={"ci":"Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M="}' \
+            maintainflow-ads:private-read-ci
+          mismatch_refused=false
+          for _attempt in {1..20}; do
+            if test "$(docker inspect --format '{{.State.Running}}' maintainflow-ads-config-mismatch-ci)" = "false"; then
+              mismatch_refused=true
+              break
+            fi
+            sleep 1
+          done
+          test "$mismatch_refused" = "true"
+          test "$(docker inspect --format '{{.State.ExitCode}}' maintainflow-ads-config-mismatch-ci)" -ne 0
+          docker logs maintainflow-ads-config-mismatch-ci 2>&1 \
+            | grep --fixed-strings 'Runtime NEXT_PUBLIC Clerk configuration does not match'
 
   database:
     name: PostgreSQL integration

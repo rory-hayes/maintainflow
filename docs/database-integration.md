@@ -45,7 +45,7 @@ this explicitly disposable harness.
 
 ## What it proves
 
-- migrations `001` through `016` apply together on PostgreSQL in filename
+- migrations `001` through `017` apply together on PostgreSQL in filename
   order;
 - concurrent migration runners serialize, record one immutable SHA-256 ledger
   row per file, and a subsequent runner is a checksum-verifying no-op;
@@ -99,6 +99,16 @@ this explicitly disposable harness.
   preventing the tested partial-acquisition deadlock;
 - ambiguous outcomes can be reconciled into a terminal audit state with the
   acting organization and roles preserved.
+- offboarding requires a current locked inventory and exact confirmation token,
+  deletes local access and credential rows, and leaves a lifecycle receipt;
+- externally completed provider revocation can be recorded only against that
+  disconnected lifecycle record, without any provider API call or customer
+  identifiers in its evidence;
+- retention purge refuses early, unresolved, oversized, stale-token, or
+  re-credentialed targets; account locking holds across the exact bounded
+  deletion, retained account rows are removed in foreign-key-safe order, the
+  lifecycle receipt is de-identified, and shared organizations, memberships,
+  and an unrelated advertiser account survive.
 
 ## What it does not prove
 

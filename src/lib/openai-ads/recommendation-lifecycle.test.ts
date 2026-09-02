@@ -16,8 +16,6 @@ function approval(
   return {
     id: "00000000-0000-4000-8000-000000000001",
     accountId: "adacct_live",
-    operatorId: "user_owner",
-    organizationId: "00000000-0000-4000-8000-000000000002",
     organizationName: "Alpine Retail",
     membershipRole: "owner",
     accountRole: "owner",

@@ -219,6 +219,17 @@ describe("MaintainFlow app page live failure boundary", () => {
     expect(props.availableAccounts).toEqual([]);
     expect(props.operatorAuthenticated).toBe(false);
     expect(props.agencyClientAttachEnabled).toBe(false);
+    expect(props.approvalHistory).toHaveLength(2);
+    expect(props.approvalHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: "reconciliation_required" }),
+        expect.objectContaining({
+          status: "applied",
+          monitoringOutcome: "within_safeguard",
+        }),
+      ]),
+    );
+    expect(props.monitoringWindows).toHaveLength(1);
   });
 
   it("enables another client connection only for a ready live agency owner", async () => {
@@ -230,6 +241,12 @@ describe("MaintainFlow app page live failure boundary", () => {
         detectedSignalCount: 2,
         evidenceState: "confirmed_fresh",
         evidenceAt: "2026-08-31T10:00:00.000Z",
+        operationalExceptions: {
+          safeguardTriggered: { count: 0, oldestAt: null },
+          insufficientEvidence: { count: 0, oldestAt: null },
+          monitoringFailures: { count: 0, oldestAt: null },
+          reconciliationRequired: { count: 0, oldestAt: null },
+        },
       },
     ]);
     listAccountAccessesMock.mockResolvedValue([agencyAccess]);

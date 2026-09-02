@@ -5,6 +5,7 @@ import { organizationIdSchema } from "../tenancy/schema";
 import type {
   LivePortfolioAccount,
   LivePortfolioEvidenceState,
+  LivePortfolioOperationalExceptions,
 } from "./live-portfolio";
 import { LIVE_WORKBENCH_SNAPSHOT_SCHEMA_VERSION } from "./live-sync-snapshot";
 
@@ -16,6 +17,14 @@ type LivePortfolioRow = {
   synced_at: Date | null;
   fresh_until: Date | null;
   stale_until: Date | null;
+  safeguard_triggered_count: number;
+  safeguard_triggered_oldest_at: Date | null;
+  insufficient_evidence_count: number;
+  insufficient_evidence_oldest_at: Date | null;
+  monitoring_failure_count: number;
+  monitoring_failure_oldest_at: Date | null;
+  reconciliation_required_count: number;
+  reconciliation_required_oldest_at: Date | null;
 };
 
 function getDatabase() {
@@ -30,7 +39,52 @@ function validDate(value: unknown): value is Date {
   return value instanceof Date && Number.isFinite(value.getTime());
 }
 
-function invalidEvidence(row: LivePortfolioRow): LivePortfolioAccount {
+function parseExceptionEvidence(
+  count: number,
+  oldestAt: Date | null,
+): { count: number; oldestAt: string | null } {
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new TypeError("Live portfolio exception counts must be non-negative integers.");
+  }
+  if (count === 0) {
+    if (oldestAt !== null) {
+      throw new TypeError("An empty live portfolio exception set cannot have a timestamp.");
+    }
+    return { count: 0, oldestAt: null };
+  }
+  if (!validDate(oldestAt)) {
+    throw new TypeError("A live portfolio exception requires a valid timestamp.");
+  }
+  return { count, oldestAt: oldestAt.toISOString() };
+}
+
+function operationalExceptions(
+  row: LivePortfolioRow,
+): LivePortfolioOperationalExceptions {
+  return {
+    safeguardTriggered: parseExceptionEvidence(
+      row.safeguard_triggered_count,
+      row.safeguard_triggered_oldest_at,
+    ),
+    insufficientEvidence: parseExceptionEvidence(
+      row.insufficient_evidence_count,
+      row.insufficient_evidence_oldest_at,
+    ),
+    monitoringFailures: parseExceptionEvidence(
+      row.monitoring_failure_count,
+      row.monitoring_failure_oldest_at,
+    ),
+    reconciliationRequired: parseExceptionEvidence(
+      row.reconciliation_required_count,
+      row.reconciliation_required_oldest_at,
+    ),
+  };
+}
+
+function invalidEvidence(
+  row: LivePortfolioRow,
+  exceptions: LivePortfolioOperationalExceptions,
+): LivePortfolioAccount {
   return {
     accountId: row.account_id,
     accountName: row.account_name,
@@ -38,6 +92,7 @@ function invalidEvidence(row: LivePortfolioRow): LivePortfolioAccount {
     detectedSignalCount: null,
     evidenceState: "invalid",
     evidenceAt: validDate(row.synced_at) ? row.synced_at.toISOString() : null,
+    operationalExceptions: exceptions,
   };
 }
 
@@ -54,6 +109,7 @@ export function toLivePortfolioAccount(
   row: LivePortfolioRow,
   now: Date,
 ): LivePortfolioAccount {
+  const exceptions = operationalExceptions(row);
   if (
     row.payload_schema_version === null &&
     row.detected_signal_count === null &&
@@ -68,6 +124,7 @@ export function toLivePortfolioAccount(
       detectedSignalCount: null,
       evidenceState: "not_confirmed",
       evidenceAt: null,
+      operationalExceptions: exceptions,
     };
   }
 
@@ -79,7 +136,7 @@ export function toLivePortfolioAccount(
     row.synced_at > row.fresh_until ||
     row.fresh_until > row.stale_until
   ) {
-    return invalidEvidence(row);
+    return invalidEvidence(row, exceptions);
   }
 
   if (row.detected_signal_count === null) {
@@ -90,6 +147,7 @@ export function toLivePortfolioAccount(
       detectedSignalCount: null,
       evidenceState: "refresh_required",
       evidenceAt: row.synced_at.toISOString(),
+      operationalExceptions: exceptions,
     };
   }
 
@@ -98,7 +156,7 @@ export function toLivePortfolioAccount(
     row.detected_signal_count < 0 ||
     row.detected_signal_count > 1_000_000
   ) {
-    return invalidEvidence(row);
+    return invalidEvidence(row, exceptions);
   }
 
   return {
@@ -108,6 +166,7 @@ export function toLivePortfolioAccount(
     detectedSignalCount: row.detected_signal_count,
     evidenceState: evidenceState(row, now),
     evidenceAt: row.synced_at.toISOString(),
+    operationalExceptions: exceptions,
   };
 }
 
@@ -133,7 +192,26 @@ export async function listLivePortfolioAccounts(options: {
       snapshot.detected_signal_count,
       snapshot.synced_at,
       snapshot.fresh_until,
-      snapshot.stale_until
+      snapshot.stale_until,
+      coalesce(exception_summary.safeguard_triggered_count, 0)::int
+        as safeguard_triggered_count,
+      exception_summary.safeguard_triggered_oldest_at,
+      coalesce(exception_summary.insufficient_evidence_count, 0)::int
+        as insufficient_evidence_count,
+      exception_summary.insufficient_evidence_oldest_at,
+      coalesce(monitoring_schedule.consecutive_failures, 0)::int
+        as monitoring_failure_count,
+      case
+        when coalesce(monitoring_schedule.consecutive_failures, 0) > 0
+          then coalesce(
+            exception_summary.oldest_unevaluated_monitoring_at,
+            monitoring_schedule.last_failed_at
+          )
+        else null
+      end as monitoring_failure_oldest_at,
+      coalesce(exception_summary.reconciliation_required_count, 0)::int
+        as reconciliation_required_count,
+      exception_summary.reconciliation_required_oldest_at
     from maintainflow_organization_memberships membership
     join maintainflow_organizations organization
       on organization.id = membership.organization_id
@@ -158,6 +236,71 @@ export async function listLivePortfolioAccounts(options: {
         ':',
         active_credential.credential_version::text
       )
+    left join lateral (
+      select
+        count(*) filter (
+          where approval.monitoring_outcome = 'safeguard_triggered'
+            and approval.status in (
+              'applied',
+              'reconciliation_required',
+              'rollback_pending',
+              'rollback_failed',
+              'rollback_reconciliation_required'
+            )
+        ) as safeguard_triggered_count,
+        min(approval.monitoring_evaluated_at) filter (
+          where approval.monitoring_outcome = 'safeguard_triggered'
+            and approval.status in (
+              'applied',
+              'reconciliation_required',
+              'rollback_pending',
+              'rollback_failed',
+              'rollback_reconciliation_required'
+            )
+        ) as safeguard_triggered_oldest_at,
+        count(*) filter (
+          where approval.monitoring_outcome = 'insufficient_evidence'
+            and approval.status in (
+              'applied',
+              'reconciliation_required',
+              'rollback_pending',
+              'rollback_failed',
+              'rollback_reconciliation_required'
+            )
+        ) as insufficient_evidence_count,
+        min(approval.monitoring_evaluated_at) filter (
+          where approval.monitoring_outcome = 'insufficient_evidence'
+            and approval.status in (
+              'applied',
+              'reconciliation_required',
+              'rollback_pending',
+              'rollback_failed',
+              'rollback_reconciliation_required'
+            )
+        ) as insufficient_evidence_oldest_at,
+        count(*) filter (
+          where approval.status in (
+            'reconciliation_required',
+            'rollback_reconciliation_required'
+          )
+        ) as reconciliation_required_count,
+        min(approval.updated_at) filter (
+          where approval.status in (
+            'reconciliation_required',
+            'rollback_reconciliation_required'
+          )
+        ) as reconciliation_required_oldest_at,
+        min(approval.monitoring_ends_at) filter (
+          where approval.monitoring_evaluated_at is null
+            and approval.monitoring_started_at is not null
+            and approval.monitoring_ends_at <= ${now}
+            and approval.status in ('applied', 'rollback_failed')
+        ) as oldest_unevaluated_monitoring_at
+      from ads_approval_records approval
+      where approval.account_id = account.external_account_id
+    ) exception_summary on true
+    left join maintainflow_monitoring_account_schedule monitoring_schedule
+      on monitoring_schedule.advertiser_account_id = account.id
     where membership.clerk_user_id = ${operatorId}
       and organization.id = ${organizationId}
       and organization.customer_type = 'agency'

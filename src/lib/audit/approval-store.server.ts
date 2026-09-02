@@ -43,6 +43,7 @@ type ApprovalRow = {
   entity_id: string;
   request_payload?: unknown;
   rollback_payload: unknown;
+  evidence_payload?: unknown;
   safeguard: string;
   status: ApprovalStatus;
   error_message: string | null;
@@ -73,7 +74,9 @@ const approvalColumns = [
   "recommendation_id",
   "recommendation_title",
   "entity_id",
+  "request_payload",
   "rollback_payload",
+  "evidence_payload",
   "safeguard",
   "status",
   "error_message",
@@ -227,7 +230,9 @@ function parseApprovalRow(row: ApprovalRow): ApprovalRecord {
     recommendationId: row.recommendation_id,
     recommendationTitle: row.recommendation_title,
     entityId: row.entity_id,
+    mutation: row.request_payload ?? null,
     rollback: row.rollback_payload,
+    evidence: row.evidence_payload ?? [],
     safeguard: row.safeguard,
     status: row.status,
     errorMessage: row.rollback_error_message ?? row.error_message,
@@ -672,6 +677,65 @@ export async function listDueMonitoringAccountIds(
   return rows.map((row) => row.account_id);
 }
 
+const MAX_REPORTED_MONITORING_BACKLOG = 10_000;
+
+export async function summarizeDueMonitoringBacklog(now = new Date()) {
+  const sql = getDatabase();
+  const maturityCutoff = monitoringAttributionMaturityCutoff(now);
+  const [row] = await sql<
+    {
+      due_accounts: number;
+      due_windows: number;
+      due_accounts_capped: boolean;
+      due_windows_capped: boolean;
+    }[]
+  >`
+    select
+      least(
+        count(distinct approval.account_id),
+        ${MAX_REPORTED_MONITORING_BACKLOG + 1}
+      )::int as due_accounts,
+      least(
+        count(*),
+        ${MAX_REPORTED_MONITORING_BACKLOG + 1}
+      )::int as due_windows,
+      count(distinct approval.account_id)
+        > ${MAX_REPORTED_MONITORING_BACKLOG} as due_accounts_capped,
+      count(*) > ${MAX_REPORTED_MONITORING_BACKLOG} as due_windows_capped
+    from ads_approval_records approval
+    join maintainflow_advertiser_accounts advertiser_account
+      on advertiser_account.external_account_id = approval.account_id
+      and advertiser_account.status = 'active'
+    left join maintainflow_monitoring_account_schedule schedule
+      on schedule.advertiser_account_id = advertiser_account.id
+    where approval.monitoring_evaluated_at is null
+      and approval.monitoring_started_at is not null
+      and approval.monitoring_ends_at <= ${maturityCutoff}
+      and (
+        approval.monitoring_evaluation_claimed_at is null
+        or approval.monitoring_evaluation_claimed_at < ${now} - interval '15 minutes'
+      )
+      and (schedule.backoff_until is null or schedule.backoff_until <= ${now})
+      and (
+        schedule.attempt_lease_until is null
+        or schedule.attempt_lease_until <= ${now}
+      )
+      and approval.status in ('applied', 'rollback_failed')
+  `;
+  return {
+    dueAccounts: Math.min(
+      row?.due_accounts ?? 0,
+      MAX_REPORTED_MONITORING_BACKLOG,
+    ),
+    dueWindows: Math.min(
+      row?.due_windows ?? 0,
+      MAX_REPORTED_MONITORING_BACKLOG,
+    ),
+    dueAccountsCapped: row?.due_accounts_capped ?? false,
+    dueWindowsCapped: row?.due_windows_capped ?? false,
+  };
+}
+
 export async function claimDueMonitoringAccounts(options: {
   attemptId: string;
   now?: Date;
@@ -848,6 +912,33 @@ export async function completeMonitoringAccountAttempt(options: {
           and schedule.current_attempt_id = ${options.attemptId}
         returning schedule.advertiser_account_id
       `;
+  return Boolean(rows[0]);
+}
+
+export async function releaseMonitoringAccountAttempt(options: {
+  accountId: string;
+  attemptId: string;
+  now?: Date;
+}) {
+  const sql = getDatabase();
+  const now = options.now ?? new Date();
+  const rows = await sql<{ advertiser_account_id: string }[]>`
+    with locked_account as materialized (
+      select id
+      from maintainflow_advertiser_accounts
+      where external_account_id = ${options.accountId}
+        and status = 'active'
+      for share
+    )
+    update maintainflow_monitoring_account_schedule schedule set
+      current_attempt_id = null,
+      attempt_lease_until = null,
+      updated_at = ${now}
+    from locked_account advertiser_account
+    where schedule.advertiser_account_id = advertiser_account.id
+      and schedule.current_attempt_id = ${options.attemptId}
+    returning schedule.advertiser_account_id
+  `;
   return Boolean(rows[0]);
 }
 

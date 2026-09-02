@@ -22,6 +22,12 @@ import {
   applyCustomerOffboarding,
   prepareCustomerOffboarding,
 } from "../../../scripts/customer-offboarding.mjs";
+import {
+  applyProviderRevocationConfirmation,
+  applyRetentionPurge,
+  prepareProviderRevocationConfirmation,
+  prepareRetentionPurge,
+} from "../../../scripts/customer-lifecycle.mjs";
 
 import {
   APPROVAL_OPERATION_LEASE_MS,
@@ -167,6 +173,7 @@ async function applyMigrations(sql: Sql) {
     "docs/database/014_approval_operation_recovery.sql",
     "docs/database/015_monitoring_account_fairness.sql",
     "docs/database/016_live_portfolio_summaries.sql",
+    "docs/database/017_customer_retention_purge.sql",
   ];
   await sql.begin(async (transaction) => {
     for (const migrationFile of migrationFiles) {
@@ -1774,6 +1781,183 @@ describe("PostgreSQL customer and approval boundary", () => {
       await database`
         delete from maintainflow_advertiser_accounts
         where external_account_id = ${mismatchedAccountId}
+      `;
+    }
+  });
+
+  it("aggregates account-wide operational exceptions for each live agency account", async () => {
+    const source = getDemoRecommendation("rec_bid_20");
+    if (!source) throw new Error("The portfolio exception fixture is missing.");
+
+    const accountId = `adacct_portfolio_exceptions_${randomUUID()}`;
+    const credential = encryptAdsApiKey({
+      apiKey: `ads-integration-${randomUUID()}`,
+      externalAccountId: accountId,
+    });
+    const attached = await attachAdvertiserAccountToAgency({
+      operatorId: ownerOperatorId,
+      organizationId: agencyAccess.organizationId,
+      accountId,
+      accountName: "Operational Exception Client",
+      credential,
+      verifiedAt: new Date("2026-08-27T09:00:00.000Z"),
+    });
+    await database`
+      insert into maintainflow_account_access (
+        organization_id, advertiser_account_id, role, granted_by
+      )
+      select ${advertiserAccess.organizationId}, account.id, 'manager',
+        ${ownerOperatorId}
+      from maintainflow_advertiser_accounts account
+      where account.external_account_id = ${accountId}
+    `;
+    const sharedAdvertiserAccess: AccountAccess = {
+      ...attached.access,
+      organizationId: advertiserAccess.organizationId,
+      organizationName: advertiserAccess.organizationName,
+      organizationType: "advertiser",
+      membershipRole: "owner",
+      accountRole: "manager",
+    };
+    const approvalIds: string[] = [];
+    const reconciliationAt = new Date("2026-08-29T09:00:00.000Z");
+    const safeguardAt = new Date("2026-08-30T09:00:00.000Z");
+    const insufficientAt = new Date("2026-08-31T09:00:00.000Z");
+    const monitoringFailureAt = new Date("2026-08-28T09:00:00.000Z");
+
+    try {
+      const reconciliationId = await createApprovalRecord({
+        accountId,
+        operatorId: ownerOperatorId,
+        access: sharedAdvertiserAccess,
+        recommendation: {
+          ...source,
+          id: `rec_portfolio_reconciliation_${randomUUID()}`,
+          entityId: `${source.entityId}_portfolio_reconciliation_${randomUUID()}`,
+        },
+      });
+      approvalIds.push(reconciliationId);
+      await updateApprovalRecord(reconciliationId, "reconciliation_required", {
+        error: "The provider response is intentionally ambiguous.",
+      });
+      await database`
+        update ads_approval_records set updated_at = ${reconciliationAt}
+        where id = ${reconciliationId}
+      `;
+      const [sharedApproval] = await database<
+        { acting_organization_id: string }[]
+      >`
+        select acting_organization_id
+        from ads_approval_records
+        where id = ${reconciliationId}
+      `;
+      expect(sharedApproval?.acting_organization_id).toBe(
+        advertiserAccess.organizationId,
+      );
+
+      for (const [outcome, evaluatedAt] of [
+        ["safeguard_triggered", safeguardAt],
+        ["insufficient_evidence", insufficientAt],
+      ] as const) {
+        const approvalId = await createApprovalRecord({
+          accountId,
+          operatorId: ownerOperatorId,
+          access: attached.access,
+          recommendation: {
+            ...source,
+            id: `rec_portfolio_${outcome}_${randomUUID()}`,
+            entityId: `${source.entityId}_portfolio_${outcome}_${randomUUID()}`,
+          },
+        });
+        approvalIds.push(approvalId);
+        await updateApprovalRecord(approvalId, "applied");
+        await database`
+          update ads_approval_records set
+            monitoring_started_at = ${new Date(
+              evaluatedAt.getTime() - 9 * 24 * 60 * 60 * 1_000,
+            )},
+            monitoring_ends_at = ${new Date(
+              evaluatedAt.getTime() - 2 * 24 * 60 * 60 * 1_000,
+            )},
+            monitoring_outcome = ${outcome},
+            monitoring_observation = ${database.json({
+              evidenceState:
+                outcome === "insufficient_evidence" ? "incomplete" : "complete",
+            })},
+            monitoring_evaluated_at = ${evaluatedAt},
+            updated_at = ${evaluatedAt}
+          where id = ${approvalId}
+        `;
+      }
+
+      await database`
+        insert into maintainflow_monitoring_account_schedule (
+          advertiser_account_id, attempt_count, consecutive_failures,
+          last_attempted_at, last_failed_at, backoff_until, updated_at
+        )
+        select account.id, 3, 3, ${monitoringFailureAt},
+          ${monitoringFailureAt},
+          ${new Date(monitoringFailureAt.getTime() + 60 * 60 * 1_000)},
+          ${monitoringFailureAt}
+        from maintainflow_advertiser_accounts account
+        where account.external_account_id = ${accountId}
+      `;
+
+      const portfolio = await listLivePortfolioAccounts({
+        operatorId: ownerOperatorId,
+        organizationId: agencyAccess.organizationId,
+        now: new Date("2026-09-02T12:00:00.000Z"),
+      });
+
+      expect(portfolio).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            accountId,
+            operationalExceptions: {
+              safeguardTriggered: {
+                count: 1,
+                oldestAt: safeguardAt.toISOString(),
+              },
+              insufficientEvidence: {
+                count: 1,
+                oldestAt: insufficientAt.toISOString(),
+              },
+              monitoringFailures: {
+                count: 3,
+                oldestAt: monitoringFailureAt.toISOString(),
+              },
+              reconciliationRequired: {
+                count: 1,
+                oldestAt: reconciliationAt.toISOString(),
+              },
+            },
+          }),
+        ]),
+      );
+    } finally {
+      if (approvalIds.length > 0) {
+        await database`
+          delete from ads_approval_records
+          where id = any(${approvalIds}::uuid[])
+        `;
+      }
+      await database`
+        delete from maintainflow_advertiser_credentials
+        where advertiser_account_id = (
+          select id from maintainflow_advertiser_accounts
+          where external_account_id = ${accountId}
+        )
+      `;
+      await database`
+        delete from maintainflow_account_access
+        where advertiser_account_id = (
+          select id from maintainflow_advertiser_accounts
+          where external_account_id = ${accountId}
+        )
+      `;
+      await database`
+        delete from maintainflow_advertiser_accounts
+        where external_account_id = ${accountId}
       `;
     }
   });
@@ -4462,5 +4646,266 @@ describe("PostgreSQL customer and approval boundary", () => {
         writeValidatedExport: async () => {},
       }),
     ).rejects.toThrow(/authority could not be resolved/i);
+
+    const lifecycleEvidenceReference = `case_${randomUUID()}`;
+    const revocationConfirmedAt = new Date();
+    const providerRevokedAt = new Date(
+      revocationConfirmedAt.getTime() - 1_000,
+    );
+    const retainUntil = new Date(revocationConfirmedAt.getTime() + 60_000);
+    const revocationPlan = await prepareProviderRevocationConfirmation(
+      database,
+      {
+        lifecycleId: result.lifecycleId,
+        providerRevokedAt,
+        evidenceReference: lifecycleEvidenceReference,
+        retainUntil,
+        confirmedAt: revocationConfirmedAt,
+      },
+    );
+    expect(revocationPlan.blockers).toEqual([]);
+    expect(revocationPlan.confirmationToken).toMatch(
+      /^RECORD-EXTERNAL-REVOCATION:[a-f0-9]{64}$/,
+    );
+    for (const sensitive of [
+      result.lifecycleId,
+      result.advertiserAccountId,
+      offboardingAccountId,
+      access.organizationId,
+      ownerOperatorId,
+      lifecycleEvidenceReference,
+      offboardingAdsKey,
+      offboardingCapiKey,
+      offboardingPixelId,
+    ]) {
+      expect(revocationPlan.serializedEvidence).not.toContain(sensitive);
+    }
+
+    let wrongRevocationEvidenceCalled = false;
+    await expect(
+      applyProviderRevocationConfirmation(database, {
+        lifecycleId: result.lifecycleId,
+        providerRevokedAt,
+        evidenceReference: lifecycleEvidenceReference,
+        retainUntil,
+        confirmedAt: revocationConfirmedAt,
+        confirmationToken: `${revocationPlan.confirmationToken}-wrong`,
+        writeValidatedEvidence: async () => {
+          wrongRevocationEvidenceCalled = true;
+        },
+      }),
+    ).rejects.toThrow(/does not match/i);
+    expect(wrongRevocationEvidenceCalled).toBe(false);
+
+    let recordedRevocationEvidence = "";
+    const revocationResult = await applyProviderRevocationConfirmation(database, {
+      lifecycleId: result.lifecycleId,
+      providerRevokedAt,
+      evidenceReference: lifecycleEvidenceReference,
+      retainUntil,
+      confirmedAt: revocationConfirmedAt,
+      confirmationToken: revocationPlan.confirmationToken,
+      writeValidatedEvidence: async ({ serialized }: { serialized: string }) => {
+        recordedRevocationEvidence = serialized;
+      },
+    });
+    expect(recordedRevocationEvidence).toBe(
+      revocationPlan.serializedEvidence,
+    );
+    expect(revocationResult).toMatchObject({
+      providerRevokedAt,
+      retainUntil,
+      evidenceSha256: revocationPlan.evidenceSha256,
+    });
+    const [confirmedLifecycle] = await database<
+      {
+        provider_revocation_required: boolean;
+        provider_revoked_at: Date;
+        provider_revocation_confirmed_at: Date;
+        provider_revocation_evidence_ref: string;
+        provider_revocation_confirmation_sha256: string;
+        retain_until: Date;
+      }[]
+    >`
+      select provider_revocation_required, provider_revoked_at,
+        provider_revocation_confirmed_at, provider_revocation_evidence_ref,
+        provider_revocation_confirmation_sha256, retain_until
+      from maintainflow_customer_lifecycle_records
+      where id = ${result.lifecycleId}
+    `;
+    expect(confirmedLifecycle).toMatchObject({
+      provider_revocation_required: false,
+      provider_revoked_at: providerRevokedAt,
+      provider_revocation_confirmed_at: revocationConfirmedAt,
+      provider_revocation_evidence_ref: lifecycleEvidenceReference,
+      provider_revocation_confirmation_sha256:
+        revocationPlan.evidenceSha256,
+      retain_until: retainUntil,
+    });
+
+    const earlyPurgePlan = await prepareRetentionPurge(database, {
+      lifecycleId: result.lifecycleId,
+      now: new Date(retainUntil.getTime() - 1),
+    });
+    expect(earlyPurgePlan.confirmationToken).toBeNull();
+    expect(earlyPurgePlan.blockers).toEqual([
+      expect.stringMatching(/retention deadline has not elapsed/i),
+    ]);
+
+    const purgeAt = new Date(retainUntil.getTime() + 1_000);
+    await database`
+      update ads_approval_records set status = 'rollback_failed'
+      where id = ${concurrentApprovalId}
+    `;
+    const unresolvedPurgePlan = await prepareRetentionPurge(database, {
+      lifecycleId: result.lifecycleId,
+      now: purgeAt,
+    });
+    expect(unresolvedPurgePlan.confirmationToken).toBeNull();
+    expect(unresolvedPurgePlan.blockers).toEqual([
+      expect.stringMatching(/unresolved state/i),
+    ]);
+    await database`
+      update ads_approval_records set status = 'applied'
+      where id = ${concurrentApprovalId}
+    `;
+    const purgePlan = await prepareRetentionPurge(database, {
+      lifecycleId: result.lifecycleId,
+      now: purgeAt,
+    });
+    expect(purgePlan.blockers).toEqual([]);
+    expect(purgePlan.confirmationToken).toMatch(
+      /^PURGE-RETAINED-DATA:[a-f0-9]{64}$/,
+    );
+    expect(purgePlan.inventory).toMatchObject({
+      accessGrants: 0,
+      advertiserCredentials: 0,
+      conversionCredentials: 0,
+      approvals: 3,
+      monitoringAccountSchedules: 1,
+    });
+    for (const sensitive of [
+      result.lifecycleId,
+      result.advertiserAccountId,
+      offboardingAccountId,
+      access.organizationId,
+      ownerOperatorId,
+      lifecycleEvidenceReference,
+    ]) {
+      expect(purgePlan.serializedEvidence).not.toContain(sensitive);
+    }
+
+    let wrongPurgeEvidenceCalled = false;
+    await expect(
+      applyRetentionPurge(database, {
+        lifecycleId: result.lifecycleId,
+        now: purgeAt,
+        confirmationToken: `${purgePlan.confirmationToken}-wrong`,
+        writeValidatedEvidence: async () => {
+          wrongPurgeEvidenceCalled = true;
+        },
+      }),
+    ).rejects.toThrow(/does not match/i);
+    expect(wrongPurgeEvidenceCalled).toBe(false);
+
+    let releasePurgeEvidence!: () => void;
+    let markPurgeEvidenceStarted!: () => void;
+    const purgeEvidenceRelease = new Promise<void>((resolve) => {
+      releasePurgeEvidence = resolve;
+    });
+    const purgeEvidenceStarted = new Promise<void>((resolve) => {
+      markPurgeEvidenceStarted = resolve;
+    });
+    let recordedPurgeEvidence = "";
+    const purge = applyRetentionPurge(database, {
+      lifecycleId: result.lifecycleId,
+      now: purgeAt,
+      confirmationToken: purgePlan.confirmationToken,
+      writeValidatedEvidence: async ({ serialized }: { serialized: string }) => {
+        recordedPurgeEvidence = serialized;
+        markPurgeEvidenceStarted();
+        await purgeEvidenceRelease;
+      },
+    });
+    await purgeEvidenceStarted;
+    const concurrentAccountUpdate = database`
+      update maintainflow_advertiser_accounts set name = 'Must not survive purge'
+      where id = ${result.advertiserAccountId}
+      returning id
+    `;
+    const lockOutcome = await Promise.race([
+      concurrentAccountUpdate.then(
+        () => "settled" as const,
+        () => "settled" as const,
+      ),
+      new Promise<"blocked">((resolve) =>
+        setTimeout(() => resolve("blocked"), 100),
+      ),
+    ]);
+    expect(lockOutcome).toBe("blocked");
+    releasePurgeEvidence();
+    const purgeResult = await purge;
+    await expect(concurrentAccountUpdate).resolves.toEqual([]);
+    expect(recordedPurgeEvidence).toBe(purgePlan.serializedEvidence);
+    expect(purgeResult.deleted).toEqual(purgePlan.inventory);
+
+    const [purgedLifecycle] = await database<
+      {
+        advertiser_account_id: string | null;
+        external_account_id: string | null;
+        acting_organization_id: string | null;
+        operator_id: string | null;
+        provider_revocation_required: boolean;
+        provider_revocation_evidence_ref: string;
+        retain_until: Date;
+        purge_completed_at: Date;
+        purge_evidence_sha256: string;
+      }[]
+    >`
+      select advertiser_account_id, external_account_id,
+        acting_organization_id, operator_id, provider_revocation_required,
+        provider_revocation_evidence_ref, retain_until,
+        purge_completed_at, purge_evidence_sha256
+      from maintainflow_customer_lifecycle_records
+      where id = ${result.lifecycleId}
+    `;
+    expect(purgedLifecycle).toMatchObject({
+      advertiser_account_id: null,
+      external_account_id: null,
+      acting_organization_id: null,
+      operator_id: null,
+      provider_revocation_required: false,
+      provider_revocation_evidence_ref: lifecycleEvidenceReference,
+      retain_until: retainUntil,
+      purge_completed_at: purgeAt,
+      purge_evidence_sha256: purgePlan.evidenceSha256,
+    });
+    const [purgedCounts] = await database<
+      {
+        account_count: number;
+        approval_count: number;
+        organization_count: number;
+        membership_count: number;
+      }[]
+    >`
+      select
+        (select count(*)::int from maintainflow_advertiser_accounts
+          where id = ${result.advertiserAccountId}) as account_count,
+        (select count(*)::int from ads_approval_records
+          where account_id = ${offboardingAccountId}) as approval_count,
+        (select count(*)::int from maintainflow_organizations
+          where id = ${access.organizationId}) as organization_count,
+        (select count(*)::int from maintainflow_organization_memberships
+          where organization_id = ${access.organizationId}) as membership_count
+    `;
+    expect(purgedCounts).toEqual({
+      account_count: 0,
+      approval_count: 0,
+      organization_count: 1,
+      membership_count: 1,
+    });
+    await expect(
+      getAdsApiKeyForAccount(advertiserAccountId),
+    ).resolves.toBe(replacementAdvertiserKey);
   });
 });

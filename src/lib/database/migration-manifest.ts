@@ -79,6 +79,11 @@ export const databaseMigrationManifest = [
     checksumSha256:
       "9868cdda36e18375dda7094f734611308b7e610576cbe6c83dbdc6bbe0104c5a",
   },
+  {
+    name: "017_customer_retention_purge.sql",
+    checksumSha256:
+      "e4476dd0b2c590788a1cef4cf588a5f904fb94c0de464bd403f2b87aa0c47fb8",
+  },
 ] as const;
 
 export type DatabaseMigrationManifestEntry =

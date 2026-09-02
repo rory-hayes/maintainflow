@@ -43,6 +43,11 @@ workflow from `main` with the exact deployed Git SHA and expected stage. The
 workflow deliberately accepts no destination input, so a dispatch cannot send
 either bearer secret to an arbitrary host.
 
+Before it sends either secret, the workflow fetches repository history and
+proves that the full supplied object ID resolves to a commit and is an ancestor
+of `origin/main`. A fabricated hexadecimal label, abbreviated SHA, detached
+commit, or non-main revision therefore cannot count as deployment evidence.
+
 The same probe can be run locally without writing secrets to the repository:
 
 ```bash
@@ -72,6 +77,18 @@ origin. The script never prints bearer secrets or response bodies. A 503 is
 deployment failure evidence, even if some maintenance or monitoring work
 completed.
 
+Container CI runs this same complete probe against the built image through an
+explicit loopback-only HTTP exception. The exception is accepted only when
+`CI=true`, never for a remote HTTP host, and does not relax the hosted probe's
+credential-free HTTPS-origin requirement.
+
+CI also builds a second standalone image with a syntactically valid non-secret
+test Clerk publishable key. It starts that image in `private_read` against the
+migrated TLS PostgreSQL service and requires all twelve readiness checks, then
+proves that changing the runtime public Clerk key makes startup fail. This
+covers the account-backed image/configuration boundary without contacting
+Clerk or OpenAI and is not evidence of either hosted service working.
+
 ## Alert and retry policy
 
 - Probe liveness every five minutes and authenticated readiness every five to
@@ -98,6 +115,26 @@ completed.
 - A definitive 4xx provider rejection may be corrected and submitted only as a
   new deliberate approval or rollback attempt.
 
+## Scheduled monitoring run contract
+
+- The protected route always performs bounded stale-operation recovery,
+  unresolved-ledger checks, readiness-quota cleanup, and expired live-snapshot
+  cleanup before it starts provider work.
+- In `demo`, provider monitoring is paused: the route does not verify Ads
+  credentials or call OpenAI. It returns only capped aggregate due-account and
+  due-window counts after maintenance; those counts are not live Ads evidence.
+- In `private_read` and `live_write`, one invocation has a 60-second route cap
+  and a shared 45-second provider budget. It selects at most two advertiser
+  accounts and one due monitoring window per account. Both Insights requests
+  for a window share the same abort signal, including rate-limit waits.
+- If that budget expires, unstarted or interrupted account leases are released
+  without increasing their provider-failure backoff. The response still sets
+  `deadlineExhausted=true` and returns `503`, so the scheduler retries rather
+  than treating partial work as a healthy run.
+- Monitoring logs and responses expose capped aggregate counts and ages only;
+  they do not include advertiser account IDs. The deployment probe allows 65
+  seconds for this route and requires `deadlineExhausted=false`.
+
 ## Incident containment
 
 For any suspected bad write, credential exposure, cross-account access, or
@@ -123,9 +160,23 @@ conversion payloads, or customer URLs into tickets or chat.
 - Roll back application code only to an immutable previously verified SHA.
 - Database migrations are forward-only. Prefer a corrective migration; never
   edit an applied migration or restore an older schema under newer code.
-- Before `private_read`, restore the hosted backup into an isolated database,
-  apply the current migration ledger, run `npm run test:db` against the fixture,
-  and record recovery point/time evidence.
+- Before `private_read`, complete the read-only
+  [hosted backup and restore verification](database-backup-restore-verification.md)
+  against a pre-backup source manifest and a distinct isolated restore target,
+  including migration of the clone to the full current ledger before the final
+  read-only verification. `npm run test:db` covers only a disposable database
+  and is not restore proof.
+- Keep application writers and operational jobs stopped between the source
+  capture and the provider backup recovery point. The restore verifier requires
+  exact migration/schema fingerprints and critical aggregate counts, plus zero
+  isolation/orphan violations, inside one bounded read-only transaction.
+- Preserve both mode-`0600` evidence manifests with the release record. Do not
+  set `MAINTAINFLOW_DATABASE_BACKUP_RESTORE_VERIFIED=true` from a provider
+  snapshot notification or disposable database test alone. Hosted production
+  `db:migrate` additionally requires the passing manifest, sealed pre-backup
+  capture, and backup recovery point all to remain no more than 24 hours old,
+  and checks them against the exact target identity, full build SHA, and local
+  migration set before it connects.
 - A production restore decision must account for approvals and reconciliation
   records created after the backup. Do not erase unresolved external-write
   evidence merely to recover availability.

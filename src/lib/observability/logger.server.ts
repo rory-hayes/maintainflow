@@ -60,6 +60,7 @@ const events = [
   "monitoring.claim_release.unconfirmed",
   "monitoring.evaluation.failed",
   "monitoring.evaluation.unavailable",
+  "monitoring.paused_backlog.unavailable",
   "monitoring.readiness_cleanup.failed",
   "monitoring.run.completed",
   "monitoring.run.completed_with_failures",
@@ -67,6 +68,7 @@ const events = [
   "monitoring.run.unconfigured",
   "monitoring.snapshot_cleanup.failed",
   "monitoring.snapshot_cleanup.unavailable",
+  "monitoring.store_verification.unavailable",
   "observability.invalid_event",
   "onboarding.workspace.completed",
   "onboarding.workspace.failed",
@@ -133,6 +135,8 @@ const countNames = new Set([
   "due",
   "evaluated",
   "failed",
+  "pausedDueAccounts",
+  "pausedDueWindows",
   "pruned",
 ]);
 

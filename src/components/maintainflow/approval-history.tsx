@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, FileClock, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -65,6 +65,7 @@ import { cn } from "@/lib/utils";
 
 type ApprovalHistoryProps = {
   records: ApprovalRecordDto[];
+  dataSource?: "demo" | "live";
   canRollback: boolean;
   canReconcile: boolean;
   error?: string;
@@ -105,6 +106,13 @@ function reconciliationOptions(status: ApprovalStatus): Array<{
     { action: "mark_rolled_back", label: "Confirmed rolled back" },
     { action: "mark_still_applied", label: "Original change remains" },
   ];
+}
+
+function formatRole(role: string) {
+  return role
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 export function RollbackConfirmationDetails({
@@ -154,8 +162,114 @@ export function RollbackConfirmationDetails({
   );
 }
 
+export function ReconciliationDecisionContext({
+  record,
+}: {
+  record: ApprovalRecordDto;
+}) {
+  const headingId = useId();
+  const hasOrganization = Boolean(record.organizationName);
+  const hasRecordedRole = Boolean(record.membershipRole || record.accountRole);
+
+  return (
+    <section
+      aria-labelledby={headingId}
+      className="grid gap-3 rounded-lg border bg-muted/40 p-4"
+    >
+      <div className="grid gap-1">
+        <h3 id={headingId} className="text-sm font-medium">
+          Read-only incident context
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          Confirm this stored evidence against the live advertiser account before
+          recording an outcome.
+        </p>
+      </div>
+      <dl className="grid gap-3 text-sm sm:grid-cols-2">
+        <div className="grid min-w-0 gap-1">
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Advertiser account
+          </dt>
+          <dd className="break-all font-mono text-xs">{record.accountId}</dd>
+        </div>
+        <div className="grid min-w-0 gap-1">
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Current status
+          </dt>
+          <dd className="flex min-w-0 flex-wrap items-center gap-2">
+            <Badge
+              variant="outline"
+              className={cn("whitespace-nowrap", statusTone(record.status))}
+            >
+              {statusLabels[record.status]}
+            </Badge>
+            <span className="break-all font-mono text-xs text-muted-foreground">
+              {record.status}
+            </span>
+          </dd>
+        </div>
+        {hasOrganization ? (
+          <div className="grid min-w-0 gap-1">
+            <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Organization
+            </dt>
+            {record.organizationName ? (
+              <dd className="font-medium">{record.organizationName}</dd>
+            ) : null}
+          </div>
+        ) : null}
+        {hasRecordedRole ? (
+          <div className="grid min-w-0 gap-1">
+            <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Recorded roles
+            </dt>
+            {record.membershipRole ? (
+              <dd>Workspace {formatRole(record.membershipRole)}</dd>
+            ) : null}
+            {record.accountRole ? (
+              <dd className="text-muted-foreground">
+                Advertiser account {formatRole(record.accountRole)}
+              </dd>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="grid min-w-0 gap-1 sm:col-span-2">
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Recommendation and entity
+          </dt>
+          <dd className="font-medium">{record.recommendationTitle}</dd>
+          <dd className="break-all font-mono text-xs text-muted-foreground">
+            {record.entityId}
+          </dd>
+        </div>
+        {record.errorMessage ? (
+          <div className="grid min-w-0 gap-1 sm:col-span-2">
+            <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Stored provider error
+            </dt>
+            <dd className="break-words text-destructive">
+              {record.errorMessage}
+            </dd>
+          </div>
+        ) : null}
+        {record.reconciliationNote ? (
+          <div className="grid min-w-0 gap-1 sm:col-span-2">
+            <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Prior reconciliation note
+            </dt>
+            <dd className="whitespace-pre-wrap break-words text-muted-foreground">
+              {record.reconciliationNote}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </section>
+  );
+}
+
 export function ApprovalHistory({
   records,
+  dataSource = "live",
   canRollback,
   canReconcile,
   error,
@@ -227,7 +341,9 @@ export function ApprovalHistory({
           <div className="min-w-0 grid gap-1">
             <CardTitle className="text-base">Durable approval history</CardTitle>
             <CardDescription>
-              Account-scoped live changes, stored rollback requests, and reconciled outcomes.
+              {dataSource === "live"
+                ? "Account-scoped live changes, stored rollback requests, and reconciled outcomes."
+                : "Illustrative approvals, rollback requests, monitoring, and reconciliation records. No Ads API request was sent."}
             </CardDescription>
           </div>
         </div>
@@ -243,9 +359,15 @@ export function ApprovalHistory({
           <Empty className="border-0 py-8">
             <EmptyHeader>
               <EmptyMedia variant="icon"><FileClock /></EmptyMedia>
-              <EmptyTitle>No live approvals yet</EmptyTitle>
+              <EmptyTitle>
+                {dataSource === "live"
+                  ? "No live approvals yet"
+                  : "No simulator approvals yet"}
+              </EmptyTitle>
               <EmptyDescription>
-                Records appear here only after a live recommendation is approved.
+                {dataSource === "live"
+                  ? "Records appear here only after a live recommendation is approved."
+                  : "Approve a simulator recommendation to add an illustrative record for this session."}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
@@ -353,15 +475,18 @@ export function ApprovalHistory({
       </AlertDialog>
 
       <Dialog open={Boolean(reconcileRecord)} onOpenChange={(open) => !open && setReconcileRecord(null)}>
-        <DialogContent>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Reconcile uncertain outcome</DialogTitle>
             <DialogDescription>
               Verify the live account first, then record what actually happened. This action never sends an Ads API write.
             </DialogDescription>
           </DialogHeader>
+          {reconcileRecord ? (
+            <ReconciliationDecisionContext record={reconcileRecord} />
+          ) : null}
           <FieldGroup>
-            <Field>
+            <Field data-invalid={note.length > 0 && note.trim().length < 10}>
               <FieldLabel htmlFor="reconciliation-note">Verification note</FieldLabel>
               <Textarea
                 id="reconciliation-note"
@@ -369,8 +494,14 @@ export function ApprovalHistory({
                 onChange={(event) => setNote(event.target.value)}
                 placeholder="What did you verify in OpenAI Ads Manager?"
                 rows={4}
+                required
+                minLength={10}
+                aria-invalid={note.length > 0 && note.trim().length < 10}
+                aria-describedby="reconciliation-note-requirement"
               />
-              <FieldDescription>Required for the durable audit trail; minimum 10 characters.</FieldDescription>
+              <FieldDescription id="reconciliation-note-requirement">
+                Required for the durable audit trail; minimum 10 characters.
+              </FieldDescription>
             </Field>
           </FieldGroup>
           <DialogFooter className="gap-2 sm:flex-wrap">

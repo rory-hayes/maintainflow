@@ -19,6 +19,8 @@ import {
   listDueMonitoringAccountIds,
   listDueMonitoringRecords,
   recordMonitoringOutcome,
+  releaseMonitoringAccountAttempt,
+  summarizeDueMonitoringBacklog,
 } from "./approval-store.server";
 import { MONITORING_ATTRIBUTION_MATURITY_MS } from "../openai-ads/monitoring";
 
@@ -148,12 +150,33 @@ describe("approval rollback claims", () => {
 });
 
 describe("approval monitoring maturity store guards", () => {
+  it("releases an unstarted account lease without recording a provider failure", async () => {
+    const { calls } = fakeDatabase([
+      [{ advertiser_account_id: "00000000-0000-4000-8000-000000000001" }],
+    ]);
+
+    await expect(
+      releaseMonitoringAccountAttempt({
+        accountId: "adacct_expected",
+        attemptId: "attempt-expected",
+        now: new Date("2026-08-30T12:00:00.000Z"),
+      }),
+    ).resolves.toBe(true);
+
+    const statement = normalizedQueryText(calls[0]);
+    expect(statement).toContain("current_attempt_id = null");
+    expect(statement).toContain("attempt_lease_until = null");
+    expect(statement).not.toContain("consecutive_failures =");
+    expect(statement).not.toContain("backoff_until =");
+    expect(statement).toContain("schedule.current_attempt_id = $parameter");
+  });
+
   it("uses the shared 48-hour cutoff for listing, claiming, and outcome persistence", async () => {
     const endsAt = new Date("2026-08-27T00:00:00.000Z");
     const maturityAt = new Date(
       endsAt.getTime() + MONITORING_ATTRIBUTION_MATURITY_MS,
     );
-    const { calls } = fakeDatabase([[], [], [], []]);
+    const { calls } = fakeDatabase([[], [], [], [], []]);
 
     await expect(
       listDueMonitoringRecords("adacct_expected", maturityAt, 1),
@@ -190,7 +213,14 @@ describe("approval monitoring maturity store guards", () => {
       }),
     ).resolves.toBe(false);
 
-    expect(calls).toHaveLength(4);
+    await expect(summarizeDueMonitoringBacklog(maturityAt)).resolves.toEqual({
+      dueAccounts: 0,
+      dueWindows: 0,
+      dueAccountsCapped: false,
+      dueWindowsCapped: false,
+    });
+
+    expect(calls).toHaveLength(5);
     for (const call of calls) {
       expect(monitoringCutoffValue(call)).toEqual(endsAt);
     }
@@ -202,6 +232,29 @@ describe("approval monitoring maturity store guards", () => {
       "with locked_account as materialized",
     );
     expect(normalizedQueryText(calls[3])).toContain("for share");
+    expect(normalizedQueryText(calls[4])).not.toContain("for update");
+  });
+
+  it("returns only bounded aggregate monitoring backlog evidence", async () => {
+    fakeDatabase([
+      [
+        {
+          due_accounts: 10_001,
+          due_windows: 10_001,
+          due_accounts_capped: true,
+          due_windows_capped: true,
+        },
+      ],
+    ]);
+
+    await expect(
+      summarizeDueMonitoringBacklog(new Date("2026-08-30T12:00:00.000Z")),
+    ).resolves.toEqual({
+      dueAccounts: 10_000,
+      dueWindows: 10_000,
+      dueAccountsCapped: true,
+      dueWindowsCapped: true,
+    });
   });
 
   it("fences a stale account candidate against a current lease or backoff", async () => {

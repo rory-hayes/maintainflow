@@ -499,6 +499,14 @@ export default async function MaintainFlowAppPage({
     }
   }
 
+  if (dataSource === "demo") {
+    approvalHistory = simulatedWorkspace.approvalHistory;
+    monitoringWindows = buildMonitoringWindows(
+      approvalHistory,
+      new Date("2026-09-02T12:00:00.000Z"),
+    );
+  }
+
   const writeBlockers = [
     ...runtime.writeBlockers,
     ...(runtime.authConfigured && !authenticatedOperator
