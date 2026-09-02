@@ -37,8 +37,11 @@ wildcard or list target. The acting operator must still be an active organizatio
 owner, and the organization must be the advertiser owner or the sole manager of
 an ownerless agency-managed account.
 
-Load `DATABASE_URL` from the deployment secret manager. First run the command
-without `--apply`; dry-run is the default:
+Load a short-lived operator `DATABASE_URL` from the secret manager; do not use
+the restricted runtime role for offboarding or retention operations. For a
+hosted database, also inject the matching `MAINTAINFLOW_DATABASE_CA_CERT` root
+CA so the operator connection verifies both the certificate chain and hostname.
+First run the command without `--apply`; dry-run is the default:
 
 ```bash
 npm run customer:offboard -- \

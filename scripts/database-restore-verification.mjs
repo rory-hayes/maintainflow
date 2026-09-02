@@ -17,6 +17,7 @@ import {
   writeEvidenceManifest,
 } from "./database-restore-evidence-common.mjs";
 import { loadMigrations } from "./run-database-migrations.mjs";
+import { hostedDatabaseTlsOptions } from "./database-tls.mjs";
 
 export {
   databaseTargetIdentity,
@@ -29,6 +30,10 @@ export const SOURCE_DATABASE_URL_KEY =
   "MAINTAINFLOW_BACKUP_SOURCE_DATABASE_URL";
 export const RESTORE_DATABASE_URL_KEY =
   "MAINTAINFLOW_RESTORE_DATABASE_URL";
+export const SOURCE_DATABASE_CA_CERT_KEY =
+  "MAINTAINFLOW_BACKUP_SOURCE_DATABASE_CA_CERT";
+export const RESTORE_DATABASE_CA_CERT_KEY =
+  "MAINTAINFLOW_RESTORE_DATABASE_CA_CERT";
 export const SOURCE_TARGET_REFERENCE_KEY =
   "MAINTAINFLOW_BACKUP_SOURCE_TARGET_REFERENCE";
 export const RESTORE_TARGET_REFERENCE_KEY =
@@ -771,7 +776,13 @@ export async function collectDatabaseEvidence(
 export async function inspectDatabase(
   databaseUrl,
   expectedDatabaseName,
-  { connect = postgres, migrations = undefined, ledgerMode = "full" } = {},
+  {
+    connect = postgres,
+    certificateKey = "MAINTAINFLOW_DATABASE_CA_CERT",
+    environment = process.env,
+    migrations = undefined,
+    ledgerMode = "full",
+  } = {},
 ) {
   const loadedMigrations = migrations ?? (await loadMigrations());
   const sql = connect(databaseUrl, {
@@ -780,6 +791,12 @@ export async function inspectDatabase(
     max: 1,
     onnotice: () => {},
     prepare: false,
+    ...hostedDatabaseTlsOptions({
+      hosted: true,
+      certificateKey,
+      environment,
+      createError: (message) => new RestoreVerificationError(message),
+    }),
   });
   try {
     return await sql.begin(READ_ONLY_TRANSACTION_OPTIONS, (transaction) =>
@@ -932,7 +949,13 @@ export async function capturePreBackupEvidence({
   const evidence = await inspectDatabase(
     config.databaseUrl,
     config.expectedDatabaseName,
-    { connect, migrations, ledgerMode: "prefix" },
+    {
+      connect,
+      certificateKey: SOURCE_DATABASE_CA_CERT_KEY,
+      environment: env,
+      migrations,
+      ledgerMode: "prefix",
+    },
   );
   const manifest = withManifestChecksum({
     schemaVersion: EVIDENCE_SCHEMA_VERSION,
@@ -988,7 +1011,13 @@ export async function verifyRestoredBackup({
   const restoredEvidence = await inspectDatabase(
     config.databaseUrl,
     config.expectedDatabaseName,
-    { connect, migrations, ledgerMode: "full" },
+    {
+      connect,
+      certificateKey: RESTORE_DATABASE_CA_CERT_KEY,
+      environment: env,
+      migrations,
+      ledgerMode: "full",
+    },
   );
   compareRestoredEvidence(preBackupManifest.evidence, restoredEvidence);
   const manifest = withManifestChecksum({

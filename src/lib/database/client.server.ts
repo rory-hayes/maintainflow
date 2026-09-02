@@ -1,5 +1,7 @@
 import "server-only";
 
+import { X509Certificate } from "node:crypto";
+
 import postgres, { type Sql } from "postgres";
 
 const DEFAULT_POOL_MAX = 4;
@@ -75,6 +77,54 @@ function validatedDatabaseUrl(connectionString: string) {
   return parsed;
 }
 
+function configuredProductionDatabaseSsl() {
+  const configured = process.env.MAINTAINFLOW_DATABASE_CA_CERT;
+  if (!configured) {
+    throw new RuntimeDatabaseConfigurationError(
+      "MAINTAINFLOW_DATABASE_CA_CERT must contain one currently valid self-signed CA certificate in production.",
+    );
+  }
+
+  const certificateBlocks = configured.match(
+    /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g,
+  );
+  if (
+    certificateBlocks?.length !== 1 ||
+    certificateBlocks[0].trim() !== configured.trim()
+  ) {
+    throw new RuntimeDatabaseConfigurationError(
+      "MAINTAINFLOW_DATABASE_CA_CERT must contain one currently valid self-signed CA certificate in production.",
+    );
+  }
+
+  try {
+    const certificate = new X509Certificate(certificateBlocks[0]);
+    const now = Date.now();
+    const validFrom = Date.parse(certificate.validFrom);
+    const validTo = Date.parse(certificate.validTo);
+    if (
+      !certificate.ca ||
+      !Number.isFinite(validFrom) ||
+      !Number.isFinite(validTo) ||
+      validFrom > now ||
+      validTo <= now ||
+      !certificate.checkIssued(certificate) ||
+      !certificate.verify(certificate.publicKey)
+    ) {
+      throw new Error("The configured certificate is not a valid root CA.");
+    }
+  } catch {
+    throw new RuntimeDatabaseConfigurationError(
+      "MAINTAINFLOW_DATABASE_CA_CERT must contain one currently valid self-signed CA certificate in production.",
+    );
+  }
+
+  return {
+    ca: certificateBlocks[0],
+    rejectUnauthorized: true,
+  };
+}
+
 export function getRuntimeDatabase(connectionString: string): Sql {
   validatedDatabaseUrl(connectionString);
   if (runtimeDatabase) {
@@ -96,7 +146,9 @@ export function getRuntimeDatabase(connectionString: string): Sql {
       search_path: "public",
     },
     ...(process.env.NODE_ENV === "production"
-      ? { ssl: "verify-full" as const }
+      ? {
+          ssl: configuredProductionDatabaseSsl(),
+        }
       : {}),
   });
   runtimeDatabase = { client, connectionString };

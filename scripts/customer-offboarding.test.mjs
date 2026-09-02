@@ -1,8 +1,10 @@
+import { X509Certificate } from "node:crypto";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { rootCertificates } from "node:tls";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   canonicalCustomerOffboardingJson,
@@ -11,11 +13,38 @@ import {
   customerOffboardingStateFingerprint,
   formatCustomerOffboardingFailure,
   parseCustomerOffboardingArgs,
+  runCustomerOffboardingCli,
   writePrivateCustomerExport,
 } from "./customer-offboarding.mjs";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const temporaryDirectories = [];
+const testCaCertificate = rootCertificates.find((pem) => {
+  const certificate = new X509Certificate(pem);
+  const now = Date.now();
+  return (
+    certificate.ca &&
+    Date.parse(certificate.validFrom) <= now &&
+    Date.parse(certificate.validTo) > now &&
+    certificate.checkIssued(certificate) &&
+    certificate.verify(certificate.publicKey)
+  );
+});
+
+if (!testCaCertificate) throw new Error("No valid test root CA is available.");
+
+function offboardingArguments(exportFile = "/tmp/customer-offboarding.json") {
+  return [
+    "--account-id",
+    "adacct_customer_exact",
+    "--organization-id",
+    organizationId,
+    "--operator-id",
+    "user_customer_owner",
+    "--export-file",
+    exportFile,
+  ];
+}
 
 function snapshot(overrides = {}) {
   return {
@@ -63,16 +92,7 @@ afterEach(async () => {
 
 describe("customer offboarding operator safety", () => {
   it("defaults to dry-run and requires exact, non-wildcard targets", () => {
-    const parsed = parseCustomerOffboardingArgs([
-      "--account-id",
-      "adacct_customer_exact",
-      "--organization-id",
-      organizationId,
-      "--operator-id",
-      "user_customer_owner",
-      "--export-file",
-      "/tmp/customer-offboarding.json",
-    ]);
+    const parsed = parseCustomerOffboardingArgs(offboardingArguments());
     expect(parsed).toMatchObject({
       mode: "dry-run",
       accountId: "adacct_customer_exact",
@@ -196,5 +216,46 @@ describe("customer offboarding operator safety", () => {
     expect(formatted).not.toContain("do-not-print");
     expect(formatted).not.toContain("another-secret");
     expect(formatted).toContain("[REDACTED]");
+  });
+
+  it("requires the hosted operator CA before opening an offboarding connection", async () => {
+    const connect = vi.fn();
+    await expect(
+      runCustomerOffboardingCli({
+        argv: offboardingArguments(),
+        environment: {
+          DATABASE_URL:
+            "postgres://operator:secret@db.example/maintainflow?sslmode=verify-full",
+        },
+        connect,
+      }),
+    ).rejects.toThrow("MAINTAINFLOW_DATABASE_CA_CERT");
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("passes the pinned CA to the offboarding connector", async () => {
+    const sentinel = new Error("connector sentinel");
+    const connect = vi.fn(() => {
+      throw sentinel;
+    });
+    await expect(
+      runCustomerOffboardingCli({
+        argv: offboardingArguments(),
+        environment: {
+          DATABASE_URL:
+            "postgres://operator:secret@db.example/maintainflow?sslmode=verify-full",
+          MAINTAINFLOW_DATABASE_CA_CERT: testCaCertificate,
+        },
+        connect,
+      }),
+    ).rejects.toBe(sentinel);
+    expect(connect).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        max: 1,
+        prepare: false,
+        ssl: { ca: testCaCertificate, rejectUnauthorized: true },
+      }),
+    );
   });
 });

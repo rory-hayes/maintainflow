@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { X509Certificate } from "node:crypto";
+import { rootCertificates } from "node:tls";
 
 vi.mock("server-only", () => ({}));
 
@@ -19,6 +21,20 @@ import {
   getRuntimeDatabase,
   RuntimeDatabaseConfigurationError,
 } from "./client.server";
+
+const testCaCertificate = rootCertificates.find((pem) => {
+  const certificate = new X509Certificate(pem);
+  const now = Date.now();
+  return (
+    certificate.ca &&
+    Date.parse(certificate.validFrom) <= now &&
+    Date.parse(certificate.validTo) > now &&
+    certificate.checkIssued(certificate) &&
+    certificate.verify(certificate.publicKey)
+  );
+});
+
+if (!testCaCertificate) throw new Error("No valid test root CA is available.");
 
 beforeEach(async () => {
   await closeRuntimeDatabase();
@@ -92,6 +108,7 @@ describe("shared runtime PostgreSQL client", () => {
 
   it("pins certificate verification even after validating the URL", () => {
     vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("MAINTAINFLOW_DATABASE_CA_CERT", testCaCertificate);
     const url =
       "postgres://user:secret@db.example/maintainflow?sslmode=verify-full";
 
@@ -99,8 +116,33 @@ describe("shared runtime PostgreSQL client", () => {
 
     expect(databaseMocks.create).toHaveBeenCalledWith(
       url,
-      expect.objectContaining({ ssl: "verify-full" }),
+      expect.objectContaining({
+        ssl: {
+          ca: testCaCertificate,
+          rejectUnauthorized: true,
+        },
+      }),
     );
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["invalid", "not-a-certificate"],
+    ["multiple", `${testCaCertificate}\n${testCaCertificate}`],
+  ])("rejects a %s production database CA certificate", (_label, certificate) => {
+    vi.stubEnv("NODE_ENV", "production");
+    if (certificate === undefined) {
+      vi.stubEnv("MAINTAINFLOW_DATABASE_CA_CERT", "");
+    } else {
+      vi.stubEnv("MAINTAINFLOW_DATABASE_CA_CERT", certificate);
+    }
+
+    expect(() =>
+      getRuntimeDatabase(
+        "postgres://user:secret@db.example/maintainflow?sslmode=verify-full",
+      ),
+    ).toThrow("MAINTAINFLOW_DATABASE_CA_CERT");
+    expect(databaseMocks.create).not.toHaveBeenCalled();
   });
 
   it.each(["search_path=other", "options=-c%20search_path%3Dother"])(

@@ -1,14 +1,17 @@
+import { X509Certificate } from "node:crypto";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { rootCertificates } from "node:tls";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CustomerLifecycleSafetyError,
   formatCustomerLifecycleFailure,
   parseCustomerLifecycleArgs,
   prepareProviderRevocationConfirmation,
+  runCustomerLifecycleCli,
   writePrivateLifecycleEvidence,
 } from "./customer-lifecycle.mjs";
 
@@ -19,6 +22,19 @@ const externalAccountId = "adacct_customer_must_not_enter_evidence";
 const operatorId = "user_customer_must_not_enter_evidence";
 const evidenceReference = "case_external_revocation_20260902";
 const temporaryDirectories = [];
+const testCaCertificate = rootCertificates.find((pem) => {
+  const certificate = new X509Certificate(pem);
+  const now = Date.now();
+  return (
+    certificate.ca &&
+    Date.parse(certificate.validFrom) <= now &&
+    Date.parse(certificate.validTo) > now &&
+    certificate.checkIssued(certificate) &&
+    certificate.verify(certificate.publicKey)
+  );
+});
+
+if (!testCaCertificate) throw new Error("No valid test root CA is available.");
 
 function revocationArguments(extra = []) {
   return [
@@ -219,5 +235,46 @@ describe("customer lifecycle operator safety", () => {
     expect(formatted).not.toContain(evidenceReference);
     expect(formatted).not.toContain("another-secret");
     expect(formatted).toContain("[REDACTED]");
+  });
+
+  it("requires the hosted operator CA before opening a lifecycle connection", async () => {
+    const connect = vi.fn();
+    await expect(
+      runCustomerLifecycleCli({
+        argv: revocationArguments(),
+        environment: {
+          DATABASE_URL:
+            "postgres://operator:secret@db.example/maintainflow?sslmode=verify-full",
+        },
+        connect,
+      }),
+    ).rejects.toThrow("MAINTAINFLOW_DATABASE_CA_CERT");
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("passes the pinned CA to the lifecycle connector", async () => {
+    const sentinel = new Error("connector sentinel");
+    const connect = vi.fn(() => {
+      throw sentinel;
+    });
+    await expect(
+      runCustomerLifecycleCli({
+        argv: revocationArguments(),
+        environment: {
+          DATABASE_URL:
+            "postgres://operator:secret@db.example/maintainflow?sslmode=verify-full",
+          MAINTAINFLOW_DATABASE_CA_CERT: testCaCertificate,
+        },
+        connect,
+      }),
+    ).rejects.toBe(sentinel);
+    expect(connect).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        max: 1,
+        prepare: false,
+        ssl: { ca: testCaCertificate, rejectUnauthorized: true },
+      }),
+    );
   });
 });

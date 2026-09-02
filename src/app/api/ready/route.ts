@@ -2,7 +2,10 @@ import { timingSafeEqual } from "node:crypto";
 
 import { verifyApprovalStore } from "@/lib/audit/approval-store.server";
 import { verifyRecommendationDecisionStore } from "@/lib/audit/recommendation-decision-store.server";
-import { verifyDatabaseMigrationLedger } from "@/lib/database/readiness.server";
+import {
+  verifyDatabaseMigrationLedger,
+  verifyRuntimeDatabaseRole,
+} from "@/lib/database/readiness.server";
 import { createServerLogger } from "@/lib/observability/logger.server";
 import { verifyCreativeHistoryStore } from "@/lib/openai-ads/creative-history.server";
 import { verifyLiveSyncStore } from "@/lib/openai-ads/live-sync-store.server";
@@ -33,6 +36,7 @@ function hasAuthorizedProbeHeader(request: Request, secret: string) {
 
 function dependencyChecks(stage: string): ReadinessCheck[] {
   const checks: ReadinessCheck[] = [
+    ["database_runtime_role", verifyRuntimeDatabaseRole],
     [
       "database_migrations",
       async () => (await verifyDatabaseMigrationLedger()).ready,
