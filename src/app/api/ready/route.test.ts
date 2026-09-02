@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 const state = vi.hoisted(() => ({
   verifyDatabaseMigrationLedger: vi.fn(),
+  verifyRuntimeDatabaseRole: vi.fn(),
   verifyReadinessRateLimitStore: vi.fn(),
   verifyTenancyStore: vi.fn(),
   verifyCredentialStore: vi.fn(),
@@ -18,6 +19,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock("@/lib/database/readiness.server", () => ({
   verifyDatabaseMigrationLedger: state.verifyDatabaseMigrationLedger,
+  verifyRuntimeDatabaseRole: state.verifyRuntimeDatabaseRole,
 }));
 vi.mock("@/lib/readiness/rate-limit.server", () => ({
   verifyReadinessRateLimitStore: state.verifyReadinessRateLimitStore,
@@ -63,6 +65,7 @@ beforeEach(() => {
   vi.stubEnv("CRON_SECRET", "c".repeat(32));
   state.resolveBuildRevision.mockReturnValue("a".repeat(40));
   state.verifyDatabaseMigrationLedger.mockResolvedValue({ ready: true });
+  state.verifyRuntimeDatabaseRole.mockResolvedValue(true);
   for (const check of [
     state.verifyReadinessRateLimitStore,
     state.verifyTenancyStore,
@@ -89,7 +92,7 @@ describe("deployment readiness route", () => {
     });
   }
 
-  it("proves a credential-free demo only after its revision, ledger, and public quota are ready", async () => {
+  it("proves a credential-free demo only after its revision, runtime role, ledger, and public quota are ready", async () => {
     const response = await GET(request());
 
     expect(response.status).toBe(200);
@@ -100,7 +103,7 @@ describe("deployment readiness route", () => {
       scope: "deployment_readiness",
       stage: "demo",
       revision: "a".repeat(40),
-      checks: { passed: 5, total: 5 },
+      checks: { passed: 6, total: 6 },
     });
     expect(state.verifyTenancyStore).not.toHaveBeenCalled();
     expect(console.info).toHaveBeenCalledOnce();
@@ -109,7 +112,7 @@ describe("deployment readiness route", () => {
     ).toMatchObject({
       event: "deployment.readiness.completed",
       status: 200,
-      counts: { checksPassed: 5, checksTotal: 5 },
+      counts: { checksPassed: 6, checksTotal: 6 },
     });
   });
 
@@ -121,12 +124,27 @@ describe("deployment readiness route", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
       stage: "demo",
-      checks: { passed: 4, total: 5 },
+      checks: { passed: 5, total: 6 },
     });
     expect(state.verifyLiveSyncStore).toHaveBeenCalledTimes(1);
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
       failedChecks: ["live_sync"],
+    });
+  });
+
+  it("fails when the deployment is not using the restricted runtime role", async () => {
+    state.verifyRuntimeDatabaseRole.mockResolvedValue(false);
+    const response = await GET(request());
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      checks: { passed: 5, total: 6 },
+    });
+    expect(lastErrorRecord()).toMatchObject({
+      event: "deployment.readiness.failed",
+      failedChecks: ["database_runtime_role"],
     });
   });
 
@@ -142,7 +160,7 @@ describe("deployment readiness route", () => {
       ok: false,
       stage: "demo",
       revision: "unknown",
-      checks: { passed: 3, total: 5 },
+      checks: { passed: 4, total: 6 },
     });
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
@@ -160,7 +178,7 @@ describe("deployment readiness route", () => {
     expect(payload).toMatchObject({
       ok: false,
       stage: "private_read",
-      checks: { passed: 11, total: 12 },
+      checks: { passed: 12, total: 13 },
     });
     expect(state.verifyTenancyStore).toHaveBeenCalledTimes(1);
     expect(state.verifyApprovalStore).toHaveBeenCalledTimes(1);
@@ -175,6 +193,7 @@ describe("deployment readiness route", () => {
 
     expect(response.status).toBe(401);
     expect(state.verifyDatabaseMigrationLedger).not.toHaveBeenCalled();
+    expect(state.verifyRuntimeDatabaseRole).not.toHaveBeenCalled();
     expect(state.verifyReadinessRateLimitStore).not.toHaveBeenCalled();
   });
 

@@ -129,11 +129,25 @@ jobs:
             sleep 1
           done
           test "$postgres_ready" = "true"
+          ci_database_ca="$(< "$ci_cert_dir/ca.crt")"
 
           NODE_EXTRA_CA_CERTS="$ci_cert_dir/ca.crt" \
             DATABASE_URL='postgres://maintainflow:maintainflow@localhost:5432/maintainflow?sslmode=verify-full' \
             MAINTAINFLOW_APPLY_DATABASE_MIGRATIONS=true \
             npm run db:migrate
+
+          docker exec --interactive \
+            --env PGPASSWORD=maintainflow \
+            maintainflow-postgres-ci \
+            psql --username maintainflow --dbname maintainflow \
+              --no-psqlrc --set ON_ERROR_STOP=1 --file - \
+            < scripts/database/maintainflow-runtime-role.sql
+          docker exec \
+            --env PGPASSWORD=maintainflow \
+            maintainflow-postgres-ci \
+            psql --username maintainflow --dbname maintainflow \
+              --no-psqlrc --set ON_ERROR_STOP=1 \
+              --command "alter role maintainflow_app password 'maintainflow_app_ci'"
 
           docker run --detach --name maintainflow-ads-ci --publish 3000:3000 \
             --network "$ci_network" \
@@ -148,7 +162,8 @@ jobs:
             --env MAINTAINFLOW_LEGAL_ENTITY_NAME="MaintainFlow CI" \
             --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.io \
             --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.io \
-            --env DATABASE_URL='postgres://maintainflow:maintainflow@postgres:5432/maintainflow?sslmode=verify-full' \
+            --env DATABASE_URL='postgres://maintainflow_app:maintainflow_app_ci@postgres:5432/maintainflow?sslmode=verify-full' \
+            --env MAINTAINFLOW_DATABASE_CA_CERT="$ci_database_ca" \
             --env CRON_SECRET=cccccccccccccccccccccccccccccccc \
             --env READINESS_RATE_LIMIT_SECRET=rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr \
             --env MAINTAINFLOW_READINESS_PROBE_SECRET=pppppppppppppppppppppppppppppppp \
@@ -180,7 +195,7 @@ jobs:
             sleep 1
           done
           test "$dependencies_ready" = "true"
-          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('ready.json','utf8')); if (!value.ok || value.scope !== 'deployment_readiness' || value.stage !== 'demo' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 5) process.exit(1);"
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('ready.json','utf8')); if (!value.ok || value.scope !== 'deployment_readiness' || value.stage !== 'demo' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 6) process.exit(1);"
 
           CI=true \
             MAINTAINFLOW_PROBE_ALLOW_INSECURE_LOOPBACK=true \
@@ -211,7 +226,8 @@ jobs:
             --env MAINTAINFLOW_LEGAL_ENTITY_NAME="MaintainFlow CI" \
             --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.io \
             --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.io \
-            --env DATABASE_URL='postgres://maintainflow:maintainflow@postgres:5432/maintainflow?sslmode=verify-full' \
+            --env DATABASE_URL='postgres://maintainflow_app:maintainflow_app_ci@postgres:5432/maintainflow?sslmode=verify-full' \
+            --env MAINTAINFLOW_DATABASE_CA_CERT="$ci_database_ca" \
             --env CRON_SECRET=cccccccccccccccccccccccccccccccc \
             --env READINESS_RATE_LIMIT_SECRET=rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr \
             --env MAINTAINFLOW_READINESS_PROBE_SECRET=pppppppppppppppppppppppppppppppp \
@@ -234,7 +250,7 @@ jobs:
             sleep 1
           done
           test "$private_read_ready" = "true"
-          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('private-read-ready.json','utf8')); if (!value.ok || value.stage !== 'private_read' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 12) process.exit(1);"
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('private-read-ready.json','utf8')); if (!value.ok || value.stage !== 'private_read' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 13) process.exit(1);"
 
           docker rm --force maintainflow-ads-private-read-ci
           docker run --detach --name maintainflow-ads-config-mismatch-ci \
@@ -249,7 +265,8 @@ jobs:
             --env MAINTAINFLOW_LEGAL_ENTITY_NAME="MaintainFlow CI" \
             --env MAINTAINFLOW_PRIVACY_CONTACT_EMAIL=privacy@maintainflow.io \
             --env MAINTAINFLOW_SUPPORT_CONTACT_EMAIL=support@maintainflow.io \
-            --env DATABASE_URL='postgres://maintainflow:maintainflow@postgres:5432/maintainflow?sslmode=verify-full' \
+            --env DATABASE_URL='postgres://maintainflow_app:maintainflow_app_ci@postgres:5432/maintainflow?sslmode=verify-full' \
+            --env MAINTAINFLOW_DATABASE_CA_CERT="$ci_database_ca" \
             --env CRON_SECRET=cccccccccccccccccccccccccccccccc \
             --env READINESS_RATE_LIMIT_SECRET=rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr \
             --env MAINTAINFLOW_READINESS_PROBE_SECRET=pppppppppppppppppppppppppppppppp \

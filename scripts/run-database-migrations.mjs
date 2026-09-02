@@ -15,6 +15,7 @@ import {
   SHA256_PATTERN,
   sha256 as hashEvidence,
 } from "./database-restore-evidence-common.mjs";
+import { hostedDatabaseTlsOptions } from "./database-tls.mjs";
 
 export const APPLY_MIGRATIONS_FLAG =
   "MAINTAINFLOW_APPLY_DATABASE_MIGRATIONS";
@@ -580,6 +581,11 @@ export async function runDatabaseMigrations({
     max: 1,
     onnotice: () => {},
     prepare: false,
+    ...hostedDatabaseTlsOptions({
+      hosted: migrationConfig.hosted,
+      environment: env,
+      createError: (message) => new MigrationSafetyError(message),
+    }),
   });
 
   try {

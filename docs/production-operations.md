@@ -31,6 +31,14 @@ Vercel runtime logs are sufficient for the first private staging deployment.
 Add a paid log drain or incident vendor only after the event contract is proven;
 do not send raw request or database data to a monitoring vendor.
 
+Production and Preview deployments each run with `NODE_ENV=production`, so
+each database URL must have its matching Sensitive
+`MAINTAINFLOW_DATABASE_CA_CERT` trust root. Keep Preview on an isolated
+non-production database credential even when the provider root CA happens to be
+the same. Certificate rotation requires updating the scoped secret, deploying a
+new immutable revision, and proving a real authenticated pooler query before
+promotion; never fall back to encryption-only TLS or disable hostname checks.
+
 ## Exact-revision deployment smoke
 
 Create a protected GitHub environment named `staging`. Require an appropriate
@@ -84,7 +92,7 @@ credential-free HTTPS-origin requirement.
 
 CI also builds a second standalone image with a syntactically valid non-secret
 test Clerk publishable key. It starts that image in `private_read` against the
-migrated TLS PostgreSQL service and requires all twelve readiness checks, then
+migrated TLS PostgreSQL service and requires all thirteen readiness checks, then
 proves that changing the runtime public Clerk key makes startup fail. This
 covers the account-backed image/configuration boundary without contacting
 Clerk or OpenAI and is not evidence of either hosted service working.

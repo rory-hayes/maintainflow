@@ -22,6 +22,18 @@ never the application's `DATABASE_URL`:
 - `MAINTAINFLOW_RESTORE_DATABASE_URL` is the isolated restored target used only
   for verification.
 
+Bind each URL to its own secret-manager trust root:
+
+- `MAINTAINFLOW_BACKUP_SOURCE_DATABASE_CA_CERT` authenticates only the source
+  evidence connection; and
+- `MAINTAINFLOW_RESTORE_DATABASE_CA_CERT` authenticates only the restored
+  verifier connection.
+
+The clone-migration and production-migration commands use the operator-level
+`MAINTAINFLOW_DATABASE_CA_CERT`. Keeping the verifier roots separate prevents a
+source certificate change from silently changing which restore trust anchor is
+used.
+
 Both URLs must use `postgres://` or `postgresql://`, name exactly one hosted
 database, and include exactly one `sslmode=verify-full`. Loopback targets and
 looser TLS modes are rejected. The script derives one SHA-256 endpoint identity
@@ -85,6 +97,7 @@ immediately before requesting the backup:
 
 ```bash
 MAINTAINFLOW_BACKUP_SOURCE_DATABASE_URL='<secret-manager source URL>' \
+MAINTAINFLOW_BACKUP_SOURCE_DATABASE_CA_CERT='<secret-manager source root CA PEM>' \
 MAINTAINFLOW_BACKUP_SOURCE_TARGET_REFERENCE='<same provider target reference>' \
 MAINTAINFLOW_BACKUP_SOURCE_IDENTITY_SHA256='<reviewed source identity>' \
 MAINTAINFLOW_PRODUCTION_DATABASE_IDENTITY_SHA256='<same reviewed identity>' \
@@ -136,6 +149,7 @@ migration role, apply the checkout's pending suffix to the isolated clone:
 
 ```bash
 DATABASE_URL='<secret-manager restore migration URL>' \
+MAINTAINFLOW_DATABASE_CA_CERT='<secret-manager restore migration root CA PEM>' \
 MAINTAINFLOW_DATABASE_TARGET_REFERENCE='<same restore target reference>' \
 MAINTAINFLOW_PRODUCTION_DATABASE_IDENTITY_SHA256='<reviewed production identity>' \
 MAINTAINFLOW_RESTORE_TARGET_IDENTITY_SHA256='<reviewed restore identity>' \
@@ -157,6 +171,7 @@ complete verification:
 
 ```bash
 MAINTAINFLOW_RESTORE_DATABASE_URL='<secret-manager restore URL>' \
+MAINTAINFLOW_RESTORE_DATABASE_CA_CERT='<secret-manager restore root CA PEM>' \
 MAINTAINFLOW_RESTORE_TARGET_REFERENCE='<same provider restore target reference>' \
 MAINTAINFLOW_RESTORE_TARGET_IDENTITY_SHA256='<reviewed restore identity>' \
 MAINTAINFLOW_PRODUCTION_DATABASE_IDENTITY_SHA256='<reviewed production identity>' \
@@ -213,6 +228,7 @@ production target identity:
 
 ```bash
 DATABASE_URL='<secret-manager production migration URL>' \
+MAINTAINFLOW_DATABASE_CA_CERT='<secret-manager production root CA PEM>' \
 MAINTAINFLOW_DATABASE_TARGET_REFERENCE='<production provider target reference>' \
 MAINTAINFLOW_PRODUCTION_DATABASE_IDENTITY_SHA256='<reviewed production identity>' \
 MAINTAINFLOW_BUILD_SHA='<same full Git SHA>' \

@@ -19,6 +19,8 @@ For a hosted `DATABASE_URL`, additional gates are enforced:
    connection verifies both the provider's trusted certificate chain and the
    database hostname. `require`, `verify-ca`, `disable`, `allow`, `prefer`, a
    missing or duplicate mode, and non-PostgreSQL URLs are rejected.
+   `MAINTAINFLOW_DATABASE_CA_CERT` must contain the provider's single current
+   self-signed root CA for hosted connections; system trust alone is not used.
 2. The credential-free endpoint and provider target reference are hashed and
    compared separately as well as through the reviewed composite target
    identity. An isolated restore must not reuse the production endpoint even
@@ -76,6 +78,7 @@ Load `DATABASE_URL` from the deployment secret manager rather than putting it
 in shell history. After the applicable recovery checks:
 
 ```bash
+MAINTAINFLOW_DATABASE_CA_CERT='<secret-manager production root CA PEM>' \
 MAINTAINFLOW_APPLY_DATABASE_MIGRATIONS=true \
 MAINTAINFLOW_DATABASE_BACKUP_RESTORE_VERIFIED=true \
 MAINTAINFLOW_DATABASE_TARGET_REFERENCE='<production provider target reference>' \
@@ -133,9 +136,10 @@ revokes matching default privileges for future public-schema objects.
 MaintainFlow uses Clerk plus its server-only PostgreSQL connection rather than
 Supabase Auth or PostgREST; keep the Supabase Data API disabled for this schema
 and run hosted migrations as the privileged `postgres` migration role so its
-defaults are hardened. Application access through a non-owner database role
-requires a separate reviewed grant/RLS policy migration before changing runtime
-roles.
+defaults are hardened. Application traffic uses the separately reviewed
+[`maintainflow_app` runtime role](runtime-database-role.md), whose exact grants
+and deliberate zero-policy RLS boundary are documented independently from the
+migration credential.
 
 The application compiles the same ordered names and SHA-256 checksums into its
 deployment-readiness contract. `/api/ready` compares that immutable manifest

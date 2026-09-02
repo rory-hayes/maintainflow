@@ -205,7 +205,7 @@ export async function probeDeployment(options) {
     readinessResponse,
     "Authenticated readiness probe",
   );
-  const minimumReadinessChecks = expectedStage === "demo" ? 5 : 12;
+  const minimumReadinessChecks = expectedStage === "demo" ? 6 : 13;
   if (
     readiness?.ok !== true ||
     readiness?.service !== "maintainflow-ads" ||

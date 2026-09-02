@@ -115,6 +115,7 @@ const dependencyChecks = new Set([
   "conversion_credentials",
   "creative_history",
   "database_migrations",
+  "database_runtime_role",
   "live_sync",
   "readiness_history",
   "readiness_quota",

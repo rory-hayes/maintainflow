@@ -1,3 +1,4 @@
+import { X509Certificate } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -8,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { rootCertificates } from "node:tls";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -21,11 +23,13 @@ import {
   inspectDatabase,
   readPreBackupManifest,
   RESTORE_DATABASE_URL_KEY,
+  RESTORE_DATABASE_CA_CERT_KEY,
   RESTORE_EVIDENCE_PATH_KEY,
   RESTORE_IDENTITY_KEY,
   RESTORE_TARGET_REFERENCE_KEY,
   RestoreVerificationError,
   SOURCE_DATABASE_URL_KEY,
+  SOURCE_DATABASE_CA_CERT_KEY,
   SOURCE_IDENTITY_KEY,
   SOURCE_TARGET_REFERENCE_KEY,
   PRE_BACKUP_EVIDENCE_PATH_KEY,
@@ -37,6 +41,20 @@ import {
 } from "./database-restore-verification.mjs";
 
 const buildSha = "a".repeat(40);
+const testCaCertificate = rootCertificates.find((pem) => {
+  const certificate = new X509Certificate(pem);
+  const now = Date.now();
+  return (
+    certificate.ca &&
+    Date.parse(certificate.validFrom) <= now &&
+    Date.parse(certificate.validTo) > now &&
+    certificate.checkIssued(certificate) &&
+    certificate.verify(certificate.publicKey)
+  );
+});
+
+if (!testCaCertificate) throw new Error("No valid test root CA is available.");
+
 const recoveryRunId = "7d14d008-c539-4d43-9870-585f142459f8";
 const sourceUrl =
   "postgres://reader:source-secret@prod.db.example/maintainflow?sslmode=verify-full";
@@ -194,6 +212,7 @@ function fakeConnector() {
 
 function baseCaptureEnvironment(evidencePath) {
   return {
+    [SOURCE_DATABASE_CA_CERT_KEY]: testCaCertificate,
     [SOURCE_DATABASE_URL_KEY]: sourceUrl,
     [SOURCE_TARGET_REFERENCE_KEY]: sourceTargetReference,
     [SOURCE_IDENTITY_KEY]: sourceIdentity,
@@ -208,6 +227,7 @@ function baseCaptureEnvironment(evidencePath) {
 
 function baseVerifyEnvironment(preBackupPath, restoreEvidencePath) {
   return {
+    [RESTORE_DATABASE_CA_CERT_KEY]: testCaCertificate,
     [RESTORE_DATABASE_URL_KEY]: restoreUrl,
     [RESTORE_TARGET_REFERENCE_KEY]: restoreTargetReference,
     [RESTORE_IDENTITY_KEY]: restoreIdentity,
@@ -317,6 +337,7 @@ describe("database backup and restore verification", () => {
     await expect(
       inspectDatabase(sourceUrl, "maintainflow", {
         connect,
+        environment: { MAINTAINFLOW_DATABASE_CA_CERT: testCaCertificate },
         migrations: migrationsFixture(),
       }),
     ).resolves.toMatchObject({

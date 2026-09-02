@@ -1,6 +1,8 @@
+import { X509Certificate } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rootCertificates } from "node:tls";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -11,6 +13,20 @@ import {
 import { createPublicBuildMetadata } from "./public-build-metadata.mjs";
 
 const temporaryDirectories = [];
+
+const testCaCertificate = rootCertificates.find((pem) => {
+  const certificate = new X509Certificate(pem);
+  const now = Date.now();
+  return (
+    certificate.ca &&
+    Date.parse(certificate.validFrom) <= now &&
+    Date.parse(certificate.validTo) > now &&
+    certificate.checkIssued(certificate) &&
+    certificate.verify(certificate.publicKey)
+  );
+});
+
+if (!testCaCertificate) throw new Error("No valid test root CA is available.");
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -33,6 +49,7 @@ function privateConfig(overrides = {}) {
     MAINTAINFLOW_SUPPORT_CONTACT_EMAIL: "support@maintainflow.io",
     DATABASE_URL:
       "postgres://maintainflow:secret@db.example/maintainflow?sslmode=verify-full",
+    MAINTAINFLOW_DATABASE_CA_CERT: testCaCertificate,
     MAINTAINFLOW_CREDENTIAL_KEYRING: keyring(),
     MAINTAINFLOW_ACTIVE_CREDENTIAL_KEY_ID: "v1",
     MAINTAINFLOW_READINESS_PROBE_SECRET: "p".repeat(32),
@@ -68,6 +85,7 @@ const firstAccountPrivateReadRequiredKeys = [
   "MAINTAINFLOW_PRIVACY_CONTACT_EMAIL",
   "MAINTAINFLOW_SUPPORT_CONTACT_EMAIL",
   "DATABASE_URL",
+  "MAINTAINFLOW_DATABASE_CA_CERT",
   "MAINTAINFLOW_CREDENTIAL_KEYRING",
   "MAINTAINFLOW_ACTIVE_CREDENTIAL_KEY_ID",
   "MAINTAINFLOW_READINESS_PROBE_SECRET",
@@ -87,6 +105,7 @@ function demoConfig(overrides = {}) {
     MAINTAINFLOW_SUPPORT_CONTACT_EMAIL: "support@maintainflow.io",
     DATABASE_URL:
       "postgres://maintainflow:secret@db.example/maintainflow?sslmode=verify-full",
+    MAINTAINFLOW_DATABASE_CA_CERT: testCaCertificate,
     MAINTAINFLOW_READINESS_PROBE_SECRET: "p".repeat(32),
     CRON_SECRET: "c".repeat(32),
     READINESS_RATE_LIMIT_SECRET: "r".repeat(32),
@@ -189,6 +208,7 @@ describe("production release-stage configuration", () => {
         expect.stringContaining("MAINTAINFLOW_PRIVACY_CONTACT_EMAIL"),
         expect.stringContaining("MAINTAINFLOW_SUPPORT_CONTACT_EMAIL"),
         expect.stringContaining("DATABASE_URL"),
+        expect.stringContaining("MAINTAINFLOW_DATABASE_CA_CERT"),
         expect.stringContaining("MAINTAINFLOW_READINESS_PROBE_SECRET"),
         expect.stringContaining("CRON_SECRET"),
         expect.stringContaining("READINESS_RATE_LIMIT_SECRET"),
@@ -258,6 +278,20 @@ describe("production release-stage configuration", () => {
 
     expect(result.issues).toContain(
       "DATABASE_URL must include exactly one sslmode=verify-full parameter.",
+    );
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["invalid", "not-a-certificate"],
+    ["multiple", `${testCaCertificate}\n${testCaCertificate}`],
+  ])("rejects a %s production database CA certificate", (_label, certificate) => {
+    const result = validateProductionConfig(
+      demoConfig({ MAINTAINFLOW_DATABASE_CA_CERT: certificate }),
+    );
+
+    expect(result.issues).toContain(
+      "MAINTAINFLOW_DATABASE_CA_CERT must contain one currently valid self-signed CA certificate.",
     );
   });
 

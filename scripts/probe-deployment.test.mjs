@@ -42,7 +42,7 @@ function successfulFetch({ landingHtml, monitoringOverrides } = {}) {
         scope: "deployment_readiness",
         stage: "demo",
         revision,
-        checks: { passed: 5, total: 5 },
+        checks: { passed: 6, total: 6 },
       }),
     )
     .mockResolvedValueOnce(
@@ -114,7 +114,7 @@ describe("hosted deployment probe", () => {
       service: "maintainflow-ads",
       stage: "demo",
       revision,
-      readinessChecks: 5,
+      readinessChecks: 6,
       surfaceChecks: 5,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(9);
@@ -332,7 +332,7 @@ describe("hosted deployment probe", () => {
           scope: "deployment_readiness",
           stage: "demo",
           revision,
-          checks: { passed: 5, total: 5 },
+          checks: { passed: 6, total: 6 },
         }),
       )
       .mockResolvedValueOnce(jsonResponse({ ok: true }));

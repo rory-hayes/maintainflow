@@ -4,6 +4,7 @@ import {
   publicClerkConfigDigest,
   readPublicBuildMetadata,
 } from "./public-build-metadata.mjs";
+import { validateDatabaseCaCertificate as assertDatabaseCaCertificate } from "./database-tls.mjs";
 
 const RELEASE_STAGES = new Set(["demo", "private_read", "live_write"]);
 const PRODUCTION_SECRET_KEYS = [
@@ -140,6 +141,16 @@ function validateDatabaseUrl(issues, value) {
   }
 }
 
+function validateDatabaseCaCertificate(issues, value) {
+  try {
+    assertDatabaseCaCertificate(value);
+  } catch {
+    issues.push(
+      "MAINTAINFLOW_DATABASE_CA_CERT must contain one currently valid self-signed CA certificate.",
+    );
+  }
+}
+
 function validateCredentialKeyring(issues, env) {
   const serialized = env.MAINTAINFLOW_CREDENTIAL_KEYRING;
   const activeKeyId = env.MAINTAINFLOW_ACTIVE_CREDENTIAL_KEY_ID;
@@ -194,6 +205,7 @@ export function validateProductionConfig(env) {
   requireContactEmail(issues, env, "MAINTAINFLOW_PRIVACY_CONTACT_EMAIL");
   requireContactEmail(issues, env, "MAINTAINFLOW_SUPPORT_CONTACT_EMAIL");
   validateDatabaseUrl(issues, env.DATABASE_URL);
+  validateDatabaseCaCertificate(issues, env.MAINTAINFLOW_DATABASE_CA_CERT);
   requireSecret(issues, env, "READINESS_RATE_LIMIT_SECRET");
   requireSecret(issues, env, "MAINTAINFLOW_READINESS_PROBE_SECRET");
   requireSecret(issues, env, "CRON_SECRET");

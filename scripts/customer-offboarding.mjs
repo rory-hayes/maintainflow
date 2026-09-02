@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import postgres from "postgres";
 
+import { hostedDatabaseTlsOptions } from "./database-tls.mjs";
+
 const EXPORT_SCHEMA_VERSION = "maintainflow.customer-offboarding.v1";
 const UNRESOLVED_APPROVAL_STATUSES = new Set([
   "pending",
@@ -789,10 +791,11 @@ export function formatCustomerOffboardingFailure(error, environment = process.en
 export async function runCustomerOffboardingCli({
   argv = process.argv.slice(2),
   environment = process.env,
+  connect = postgres,
 } = {}) {
   const options = parseCustomerOffboardingArgs(argv);
   const { hosted } = validatedDatabaseUrl(environment.DATABASE_URL);
-  const database = postgres(environment.DATABASE_URL, {
+  const database = connect(environment.DATABASE_URL, {
     connect_timeout: 10,
     idle_timeout: 5,
     max: 1,
@@ -801,7 +804,11 @@ export async function runCustomerOffboardingCli({
       application_name: "maintainflow-customer-offboarding",
       search_path: "public",
     },
-    ...(hosted ? { ssl: "verify-full" } : {}),
+    ...hostedDatabaseTlsOptions({
+      hosted,
+      environment,
+      createError: (message) => new CustomerOffboardingSafetyError(message),
+    }),
   });
   try {
     if (options.mode === "dry-run") {

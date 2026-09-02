@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import postgres from "postgres";
 
+import { hostedDatabaseTlsOptions } from "./database-tls.mjs";
+
 const EVIDENCE_SCHEMA_VERSION = "maintainflow.customer-lifecycle-evidence.v1";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -905,10 +907,11 @@ export function formatCustomerLifecycleFailure(
 export async function runCustomerLifecycleCli({
   argv = process.argv.slice(2),
   environment = process.env,
+  connect = postgres,
 } = {}) {
   const options = parseCustomerLifecycleArgs(argv);
   const { hosted } = validatedDatabaseUrl(environment.DATABASE_URL);
-  const database = postgres(environment.DATABASE_URL, {
+  const database = connect(environment.DATABASE_URL, {
     connect_timeout: 10,
     idle_timeout: 5,
     max: 1,
@@ -917,7 +920,11 @@ export async function runCustomerLifecycleCli({
       application_name: "maintainflow-customer-lifecycle",
       search_path: "public",
     },
-    ...(hosted ? { ssl: "verify-full" } : {}),
+    ...hostedDatabaseTlsOptions({
+      hosted,
+      environment,
+      createError: (message) => new CustomerLifecycleSafetyError(message),
+    }),
   });
   try {
     const writer = ({ serialized }) =>
