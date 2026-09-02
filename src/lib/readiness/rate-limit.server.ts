@@ -32,9 +32,9 @@ export class ReadinessRateLimitUnavailableError extends Error {
   }
 }
 
-export function isReadinessRateLimitConfigured() {
+export function isReadinessRateLimitConfigured(database?: Sql) {
   return Boolean(
-    process.env.DATABASE_URL &&
+    (database ?? process.env.DATABASE_URL) &&
       process.env.READINESS_RATE_LIMIT_SECRET &&
       process.env.READINESS_RATE_LIMIT_SECRET.length >= MINIMUM_SECRET_LENGTH,
   );
@@ -135,9 +135,9 @@ export function getTrustedReadinessClientIp(
   return isIP(candidate) ? candidate : null;
 }
 
-export async function verifyReadinessRateLimitStore() {
-  if (!isReadinessRateLimitConfigured()) return false;
-  const sql = getDatabase();
+export async function verifyReadinessRateLimitStore(database?: Sql) {
+  if (!isReadinessRateLimitConfigured(database)) return false;
+  const sql = database ?? getDatabase();
   const [row] = await sql<{ ready: boolean }[]>`
     select (
       to_regclass('public.maintainflow_rate_limit_buckets') is not null

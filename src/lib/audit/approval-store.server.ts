@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import type postgres from "postgres";
+import type { Sql } from "postgres";
 
 import type { Recommendation } from "../openai-ads/demo-data";
 import { getRuntimeDatabase } from "../database/client.server";
@@ -143,13 +144,13 @@ export type DueMonitoringAccount = {
   oldestDueAt: Date;
 };
 
-export function isApprovalStoreConfigured() {
-  return Boolean(process.env.DATABASE_URL);
+export function isApprovalStoreConfigured(database?: Sql) {
+  return Boolean(database ?? process.env.DATABASE_URL);
 }
 
-export async function verifyApprovalStore() {
-  if (!isApprovalStoreConfigured()) return false;
-  const sql = getDatabase();
+export async function verifyApprovalStore(database?: Sql) {
+  if (!isApprovalStoreConfigured(database)) return false;
+  const sql = database ?? getDatabase();
   const [result] = await sql<{ ready: boolean }[]>`
     select (
       to_regclass('public.ads_approval_records') is not null

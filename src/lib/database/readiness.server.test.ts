@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Sql } from "postgres";
 
 vi.mock("server-only", () => ({}));
 
@@ -12,6 +13,7 @@ import { databaseMigrationManifest } from "./migration-manifest";
 import {
   verifyDatabaseMigrationLedger,
   verifyRuntimeDatabaseRole,
+  verifyRuntimeDatabaseTransaction,
 } from "./readiness.server";
 
 const runtimeReadableTables = [
@@ -61,6 +63,15 @@ function healthyRole(overrides = {}) {
   return {
     role_name: "maintainflow_app",
     session_role_name: "maintainflow_app",
+    role_settings: [
+      "search_path=pg_catalog, public",
+      "statement_timeout=20s",
+      "lock_timeout=18s",
+      "idle_in_transaction_session_timeout=30s",
+    ],
+    effective_statement_timeout: "20s",
+    effective_lock_timeout: "18s",
+    effective_idle_in_transaction_timeout: "30s",
     can_login: true,
     inherits_roles: false,
     is_superuser: false,
@@ -129,6 +140,43 @@ function databaseWithLedger(
     }
     throw new Error("Unexpected readiness query.");
   });
+}
+
+function databaseWithTransaction(options: {
+  roleName?: string;
+  identityMarker?: string;
+  identityPid?: number;
+  confirmedMarker?: string;
+  confirmedPid?: number;
+  reject?: boolean;
+} = {}) {
+  const identityPid = options.identityPid ?? 101;
+  let queryCount = 0;
+  const transaction = vi.fn(() => {
+    queryCount += 1;
+    return Promise.resolve(
+      queryCount === 1
+        ? [
+            {
+              role_name: options.roleName ?? "maintainflow_app",
+              backend_pid: identityPid,
+              transaction_marker: options.identityMarker ?? "active",
+            },
+          ]
+        : [
+            {
+              backend_pid: options.confirmedPid ?? identityPid,
+              transaction_marker: options.confirmedMarker ?? "active",
+            },
+          ],
+    );
+  });
+  const begin = vi.fn(async (callback: (sql: typeof transaction) => unknown) => {
+    if (options.reject) throw new Error("transaction unavailable");
+    return callback(transaction);
+  });
+  const database = Object.assign(vi.fn(), { begin }) as unknown as Sql;
+  return { database, begin, transaction };
 }
 
 beforeEach(() => {
@@ -215,6 +263,13 @@ describe("runtime database role deployment readiness", () => {
     ["unexpected policy", { public_policy_count: 1 }],
     ["function execution", { executable_public_function_count: 1 }],
     ["schema creation", { can_create_in_public_schema: true }],
+    ["missing role timeout", { role_settings: ["statement_timeout=20s"] }],
+    ["ineffective statement timeout", { effective_statement_timeout: "0" }],
+    ["ineffective lock timeout", { effective_lock_timeout: "0" }],
+    [
+      "ineffective idle transaction timeout",
+      { effective_idle_in_transaction_timeout: "0" },
+    ],
   ])("rejects %s", async (_label, override) => {
     state.getRuntimeDatabase.mockReturnValue(
       databaseWithRuntimeRole(healthyRole(override)),
@@ -259,5 +314,39 @@ describe("runtime database role deployment readiness", () => {
       throw new Error("offline");
     });
     await expect(verifyRuntimeDatabaseRole()).resolves.toBe(false);
+  });
+});
+
+describe("runtime database transaction deployment readiness", () => {
+  it("proves the injected driver retains one role, backend, and local marker", async () => {
+    vi.stubEnv("DATABASE_URL", "");
+    const { database, begin, transaction } = databaseWithTransaction();
+
+    await expect(
+      verifyRuntimeDatabaseTransaction(database),
+    ).resolves.toBe(true);
+    expect(begin).toHaveBeenCalledOnce();
+    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(state.getRuntimeDatabase).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["wrong role", { roleName: "postgres" }],
+    ["changed backend", { confirmedPid: 202 }],
+    ["missing marker", { confirmedMarker: "" }],
+    ["driver failure", { reject: true }],
+  ])("rejects %s", async (_label, options) => {
+    const { database } = databaseWithTransaction(options);
+
+    await expect(
+      verifyRuntimeDatabaseTransaction(database),
+    ).resolves.toBe(false);
+  });
+
+  it("fails closed without a configured or injected database", async () => {
+    vi.stubEnv("DATABASE_URL", "");
+
+    await expect(verifyRuntimeDatabaseTransaction()).resolves.toBe(false);
+    expect(state.getRuntimeDatabase).not.toHaveBeenCalled();
   });
 });

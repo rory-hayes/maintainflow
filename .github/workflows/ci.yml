@@ -195,7 +195,7 @@ jobs:
             sleep 1
           done
           test "$dependencies_ready" = "true"
-          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('ready.json','utf8')); if (!value.ok || value.scope !== 'deployment_readiness' || value.stage !== 'demo' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 6) process.exit(1);"
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('ready.json','utf8')); if (!value.ok || value.scope !== 'deployment_readiness' || value.stage !== 'demo' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 7) process.exit(1);"
 
           CI=true \
             MAINTAINFLOW_PROBE_ALLOW_INSECURE_LOOPBACK=true \
@@ -250,7 +250,7 @@ jobs:
             sleep 1
           done
           test "$private_read_ready" = "true"
-          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('private-read-ready.json','utf8')); if (!value.ok || value.stage !== 'private_read' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 13) process.exit(1);"
+          node -e "const fs=require('node:fs'); const value=JSON.parse(fs.readFileSync('private-read-ready.json','utf8')); if (!value.ok || value.stage !== 'private_read' || value.revision !== process.env.GITHUB_SHA || value.checks.passed !== value.checks.total || value.checks.total < 14) process.exit(1);"
 
           docker rm --force maintainflow-ads-private-read-ci
           docker run --detach --name maintainflow-ads-config-mismatch-ci \

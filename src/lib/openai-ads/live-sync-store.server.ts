@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import type postgres from "postgres";
+import type { Sql } from "postgres";
 
 import { getRuntimeDatabase } from "../database/client.server";
 import type { LiveWorkbenchData } from "./data.server";
@@ -148,9 +149,9 @@ function withoutSnapshot(row: LiveSyncStateRow): LiveSyncStateRow {
   };
 }
 
-export async function verifyLiveSyncStore() {
-  if (!process.env.DATABASE_URL) return false;
-  const sql = getDatabase();
+export async function verifyLiveSyncStore(database?: Sql) {
+  if (!database && !process.env.DATABASE_URL) return false;
+  const sql = database ?? getDatabase();
   const [row] = await sql<{ ready: boolean }[]>`
     select (
       to_regclass('public.maintainflow_live_workbench_snapshots') is not null

@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { Sql } from "postgres";
+
 import { getRuntimeDatabase } from "./client.server";
 import { databaseMigrationManifest } from "./migration-manifest";
 
@@ -11,6 +13,10 @@ type MigrationLedgerRow = {
 type RuntimeRoleRow = {
   role_name: string;
   session_role_name: string;
+  role_settings: string[] | null;
+  effective_statement_timeout: string;
+  effective_lock_timeout: string;
+  effective_idle_in_transaction_timeout: string;
   can_login: boolean;
   inherits_roles: boolean;
   is_superuser: boolean;
@@ -48,6 +54,12 @@ type RuntimeTablePrivilegeRow = {
   can_reference_any_column: boolean;
 };
 
+type RuntimeTransactionIdentityRow = {
+  role_name: string;
+  backend_pid: number;
+  transaction_marker: string;
+};
+
 const runtimeTablePrivileges = new Map<
   string,
   Readonly<{ select: boolean; insert: boolean; update: boolean; delete: boolean }>
@@ -77,15 +89,22 @@ export type DatabaseMigrationReadiness = {
   currentMigration: string | null;
 };
 
-export async function verifyRuntimeDatabaseRole(): Promise<boolean> {
+export async function verifyRuntimeDatabaseRole(
+  database?: Sql,
+): Promise<boolean> {
   const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) return false;
+  if (!database && !connectionString) return false;
 
   try {
-    const sql = getRuntimeDatabase(connectionString);
+    const sql = database ?? getRuntimeDatabase(connectionString!);
     const [role] = await sql<RuntimeRoleRow[]>`
       select role.rolname as role_name,
         session_user as session_role_name,
+        role.rolconfig as role_settings,
+        current_setting('statement_timeout') as effective_statement_timeout,
+        current_setting('lock_timeout') as effective_lock_timeout,
+        current_setting('idle_in_transaction_session_timeout')
+          as effective_idle_in_transaction_timeout,
         role.rolcanlogin as can_login,
         role.rolinherit as inherits_roles,
         role.rolsuper as is_superuser,
@@ -168,6 +187,14 @@ export async function verifyRuntimeDatabaseRole(): Promise<boolean> {
     if (
       role?.role_name !== "maintainflow_app" ||
       role.session_role_name !== "maintainflow_app" ||
+      !role.role_settings?.includes("statement_timeout=20s") ||
+      !role.role_settings.includes("lock_timeout=18s") ||
+      !role.role_settings.includes(
+        "idle_in_transaction_session_timeout=30s",
+      ) ||
+      role.effective_statement_timeout !== "20s" ||
+      role.effective_lock_timeout !== "18s" ||
+      role.effective_idle_in_transaction_timeout !== "30s" ||
       role.can_login !== true ||
       role.inherits_roles !== false ||
       role.is_superuser !== false ||
@@ -243,9 +270,53 @@ export async function verifyRuntimeDatabaseRole(): Promise<boolean> {
   }
 }
 
-export async function verifyDatabaseMigrationLedger(): Promise<DatabaseMigrationReadiness> {
+export async function verifyRuntimeDatabaseTransaction(
+  database?: Sql,
+): Promise<boolean> {
   const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
+  if (!database && !connectionString) return false;
+
+  try {
+    const sql = database ?? getRuntimeDatabase(connectionString!);
+    return await sql.begin(async (transaction) => {
+      const [identity] = await transaction<RuntimeTransactionIdentityRow[]>`
+        select current_user as role_name,
+          pg_backend_pid() as backend_pid,
+          set_config(
+            'maintainflow.readiness_transaction',
+            'active',
+            true
+          ) as transaction_marker
+      `;
+      const [confirmed] = await transaction<
+        Pick<
+          RuntimeTransactionIdentityRow,
+          "backend_pid" | "transaction_marker"
+        >[]
+      >`
+        select pg_backend_pid() as backend_pid,
+          current_setting(
+            'maintainflow.readiness_transaction',
+            true
+          ) as transaction_marker
+      `;
+      return (
+        identity?.role_name === "maintainflow_app" &&
+        identity.transaction_marker === "active" &&
+        confirmed?.backend_pid === identity.backend_pid &&
+        confirmed.transaction_marker === "active"
+      );
+    });
+  } catch {
+    return false;
+  }
+}
+
+export async function verifyDatabaseMigrationLedger(
+  database?: Sql,
+): Promise<DatabaseMigrationReadiness> {
+  const connectionString = process.env.DATABASE_URL;
+  if (!database && !connectionString) {
     return {
       ready: false,
       appliedCount: 0,
@@ -255,7 +326,7 @@ export async function verifyDatabaseMigrationLedger(): Promise<DatabaseMigration
   }
 
   try {
-    const sql = getRuntimeDatabase(connectionString);
+    const sql = database ?? getRuntimeDatabase(connectionString!);
     const [table] = await sql<{ exists: boolean }[]>`
       select to_regclass('public.maintainflow_schema_migrations') is not null as exists
     `;

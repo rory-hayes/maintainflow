@@ -6,11 +6,9 @@ vi.mock("server-only", () => ({}));
 
 const databaseMocks = vi.hoisted(() => {
   const end = vi.fn(async () => undefined);
-  const client = { end };
   return {
-    client,
     end,
-    create: vi.fn(() => client),
+    create: vi.fn(() => ({ end })),
   };
 });
 
@@ -18,6 +16,7 @@ vi.mock("postgres", () => ({ default: databaseMocks.create }));
 
 import {
   closeRuntimeDatabase,
+  createReadinessDatabase,
   getRuntimeDatabase,
   RuntimeDatabaseConfigurationError,
 } from "./client.server";
@@ -60,14 +59,43 @@ describe("shared runtime PostgreSQL client", () => {
     expect(databaseMocks.create).toHaveBeenCalledWith(
       url,
       expect.objectContaining({
+        connect_timeout: 10,
         max: 4,
+        max_pipeline: 0,
         prepare: false,
         connection: {
           application_name: "maintainflow-ads",
+          idle_in_transaction_session_timeout: 30_000,
+          lock_timeout: 18_000,
           search_path: "public",
+          statement_timeout: 20_000,
         },
       }),
     );
+  });
+
+  it("creates a disposable readiness pool without replacing the shared runtime pool", async () => {
+    const url = "postgres://user:secret@localhost/maintainflow";
+    const runtime = getRuntimeDatabase(url);
+    const readiness = createReadinessDatabase(url);
+    const sharedAgain = getRuntimeDatabase(url);
+
+    expect(readiness).not.toBe(runtime);
+    expect(sharedAgain).toBe(runtime);
+    expect(databaseMocks.create).toHaveBeenCalledTimes(2);
+    expect(databaseMocks.create).toHaveBeenNthCalledWith(
+      2,
+      url,
+      expect.objectContaining({
+        max_pipeline: 0,
+        connection: expect.objectContaining({
+          application_name: "maintainflow-readiness",
+        }),
+      }),
+    );
+
+    await readiness.end({ timeout: 0 });
+    expect(databaseMocks.end).toHaveBeenCalledWith({ timeout: 0 });
   });
 
   it.each(["0", "11", "1.5", "many"])(

@@ -6,6 +6,9 @@ import postgres, { type Sql } from "postgres";
 
 const DEFAULT_POOL_MAX = 4;
 const MAX_POOL_MAX = 10;
+const STATEMENT_TIMEOUT_MS = 20_000;
+const LOCK_TIMEOUT_MS = 18_000;
+const IDLE_IN_TRANSACTION_TIMEOUT_MS = 30_000;
 
 let runtimeDatabase:
   | { client: Sql; connectionString: string }
@@ -125,8 +128,37 @@ function configuredProductionDatabaseSsl() {
   };
 }
 
-export function getRuntimeDatabase(connectionString: string): Sql {
+function createRuntimeDatabaseClient(
+  connectionString: string,
+  applicationName: string,
+): Sql {
   validatedDatabaseUrl(connectionString);
+  const options: postgres.Options<Record<string, never>> = {
+    connect_timeout: 10,
+    idle_timeout: 20,
+    max: configuredPoolMax(),
+    // Supavisor transaction-mode releases before v2.10 can drop pipelined
+    // replies. The pinned postgres.js patch makes zero a strict serial mode
+    // while preserving safe transaction connection reservation.
+    max_pipeline: 0,
+    prepare: false,
+    connection: {
+      application_name: applicationName,
+      idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
+      lock_timeout: LOCK_TIMEOUT_MS,
+      search_path: "public",
+      statement_timeout: STATEMENT_TIMEOUT_MS,
+    },
+    ...(process.env.NODE_ENV === "production"
+      ? {
+          ssl: configuredProductionDatabaseSsl(),
+        }
+      : {}),
+  };
+  return postgres(connectionString, options);
+}
+
+export function getRuntimeDatabase(connectionString: string): Sql {
   if (runtimeDatabase) {
     if (runtimeDatabase.connectionString !== connectionString) {
       throw new RuntimeDatabaseConfigurationError(
@@ -136,23 +168,19 @@ export function getRuntimeDatabase(connectionString: string): Sql {
     return runtimeDatabase.client;
   }
 
-  const client = postgres(connectionString, {
-    connect_timeout: 10,
-    idle_timeout: 20,
-    max: configuredPoolMax(),
-    prepare: false,
-    connection: {
-      application_name: "maintainflow-ads",
-      search_path: "public",
-    },
-    ...(process.env.NODE_ENV === "production"
-      ? {
-          ssl: configuredProductionDatabaseSsl(),
-        }
-      : {}),
-  });
+  const client = createRuntimeDatabaseClient(
+    connectionString,
+    "maintainflow-ads",
+  );
   runtimeDatabase = { client, connectionString };
   return client;
+}
+
+export function createReadinessDatabase(connectionString: string): Sql {
+  return createRuntimeDatabaseClient(
+    connectionString,
+    "maintainflow-readiness",
+  );
 }
 
 export async function closeRuntimeDatabase() {

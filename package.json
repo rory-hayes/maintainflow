@@ -6,6 +6,7 @@
     "postcss-selector-parser": "6.1.4"
   },
   "scripts": {
+    "postinstall": "patch-package --error-on-fail",
     "dev": "next dev",
     "build": "next build --webpack && node scripts/public-build-metadata.mjs",
     "prestart": "node scripts/check-production-config.mjs --startup",
@@ -65,7 +66,7 @@
     "lucide-react": "^0.469.0",
     "next": "^16.3.3",
     "next-themes": "^0.4.6",
-    "postgres": "^3.4.9",
+    "postgres": "3.4.9",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-fast-marquee": "^1.6.5",
@@ -83,6 +84,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "^16.3.3",
+    "patch-package": "8.0.1",
     "postcss": "^8.5.26",
     "tailwindcss": "^3.4.1",
     "typescript": "^5",

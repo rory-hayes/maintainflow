@@ -2,6 +2,8 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
+import type { Sql } from "postgres";
+
 import { getRuntimeDatabase } from "../database/client.server";
 import {
   buildCreativeReviewTransitions,
@@ -73,9 +75,9 @@ function parseEventRow(row: CreativeEventRow): CreativeReviewEvent {
   });
 }
 
-export async function verifyCreativeHistoryStore() {
-  if (!process.env.DATABASE_URL) return false;
-  const sql = getDatabase();
+export async function verifyCreativeHistoryStore(database?: Sql) {
+  if (!database && !process.env.DATABASE_URL) return false;
+  const sql = database ?? getDatabase();
   const [result] = await sql<{ ready: boolean }[]>`
     select (
       to_regclass('public.maintainflow_creative_review_state') is not null

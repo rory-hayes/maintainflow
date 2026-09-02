@@ -66,6 +66,11 @@ $maintainflow_runtime_role$;
 alter role maintainflow_app
   with login noinherit bypassrls connection limit 10;
 alter role maintainflow_app set search_path = pg_catalog, public;
+-- Supavisor transaction mode does not preserve client session SET commands.
+-- Role defaults therefore provide the production-enforced query bounds.
+alter role maintainflow_app set statement_timeout = '20s';
+alter role maintainflow_app set lock_timeout = '18s';
+alter role maintainflow_app set idle_in_transaction_session_timeout = '30s';
 
 do $maintainflow_runtime_database$
 begin
@@ -203,6 +208,18 @@ declare
     select oid from pg_catalog.pg_roles where rolname = 'maintainflow_app'
   );
 begin
+  if not coalesce((
+    select role.rolconfig @> array[
+      'statement_timeout=20s',
+      'lock_timeout=18s',
+      'idle_in_transaction_session_timeout=30s'
+    ]::text[]
+    from pg_catalog.pg_roles role
+    where role.oid = app_oid
+  ), false) then
+    raise exception 'maintainflow_app role timeout invariant failed';
+  end if;
+
   if (
     select count(*)
     from pg_catalog.pg_class relation
