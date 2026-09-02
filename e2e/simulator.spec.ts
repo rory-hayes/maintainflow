@@ -3,6 +3,30 @@ import { readFile } from "node:fs/promises";
 
 const agencyEntryPath = "/app?tab=campaigns&account=adacct_sim_northstar";
 
+function expectedContactEmail(name: string, fallback: string) {
+  const configured = process.env[name];
+  if (configured === undefined) return fallback;
+
+  const value = configured.trim();
+  if (
+    value.length === 0 ||
+    value.length > 254 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  ) {
+    throw new Error(`${name} must be a valid email address.`);
+  }
+  return value;
+}
+
+const expectedPrivacyContactEmail = expectedContactEmail(
+  "PLAYWRIGHT_EXPECTED_PRIVACY_CONTACT_EMAIL",
+  "privacy@maintainflow.test",
+);
+const expectedSupportContactEmail = expectedContactEmail(
+  "PLAYWRIGHT_EXPECTED_SUPPORT_CONTACT_EMAIL",
+  "support@maintainflow.test",
+);
+
 function collectBrowserErrors(page: Page) {
   const errors: string[] = [];
 
@@ -22,12 +46,17 @@ test("landing page opens the five-client agency portfolio", async ({ page }) => 
     name: "Explore the five-client agency portfolio",
   });
   await expect(agencyPortfolioLink).toHaveAttribute("href", agencyEntryPath);
-  await expect(
-    page.getByRole("link", { name: "Apply for an agency pilot" }),
-  ).toHaveAttribute(
-    "href",
-    /^mailto:support@maintainflow\.test\?subject=MaintainFlow%20agency%20pilot&body=/,
+  const agencyPilotHref = await page
+    .getByRole("link", { name: "Apply for an agency pilot" })
+    .getAttribute("href");
+  expect(agencyPilotHref).not.toBeNull();
+  const agencyPilotUrl = new URL(agencyPilotHref!);
+  expect(agencyPilotUrl.protocol).toBe("mailto:");
+  expect(agencyPilotUrl.pathname).toBe(expectedSupportContactEmail);
+  expect(agencyPilotUrl.searchParams.get("subject")).toBe(
+    "MaintainFlow agency pilot",
   );
+  expect(agencyPilotUrl.searchParams.get("body")).toBeTruthy();
   await agencyPortfolioLink.press("Enter");
 
   await expect(page).toHaveURL((url) => {
@@ -434,16 +463,16 @@ test("public, legal, and closed-access surfaces render deployment truth", async 
     page.getByRole("heading", { name: "Privacy at MaintainFlow" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "privacy@maintainflow.test" }),
-  ).toHaveAttribute("href", "mailto:privacy@maintainflow.test");
+    page.getByRole("link", { name: expectedPrivacyContactEmail }),
+  ).toHaveAttribute("href", `mailto:${expectedPrivacyContactEmail}`);
 
   await page.goto("/terms", { waitUntil: "networkidle" });
   await expect(
     page.getByRole("heading", { name: "MaintainFlow service terms" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "support@maintainflow.test" }),
-  ).toHaveAttribute("href", "mailto:support@maintainflow.test");
+    page.getByRole("link", { name: expectedSupportContactEmail }),
+  ).toHaveAttribute("href", `mailto:${expectedSupportContactEmail}`);
 
   await page.goto("/auth/sign-up", { waitUntil: "networkidle" });
   await expect(
@@ -508,21 +537,37 @@ test("mobile workspace exposes a visible keyboard path into readiness", async ({
 });
 
 test("readiness fails closed when the browser origin is not the public deployment origin", async ({
+  baseURL,
   page,
 }) => {
   const browserErrors = collectBrowserErrors(page);
-  const externalRequests: string[] = [];
+  expect(baseURL).toBeTruthy();
+  const applicationOrigin = new URL(baseURL!).origin;
+  const crossOriginRequests: string[] = [];
   const readinessStatuses: number[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (!new Set(["127.0.0.1", "localhost"]).has(url.hostname)) {
-      externalRequests.push(request.url());
+    if (url.origin !== applicationOrigin) {
+      crossOriginRequests.push(request.url());
     }
   });
   page.on("response", (response) => {
     if (new URL(response.url()).pathname === "/api/readiness/audit") {
       readinessStatuses.push(response.status());
     }
+  });
+  await page.route("**/api/readiness/audit", async (route) => {
+    const request = route.request();
+    if (request.method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await route.continue({
+      headers: {
+        ...request.headers(),
+        origin: "https://untrusted.example",
+      },
+    });
   });
 
   await page.goto("/app?tab=readiness");
@@ -539,7 +584,7 @@ test("readiness fails closed when the browser origin is not the public deploymen
       .getByRole("tabpanel", { name: "Readiness" })
       .getByText("Secure same-origin readiness requests are required."),
   ).toBeVisible();
-  expect(externalRequests).toEqual([]);
+  expect(crossOriginRequests).toEqual([]);
   expect(readinessStatuses).toEqual([403]);
   expect(
     browserErrors.every(
