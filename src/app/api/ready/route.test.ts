@@ -14,7 +14,13 @@ const state = vi.hoisted(() => ({
   verifyRecommendationDecisionStore: vi.fn(),
   verifyCreativeHistoryStore: vi.fn(),
   verifyReadinessHistoryStore: vi.fn(),
+  probeEnd: vi.fn(),
+  createReadinessDatabase: vi.fn(),
   resolveBuildRevision: vi.fn(),
+}));
+
+vi.mock("@/lib/database/client.server", () => ({
+  createReadinessDatabase: state.createReadinessDatabase,
 }));
 
 vi.mock("@/lib/database/readiness.server", () => ({
@@ -63,7 +69,10 @@ beforeEach(() => {
   vi.stubEnv("MAINTAINFLOW_RELEASE_STAGE", "demo");
   vi.stubEnv("MAINTAINFLOW_READINESS_PROBE_SECRET", "p".repeat(32));
   vi.stubEnv("CRON_SECRET", "c".repeat(32));
+  vi.stubEnv("DATABASE_URL", "postgres://runtime:secret@localhost/maintainflow");
   state.resolveBuildRevision.mockReturnValue("a".repeat(40));
+  state.probeEnd.mockResolvedValue(undefined);
+  state.createReadinessDatabase.mockReturnValue({ end: state.probeEnd });
   state.verifyDatabaseMigrationLedger.mockResolvedValue({ ready: true });
   state.verifyRuntimeDatabaseRole.mockResolvedValue(true);
   for (const check of [
@@ -108,6 +117,11 @@ describe("deployment readiness route", () => {
       checks: { passed: 6, total: 6 },
     });
     expect(state.verifyTenancyStore).not.toHaveBeenCalled();
+    expect(state.createReadinessDatabase).toHaveBeenCalledOnce();
+    expect(state.verifyRuntimeDatabaseRole).toHaveBeenCalledWith(
+      expect.objectContaining({ end: state.probeEnd }),
+    );
+    expect(state.probeEnd).toHaveBeenCalledWith({ timeout: 1 });
     expect(console.info).toHaveBeenCalledOnce();
     expect(
       JSON.parse(String(vi.mocked(console.info).mock.calls[0][0])),
@@ -184,6 +198,22 @@ describe("deployment readiness route", () => {
     });
     expect(state.verifyTenancyStore).toHaveBeenCalledTimes(1);
     expect(state.verifyApprovalStore).toHaveBeenCalledTimes(1);
+    const dedicatedDatabase = state.createReadinessDatabase.mock.results[0].value;
+    for (const check of [
+      state.verifyRuntimeDatabaseRole,
+      state.verifyDatabaseMigrationLedger,
+      state.verifyReadinessRateLimitStore,
+      state.verifyLiveSyncStore,
+      state.verifyTenancyStore,
+      state.verifyCredentialStore,
+      state.verifyConversionCredentialStore,
+      state.verifyApprovalStore,
+      state.verifyRecommendationDecisionStore,
+      state.verifyCreativeHistoryStore,
+      state.verifyReadinessHistoryStore,
+    ]) {
+      expect(check).toHaveBeenCalledWith(dedicatedDatabase);
+    }
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
       failedChecks: ["creative_history"],
@@ -197,6 +227,8 @@ describe("deployment readiness route", () => {
     expect(state.verifyDatabaseMigrationLedger).not.toHaveBeenCalled();
     expect(state.verifyRuntimeDatabaseRole).not.toHaveBeenCalled();
     expect(state.verifyReadinessRateLimitStore).not.toHaveBeenCalled();
+    expect(state.createReadinessDatabase).not.toHaveBeenCalled();
+    expect(state.probeEnd).not.toHaveBeenCalled();
   });
 
   it("does not accept the scheduler secret as a readiness credential", async () => {
@@ -205,6 +237,28 @@ describe("deployment readiness route", () => {
     expect(response.status).toBe(401);
     expect(state.verifyDatabaseMigrationLedger).not.toHaveBeenCalled();
     expect(state.verifyLiveSyncStore).not.toHaveBeenCalled();
+    expect(state.createReadinessDatabase).not.toHaveBeenCalled();
+    expect(state.probeEnd).not.toHaveBeenCalled();
+  });
+
+  it("fails every database check without falling back to the shared pool when the dedicated pool is unavailable", async () => {
+    state.createReadinessDatabase.mockImplementation(() => {
+      throw new Error("unsafe database configuration");
+    });
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      stage: "demo",
+      checks: { passed: 2, total: 6 },
+    });
+    expect(state.verifyRuntimeDatabaseRole).not.toHaveBeenCalled();
+    expect(state.verifyDatabaseMigrationLedger).not.toHaveBeenCalled();
+    expect(state.verifyReadinessRateLimitStore).not.toHaveBeenCalled();
+    expect(state.verifyLiveSyncStore).not.toHaveBeenCalled();
+    expect(state.probeEnd).not.toHaveBeenCalled();
   });
 
   it("fails within one parallel deadline when database checks never settle", async () => {
@@ -235,7 +289,10 @@ describe("deployment readiness route", () => {
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
       failedChecks: ["database_runtime_role", "live_sync"],
+      timedOutChecks: ["database_runtime_role", "live_sync"],
     });
+    expect(state.probeEnd).toHaveBeenCalledOnce();
+    expect(state.probeEnd).toHaveBeenCalledWith({ timeout: 0 });
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -245,6 +302,7 @@ describe("deployment readiness route", () => {
     const response = await GET(request());
 
     expect(response.status).toBe(200);
+    expect(state.probeEnd).toHaveBeenCalledWith({ timeout: 1 });
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -254,6 +312,8 @@ describe("deployment readiness route", () => {
     const response = await GET(request("wrong-secret"));
 
     expect(response.status).toBe(401);
+    expect(state.createReadinessDatabase).not.toHaveBeenCalled();
+    expect(state.probeEnd).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
     expect(state.verifyRuntimeDatabaseRole).not.toHaveBeenCalled();
   });

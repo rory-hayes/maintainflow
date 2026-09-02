@@ -15,6 +15,12 @@ Supabase Data API remains deny-all, while authorization for the server-only
 application connection is enforced by Clerk identity, organization/account
 lookups, transaction-scoped authorization checks, and these exact SQL grants.
 
+The role also enforces `statement_timeout=20s`, `lock_timeout=18s`, and
+`idle_in_transaction_session_timeout=30s`. These are role defaults rather than
+session `SET` commands because Supavisor transaction mode does not preserve
+session-level timeout configuration; the 30-second idle-transaction bound
+still permits the current 15-second provider-send fence to finish or fail.
+
 `maintainflow_app` owns no application table. Supabase automatically retains
 the hosted `postgres` role as an admin member of a role it creates, with
 inheritance and `SET ROLE` disabled; provisioning accepts only that exact
@@ -112,9 +118,11 @@ Before promotion, record non-secret evidence that:
    public tables;
 4. all 18 migration ledger names and checksums match the deployed revision;
 5. strict TLS succeeds through the transaction pooler using the configured CA;
-6. unauthenticated readiness is rejected and the authenticated readiness check
+6. the role's `rolconfig` and effective settings expose all three timeout
+   bounds through a fresh pooler connection;
+7. unauthenticated readiness is rejected and the authenticated readiness check
    passes for the exact deployed SHA; and
-7. the Supabase project Data API schema list is empty.
+8. the Supabase project Data API schema list is empty.
 
 Counts or a successful local test are not substitutes for the hosted role,
 connection, deployment, and project-setting evidence.

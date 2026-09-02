@@ -1,11 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
 
+import type { Sql } from "postgres";
+
 import { verifyApprovalStore } from "@/lib/audit/approval-store.server";
 import { verifyRecommendationDecisionStore } from "@/lib/audit/recommendation-decision-store.server";
 import {
   verifyDatabaseMigrationLedger,
   verifyRuntimeDatabaseRole,
 } from "@/lib/database/readiness.server";
+import { createReadinessDatabase } from "@/lib/database/client.server";
 import { createServerLogger } from "@/lib/observability/logger.server";
 import { verifyCreativeHistoryStore } from "@/lib/openai-ads/creative-history.server";
 import { verifyLiveSyncStore } from "@/lib/openai-ads/live-sync-store.server";
@@ -25,6 +28,7 @@ export const maxDuration = 15;
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
 const DEPENDENCY_CHECK_TIMEOUT_MS = 10_000;
+const DEPENDENCY_TIMEOUT = Symbol("dependency_timeout");
 
 type ReadinessCheck = readonly [string, () => Promise<boolean>];
 
@@ -36,26 +40,62 @@ function hasAuthorizedProbeHeader(request: Request, secret: string) {
   );
 }
 
-function dependencyChecks(stage: string): ReadinessCheck[] {
+function dependencyChecks(stage: string, database?: Sql): ReadinessCheck[] {
+  const unavailable = async () => false;
   const checks: ReadinessCheck[] = [
-    ["database_runtime_role", verifyRuntimeDatabaseRole],
+    [
+      "database_runtime_role",
+      database ? () => verifyRuntimeDatabaseRole(database) : unavailable,
+    ],
     [
       "database_migrations",
-      async () => (await verifyDatabaseMigrationLedger()).ready,
+      database
+        ? async () => (await verifyDatabaseMigrationLedger(database)).ready
+        : unavailable,
     ],
-    ["readiness_quota", verifyReadinessRateLimitStore],
-    ["live_sync", verifyLiveSyncStore],
+    [
+      "readiness_quota",
+      database
+        ? () => verifyReadinessRateLimitStore(database)
+        : unavailable,
+    ],
+    [
+      "live_sync",
+      database ? () => verifyLiveSyncStore(database) : unavailable,
+    ],
   ];
 
   if (stage !== "demo") {
     checks.push(
-      ["tenancy", verifyTenancyStore],
-      ["ads_credentials", verifyCredentialStore],
-      ["conversion_credentials", verifyConversionCredentialStore],
-      ["approvals_and_monitoring", verifyApprovalStore],
-      ["recommendation_decisions", verifyRecommendationDecisionStore],
-      ["creative_history", verifyCreativeHistoryStore],
-      ["readiness_history", verifyReadinessHistoryStore],
+      ["tenancy", database ? () => verifyTenancyStore(database) : unavailable],
+      [
+        "ads_credentials",
+        database ? () => verifyCredentialStore(database) : unavailable,
+      ],
+      [
+        "conversion_credentials",
+        database
+          ? () => verifyConversionCredentialStore(database)
+          : unavailable,
+      ],
+      [
+        "approvals_and_monitoring",
+        database ? () => verifyApprovalStore(database) : unavailable,
+      ],
+      [
+        "recommendation_decisions",
+        database
+          ? () => verifyRecommendationDecisionStore(database)
+          : unavailable,
+      ],
+      [
+        "creative_history",
+        database ? () => verifyCreativeHistoryStore(database) : unavailable,
+      ],
+      [
+        "readiness_history",
+        database ? () => verifyReadinessHistoryStore(database) : unavailable,
+      ],
     );
   }
 
@@ -65,18 +105,22 @@ function dependencyChecks(stage: string): ReadinessCheck[] {
 async function runCheck([name, check]: ReadinessCheck) {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    const ready = await Promise.race([
+    const outcome = await Promise.race([
       Promise.resolve().then(check),
-      new Promise<false>((resolve) => {
+      new Promise<typeof DEPENDENCY_TIMEOUT>((resolve) => {
         timeout = setTimeout(
-          () => resolve(false),
+          () => resolve(DEPENDENCY_TIMEOUT),
           DEPENDENCY_CHECK_TIMEOUT_MS,
         );
       }),
     ]);
-    return { name, ready: ready === true };
+    return {
+      name,
+      ready: outcome === true,
+      timedOut: outcome === DEPENDENCY_TIMEOUT,
+    };
   } catch {
-    return { name, ready: false };
+    return { name, ready: false, timedOut: false };
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
@@ -115,9 +159,29 @@ export async function GET(request: Request) {
 
   const stage = resolveReleaseStage();
   const revision = resolveBuildRevision();
+  let database: Sql | undefined;
+  try {
+    const connectionString = process.env.DATABASE_URL;
+    if (connectionString) {
+      database = createReadinessDatabase(connectionString);
+    }
+  } catch {
+    database = undefined;
+  }
+
   const results = await Promise.all(
-    dependencyChecks(stage).map((check) => runCheck(check)),
+    dependencyChecks(stage, database).map((check) => runCheck(check)),
   );
+  const timedOutChecks = results
+    .filter((result) => result.timedOut)
+    .map((result) => result.name);
+  if (database) {
+    // Readiness owns this pool. Destroy it immediately after a timeout so the
+    // losing query cannot retain a slot, without touching customer traffic.
+    await database
+      .end({ timeout: timedOutChecks.length > 0 ? 0 : 1 })
+      .catch(() => undefined);
+  }
   const failedChecks = results
     .filter((result) => !result.ready)
     .map((result) => result.name);
@@ -134,6 +198,7 @@ export async function GET(request: Request) {
     status: ok ? 200 : 503,
     durationMs: Date.now() - startedAt,
     failedChecks,
+    timedOutChecks,
     counts: { checksPassed: passed, checksTotal: total },
   };
   if (ok) log.info("deployment.readiness.completed", logFields);

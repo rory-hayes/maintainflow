@@ -49,6 +49,7 @@ describe("privacy-safe server logging", () => {
         status: 503,
         durationMs: 12.4,
         failedChecks: ["live_sync", secret],
+        timedOutChecks: ["database_runtime_role", secret],
         counts: { checksPassed: 3, checksTotal: 5, [secret]: 99 },
       },
     );
@@ -73,6 +74,7 @@ describe("privacy-safe server logging", () => {
       status: 503,
       durationMs: 12,
       failedChecks: ["live_sync", "unknown_check"],
+      timedOutChecks: ["database_runtime_role", "unknown_check"],
       counts: { checksPassed: 3, checksTotal: 5 },
     });
   });

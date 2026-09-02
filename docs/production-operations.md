@@ -104,7 +104,9 @@ Clerk or OpenAI and is not evidence of either hosted service working.
 - The readiness route gives every dependency check a ten-second wall-clock
   deadline and caps the route at fifteen seconds. A stalled pool checkout or
   query therefore returns a logged `503` instead of reaching the platform's
-  function timeout.
+  function timeout; a timed-out probe destroys only its dedicated readiness
+  pool so its losing work cannot retain connection slots or interrupt customer
+  traffic.
 - Alert after two consecutive liveness/readiness failures; page immediately on
   revision mismatch or an invalid release stage.
 - Require one successful monitoring completion after every deployment and one
@@ -115,11 +117,16 @@ Clerk or OpenAI and is not evidence of either hosted service working.
   The provider-write fence also blocks every new apply or rollback on the
   affected advertiser until reconciliation.
 - The runtime PostgreSQL client disables query pipelining for Supavisor
-  transaction mode, caps statements at twenty seconds, and caps lock waits at
-  eighteen seconds. Those database deadlines remain above the 15-second Ads
-  HTTP send window; the provider-send database lock otherwise ends only on
-  commit, rollback, or session cleanup. Keep pipelining disabled until the
-  hosted pooler is proven to contain Supavisor's v2.10 pipelined-reply fix.
+  transaction mode. `postgres@3.4.9` is exactly pinned and receives the
+  committed transaction-reservation patch during every clean install; a patch
+  mismatch fails the build rather than silently restoring unsafe behavior.
+  The database role caps statements at twenty seconds, lock waits at eighteen
+  seconds, and idle transactions at thirty seconds. Those database deadlines
+  remain above the 15-second Ads HTTP send window; the provider-send database
+  lock otherwise ends only on commit, rollback, or session cleanup. Re-enable
+  pipelining only after both the hosted Supavisor dropped-reply fix and the
+  upstream postgres.js transaction-reservation fix are released and verified
+  together under the repository's concurrency test.
 - Never automatically retry an Ads apply or rollback whose transport ended
   without a response, or returned HTTP 408 or 5xx. Those outcomes remain locked
   for manual Ads Manager reconciliation.

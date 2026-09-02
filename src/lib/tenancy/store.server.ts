@@ -3,6 +3,7 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 
 import type postgres from "postgres";
+import type { Sql } from "postgres";
 
 import {
   accountAccessSchema,
@@ -175,9 +176,9 @@ async function lockActiveAdvertiserAccount(
   return account?.id ?? null;
 }
 
-export async function verifyTenancyStore() {
-  if (!process.env.DATABASE_URL) return false;
-  const sql = getDatabase();
+export async function verifyTenancyStore(database?: Sql) {
+  if (!database && !process.env.DATABASE_URL) return false;
+  const sql = database ?? getDatabase();
   const [result] = await sql<{ ready: boolean }[]>`
     select (
       to_regclass('public.maintainflow_organizations') is not null
@@ -189,9 +190,9 @@ export async function verifyTenancyStore() {
   return result?.ready === true;
 }
 
-export async function verifyCredentialStore() {
-  if (!process.env.DATABASE_URL) return false;
-  const sql = getDatabase();
+export async function verifyCredentialStore(database?: Sql) {
+  if (!database && !process.env.DATABASE_URL) return false;
+  const sql = database ?? getDatabase();
   const [result] = await sql<{ ready: boolean }[]>`
     select (
       to_regclass('public.maintainflow_advertiser_credentials') is not null
@@ -216,9 +217,9 @@ export async function verifyAdvertiserAccountAttachStore() {
   return result?.ready === true;
 }
 
-export async function verifyConversionCredentialStore() {
-  if (!process.env.DATABASE_URL) return false;
-  const sql = getDatabase();
+export async function verifyConversionCredentialStore(database?: Sql) {
+  if (!database && !process.env.DATABASE_URL) return false;
+  const sql = database ?? getDatabase();
   const [result] = await sql<{ ready: boolean }[]>`
     select (
       to_regclass('public.maintainflow_conversion_credentials') is not null

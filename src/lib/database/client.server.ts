@@ -8,16 +8,11 @@ const DEFAULT_POOL_MAX = 4;
 const MAX_POOL_MAX = 10;
 const STATEMENT_TIMEOUT_MS = 20_000;
 const LOCK_TIMEOUT_MS = 18_000;
+const IDLE_IN_TRANSACTION_TIMEOUT_MS = 30_000;
 
 let runtimeDatabase:
   | { client: Sql; connectionString: string }
   | undefined;
-
-type RuntimePostgresOptions = postgres.Options<Record<string, never>> & {
-  // postgres.js supports this option at runtime but omits it from its public
-  // TypeScript Options interface as of the installed release.
-  max_pipeline: number;
-};
 
 export class RuntimeDatabaseConfigurationError extends Error {
   constructor(message = "The runtime database configuration is not safe.") {
@@ -133,27 +128,23 @@ function configuredProductionDatabaseSsl() {
   };
 }
 
-export function getRuntimeDatabase(connectionString: string): Sql {
+function createRuntimeDatabaseClient(
+  connectionString: string,
+  applicationName: string,
+): Sql {
   validatedDatabaseUrl(connectionString);
-  if (runtimeDatabase) {
-    if (runtimeDatabase.connectionString !== connectionString) {
-      throw new RuntimeDatabaseConfigurationError(
-        "DATABASE_URL changed after the runtime pool was initialized; restart the process.",
-      );
-    }
-    return runtimeDatabase.client;
-  }
-
-  const options: RuntimePostgresOptions = {
+  const options: postgres.Options<Record<string, never>> = {
     connect_timeout: 10,
     idle_timeout: 20,
     max: configuredPoolMax(),
-    // Supavisor transaction-mode releases before v2.10 can drop later
-    // pipelined replies and leave postgres.js waiting indefinitely (#1061).
-    max_pipeline: 1,
+    // Supavisor transaction-mode releases before v2.10 can drop pipelined
+    // replies. The pinned postgres.js patch makes zero a strict serial mode
+    // while preserving safe transaction connection reservation.
+    max_pipeline: 0,
     prepare: false,
     connection: {
-      application_name: "maintainflow-ads",
+      application_name: applicationName,
+      idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
       lock_timeout: LOCK_TIMEOUT_MS,
       search_path: "public",
       statement_timeout: STATEMENT_TIMEOUT_MS,
@@ -164,9 +155,32 @@ export function getRuntimeDatabase(connectionString: string): Sql {
         }
       : {}),
   };
-  const client = postgres(connectionString, options);
+  return postgres(connectionString, options);
+}
+
+export function getRuntimeDatabase(connectionString: string): Sql {
+  if (runtimeDatabase) {
+    if (runtimeDatabase.connectionString !== connectionString) {
+      throw new RuntimeDatabaseConfigurationError(
+        "DATABASE_URL changed after the runtime pool was initialized; restart the process.",
+      );
+    }
+    return runtimeDatabase.client;
+  }
+
+  const client = createRuntimeDatabaseClient(
+    connectionString,
+    "maintainflow-ads",
+  );
   runtimeDatabase = { client, connectionString };
   return client;
+}
+
+export function createReadinessDatabase(connectionString: string): Sql {
+  return createRuntimeDatabaseClient(
+    connectionString,
+    "maintainflow-readiness",
+  );
 }
 
 export async function closeRuntimeDatabase() {

@@ -187,6 +187,7 @@ export type ServerLogFields = {
   status?: number;
   durationMs?: number;
   failedChecks?: readonly string[];
+  timedOutChecks?: readonly string[];
   counts?: Readonly<Record<string, number>>;
 };
 
@@ -233,6 +234,7 @@ function emit(
   const status = boundedInteger(fields.status, 599);
   const durationMs = boundedInteger(fields.durationMs, 86_400_000);
   const failedChecks = safeFailedChecks(fields.failedChecks);
+  const timedOutChecks = safeFailedChecks(fields.timedOutChecks);
   const counts = safeCounts(fields.counts);
   const record = {
     timestamp: new Date().toISOString(),
@@ -249,6 +251,7 @@ function emit(
     ...(status === undefined ? {} : { status }),
     ...(durationMs === undefined ? {} : { durationMs }),
     ...(failedChecks ? { failedChecks } : {}),
+    ...(timedOutChecks ? { timedOutChecks } : {}),
     ...(counts ? { counts } : {}),
   };
   const line = JSON.stringify(record);

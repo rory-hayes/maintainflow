@@ -134,6 +134,8 @@ const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   throw new Error("DATABASE_URL is required for the database integration suite.");
 }
+const runtimeDriverDatabaseUrl =
+  process.env.MAINTAINFLOW_TEST_RUNTIME_DATABASE_URL ?? databaseUrl;
 
 const database = postgres(databaseUrl, {
   connect_timeout: 5,
@@ -585,15 +587,26 @@ describe("PostgreSQL customer and approval boundary", () => {
     expect(dataApiDefaultPrivileges).toEqual([]);
 
     const runtimeDatabase = getRuntimeDatabase(databaseUrl);
-    const [[runtimeSettings], [statementTimeout], [lockTimeout]] =
+    const [
+      [runtimeSettings],
+      [statementTimeout],
+      [lockTimeout],
+      [idleInTransactionTimeout],
+    ] =
       await Promise.all([
         runtimeDatabase<{ search_path: string }[]>`show search_path`,
         runtimeDatabase<{ statement_timeout: string }[]>`show statement_timeout`,
         runtimeDatabase<{ lock_timeout: string }[]>`show lock_timeout`,
+        runtimeDatabase<{
+          idle_in_transaction_session_timeout: string;
+        }[]>`show idle_in_transaction_session_timeout`,
       ]);
     expect(runtimeSettings?.search_path).toBe("public");
     expect(statementTimeout?.statement_timeout).toBe("20s");
     expect(lockTimeout?.lock_timeout).toBe("18s");
+    expect(
+      idleInTransactionTimeout?.idle_in_transaction_session_timeout,
+    ).toBe("30s");
 
     let cancellationCode: unknown;
     try {
@@ -666,6 +679,144 @@ describe("PostgreSQL customer and approval boundary", () => {
         connection: { mode: "environment" },
       }),
     ).rejects.toThrow("already claimed");
+  });
+
+  it("serializes Supavisor-safe queries and preserves transaction isolation", async () => {
+    const dispatched: string[] = [];
+    let markFirstDispatched: (() => void) | undefined;
+    const firstDispatched = new Promise<void>((resolve) => {
+      markFirstDispatched = resolve;
+    });
+    let releaseTransactionBarrier: (() => void) | undefined;
+    let barrierTimeout: ReturnType<typeof setTimeout> | undefined;
+    const serialDatabase = postgres(runtimeDriverDatabaseUrl, {
+      connect_timeout: 5,
+      idle_timeout: 5,
+      max: 1,
+      max_pipeline: 0,
+      prepare: false,
+      debug: (_connection, query) => {
+        dispatched.push(query);
+        if (query.includes("'first'")) markFirstDispatched?.();
+      },
+    });
+    const transactionDatabase = postgres(runtimeDriverDatabaseUrl, {
+      connect_timeout: 5,
+      idle_timeout: 5,
+      max: 2,
+      max_pipeline: 0,
+      prepare: false,
+    });
+
+    try {
+      const first = serialDatabase.unsafe(
+        "select pg_sleep(0.15), 'first'::text as marker",
+      ).execute();
+      const second = serialDatabase.unsafe(
+        "select 'second'::text as marker",
+      ).execute();
+
+      let dispatchTimeout: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        firstDispatched,
+        new Promise<never>((_resolve, reject) => {
+          dispatchTimeout = setTimeout(
+            () => reject(new Error("The first serial query was not dispatched.")),
+            2_000,
+          );
+        }),
+      ]).finally(() => {
+        if (dispatchTimeout !== undefined) clearTimeout(dispatchTimeout);
+      });
+      expect(dispatched.some((query) => query.includes("'first'"))).toBe(true);
+      expect(dispatched.some((query) => query.includes("'second'"))).toBe(false);
+      await Promise.all([first, second]);
+      expect(dispatched.some((query) => query.includes("'second'"))).toBe(true);
+
+      const blocker = serialDatabase`select pg_sleep(0.05)`.execute();
+      const transactionAfterBusyConnection = serialDatabase.begin(
+        async (transaction) => {
+          const [row] = await transaction<{ ready: boolean }[]>`
+            select true as ready
+          `;
+          return row?.ready;
+        },
+      );
+      const [blockerResult, transactionResult] = await Promise.all([
+        blocker,
+        transactionAfterBusyConnection,
+      ]);
+      expect(blockerResult).toHaveLength(1);
+      expect(transactionResult).toBe(true);
+
+      let barrierArrivals = 0;
+      const transactionBarrier = new Promise<void>((resolve, reject) => {
+        releaseTransactionBarrier = resolve;
+        barrierTimeout = setTimeout(
+          () =>
+            reject(
+              new Error("Concurrent transaction barrier was not reached."),
+            ),
+          2_000,
+        );
+      });
+      function waitForBothTransactions() {
+        barrierArrivals += 1;
+        if (barrierArrivals === 2) {
+          if (barrierTimeout !== undefined) clearTimeout(barrierTimeout);
+          releaseTransactionBarrier?.();
+        }
+        return transactionBarrier;
+      }
+
+      const runTransaction = (marker: string) =>
+        transactionDatabase.begin(async (transaction) => {
+          const [identity] = await transaction<{
+            pid: number;
+            marker: string;
+          }[]>`
+            select pg_backend_pid() as pid,
+              set_config('maintainflow.transaction_marker', ${marker}, true)
+                as marker
+          `;
+          await waitForBothTransactions();
+          await transaction`select pg_sleep(0.05)`;
+          const readings = await Promise.all([
+            transaction<{ pid: number; marker: string }[]>`
+              select pg_backend_pid() as pid,
+                current_setting('maintainflow.transaction_marker') as marker
+            `,
+            transaction<{ pid: number; marker: string }[]>`
+              select pg_backend_pid() as pid,
+                current_setting('maintainflow.transaction_marker') as marker
+            `,
+          ]);
+          return { identity, readings: readings.flat() };
+        });
+
+      const [alpha, beta] = await Promise.all([
+        runTransaction("alpha"),
+        runTransaction("beta"),
+      ]);
+      expect(alpha.identity?.marker).toBe("alpha");
+      expect(beta.identity?.marker).toBe("beta");
+      expect(alpha.identity?.pid).not.toBe(beta.identity?.pid);
+      expect(alpha.readings).toEqual([
+        { pid: alpha.identity?.pid, marker: "alpha" },
+        { pid: alpha.identity?.pid, marker: "alpha" },
+      ]);
+      expect(beta.readings).toEqual([
+        { pid: beta.identity?.pid, marker: "beta" },
+        { pid: beta.identity?.pid, marker: "beta" },
+      ]);
+    } finally {
+      if (barrierTimeout !== undefined) clearTimeout(barrierTimeout);
+      releaseTransactionBarrier?.();
+      await Promise.all([
+        serialDatabase.end({ timeout: 5 }),
+        transactionDatabase.end({ timeout: 5 }),
+      ]);
+    }
   });
 
   it("attaches an agency client idempotently without rotating its credential", async () => {

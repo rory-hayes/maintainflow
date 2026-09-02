@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { fileURLToPath } from "node:url";
 
@@ -73,6 +74,7 @@ const clusterFixtureLock = postgres(adminDatabaseUrl, {
 const dataApiRoleNames = ["anon", "authenticated", "service_role"];
 const createdDataApiRoleNames = [];
 let createdPostgresRole = false;
+let createdMaintainflowRuntimeRole = false;
 const alternateEventTriggerOwnerRoleName = `maintainflow_fixture_owner_${randomBytes(4).toString("hex")}`;
 let createdAlternateEventTriggerOwnerRole = false;
 let clusterFixtureLockAcquired = false;
@@ -790,7 +792,83 @@ async function seedLooseDataApiSchemaPrivileges(databaseUrl) {
   }
 }
 
-function runVitest(databaseUrl) {
+async function provisionDisposableRuntimeRole(databaseUrl) {
+  const [existing] = await admin`
+    select exists (
+      select 1 from pg_catalog.pg_roles where rolname = 'maintainflow_app'
+    ) as exists
+  `;
+  if (existing?.exists) {
+    if (process.env.CI === "true") {
+      throw new Error(
+        "The isolated CI cluster unexpectedly already contains maintainflow_app.",
+      );
+    }
+    console.warn(
+      "Skipped the disposable runtime-role login probe because maintainflow_app already exists on this local cluster.",
+    );
+    return null;
+  }
+
+  const roleSql = await readFile(
+    new URL("./database/maintainflow-runtime-role.sql", import.meta.url),
+    "utf8",
+  );
+  const ownerDatabase = databaseClient(databaseUrl);
+  const password = randomBytes(32).toString("hex");
+  try {
+    await ownerDatabase.unsafe(roleSql);
+    createdMaintainflowRuntimeRole = true;
+    await ownerDatabase.unsafe(
+      `alter role maintainflow_app password '${password}'`,
+    );
+  } finally {
+    await ownerDatabase.end({ timeout: 5 });
+  }
+
+  const runtimeUrl = new URL(databaseUrl);
+  runtimeUrl.username = "maintainflow_app";
+  runtimeUrl.password = password;
+  const runtimeDatabase = postgres(runtimeUrl.toString(), {
+    connect_timeout: 5,
+    idle_timeout: 5,
+    max: 1,
+    max_pipeline: 0,
+    prepare: false,
+  });
+  try {
+    const [settings] = await runtimeDatabase`
+      select current_user as role_name,
+        current_setting('statement_timeout') as statement_timeout,
+        current_setting('lock_timeout') as lock_timeout,
+        current_setting('idle_in_transaction_session_timeout')
+          as idle_in_transaction_session_timeout,
+        (
+          select rolconfig from pg_catalog.pg_roles
+          where rolname = current_user
+        ) as role_settings
+    `;
+    const roleSettings = new Set(settings?.role_settings ?? []);
+    if (
+      settings?.role_name !== "maintainflow_app" ||
+      settings.statement_timeout !== "20s" ||
+      settings.lock_timeout !== "18s" ||
+      settings.idle_in_transaction_session_timeout !== "30s" ||
+      !roleSettings.has("statement_timeout=20s") ||
+      !roleSettings.has("lock_timeout=18s") ||
+      !roleSettings.has("idle_in_transaction_session_timeout=30s")
+    ) {
+      throw new Error(
+        "The disposable maintainflow_app login did not inherit the required role-level timeout bounds.",
+      );
+    }
+  } finally {
+    await runtimeDatabase.end({ timeout: 5 });
+  }
+  return runtimeUrl.toString();
+}
+
+function runVitest(databaseUrl, runtimeDatabaseUrl) {
   const vitestPath = fileURLToPath(
     new URL("../node_modules/vitest/vitest.mjs", import.meta.url),
   );
@@ -802,6 +880,9 @@ function runVitest(databaseUrl) {
       integration: randomBytes(32).toString("base64"),
     }),
     READINESS_RATE_LIMIT_SECRET: randomBytes(32).toString("base64"),
+    ...(runtimeDatabaseUrl
+      ? { MAINTAINFLOW_TEST_RUNTIME_DATABASE_URL: runtimeDatabaseUrl }
+      : {}),
   });
 
   return runChild(
@@ -852,6 +933,15 @@ async function cleanupDatabaseIntegrationFixtures() {
       `drop disposable database ${databaseName}`,
       async () => {
         await admin.unsafe(`drop database if exists ${quotedDatabaseName}`);
+      },
+    );
+  }
+  if (createdMaintainflowRuntimeRole) {
+    await captureCleanupFailure(
+      cleanupErrors,
+      "drop the disposable MaintainFlow runtime role",
+      async () => {
+        await admin.unsafe("drop role if exists maintainflow_app");
       },
     );
   }
@@ -1005,7 +1095,10 @@ try {
     migrationDatabaseUrl,
     "after the subsequent checksum-verifying no-op runner",
   );
-  testExitCode = await runVitest(migrationDatabaseUrl);
+  const runtimeDatabaseUrl = await provisionDisposableRuntimeRole(
+    migrationDatabaseUrl,
+  );
+  testExitCode = await runVitest(migrationDatabaseUrl, runtimeDatabaseUrl);
 } catch (error) {
   testError = error;
 }

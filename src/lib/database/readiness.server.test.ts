@@ -61,6 +61,15 @@ function healthyRole(overrides = {}) {
   return {
     role_name: "maintainflow_app",
     session_role_name: "maintainflow_app",
+    role_settings: [
+      "search_path=pg_catalog, public",
+      "statement_timeout=20s",
+      "lock_timeout=18s",
+      "idle_in_transaction_session_timeout=30s",
+    ],
+    effective_statement_timeout: "20s",
+    effective_lock_timeout: "18s",
+    effective_idle_in_transaction_timeout: "30s",
     can_login: true,
     inherits_roles: false,
     is_superuser: false,
@@ -215,6 +224,13 @@ describe("runtime database role deployment readiness", () => {
     ["unexpected policy", { public_policy_count: 1 }],
     ["function execution", { executable_public_function_count: 1 }],
     ["schema creation", { can_create_in_public_schema: true }],
+    ["missing role timeout", { role_settings: ["statement_timeout=20s"] }],
+    ["ineffective statement timeout", { effective_statement_timeout: "0" }],
+    ["ineffective lock timeout", { effective_lock_timeout: "0" }],
+    [
+      "ineffective idle transaction timeout",
+      { effective_idle_in_transaction_timeout: "0" },
+    ],
   ])("rejects %s", async (_label, override) => {
     state.getRuntimeDatabase.mockReturnValue(
       databaseWithRuntimeRole(healthyRole(override)),
