@@ -49,7 +49,7 @@ vi.mock("@/lib/release/revision", () => ({
   resolveBuildRevision: state.resolveBuildRevision,
 }));
 
-import { GET } from "./route";
+import { GET, maxDuration } from "./route";
 
 function lastErrorRecord() {
   const line = vi.mocked(console.error).mock.calls.at(-1)?.[0];
@@ -82,6 +82,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -93,6 +94,7 @@ describe("deployment readiness route", () => {
   }
 
   it("proves a credential-free demo only after its revision, runtime role, ledger, and public quota are ready", async () => {
+    expect(maxDuration).toBe(15);
     const response = await GET(request());
 
     expect(response.status).toBe(200);
@@ -203,5 +205,56 @@ describe("deployment readiness route", () => {
     expect(response.status).toBe(401);
     expect(state.verifyDatabaseMigrationLedger).not.toHaveBeenCalled();
     expect(state.verifyLiveSyncStore).not.toHaveBeenCalled();
+  });
+
+  it("fails within one parallel deadline when database checks never settle", async () => {
+    vi.useFakeTimers();
+    state.verifyRuntimeDatabaseRole.mockImplementation(
+      () => new Promise<boolean>(() => undefined),
+    );
+    state.verifyLiveSyncStore.mockImplementation(
+      () => new Promise<boolean>(() => undefined),
+    );
+
+    let settled = false;
+    const responsePromise = GET(request()).then((response) => {
+      settled = true;
+      return response;
+    });
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const response = await responsePromise;
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      stage: "demo",
+      checks: { passed: 4, total: 6 },
+    });
+    expect(lastErrorRecord()).toMatchObject({
+      event: "deployment.readiness.failed",
+      failedChecks: ["database_runtime_role", "live_sync"],
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears every dependency deadline after successful checks", async () => {
+    vi.useFakeTimers();
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(200);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not start dependency deadlines for an unauthorized request", async () => {
+    vi.useFakeTimers();
+
+    const response = await GET(request("wrong-secret"));
+
+    expect(response.status).toBe(401);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(state.verifyRuntimeDatabaseRole).not.toHaveBeenCalled();
   });
 });

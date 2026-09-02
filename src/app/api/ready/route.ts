@@ -21,8 +21,10 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 15;
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
+const DEPENDENCY_CHECK_TIMEOUT_MS = 10_000;
 
 type ReadinessCheck = readonly [string, () => Promise<boolean>];
 
@@ -61,10 +63,22 @@ function dependencyChecks(stage: string): ReadinessCheck[] {
 }
 
 async function runCheck([name, check]: ReadinessCheck) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    return { name, ready: (await check()) === true };
+    const ready = await Promise.race([
+      Promise.resolve().then(check),
+      new Promise<false>((resolve) => {
+        timeout = setTimeout(
+          () => resolve(false),
+          DEPENDENCY_CHECK_TIMEOUT_MS,
+        );
+      }),
+    ]);
+    return { name, ready: ready === true };
   } catch {
     return { name, ready: false };
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 

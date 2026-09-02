@@ -101,6 +101,10 @@ Clerk or OpenAI and is not evidence of either hosted service working.
 
 - Probe liveness every five minutes and authenticated readiness every five to
   fifteen minutes from a service that can store the readiness secret safely.
+- The readiness route gives every dependency check a ten-second wall-clock
+  deadline and caps the route at fifteen seconds. A stalled pool checkout or
+  query therefore returns a logged `503` instead of reaching the platform's
+  function timeout.
 - Alert after two consecutive liveness/readiness failures; page immediately on
   revision mismatch or an invalid release stage.
 - Require one successful monitoring completion after every deployment and one
@@ -110,9 +114,12 @@ Clerk or OpenAI and is not evidence of either hosted service working.
   skipped by recovery while a provider-send transaction still holds their lock.
   The provider-write fence also blocks every new apply or rollback on the
   affected advertiser until reconciliation.
-- Keep database and transaction-proxy timeouts above the 15-second application
-  HTTP send window. The database lock has no independent 15-second deadline and
-  ends only on commit, rollback, or session cleanup.
+- The runtime PostgreSQL client disables query pipelining for Supavisor
+  transaction mode, caps statements at twenty seconds, and caps lock waits at
+  eighteen seconds. Those database deadlines remain above the 15-second Ads
+  HTTP send window; the provider-send database lock otherwise ends only on
+  commit, rollback, or session cleanup. Keep pipelining disabled until the
+  hosted pooler is proven to contain Supavisor's v2.10 pipelined-reply fix.
 - Never automatically retry an Ads apply or rollback whose transport ended
   without a response, or returned HTTP 408 or 5xx. Those outcomes remain locked
   for manual Ads Manager reconciliation.

@@ -60,11 +60,15 @@ describe("shared runtime PostgreSQL client", () => {
     expect(databaseMocks.create).toHaveBeenCalledWith(
       url,
       expect.objectContaining({
+        connect_timeout: 10,
         max: 4,
+        max_pipeline: 1,
         prepare: false,
         connection: {
           application_name: "maintainflow-ads",
+          lock_timeout: 18_000,
           search_path: "public",
+          statement_timeout: 20_000,
         },
       }),
     );

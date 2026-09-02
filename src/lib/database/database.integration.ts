@@ -584,10 +584,31 @@ describe("PostgreSQL customer and approval boundary", () => {
     `;
     expect(dataApiDefaultPrivileges).toEqual([]);
 
-    const [runtimeSettings] = await getRuntimeDatabase(databaseUrl)<
-      { search_path: string }[]
-    >`show search_path`;
+    const runtimeDatabase = getRuntimeDatabase(databaseUrl);
+    const [[runtimeSettings], [statementTimeout], [lockTimeout]] =
+      await Promise.all([
+        runtimeDatabase<{ search_path: string }[]>`show search_path`,
+        runtimeDatabase<{ statement_timeout: string }[]>`show statement_timeout`,
+        runtimeDatabase<{ lock_timeout: string }[]>`show lock_timeout`,
+      ]);
     expect(runtimeSettings?.search_path).toBe("public");
+    expect(statementTimeout?.statement_timeout).toBe("20s");
+    expect(lockTimeout?.lock_timeout).toBe("18s");
+
+    let cancellationCode: unknown;
+    try {
+      await runtimeDatabase.begin(async (transaction) => {
+        await transaction`set local statement_timeout = '50ms'`;
+        await transaction`select pg_sleep(0.2)`;
+      });
+    } catch (error) {
+      cancellationCode = (error as { code?: unknown }).code;
+    }
+    expect(cancellationCode).toBe("57014");
+    const [postCancellationProbe] = await runtimeDatabase<
+      { ready: boolean }[]
+    >`select true as ready`;
+    expect(postCancellationProbe?.ready).toBe(true);
 
     expect(advertiserAccess).toMatchObject({
       organizationType: "advertiser",

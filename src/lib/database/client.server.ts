@@ -6,10 +6,18 @@ import postgres, { type Sql } from "postgres";
 
 const DEFAULT_POOL_MAX = 4;
 const MAX_POOL_MAX = 10;
+const STATEMENT_TIMEOUT_MS = 20_000;
+const LOCK_TIMEOUT_MS = 18_000;
 
 let runtimeDatabase:
   | { client: Sql; connectionString: string }
   | undefined;
+
+type RuntimePostgresOptions = postgres.Options<Record<string, never>> & {
+  // postgres.js supports this option at runtime but omits it from its public
+  // TypeScript Options interface as of the installed release.
+  max_pipeline: number;
+};
 
 export class RuntimeDatabaseConfigurationError extends Error {
   constructor(message = "The runtime database configuration is not safe.") {
@@ -136,21 +144,27 @@ export function getRuntimeDatabase(connectionString: string): Sql {
     return runtimeDatabase.client;
   }
 
-  const client = postgres(connectionString, {
+  const options: RuntimePostgresOptions = {
     connect_timeout: 10,
     idle_timeout: 20,
     max: configuredPoolMax(),
+    // Supavisor transaction-mode releases before v2.10 can drop later
+    // pipelined replies and leave postgres.js waiting indefinitely (#1061).
+    max_pipeline: 1,
     prepare: false,
     connection: {
       application_name: "maintainflow-ads",
+      lock_timeout: LOCK_TIMEOUT_MS,
       search_path: "public",
+      statement_timeout: STATEMENT_TIMEOUT_MS,
     },
     ...(process.env.NODE_ENV === "production"
       ? {
           ssl: configuredProductionDatabaseSsl(),
         }
       : {}),
-  });
+  };
+  const client = postgres(connectionString, options);
   runtimeDatabase = { client, connectionString };
   return client;
 }
