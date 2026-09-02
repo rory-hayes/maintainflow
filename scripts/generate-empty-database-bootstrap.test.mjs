@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -6,7 +7,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   loadCompiledManifest,
+  OFFICIAL_SUPABASE_RLS_AUTO_ENABLE_BODY,
   renderEmptyDatabaseBootstrapSql,
+  renderOfficialSupabaseRlsAutoEnableFunctionSql,
+  renderOfficialSupabaseRlsHelperBaselineSql,
   validateCompiledManifest,
   validatePinnedCheckout,
   writeEmptyDatabaseBootstrapSql,
@@ -40,8 +44,16 @@ describe("empty hosted database bootstrap SQL", () => {
     expect(sql).toContain("public schema is not pristine");
     expect(sql).toContain("from pg_catalog.pg_collation");
     expect(sql).toContain("from pg_catalog.pg_ts_template");
+    expect(sql).toContain("official_rls_helper_oid");
+    expect(sql).toContain("procedure.proconfig = array['search_path=pg_catalog']::text[]");
+    expect(sql).toContain("not procedure.proretset");
+    expect(sql).toContain("procedure.prosrc = $maintainflow_supabase_rls_body$");
+    expect(sql).toContain("event_trigger.evtname = 'ensure_rls'");
+    expect(sql).toContain("event_trigger_owner.rolname = 'postgres'");
+    expect(sql).toContain("event_trigger.evtfoid = official_rls_helper_oid");
+    expect(sql).toContain("helper_trigger_count <> 1");
     expect(sql).toContain("pg_advisory_xact_lock(-635039337, 1107438067)");
-    expect(sql).toContain("set local search_path = pg_catalog, public");
+    expect(sql).toContain("set local search_path = public, pg_catalog");
     expect(sql.indexOf("public schema is not pristine")).toBeLessThan(
       sql.indexOf("create table public.maintainflow_schema_migrations"),
     );
@@ -53,6 +65,30 @@ describe("empty hosted database bootstrap SQL", () => {
     );
     expect(sql.trimStart().startsWith("-- MaintainFlow one-time")).toBe(true);
     expect(sql.trimEnd().endsWith("commit;")).toBe(true);
+  });
+
+  it("pins the accepted Supabase helper to the official source and catalog fingerprint", () => {
+    expect(OFFICIAL_SUPABASE_RLS_AUTO_ENABLE_BODY).toHaveLength(953);
+    expect(
+      createHash("md5")
+        .update(OFFICIAL_SUPABASE_RLS_AUTO_ENABLE_BODY)
+        .digest("hex"),
+    ).toBe("99be20677b456ea8d3be47bdd44fb369");
+
+    const functionSql = renderOfficialSupabaseRlsAutoEnableFunctionSql();
+    const baselineSql = renderOfficialSupabaseRlsHelperBaselineSql();
+    expect(functionSql).toContain("function public.rls_auto_enable()");
+    expect(functionSql).toContain("returns event_trigger");
+    expect(functionSql).toContain("security definer");
+    expect(functionSql).toContain("set search_path = pg_catalog");
+    expect(baselineSql).toContain(functionSql);
+    expect(baselineSql).toContain("create event trigger ensure_rls");
+    expect(baselineSql).toContain(
+      "when tag in ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')",
+    );
+    expect(baselineSql).toContain(
+      "execute function public.rls_auto_enable()",
+    );
   });
 
   it("writes a new mode-0600 SQL artifact and refuses overwrite", async () => {

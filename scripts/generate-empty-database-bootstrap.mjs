@@ -21,6 +21,55 @@ const compiledManifestPath = fileURLToPath(
 );
 const execFileAsync = promisify(execFile);
 
+// Supabase's documented auto-enable-RLS helper, as installed in the hosted
+// project before MaintainFlow creates any application objects. Keep the body
+// byte-for-byte stable: the bootstrap guard verifies this exact source in
+// addition to the function and event-trigger catalog attributes below.
+// Source snapshot: https://github.com/supabase/supabase/blob/2bc6144aecfab2de97c5210d14aee85a34565535/apps/docs/content/guides/database/postgres/row-level-security.mdx
+export const OFFICIAL_SUPABASE_RLS_AUTO_ENABLE_BODY = `
+DECLARE
+  cmd record;
+BEGIN
+  FOR cmd IN
+    SELECT *
+    FROM pg_event_trigger_ddl_commands()
+    WHERE command_tag IN ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')
+      AND object_type IN ('table','partitioned table')
+  LOOP
+     IF cmd.schema_name IS NOT NULL AND cmd.schema_name IN ('public') AND cmd.schema_name NOT IN ('pg_catalog','information_schema') AND cmd.schema_name NOT LIKE 'pg_toast%' AND cmd.schema_name NOT LIKE 'pg_temp%' THEN
+      BEGIN
+        EXECUTE format('alter table if exists %s enable row level security', cmd.object_identity);
+        RAISE LOG 'rls_auto_enable: enabled RLS on %', cmd.object_identity;
+      EXCEPTION
+        WHEN OTHERS THEN
+          RAISE LOG 'rls_auto_enable: failed to enable RLS on %', cmd.object_identity;
+      END;
+     ELSE
+        RAISE LOG 'rls_auto_enable: skip % (either system schema or not in enforced list: %.)', cmd.object_identity, cmd.schema_name;
+     END IF;
+  END LOOP;
+END;
+`;
+
+export function renderOfficialSupabaseRlsAutoEnableFunctionSql() {
+  return `create or replace function public.rls_auto_enable()
+returns event_trigger
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $supabase_rls_auto_enable$${OFFICIAL_SUPABASE_RLS_AUTO_ENABLE_BODY}$supabase_rls_auto_enable$;`;
+}
+
+export function renderOfficialSupabaseRlsHelperBaselineSql() {
+  return `${renderOfficialSupabaseRlsAutoEnableFunctionSql()}
+
+drop event trigger if exists ensure_rls;
+create event trigger ensure_rls
+on ddl_command_end
+when tag in ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')
+execute function public.rls_auto_enable();`;
+}
+
 function ledgerDdl() {
   return `create table public.maintainflow_schema_migrations (
   migration_name text primary key
@@ -34,10 +83,13 @@ function ledgerDdl() {
 function pristinePublicSchemaGuard() {
   return `do $maintainflow_empty_bootstrap$
 declare
-  unexpected_object_count integer;
+  public_object_count integer;
+  official_rls_helper_oid oid;
+  official_rls_trigger_count integer;
+  helper_trigger_count integer;
 begin
   select count(*)::integer
-    into unexpected_object_count
+    into public_object_count
   from (
     select c.oid
     from pg_catalog.pg_class c
@@ -103,12 +155,98 @@ begin
     from pg_catalog.pg_ts_template t
     join pg_catalog.pg_namespace n on n.oid = t.tmplnamespace
     where n.nspname = 'public'
-  ) unexpected;
+  ) public_objects;
 
-  if unexpected_object_count <> 0 then
+  if public_object_count = 0 then
+    -- A trigger named like the Supabase baseline without its exact public
+    -- helper is a partial or deviant installation, not a pristine database.
+    if exists (
+      select 1
+      from pg_catalog.pg_event_trigger event_trigger
+      where event_trigger.evtname = 'ensure_rls'
+    ) then
+      raise exception using
+        errcode = '55000',
+        message = 'MaintainFlow empty bootstrap refused: public schema is not pristine or the exact Supabase RLS helper baseline.';
+    end if;
+  elsif public_object_count = 1 then
+    select procedure.oid
+      into official_rls_helper_oid
+    from pg_catalog.pg_proc procedure
+    join pg_catalog.pg_namespace namespace
+      on namespace.oid = procedure.pronamespace
+    join pg_catalog.pg_roles owner_role
+      on owner_role.oid = procedure.proowner
+    join pg_catalog.pg_language language
+      on language.oid = procedure.prolang
+    where namespace.nspname = 'public'
+      and procedure.proname = 'rls_auto_enable'
+      and pg_catalog.pg_get_function_identity_arguments(procedure.oid) = ''
+      and procedure.prokind = 'f'
+      and owner_role.rolname = 'postgres'
+      and language.lanname = 'plpgsql'
+      and procedure.prorettype = 'pg_catalog.event_trigger'::pg_catalog.regtype
+      and not procedure.proretset
+      and procedure.provolatile = 'v'
+      and not procedure.proisstrict
+      and procedure.prosecdef
+      and not procedure.proleakproof
+      and procedure.proparallel = 'u'
+      and procedure.proconfig = array['search_path=pg_catalog']::text[]
+      and pg_catalog.length(procedure.prosrc) = 953
+      and pg_catalog.md5(procedure.prosrc) = '99be20677b456ea8d3be47bdd44fb369'
+      and procedure.prosrc = $maintainflow_supabase_rls_body$${OFFICIAL_SUPABASE_RLS_AUTO_ENABLE_BODY}$maintainflow_supabase_rls_body$
+      and not exists (
+        select 1
+        from pg_catalog.pg_depend dependency
+        where dependency.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass
+          and dependency.objid = procedure.oid
+          and dependency.deptype = 'e'
+      );
+
+    if official_rls_helper_oid is null then
+      raise exception using
+        errcode = '55000',
+        message = 'MaintainFlow empty bootstrap refused: public schema is not pristine or the exact Supabase RLS helper baseline.';
+    end if;
+
+    select count(*)::integer
+      into official_rls_trigger_count
+    from pg_catalog.pg_event_trigger event_trigger
+    join pg_catalog.pg_roles event_trigger_owner
+      on event_trigger_owner.oid = event_trigger.evtowner
+    where event_trigger.evtname = 'ensure_rls'
+      and event_trigger.evtevent = 'ddl_command_end'
+      and event_trigger.evtenabled = 'O'
+      and event_trigger_owner.rolname = 'postgres'
+      and event_trigger.evtfoid = official_rls_helper_oid
+      and event_trigger.evttags = array[
+        'CREATE TABLE',
+        'CREATE TABLE AS',
+        'SELECT INTO'
+      ]::text[]
+      and not exists (
+        select 1
+        from pg_catalog.pg_depend dependency
+        where dependency.classid = 'pg_catalog.pg_event_trigger'::pg_catalog.regclass
+          and dependency.objid = event_trigger.oid
+          and dependency.deptype = 'e'
+      );
+
+    select count(*)::integer
+      into helper_trigger_count
+    from pg_catalog.pg_event_trigger event_trigger
+    where event_trigger.evtfoid = official_rls_helper_oid;
+
+    if official_rls_trigger_count <> 1 or helper_trigger_count <> 1 then
+      raise exception using
+        errcode = '55000',
+        message = 'MaintainFlow empty bootstrap refused: public schema is not pristine or the exact Supabase RLS helper baseline.';
+    end if;
+  else
     raise exception using
       errcode = '55000',
-      message = 'MaintainFlow empty bootstrap refused: public schema is not pristine.';
+      message = 'MaintainFlow empty bootstrap refused: public schema is not pristine or the exact Supabase RLS helper baseline.';
   end if;
 end
 $maintainflow_empty_bootstrap$`;
@@ -222,10 +360,10 @@ export function renderEmptyDatabaseBootstrapSql(
   const sections = [
     "-- MaintainFlow one-time hosted database bootstrap.",
     `-- Exact source build: ${expectedBuildSha}`,
-    "-- This transaction refuses every non-pristine public schema.",
+    "-- This transaction accepts only an empty public schema or the exact official Supabase RLS helper baseline.",
     "-- After first initialization, use the backup/restore-gated db:migrate workflow.",
     "begin;",
-    "set local search_path = pg_catalog, public;",
+    "set local search_path = public, pg_catalog;",
     "select pg_advisory_xact_lock(-635039337, 1107438067);",
     `${pristinePublicSchemaGuard()};`,
     `${ledgerDdl()};`,
