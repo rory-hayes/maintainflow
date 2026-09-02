@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   ArrowDown,
   CheckCircle2,
@@ -290,13 +291,13 @@ export function BudgetGuard({
                 )} above the confirmed applicable limit. Review the exact
                 campaign row before approving any change.
               </span>
-              <a
+              <Link
                 className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border bg-background px-3 text-xs font-medium shadow-xs hover:bg-accent"
                 href={`#budget-campaign-${highestRisk.campaign.id}`}
               >
                 Review campaign row
                 <ArrowDown className="size-3.5" />
-              </a>
+              </Link>
             </AlertDescription>
           </Alert>
         ) : underpacingCount > 0 ? (

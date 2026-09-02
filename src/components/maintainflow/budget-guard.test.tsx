@@ -1,5 +1,22 @@
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("next/link", () => ({
+  default: ({
+    children,
+    className,
+    href,
+  }: {
+    children: ReactNode;
+    className?: string;
+    href: string;
+  }) => (
+    <a className={className} data-next-link="true" href={href}>
+      {children}
+    </a>
+  ),
+}));
 
 import { BudgetGuard } from "./budget-guard";
 import { demoCampaigns } from "@/lib/openai-ads/demo-data";
@@ -44,6 +61,8 @@ describe("BudgetGuard", () => {
     expect(markup).toContain("Critical pacing risk");
     expect(markup).toContain("Underpacing");
     expect(markup).toContain("Review campaign row");
+    expect(markup).toContain('data-next-link="true"');
+    expect(markup).toContain('href="#budget-campaign-cmpn_101"');
     expect(markup).toContain("seven-day spending limit");
   });
 
