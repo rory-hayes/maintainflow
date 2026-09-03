@@ -321,32 +321,46 @@ describe("runtime database transaction deployment readiness", () => {
   it("proves the injected driver retains one role, backend, and local marker", async () => {
     vi.stubEnv("DATABASE_URL", "");
     const { database, begin, transaction } = databaseWithTransaction();
+    const reportFailure = vi.fn();
 
     await expect(
-      verifyRuntimeDatabaseTransaction(database),
+      verifyRuntimeDatabaseTransaction(database, reportFailure),
     ).resolves.toBe(true);
     expect(begin).toHaveBeenCalledOnce();
     expect(transaction).toHaveBeenCalledTimes(2);
     expect(state.getRuntimeDatabase).not.toHaveBeenCalled();
+    expect(reportFailure).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["wrong role", { roleName: "postgres" }],
-    ["changed backend", { confirmedPid: 202 }],
-    ["missing marker", { confirmedMarker: "" }],
-    ["driver failure", { reject: true }],
-  ])("rejects %s", async (_label, options) => {
+    ["wrong role", { roleName: "postgres" }, "transaction_role_mismatch"],
+    ["changed backend", { confirmedPid: 202 }, "transaction_backend_changed"],
+    [
+      "missing marker",
+      { confirmedMarker: "" },
+      "transaction_confirmation_marker_mismatch",
+    ],
+    ["driver failure", { reject: true }, "transaction_begin_failed"],
+  ])("rejects %s", async (_label, options, expectedCode) => {
     const { database } = databaseWithTransaction(options);
+    const reportFailure = vi.fn();
 
     await expect(
-      verifyRuntimeDatabaseTransaction(database),
+      verifyRuntimeDatabaseTransaction(database, reportFailure),
     ).resolves.toBe(false);
+    expect(reportFailure).toHaveBeenCalledWith({ code: expectedCode });
   });
 
   it("fails closed without a configured or injected database", async () => {
     vi.stubEnv("DATABASE_URL", "");
 
-    await expect(verifyRuntimeDatabaseTransaction()).resolves.toBe(false);
+    const reportFailure = vi.fn();
+    await expect(
+      verifyRuntimeDatabaseTransaction(undefined, reportFailure),
+    ).resolves.toBe(false);
     expect(state.getRuntimeDatabase).not.toHaveBeenCalled();
+    expect(reportFailure).toHaveBeenCalledWith({
+      code: "database_unconfigured",
+    });
   });
 });

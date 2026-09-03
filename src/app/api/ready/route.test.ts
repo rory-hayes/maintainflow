@@ -124,6 +124,10 @@ describe("deployment readiness route", () => {
     expect(state.verifyRuntimeDatabaseRole).toHaveBeenCalledWith(
       expect.objectContaining({ end: state.probeEnd }),
     );
+    expect(state.verifyRuntimeDatabaseTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ end: state.probeEnd }),
+      expect.any(Function),
+    );
     expect(state.probeEnd).toHaveBeenCalledWith({ timeout: 1 });
     expect(console.info).toHaveBeenCalledOnce();
     expect(
@@ -168,7 +172,15 @@ describe("deployment readiness route", () => {
   });
 
   it("fails when the bundled database driver cannot complete an isolated transaction", async () => {
-    state.verifyRuntimeDatabaseTransaction.mockResolvedValue(false);
+    state.verifyRuntimeDatabaseTransaction.mockImplementation(
+      async (_database, reportFailure) => {
+        reportFailure({
+          code: "transaction_begin_failed",
+          databaseErrorCode: "XX000",
+        });
+        return false;
+      },
+    );
 
     const response = await GET(request());
 
@@ -180,6 +192,8 @@ describe("deployment readiness route", () => {
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
       failedChecks: ["database_transaction"],
+      diagnosticCode: "transaction_begin_failed",
+      databaseErrorCode: "XX000",
     });
   });
 
@@ -220,7 +234,6 @@ describe("deployment readiness route", () => {
     const dedicatedDatabase = state.createReadinessDatabase.mock.results[0].value;
     for (const check of [
       state.verifyRuntimeDatabaseRole,
-      state.verifyRuntimeDatabaseTransaction,
       state.verifyDatabaseMigrationLedger,
       state.verifyReadinessRateLimitStore,
       state.verifyLiveSyncStore,
@@ -234,6 +247,10 @@ describe("deployment readiness route", () => {
     ]) {
       expect(check).toHaveBeenCalledWith(dedicatedDatabase);
     }
+    expect(state.verifyRuntimeDatabaseTransaction).toHaveBeenCalledWith(
+      dedicatedDatabase,
+      expect.any(Function),
+    );
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
       failedChecks: ["creative_history"],

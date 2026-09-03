@@ -142,6 +142,32 @@ const countNames = new Set([
   "pruned",
 ]);
 
+const diagnosticCodes = new Set([
+  "database_unconfigured",
+  "database_client_failed",
+  "transaction_begin_failed",
+  "transaction_identity_query_failed",
+  "transaction_confirmation_query_failed",
+  "transaction_commit_failed",
+  "transaction_identity_missing",
+  "transaction_role_mismatch",
+  "transaction_identity_marker_mismatch",
+  "transaction_confirmation_missing",
+  "transaction_backend_changed",
+  "transaction_confirmation_marker_mismatch",
+  "transaction_result_invalid",
+]);
+
+const databaseDriverErrorCodes = new Set([
+  "CONNECT_TIMEOUT",
+  "CONNECTION_CLOSED",
+  "CONNECTION_DESTROYED",
+  "CONNECTION_ENDED",
+  "COPY_IN_PROGRESS",
+  "SASL_SIGNATURE_MISMATCH",
+  "UNSAFE_TRANSACTION",
+]);
+
 const errorKinds = new Map([
   ["AbortError", "timeout_error"],
   ["TimeoutError", "timeout_error"],
@@ -190,6 +216,8 @@ export type ServerLogFields = {
   failedChecks?: readonly string[];
   timedOutChecks?: readonly string[];
   counts?: Readonly<Record<string, number>>;
+  diagnosticCode?: string;
+  databaseErrorCode?: string;
 };
 
 function classifyError(error: unknown) {
@@ -225,6 +253,17 @@ function safeCounts(values: Readonly<Record<string, number>> | undefined) {
   return Object.keys(counts).length > 0 ? counts : undefined;
 }
 
+function safeDiagnosticCode(value: string | undefined) {
+  return value && diagnosticCodes.has(value) ? value : undefined;
+}
+
+function safeDatabaseErrorCode(value: string | undefined) {
+  return value &&
+    (/^[0-9A-Z]{5}$/.test(value) || databaseDriverErrorCodes.has(value))
+    ? value
+    : undefined;
+}
+
 function emit(
   level: ServerLogLevel,
   scope: ServerLogScope,
@@ -237,6 +276,8 @@ function emit(
   const failedChecks = safeFailedChecks(fields.failedChecks);
   const timedOutChecks = safeFailedChecks(fields.timedOutChecks);
   const counts = safeCounts(fields.counts);
+  const diagnosticCode = safeDiagnosticCode(fields.diagnosticCode);
+  const databaseErrorCode = safeDatabaseErrorCode(fields.databaseErrorCode);
   const record = {
     timestamp: new Date().toISOString(),
     service: SERVICE,
@@ -254,6 +295,8 @@ function emit(
     ...(failedChecks ? { failedChecks } : {}),
     ...(timedOutChecks ? { timedOutChecks } : {}),
     ...(counts ? { counts } : {}),
+    ...(diagnosticCode ? { diagnosticCode } : {}),
+    ...(databaseErrorCode ? { databaseErrorCode } : {}),
   };
   const line = JSON.stringify(record);
   if (level === "error") console.error(line);

@@ -18,6 +18,10 @@ const canonicalAppHostname = new URL(canonicalAppOrigin).hostname;
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // postgres.js is patched at install time for safe Supavisor transaction
+  // reservation. Keep it external so the deployed runtime loads those patched
+  // files instead of a potentially stale framework bundle from build cache.
+  serverExternalPackages: ["postgres"],
   poweredByHeader: false,
   // This value is substituted into the compiled server bundle by Next.js. It
   // deliberately has no runtime-environment fallback, so a container operator

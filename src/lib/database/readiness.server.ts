@@ -60,6 +60,31 @@ type RuntimeTransactionIdentityRow = {
   transaction_marker: string;
 };
 
+export type RuntimeDatabaseTransactionDiagnostic = Readonly<{
+  code:
+    | "database_unconfigured"
+    | "database_client_failed"
+    | "transaction_begin_failed"
+    | "transaction_identity_query_failed"
+    | "transaction_confirmation_query_failed"
+    | "transaction_commit_failed"
+    | "transaction_identity_missing"
+    | "transaction_role_mismatch"
+    | "transaction_identity_marker_mismatch"
+    | "transaction_confirmation_missing"
+    | "transaction_backend_changed"
+    | "transaction_confirmation_marker_mismatch"
+    | "transaction_result_invalid";
+  databaseErrorCode?: string;
+}>;
+
+type RuntimeDatabaseTransactionPhase =
+  | "database_client"
+  | "transaction_begin"
+  | "transaction_identity_query"
+  | "transaction_confirmation_query"
+  | "transaction_commit";
+
 const runtimeTablePrivileges = new Map<
   string,
   Readonly<{ select: boolean; insert: boolean; update: boolean; delete: boolean }>
@@ -272,13 +297,24 @@ export async function verifyRuntimeDatabaseRole(
 
 export async function verifyRuntimeDatabaseTransaction(
   database?: Sql,
+  reportFailure?: (diagnostic: RuntimeDatabaseTransactionDiagnostic) => void,
 ): Promise<boolean> {
   const connectionString = process.env.DATABASE_URL;
-  if (!database && !connectionString) return false;
+  if (!database && !connectionString) {
+    reportFailure?.({ code: "database_unconfigured" });
+    return false;
+  }
+
+  let phase: RuntimeDatabaseTransactionPhase = "database_client";
+  let validationFailure:
+    | RuntimeDatabaseTransactionDiagnostic["code"]
+    | undefined;
 
   try {
     const sql = database ?? getRuntimeDatabase(connectionString!);
-    return await sql.begin(async (transaction) => {
+    phase = "transaction_begin";
+    const ready = await sql.begin(async (transaction) => {
+      phase = "transaction_identity_query";
       const [identity] = await transaction<RuntimeTransactionIdentityRow[]>`
         select current_user as role_name,
           pg_backend_pid() as backend_pid,
@@ -288,6 +324,7 @@ export async function verifyRuntimeDatabaseTransaction(
             true
           ) as transaction_marker
       `;
+      phase = "transaction_confirmation_query";
       const [confirmed] = await transaction<
         Pick<
           RuntimeTransactionIdentityRow,
@@ -300,14 +337,44 @@ export async function verifyRuntimeDatabaseTransaction(
             true
           ) as transaction_marker
       `;
-      return (
-        identity?.role_name === "maintainflow_app" &&
-        identity.transaction_marker === "active" &&
-        confirmed?.backend_pid === identity.backend_pid &&
-        confirmed.transaction_marker === "active"
-      );
+      validationFailure = !identity
+        ? "transaction_identity_missing"
+        : identity.role_name !== "maintainflow_app"
+          ? "transaction_role_mismatch"
+          : identity.transaction_marker !== "active"
+            ? "transaction_identity_marker_mismatch"
+            : !confirmed
+              ? "transaction_confirmation_missing"
+              : confirmed.backend_pid !== identity.backend_pid
+                ? "transaction_backend_changed"
+                : confirmed.transaction_marker !== "active"
+                  ? "transaction_confirmation_marker_mismatch"
+                  : undefined;
+      phase = "transaction_commit";
+      return validationFailure === undefined;
     });
-  } catch {
+
+    if (ready === true) return true;
+    reportFailure?.({
+      code: validationFailure ?? "transaction_result_invalid",
+    });
+    return false;
+  } catch (error) {
+    const code =
+      phase === "database_client"
+        ? "database_client_failed"
+        : phase === "transaction_begin"
+          ? "transaction_begin_failed"
+          : phase === "transaction_identity_query"
+            ? "transaction_identity_query_failed"
+            : phase === "transaction_confirmation_query"
+              ? "transaction_confirmation_query_failed"
+              : "transaction_commit_failed";
+    const databaseErrorCode =
+      typeof (error as { code?: unknown })?.code === "string"
+        ? (error as { code: string }).code
+        : undefined;
+    reportFailure?.({ code, databaseErrorCode });
     return false;
   }
 }

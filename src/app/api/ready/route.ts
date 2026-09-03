@@ -5,6 +5,7 @@ import type { Sql } from "postgres";
 import { verifyApprovalStore } from "@/lib/audit/approval-store.server";
 import { verifyRecommendationDecisionStore } from "@/lib/audit/recommendation-decision-store.server";
 import {
+  type RuntimeDatabaseTransactionDiagnostic,
   verifyDatabaseMigrationLedger,
   verifyRuntimeDatabaseRole,
   verifyRuntimeDatabaseTransaction,
@@ -32,6 +33,9 @@ const DEPENDENCY_CHECK_TIMEOUT_MS = 10_000;
 const DEPENDENCY_TIMEOUT = Symbol("dependency_timeout");
 
 type ReadinessCheck = readonly [string, () => Promise<boolean>];
+type ReadinessDiagnostics = {
+  databaseTransaction?: RuntimeDatabaseTransactionDiagnostic;
+};
 
 function hasAuthorizedProbeHeader(request: Request, secret: string) {
   const supplied = Buffer.from(request.headers.get("authorization") ?? "");
@@ -41,7 +45,11 @@ function hasAuthorizedProbeHeader(request: Request, secret: string) {
   );
 }
 
-function dependencyChecks(stage: string, database?: Sql): ReadinessCheck[] {
+function dependencyChecks(
+  stage: string,
+  diagnostics: ReadinessDiagnostics,
+  database?: Sql,
+): ReadinessCheck[] {
   const unavailable = async () => false;
   const checks: ReadinessCheck[] = [
     [
@@ -51,7 +59,10 @@ function dependencyChecks(stage: string, database?: Sql): ReadinessCheck[] {
     [
       "database_transaction",
       database
-        ? () => verifyRuntimeDatabaseTransaction(database)
+        ? () =>
+            verifyRuntimeDatabaseTransaction(database, (diagnostic) => {
+              diagnostics.databaseTransaction = diagnostic;
+            })
         : unavailable,
     ],
     [
@@ -176,8 +187,9 @@ export async function GET(request: Request) {
     database = undefined;
   }
 
+  const diagnostics: ReadinessDiagnostics = {};
   const results = await Promise.all(
-    dependencyChecks(stage, database).map((check) => runCheck(check)),
+    dependencyChecks(stage, diagnostics, database).map((check) => runCheck(check)),
   );
   const timedOutChecks = results
     .filter((result) => result.timedOut)
@@ -207,6 +219,8 @@ export async function GET(request: Request) {
     failedChecks,
     timedOutChecks,
     counts: { checksPassed: passed, checksTotal: total },
+    diagnosticCode: diagnostics.databaseTransaction?.code,
+    databaseErrorCode: diagnostics.databaseTransaction?.databaseErrorCode,
   };
   if (ok) log.info("deployment.readiness.completed", logFields);
   else log.error("deployment.readiness.failed", logFields);
