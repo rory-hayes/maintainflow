@@ -4,6 +4,11 @@ const MAX_JSON_RESPONSE_BYTES = 64 * 1024;
 const MAX_HTML_RESPONSE_BYTES = 512 * 1024;
 const REVISION_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i;
 const RELEASE_STAGES = new Set(["demo", "private_read", "live_write"]);
+const EXPECTED_READINESS_CHECKS = Object.freeze({
+  demo: 7,
+  private_read: 14,
+  live_write: 14,
+});
 
 export class DeploymentProbeError extends Error {
   constructor(message) {
@@ -205,7 +210,7 @@ export async function probeDeployment(options) {
     readinessResponse,
     "Authenticated readiness probe",
   );
-  const minimumReadinessChecks = expectedStage === "demo" ? 6 : 13;
+  const expectedReadinessChecks = EXPECTED_READINESS_CHECKS[expectedStage];
   if (
     readiness?.ok !== true ||
     readiness?.service !== "maintainflow-ads" ||
@@ -214,8 +219,8 @@ export async function probeDeployment(options) {
     readiness?.stage !== expectedStage ||
     !Number.isInteger(readiness?.checks?.passed) ||
     !Number.isInteger(readiness?.checks?.total) ||
-    readiness.checks.total < minimumReadinessChecks ||
-    readiness.checks.passed !== readiness.checks.total
+    readiness.checks.total !== expectedReadinessChecks ||
+    readiness.checks.passed !== expectedReadinessChecks
   ) {
     throw new DeploymentProbeError(
       "Readiness probe did not confirm the expected stage, revision, and checks.",

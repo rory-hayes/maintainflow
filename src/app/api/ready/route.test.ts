@@ -257,6 +257,26 @@ describe("deployment readiness route", () => {
     });
   });
 
+  it("uses the complete non-demo readiness contract in live-write mode", async () => {
+    vi.stubEnv("MAINTAINFLOW_RELEASE_STAGE", "live_write");
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      stage: "live_write",
+      checks: { passed: 14, total: 14 },
+    });
+    expect(state.verifyTenancyStore).toHaveBeenCalledTimes(1);
+    expect(state.verifyCredentialStore).toHaveBeenCalledTimes(1);
+    expect(state.verifyConversionCredentialStore).toHaveBeenCalledTimes(1);
+    expect(state.verifyApprovalStore).toHaveBeenCalledTimes(1);
+    expect(state.verifyRecommendationDecisionStore).toHaveBeenCalledTimes(1);
+    expect(state.verifyCreativeHistoryStore).toHaveBeenCalledTimes(1);
+    expect(state.verifyReadinessHistoryStore).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects an unauthenticated probe before touching the database", async () => {
     const response = await GET(request("wrong-secret"));
 
