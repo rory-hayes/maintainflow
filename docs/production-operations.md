@@ -71,8 +71,9 @@ The probe must prove all five gate groups in one run:
 
 1. `/api/health` returns the exact compiled revision;
 2. unauthenticated `/api/ready` returns 401;
-3. authenticated `/api/ready` returns the expected stage/revision with every
-   dependency check passed;
+3. authenticated `/api/ready` returns the expected stage/revision with the
+   complete contract passed exactly: 7/7 checks in `demo` and 14/14 checks in
+   `private_read` or `live_write`;
 4. the protected monitoring route completes successfully, including bounded
    cleanup; and
 5. the public landing page, privacy notice, private-beta terms, registration
@@ -92,7 +93,7 @@ credential-free HTTPS-origin requirement.
 
 CI also builds a second standalone image with a syntactically valid non-secret
 test Clerk publishable key. It starts that image in `private_read` against the
-migrated TLS PostgreSQL service and requires all thirteen readiness checks, then
+migrated TLS PostgreSQL service and requires all fourteen readiness checks, then
 proves that changing the runtime public Clerk key makes startup fail. This
 covers the account-backed image/configuration boundary without contacting
 Clerk or OpenAI and is not evidence of either hosted service working.

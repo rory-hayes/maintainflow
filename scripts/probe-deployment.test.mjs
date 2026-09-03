@@ -23,7 +23,13 @@ function htmlResponse(body, status = 200) {
   });
 }
 
-function successfulFetch({ landingHtml, monitoringOverrides } = {}) {
+function successfulFetch({
+  landingHtml,
+  monitoringOverrides,
+  readinessOverrides,
+  stage = "demo",
+} = {}) {
+  const expectedReadinessChecks = stage === "demo" ? 7 : 14;
   return vi
     .fn()
     .mockResolvedValueOnce(
@@ -40,16 +46,20 @@ function successfulFetch({ landingHtml, monitoringOverrides } = {}) {
         ok: true,
         service: "maintainflow-ads",
         scope: "deployment_readiness",
-        stage: "demo",
+        stage,
         revision,
-        checks: { passed: 6, total: 6 },
+        checks: {
+          passed: expectedReadinessChecks,
+          total: expectedReadinessChecks,
+          ...readinessOverrides,
+        },
       }),
     )
     .mockResolvedValueOnce(
       jsonResponse({
         ok: true,
-        releaseStage: "demo",
-        providerMonitoringPaused: true,
+        releaseStage: stage,
+        providerMonitoringPaused: stage === "demo",
         pausedBacklog: {
           dueAccounts: 0,
           dueWindows: 0,
@@ -114,7 +124,7 @@ describe("hosted deployment probe", () => {
       service: "maintainflow-ads",
       stage: "demo",
       revision,
-      readinessChecks: 6,
+      readinessChecks: 7,
       surfaceChecks: 5,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(9);
@@ -138,6 +148,29 @@ describe("hosted deployment probe", () => {
       fetchImpl.mock.calls.slice(4).every(([, init]) => !init?.headers),
     ).toBe(true);
   });
+
+  it.each([
+    ["private_read", 14],
+    ["live_write", 14],
+  ])(
+    "requires the complete %s readiness contract",
+    async (expectedStage, expectedReadinessChecks) => {
+      await expect(
+        probeDeployment({
+          origin: "https://staging.maintainflow.io",
+          readinessSecret,
+          cronSecret,
+          expectedRevision: revision,
+          expectedStage,
+          fetchImpl: successfulFetch({ stage: expectedStage }),
+        }),
+      ).resolves.toMatchObject({
+        ok: true,
+        stage: expectedStage,
+        readinessChecks: expectedReadinessChecks,
+      });
+    },
+  );
 
   it("fails closed when a public surface returns the wrong application", async () => {
     const plantedSecret = "PLANTED_SURFACE_SECRET_f8f24a";
@@ -313,6 +346,27 @@ describe("hosted deployment probe", () => {
     ).rejects.toThrow("expected stage, revision, and checks");
   });
 
+  it.each([6, 8])(
+    "rejects a demo readiness response with %i checks",
+    async (reportedChecks) => {
+      await expect(
+        probeDeployment({
+          origin: "https://staging.maintainflow.io",
+          readinessSecret,
+          cronSecret,
+          expectedRevision: revision,
+          expectedStage: "demo",
+          fetchImpl: successfulFetch({
+            readinessOverrides: {
+              passed: reportedChecks,
+              total: reportedChecks,
+            },
+          }),
+        }),
+      ).rejects.toThrow("expected stage, revision, and checks");
+    },
+  );
+
   it("rejects a monitoring response that omits completion evidence", async () => {
     const fetchImpl = vi
       .fn()
@@ -332,7 +386,7 @@ describe("hosted deployment probe", () => {
           scope: "deployment_readiness",
           stage: "demo",
           revision,
-          checks: { passed: 6, total: 6 },
+          checks: { passed: 7, total: 7 },
         }),
       )
       .mockResolvedValueOnce(jsonResponse({ ok: true }));
