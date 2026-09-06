@@ -100,10 +100,14 @@ RUN chown node:node .next
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/.next/maintainflow-public-build-metadata.json ./.next/maintainflow-public-build-metadata.json
+# The startup validator runs outside Next.js output tracing and imports Zod.
+COPY --from=builder --chown=node:node /app/node_modules/zod ./node_modules/zod
 COPY --from=builder --chown=node:node /app/scripts/check-maintaincode-config.mjs ./scripts/check-maintaincode-config.mjs
 COPY --from=builder --chown=node:node /app/scripts/database-tls.mjs ./scripts/database-tls.mjs
 COPY --from=builder --chown=node:node /app/scripts/public-build-metadata.mjs ./scripts/public-build-metadata.mjs
 COPY --from=builder --chown=node:node /app/scripts/start-standalone-production.mjs ./scripts/start-standalone-production.mjs
+# Check script dependencies without loading environment files or requiring secrets.
+RUN node --input-type=module -e "await import('./scripts/check-maintaincode-config.mjs')"
 
 # If you want to persist the fetch cache generated during the build so that
 # cached responses are available immediately on startup, uncomment this line:
