@@ -45,6 +45,32 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe("fail-open HTML adapter", () => {
+  it("deduplicates success callbacks before and after an in-flight acknowledgement", async () => {
+    let complete!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    tracker = installTracker(config());
+    tracker.setConsent(true);
+    tracker.confirm(form());
+    tracker.confirm(form());
+    form().dispatchEvent(new Event("submit", { bubbles: true }));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(
+      JSON.parse(localStorage.getItem("mc_delivery:site")!)[0].attempts,
+    ).toBe(1);
+    complete(Response.json({ received: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(localStorage.getItem("mc_delivery:site")).toBeNull();
+    tracker.confirm(form());
+    tracker.confirm(form());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem("mc_delivery:site")).toBeNull();
+  });
   it("expires persisted retry records after their attempt budget is exhausted", async () => {
     vi.mocked(fetch).mockRejectedValue(new Error("offline"));
     tracker = installTracker(config());
@@ -312,9 +338,8 @@ describe("documented HubSpot V4 adapter", () => {
       new CustomEvent("hs-form-event:on-submission:success"),
     );
     await new Promise((r) => setTimeout(r, 0));
-    expect(
-      JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string).id,
-    ).toBe(first.id);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(set).toHaveBeenCalledWith("0-1/mc_submission_id", [first.id]);
     expect(first.formId).toBe("hs-form");
   });
 });

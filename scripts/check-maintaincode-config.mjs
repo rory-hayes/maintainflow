@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import { validateDatabaseCaCertificate } from "./database-tls.mjs";
 import {
   publicSupabaseConfigDigest,
@@ -146,6 +147,24 @@ export function validateMaintainCodeConfig(
     );
   if (env.MAINTAINCODE_LOCAL_TEST === "1")
     issues.push("Local test mode must be disabled for production.");
+  if (
+    env.MAINTAINCODE_REPORT_EMAILS_ENABLED &&
+    !["true", "false"].includes(env.MAINTAINCODE_REPORT_EMAILS_ENABLED)
+  )
+    issues.push("MAINTAINCODE_REPORT_EMAILS_ENABLED must be true or false.");
+  if (env.MAINTAINCODE_REPORT_EMAILS_ENABLED === "true") {
+    if (!env.RESEND_API_KEY?.startsWith("re_"))
+      issues.push(
+        "Enabled workspace reports require a server-only Resend API key.",
+      );
+    if (
+      !z.string().email().max(254).safeParse(env.MAINTAINCODE_REPORT_FROM)
+        .success
+    )
+      issues.push(
+        "Enabled workspace reports require MAINTAINCODE_REPORT_FROM as one verified sender email address.",
+      );
+  }
   if (
     env.OPENAI_ADS_LIVE_WRITES_ENABLED === "true" ||
     env.OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED === "true"

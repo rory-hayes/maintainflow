@@ -133,3 +133,8 @@ jobs:
       - run: npm run test:db
         env:
           MAINTAINFLOW_TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      - name: Verify attribution concurrency and storage limits in an owned disposable database
+        run: node scripts/verify-maintaincode-load.mjs --docker
+      - run: npx playwright install --with-deps chromium
+      - name: Verify persistent onboarding, installed tracking, consent and cleanup
+        run: node scripts/verify-maintaincode-persistent.mjs --docker

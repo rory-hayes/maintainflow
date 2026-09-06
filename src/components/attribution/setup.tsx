@@ -13,10 +13,12 @@ import {
 import {
   defaultMapping,
   usage,
+  workspaceRetentionDays,
   type Workspace,
   type Site,
 } from "@/lib/attribution/model";
 import { ModeNotice, download, Empty } from "./reporting";
+import { NotificationSettings } from "./notification-settings";
 export type Act = (body: Record<string, unknown>) => Promise<void>;
 export function Setup({
   w,
@@ -675,6 +677,7 @@ export function Settings({ w, act }: { w: Workspace; act: Act }) {
         </p>
       </div>
       <ModeNotice w={w} />
+      <NotificationSettings key={w.id} workspaceId={w.id} mode={w.mode} />
       <form
         className="mc-panel mc-form"
         onSubmit={async (e) => {
@@ -741,7 +744,7 @@ export function Settings({ w, act }: { w: Workspace; act: Act }) {
               type="number"
               min={1}
               max={90}
-              defaultValue={w.sites[0]?.retentionDays ?? 90}
+              defaultValue={workspaceRetentionDays(w)}
             />
           </label>
         </div>

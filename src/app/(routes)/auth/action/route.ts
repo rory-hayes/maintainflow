@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { applicationOrigin } from "@/lib/application-origin.server";
 import { createSupabaseServerClient } from "@/lib/auth/supabase.server";
 import {
   authErrorMessage,
@@ -41,7 +42,18 @@ function json(value: unknown, status = 200) {
   });
 }
 export async function POST(request: Request) {
-  if (request.headers.get("origin") !== new URL(request.url).origin)
+  let origin: string;
+  try {
+    origin = applicationOrigin(request);
+  } catch {
+    return json(
+      {
+        error: "Customer sign-in is not available yet. Please try again later.",
+      },
+      503,
+    );
+  }
+  if (request.headers.get("origin") !== origin)
     return json(
       { error: "Open this form from your workspace to continue." },
       403,
@@ -74,8 +86,6 @@ export async function POST(request: Request) {
       );
     const input = parsed.data;
     const client = await createSupabaseServerClient(true);
-    const origin =
-      process.env.MAINTAINCODE_APP_ORIGIN || new URL(request.url).origin;
     const callback = new URL("/auth/callback", origin);
     if (input.action === "sign-in") {
       const { error } = await client.auth.signInWithPassword({

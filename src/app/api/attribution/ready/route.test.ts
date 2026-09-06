@@ -46,7 +46,15 @@ function success() {
     .mockResolvedValueOnce(
       Array.from({ length: 6 }, (_, n) => ({ policyname: `policy${n}` })),
     )
-    .mockResolvedValueOnce([{ count: 1 }]);
+    .mockResolvedValueOnce([{ count: 1 }])
+    .mockResolvedValueOnce([
+      {
+        prosecdef: true,
+        proconfig: ["search_path=pg_catalog"],
+        can_execute: true,
+        unexpected_execute: false,
+      },
+    ]);
 }
 function request(auth = true) {
   return new Request("https://maintainflow.io/api/attribution/ready", {

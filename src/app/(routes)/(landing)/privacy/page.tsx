@@ -68,6 +68,16 @@ export default async function PrivacyPage() {
             and security information, which may include IP addresses and browser
             details.
           </p>
+          <p>
+            If you opt into workspace email reports, we store your verified
+            account email, preferences and limited delivery records. Reports
+            contain aggregate counts, tracking-health guidance and links to the
+            app, without lead or contact details. You can turn reports off in
+            Workspace &amp; billing or confirm an opt-out through the email
+            link. Turning both reports off removes their saved recipient and
+            pending delivery records; the email provider may retain its own
+            delivery logs.
+          </p>
         </PolicySection>
         <PolicySection title="Cookies and browser storage">
           <p>
@@ -81,10 +91,12 @@ export default async function PrivacyPage() {
             can configure consent behaviour and is responsible for that choice.
           </p>
           <p>
-            Attribution storage lasts up to the website’s selected window, at
-            most 90 days. Pending delivery records expire within 24 hours.
-            Browser settings, consent withdrawal, device changes and blockers
-            can prevent attribution.
+            Attribution evidence stops being used after the website’s selected
+            window, at most 90 days. Pending delivery records stop being used
+            within 24 hours. Physical browser cleanup occurs on later tracker
+            activity or consent withdrawal; it does not run while the browser is
+            closed. Browser settings, consent withdrawal, device changes and
+            blockers can prevent attribution.
           </p>
         </PolicySection>
         <PolicySection title="Providers and data location">

@@ -10,10 +10,10 @@ const [configPath, expectedProject, ...flags] = process.argv.slice(2);
 if (
   !configPath ||
   !/^[a-z0-9]{20}$/.test(expectedProject ?? "") ||
-  flags.some((flag) => flag !== "--require-queue")
+  flags.some((flag) => !["--require-queue", "--require-notifications"].includes(flag))
 ) {
   console.error(
-    "Usage: node scripts/verify-maintaincode-database.mjs CONFIG_JSON EXPECTED_PROJECT_REF [--require-queue]",
+    "Usage: node scripts/verify-maintaincode-database.mjs CONFIG_JSON EXPECTED_PROJECT_REF [--require-queue] [--require-notifications]",
   );
   process.exit(1);
 }
@@ -128,7 +128,8 @@ try {
       "The runtime role has unexpected elevated privileges.",
     );
   const [schema] =
-    await sql`select to_regclass('public.maintaincode_maintenance_queue') is not null as queue`;
+    await sql`select to_regclass('public.maintaincode_maintenance_queue') is not null as queue,
+      to_regprocedure('public.maintaincode_notification_recipient_valid(uuid,text,text)') is not null as notifications`;
   if (flags.includes("--require-queue"))
     assert.equal(
       schema.queue,
@@ -174,6 +175,44 @@ try {
     check(
       "maintenance queue RLS, dedicated policy and restricted runtime/Data API grants",
     );
+  }
+  if (flags.includes("--require-notifications"))
+    assert.equal(schema.notifications, true, "Notification recipient migration is required.");
+  if (schema.notifications) {
+    // Inspect only function/privilege catalogs, never auth user records.
+    const [recipientFunction] = await sql`select p.prosecdef as security_definer,
+      p.prorettype = 'boolean'::regtype as boolean_only,p.proconfig as settings,
+      p.proowner = (select oid from pg_roles where rolname=current_user) as runtime_owns,
+      has_function_privilege(current_user,p.oid,'EXECUTE') as can_execute
+      from pg_proc p where p.oid='public.maintaincode_notification_recipient_valid(uuid,text,text)'::regprocedure`;
+    assert.deepEqual(recipientFunction, {
+      security_definer: true,
+      boolean_only: true,
+      settings: ["search_path=pg_catalog"],
+      runtime_owns: false,
+      can_execute: true,
+    }, "The recipient validator must remain a boolean-only, fixed-search-path privileged boundary.");
+    const recipientGrants = await sql`select r.rolname,a.privilege_type,a.is_grantable
+      from pg_proc p cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+      left join pg_roles r on r.oid=a.grantee
+      where p.oid='public.maintaincode_notification_recipient_valid(uuid,text,text)'::regprocedure
+      and a.grantee<>p.proowner order by r.rolname`;
+    assert.deepEqual([...recipientGrants], [{
+      rolname: "maintaincode_app", privilege_type: "EXECUTE", is_grantable: false,
+    }], "Only the dedicated runtime role may receive recipient-validator EXECUTE.");
+    const excludedRoles = await sql`select rolname,
+      has_function_privilege(oid,'public.maintaincode_notification_recipient_valid(uuid,text,text)','EXECUTE') as can_execute
+      from pg_roles where rolname in ('anon','authenticated','maintainflow_app')`;
+    assert(excludedRoles.every((role) => role.can_execute === false),
+      "Data API and legacy roles must not inherit recipient-validator EXECUTE.");
+    const authAccess = await sql`select
+      has_table_privilege(current_user,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') as table_access,
+      has_any_column_privilege(current_user,c.oid,'SELECT,INSERT,UPDATE,REFERENCES') as column_access
+      from pg_class c join pg_namespace n on n.oid=c.relnamespace
+      where n.nspname='auth' and c.relname='users'`;
+    assert(authAccess.every((access) => access.table_access === false && access.column_access === false),
+      "The runtime role must not gain direct auth user table or column access.");
+    check("notification boolean validator, fixed search path, runtime-only effective EXECUTE and no direct auth grants");
   }
   check("restricted runtime role and verified TLS connection");
 
@@ -221,6 +260,15 @@ try {
       check(
         "two transactional organizations, owner memberships, workspaces and sites",
       );
+      if (schema.notifications) {
+        await setContext(tx, a);
+        // This deliberately non-UUID actor cannot exist in auth.users. The
+        // function returns one boolean; no auth user reads/inserts are exposed.
+        const [recipient] = await tx`select public.maintaincode_notification_recipient_valid(
+          ${a.id}::uuid,${a.actor},${"nobody@verification.invalid"}) as valid`;
+        assert.equal(recipient.valid, false, "A synthetic nonrecipient must fail closed even with an owner membership.");
+        check("notification validator rejects a nonexistent synthetic owner recipient");
+      }
 
       for (const fixture of fixtures) {
         await setContext(tx, fixture);

@@ -54,6 +54,83 @@ describe("workspace boundary", () => {
       ),
     ).toThrow("workspace");
   });
+  it("accepts the configured public origin when Next normalizes the request hostname", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("MAINTAINCODE_APP_ORIGIN", "https://maintainflow.io/");
+    expect(() =>
+      sameOrigin(
+        new Request("http://localhost:3000/api/attribution/workspaces", {
+          headers: { Origin: "https://maintainflow.io" },
+        }),
+      ),
+    ).not.toThrow();
+    for (const origin of [
+      undefined,
+      "null",
+      "https://other.example",
+      "http://localhost:3000",
+    ]) {
+      expect(() =>
+        sameOrigin(
+          new Request("http://localhost:3000/api/attribution/workspaces", {
+            headers: {
+              ...(origin ? { Origin: origin } : {}),
+              "X-Forwarded-Host": "maintainflow.io",
+            },
+          }),
+        ),
+      ).toThrow("workspace");
+    }
+  });
+  it("requires the exact configured local origin and preserves the development fallback", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("MAINTAINCODE_APP_ORIGIN", "http://127.0.0.1:3218");
+    const normalized = "http://localhost:3218/api/attribution/workspaces";
+    expect(() =>
+      sameOrigin(
+        new Request(normalized, {
+          headers: { Origin: "http://127.0.0.1:3218" },
+        }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      sameOrigin(
+        new Request(normalized, {
+          headers: { Origin: "http://127.0.0.1:3217" },
+        }),
+      ),
+    ).toThrow("workspace");
+    vi.stubEnv("MAINTAINCODE_APP_ORIGIN", "");
+    expect(() =>
+      sameOrigin(
+        new Request(normalized, {
+          headers: { Origin: "http://localhost:3218" },
+        }),
+      ),
+    ).not.toThrow();
+  });
+  it.each([
+    "",
+    "http://maintainflow.io",
+    "https://maintainflow.io/path",
+    "https://user@maintainflow.io",
+    "https://maintainflow.io?x=1",
+    "https://maintainflow.io#x",
+    "invalid",
+  ])(
+    "fails closed for an absent or invalid production origin: %s",
+    (origin) => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("MAINTAINCODE_APP_ORIGIN", origin);
+      expect(() =>
+        sameOrigin(
+          new Request("https://maintainflow.io/api/attribution/workspaces", {
+            headers: { Origin: "https://maintainflow.io" },
+          }),
+        ),
+      ).toThrow("origin");
+    },
+  );
   it("redacts click references and billing IDs from exported workspace data", () => {
     const w = emptyWorkspace("w", "Test");
     w.billing.customerId = "cus_private";

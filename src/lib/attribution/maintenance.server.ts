@@ -8,6 +8,10 @@ import {
 } from "./store.server";
 import { pruneExpired } from "./model";
 import { syncWorkspaceProvider } from "./sync.server";
+import {
+  deliverWorkspaceNotifications,
+  reportMailConfig,
+} from "./notifications.server";
 
 export const MAINTENANCE_LIMITS = Object.freeze({
   maxWorkspaces: 8,
@@ -36,6 +40,7 @@ type WorkspaceResult = {
   retention: "applied";
   providers: { provider: string; status: "synced" | "failed" }[];
   syncSkipped?: "inactive_subscription";
+  notifications?: Awaited<ReturnType<typeof deliverWorkspaceNotifications>>;
 };
 export async function maintainWorkspace(
   id: string,
@@ -53,6 +58,9 @@ export async function maintainWorkspace(
       retention: "applied",
       providers: [],
       syncSkipped: "inactive_subscription",
+      ...(reportMailConfig()
+        ? { notifications: await deliverWorkspaceNotifications(id, signal) }
+        : {}),
     };
   const providers: WorkspaceResult["providers"] = [];
   for (const connector of state.connectors.filter(
@@ -73,7 +81,14 @@ export async function maintainWorkspace(
       providers.push({ provider: connector.provider, status: "failed" });
     }
   }
-  return { retention: "applied", providers };
+  const notifications = reportMailConfig()
+    ? await deliverWorkspaceNotifications(id, signal)
+    : undefined;
+  return {
+    retention: "applied",
+    providers,
+    ...(notifications ? { notifications } : {}),
+  };
 }
 
 export const maintenanceQueue = {
@@ -129,9 +144,12 @@ export async function runMaintenanceBatch(
     let result: WorkspaceResult | undefined;
     try {
       result = await dependencies.maintain(claim.organizationId, signal);
-      status = result.providers.some((provider) => provider.status === "failed")
-        ? "partial"
-        : "complete";
+      status =
+        result.providers.some((provider) => provider.status === "failed") ||
+        (result.notifications &&
+          !["complete", "unavailable"].includes(result.notifications.status))
+          ? "partial"
+          : "complete";
     } catch {
       /* Failure is retained in queue metadata; raw provider errors are never emitted. */
     }

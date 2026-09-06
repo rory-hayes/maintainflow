@@ -60,6 +60,7 @@ export const REQUIRED_MIGRATION_NAMES = Object.freeze([
   "023_maintaincode_attribution.sql",
   "024_maintaincode_runtime_role.sql",
   "025_maintaincode_maintenance_queue.sql",
+  "026_maintaincode_notification_recipient.sql",
 ]);
 
 const DEFAULT_MIGRATIONS_DIRECTORY = fileURLToPath(

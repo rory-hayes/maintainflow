@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { applicationOrigin } from "@/lib/application-origin.server";
 import { readWorkspace, siteOwner } from "@/lib/attribution/store.server";
 export async function GET(
   request: Request,
@@ -17,7 +18,7 @@ export async function GET(
           "Cross-Origin-Resource-Policy": "cross-origin",
         },
       });
-    const endpoint = new URL(request.url).origin;
+    const endpoint = applicationOrigin(request);
     const config = {
       siteId,
       endpoint,

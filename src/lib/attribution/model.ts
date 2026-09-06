@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { NotificationSubscription } from "./notifications";
 
 export const RULE_VERSION = "2026-09-06.1";
 export const channels = [
@@ -136,10 +137,12 @@ export type Connector = {
   coverage?: string;
 };
 export type Workspace = {
+  notifications?: NotificationSubscription[];
   id: string;
   name: string;
   mode: "live" | "local" | "sample";
   timezone: string;
+  retentionDays?: number;
   createdAt: string;
   sites: Site[];
   submissions: Submission[];
@@ -167,6 +170,9 @@ export type Workspace = {
     trialEndsAt: string;
   };
 };
+export function workspaceRetentionDays(w: Workspace): number {
+  return w.retentionDays ?? w.sites[0]?.retentionDays ?? 90;
+}
 export function emptyWorkspace(
   id: string,
   name: string,
@@ -178,6 +184,7 @@ export function emptyWorkspace(
     name,
     mode,
     timezone: "Europe/Dublin",
+    retentionDays: 90,
     createdAt: now.toISOString(),
     sites: [],
     submissions: [],

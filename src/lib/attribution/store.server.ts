@@ -1,5 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { applicationOrigin } from "@/lib/application-origin.server";
 import { getRuntimeDatabase } from "@/lib/database/client.server";
 import { requireOperatorId } from "@/lib/auth/operator.server";
 import { listOrganizationMemberships } from "@/lib/attribution/membership.server";
@@ -55,7 +56,15 @@ export async function authorize(request: Request, id: string, write = false) {
   return membership;
 }
 export function sameOrigin(request: Request) {
-  if (request.headers.get("origin") !== new URL(request.url).origin)
+  let trustedOrigin: string;
+  try {
+    trustedOrigin = applicationOrigin(request);
+  } catch {
+    throw new AttributionError(503, "Configure a valid application origin.");
+  }
+  // Next/proxy routing may normalize Request.url to an internal hostname.
+  // The configured public origin stays authoritative; forwarded hosts do not.
+  if (request.headers.get("origin") !== trustedOrigin)
     throw new AttributionError(
       403,
       "This action must come from your workspace.",
@@ -111,12 +120,13 @@ export async function mutateWorkspace<T>(
     }
     if (providerChange?.revoke)
       await tx`delete from maintaincode_credentials where organization_id=${id} and provider=${providerChange.provider}`;
-    if (JSON.stringify(state).length > 12_000_000)
+    const serializedState = JSON.stringify(state);
+    if (Buffer.byteLength(serializedState, "utf8") > 12_000_000)
       throw new AttributionError(
         413,
         "Workspace storage limit reached. Export and apply retention before retrying.",
       );
-    await tx`update maintaincode_workspaces set state=${tx.json(JSON.parse(JSON.stringify(state)))},updated_at=now() where organization_id=${id}`;
+    await tx`update maintaincode_workspaces set state=${tx.json(JSON.parse(serializedState))},updated_at=now() where organization_id=${id}`;
     await tx`delete from maintaincode_sites where organization_id=${id}`;
     for (const site of state.sites)
       await tx`insert into maintaincode_sites(id,organization_id,origin) values(${site.id},${id},${site.origin})`;
@@ -218,6 +228,7 @@ export async function revokeCredential(id: string, provider: string) {
 export function publicWorkspace(w: Workspace) {
   return {
     ...w,
+    notifications: undefined,
     billing: { ...w.billing, customerId: undefined, subscriptionId: undefined },
     submissions: w.submissions.map((s) => ({
       ...s,

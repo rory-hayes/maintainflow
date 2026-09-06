@@ -309,6 +309,16 @@ export function installTracker(config: Config) {
   function send(id: string, formId: string, status: "attempted" | "confirmed") {
     if (!allowed || !evidence) return;
     const previous = deliveries.get(id);
+    if (
+      previous &&
+      (previous.status === "confirmed" || status === "attempted")
+    ) {
+      // Only attempted -> confirmed creates a new delivery version. Repeated
+      // callbacks must not replace an equivalent in-flight record and keep an
+      // already acknowledged submission queued behind its retry backoff.
+      void flush();
+      return;
+    }
     const item: Delivery = previous
       ? {
           ...previous,

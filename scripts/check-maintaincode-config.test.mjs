@@ -38,6 +38,29 @@ function config(overrides = {}) {
   };
 }
 describe("MaintainCode deployment configuration", () => {
+  it("validates optional report-mail configuration only when explicitly enabled", () => {
+    const invalid = validateMaintainCodeConfig(
+      config({ MAINTAINCODE_REPORT_EMAILS_ENABLED: "true" }),
+    ).issues;
+    expect(invalid).toContainEqual(expect.stringContaining("Resend API key"));
+    expect(invalid).toContainEqual(
+      expect.stringContaining("MAINTAINCODE_REPORT_FROM"),
+    );
+    expect(
+      validateMaintainCodeConfig(
+        config({
+          MAINTAINCODE_REPORT_EMAILS_ENABLED: "true",
+          RESEND_API_KEY: "re_fixture_not_real",
+          MAINTAINCODE_REPORT_FROM: "reports@maintainflow.io",
+        }),
+      ).issues,
+    ).toEqual([]);
+    expect(
+      validateMaintainCodeConfig(
+        config({ MAINTAINCODE_REPORT_EMAILS_ENABLED: "yes" }),
+      ).issues,
+    ).toContainEqual(expect.stringContaining("true or false"));
+  });
   it("accepts the user-owned maintainflow.io target without provider or Stripe keys", () => {
     expect(validateMaintainCodeConfig(config()).issues).toEqual([]);
   });

@@ -98,5 +98,9 @@
   {
     "name": "025_maintaincode_maintenance_queue.sql",
     "checksumSha256": "c4e7b192d83aa94d815f27744abe7a39e726e598309cf9315aca82db6433e96b"
+  },
+  {
+    "name": "026_maintaincode_notification_recipient.sql",
+    "checksumSha256": "ea5d9270acac163eccc293d89d4497c89b3d51e2c8a76023791a65ff2753ff6e"
   }
 ]

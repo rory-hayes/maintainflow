@@ -13,6 +13,7 @@ import {
   costCSV,
   usage,
   pruneExpired,
+  workspaceRetentionDays,
 } from "@/lib/attribution/model";
 import { syncWorkspaceProvider } from "@/lib/attribution/sync.server";
 import { failure, jsonBody } from "@/lib/attribution/http.server";
@@ -115,6 +116,8 @@ export async function POST(request: Request, context: Context) {
       );
     } else
       await mutateWorkspace(id, (w) => {
+        // Preserve a legacy site's setting before a mutation can remove it.
+        w.retentionDays ??= workspaceRetentionDays(w);
         if (input.action === "site") {
           const origin = new URL(input.origin);
           if (
@@ -170,7 +173,7 @@ export async function POST(request: Request, context: Context) {
             adapter: input.adapter,
             formSelector: input.formSelector,
             mapping: fields,
-            retentionDays: existing?.retentionDays ?? 90,
+            retentionDays: existing?.retentionDays ?? workspaceRetentionDays(w),
             paused: existing?.paused ?? false,
           };
           if (existing) {
@@ -207,6 +210,7 @@ export async function POST(request: Request, context: Context) {
           Object.assign(w, {
             name: input.name,
             timezone: input.timezone,
+            retentionDays: input.retentionDays,
             qualifiedStages: input.qualifiedStages,
             wonStages: input.wonStages,
             submissionProperty: input.submissionProperty,

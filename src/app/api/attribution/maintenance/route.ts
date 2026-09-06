@@ -42,11 +42,12 @@ export async function POST(request: Request) {
         id,
         AbortSignal.timeout(MAINTENANCE_LIMITS.runBudgetMs),
       );
-      const status = result.providers.some(
-        (provider) => provider.status === "failed",
-      )
-        ? "partial"
-        : "complete";
+      const status =
+        result.providers.some((provider) => provider.status === "failed") ||
+        (result.notifications &&
+          !["complete", "unavailable"].includes(result.notifications.status))
+          ? "partial"
+          : "complete";
       const finished = await maintenanceQueue.finish(claim, status);
       if (!finished)
         throw new AttributionError(

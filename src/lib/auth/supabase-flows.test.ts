@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+vi.mock("server-only", () => ({}));
 const testState = vi.hoisted(() => ({
   auth: {
     signInWithPassword: vi.fn(),
@@ -58,6 +59,92 @@ it("requires same-origin customer actions before invoking authentication", async
   expect(result.status).toBe(403);
   expect(testState.client).not.toHaveBeenCalled();
 });
+it("uses the configured public origin for proxied actions and recovery callbacks", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  const result = await POST(
+    new Request("http://localhost:3000/auth/action", {
+      method: "POST",
+      headers: {
+        Origin: "https://maintainflow.io",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: "recover",
+        email: "customer@example.test",
+      }),
+    }),
+  );
+  expect(result.status).toBe(200);
+  expect(testState.auth.resetPasswordForEmail).toHaveBeenCalledWith(
+    "customer@example.test",
+    {
+      redirectTo:
+        "https://maintainflow.io/auth/callback?next=%2Fauth%2Fupdate-password",
+    },
+  );
+  for (const origin of [
+    undefined,
+    "http://localhost:3000",
+    "https://other.example",
+  ]) {
+    const denied = await POST(
+      new Request("http://localhost:3000/auth/action", {
+        method: "POST",
+        headers: {
+          ...(origin ? { Origin: origin } : {}),
+          "X-Forwarded-Host": "maintainflow.io",
+        },
+        body: JSON.stringify({ action: "sign-out" }),
+      }),
+    );
+    expect(denied.status).toBe(403);
+  }
+  expect(testState.auth.signOut).not.toHaveBeenCalled();
+});
+it("redirects normalized callback/confirmation requests only to the configured public origin", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  const exchanged = await callback(
+    new Request(
+      "http://localhost:3000/auth/callback?code=test-code&next=https://foreign.example",
+    ),
+  );
+  expect(exchanged.headers.get("location")).toBe(
+    "https://maintainflow.io/app?mode=live",
+  );
+  const verified = await confirm(
+    new Request(
+      "http://localhost:3000/auth/confirm?token_hash=test-hash&type=recovery",
+    ),
+  );
+  expect(verified.headers.get("location")).toBe(
+    "https://maintainflow.io/auth/update-password",
+  );
+});
+it.each(["", "http://maintainflow.io", "https://maintainflow.io/path"])(
+  "fails closed before provider actions when production origin is invalid: %s",
+  async (origin) => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("MAINTAINCODE_APP_ORIGIN", origin);
+    expect((await POST(request({ action: "sign-out" }))).status).toBe(503);
+    expect(
+      (
+        await callback(
+          new Request("https://maintainflow.io/auth/callback?code=test-code"),
+        )
+      ).status,
+    ).toBe(503);
+    expect(
+      (
+        await confirm(
+          new Request(
+            "https://maintainflow.io/auth/confirm?token_hash=test-hash&type=email",
+          ),
+        )
+      ).status,
+    ).toBe(503);
+    expect(testState.client).not.toHaveBeenCalled();
+  },
+);
 it("only starts public registration when both release gates permit it", async () => {
   testState.publicSignUp.mockReturnValue(false);
   const result = await POST(

@@ -52,16 +52,31 @@ describe("canonical production host", () => {
 });
 
 describe("MaintainCode release surfaces", () => {
-  it("allows cross-origin tracker loading while retaining general security headers", async () => {
-    const response = await configuredResponse(
-      "https://ads.example.test/mc-tracker.js",
-    );
-    expect(response.headers.get("cross-origin-resource-policy")).toBe(
-      "cross-origin",
-    );
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
-    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
-  });
+  it.each(["/mc-tracker.js", "/t/4f3c61a1-260a-4b4e-a801-b6b3e75d8f81"])(
+    "allows cross-origin tracker loading at %s while retaining general security headers",
+    async (path) => {
+      const response = await configuredResponse(
+        `https://ads.example.test${path}`,
+      );
+      expect(response.headers.get("cross-origin-resource-policy")).toBe(
+        "cross-origin",
+      );
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    },
+  );
+  it.each(["/app", "/api/attribution/workspaces", "/api/attribution/collect"])(
+    "retains same-site resource policy outside tracker assets: %s",
+    async (path) => {
+      const response = await configuredResponse(
+        `https://ads.example.test${path}`,
+      );
+      expect(response.headers.get("cross-origin-resource-policy")).toBe(
+        "same-site",
+      );
+      expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    },
+  );
   it("routes retired marketing material into the current application", async () => {
     const response = await configuredResponse(
       "https://ads.example.test/blog/old-product",

@@ -71,6 +71,16 @@ export async function GET(request: Request) {
     const [registration] =
       await sql`select count(*)::int as count from pg_trigger where tgname='maintaincode_workspace_maintenance_registration' and tgrelid='public.maintaincode_workspaces'::regclass and tgenabled='O' and not tgisinternal`;
     if (registration?.count !== 1) throw new Error("maintenance_registration");
+    const [recipientValidator] =
+      await sql`select p.prosecdef,p.proconfig,has_function_privilege(current_user,p.oid,'EXECUTE') as can_execute,exists(select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where a.privilege_type='EXECUTE' and a.grantee not in (p.proowner,(select oid from pg_roles where rolname='maintaincode_app'))) as unexpected_execute from pg_proc p where p.oid=to_regprocedure('public.maintaincode_notification_recipient_valid(uuid,text,text)')`;
+    if (
+      !recipientValidator?.prosecdef ||
+      !recipientValidator.can_execute ||
+      recipientValidator.unexpected_execute ||
+      !Array.isArray(recipientValidator.proconfig) ||
+      !recipientValidator.proconfig.includes("search_path=pg_catalog")
+    )
+      throw new Error("notification_recipient_validator");
     return Response.json(
       {
         ready: true,
@@ -82,6 +92,7 @@ export async function GET(request: Request) {
           tables: 6,
           isolationPolicies: 6,
           maintenanceQueue: true,
+          notificationRecipientValidator: true,
         },
         providers: "not_verified",
         payments: "not_verified",
@@ -95,7 +106,7 @@ export async function GET(request: Request) {
         service: "maintaincode-ads",
         revision: revision ?? "unknown",
         error:
-          "Check build revision, migrations 023–025, dedicated runtime role, isolation policies and table grants.",
+          "Check build revision, migrations 023–026, dedicated runtime role, isolation policies, table grants and the restricted email-recipient validator.",
       },
       { status: 503, headers },
     );

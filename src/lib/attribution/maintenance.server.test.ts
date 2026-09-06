@@ -4,6 +4,8 @@ const fixture = vi.hoisted(() => ({
   mutate: vi.fn(),
   sync: vi.fn(),
   sql: vi.fn(),
+  notify: vi.fn(),
+  mailConfig: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("./store.server", () => ({
@@ -20,6 +22,10 @@ vi.mock("./store.server", () => ({
   },
 }));
 vi.mock("./sync.server", () => ({ syncWorkspaceProvider: fixture.sync }));
+vi.mock("./notifications.server", () => ({
+  deliverWorkspaceNotifications: fixture.notify,
+  reportMailConfig: fixture.mailConfig,
+}));
 import {
   authorizeMaintenance,
   maintainWorkspace,
@@ -30,8 +36,42 @@ import { emptyWorkspace } from "./model";
 beforeEach(() => {
   vi.clearAllMocks();
   fixture.sync.mockResolvedValue(undefined);
+  fixture.mailConfig.mockReturnValue(null);
 });
 describe("bounded daily maintenance", () => {
+  it("shares its cancellation budget with opted-in notification processing", async () => {
+    fixture.mailConfig.mockReturnValue({ origin: "https://maintainflow.io" });
+    fixture.notify.mockResolvedValue({ status: "deferred", accepted: 0 });
+    fixture.read.mockResolvedValue(emptyWorkspace("id", "Test"));
+    const signal = new AbortController().signal;
+    const result = await maintainWorkspace("id", signal);
+    expect(fixture.notify).toHaveBeenCalledWith("id", signal);
+    expect(result.notifications).toEqual({ status: "deferred", accepted: 0 });
+  });
+  it("marks unresolved notification delivery as partial maintenance", async () => {
+    const queue = {
+      claim: vi
+        .fn()
+        .mockResolvedValueOnce({ organizationId: "id", token: "token" })
+        .mockResolvedValue(null),
+      finish: vi.fn().mockResolvedValue(true),
+      backlog: vi.fn().mockResolvedValue({ due: 0, leased: 0, failed: 1 }),
+    };
+    const result = await runMaintenanceBatch({
+      queue,
+      now: () => 0,
+      maintain: async () => ({
+        retention: "applied",
+        providers: [],
+        notifications: { status: "needs_review", accepted: 0 },
+      }),
+    });
+    expect(queue.finish).toHaveBeenCalledWith(
+      { organizationId: "id", token: "token" },
+      "partial",
+    );
+    expect(result.ok).toBe(false);
+  });
   it("requires an exact configured secret", () => {
     const request = new Request(
       "https://maintainflow.io/api/attribution/maintenance",
