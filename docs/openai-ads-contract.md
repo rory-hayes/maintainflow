@@ -1,6 +1,25 @@
 # OpenAI Ads API contract
 
-Verified against the official OpenAI Ads documentation on 2 September 2026.
+The MaintainCode attribution read contract was reviewed on 6 September 2026 against
+the [published OpenAPI document](https://developers.openai.com/ads/openapi.json),
+the [authentication guide](https://developers.openai.com/ads/api-reference/authentication)
+and the [Insights guide](https://developers.openai.com/ads/api-reference/insights).
+The document still identifies as `2.3.0`, but its reviewed SHA-256 is now
+`c8b8fa50544f9c5b02f65de6f2f23de9d7f1c494e2a10cf6b3881bf037f528ce` and it has
+73 operations. Fifteen previously listed operations are absent; the manifest
+records those removals without enabling any replacement capability.
+
+MaintainCode uses only `GET /ad_account`, `GET /campaigns`, `GET /ad_groups`,
+`GET /ads` and `GET /ad_account/insights`. Their operation IDs, read scopes,
+query parameters and response schemas remain compatible. Daily cost requests use
+the documented `time_granularity=daily`. Native account access remains a separate
+live acceptance gate.
+
+The current specification has no `OpenAI-Ad-Account` parameter declarations, and
+the current authentication guide documents account-scoped bearer keys. The
+shared-key/OAuth/header and mutation notes below describe retained legacy
+adapters from the 2 September review, not the current MaintainCode onboarding
+contract. Legacy ad-operation routes remain disabled in the new product.
 
 ## Authentication boundary
 

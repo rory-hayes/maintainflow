@@ -386,6 +386,8 @@ begin
     raise exception 'Expected all MaintainFlow tables to use RLS with a separate owner';
   end if;
 
+  -- Migrations 023-025 add a separate, non-BYPASSRLS runtime. Only its four
+  -- explicitly scoped organization policies may exist on legacy tables.
   if exists (
     select 1
     from pg_catalog.pg_policy policy
@@ -394,8 +396,20 @@ begin
       on namespace.oid = relation.relnamespace
     where namespace.nspname = 'public'
       and relation.relname = any(expected_tables)
+      and not (
+        (relation.relname, policy.polname, policy.polcmd) in (
+          ('maintainflow_organizations', 'maintaincode_organization_read', 'r'),
+          ('maintainflow_organizations', 'maintaincode_organization_create', 'a'),
+          ('maintainflow_organization_memberships', 'maintaincode_member_read', 'r'),
+          ('maintainflow_organization_memberships', 'maintaincode_member_create', 'a')
+        )
+        and policy.polpermissive
+        and policy.polroles = array[
+          (select oid from pg_catalog.pg_roles where rolname = 'maintaincode_app')
+        ]::oid[]
+      )
   ) then
-    raise exception 'MaintainFlow zero-policy RLS invariant failed';
+    raise exception 'MaintainFlow explicit-policy RLS invariant failed';
   end if;
 
   if has_table_privilege(

@@ -815,6 +815,32 @@ describe("PostgreSQL customer and approval boundary", () => {
         verifyRuntimeDatabaseRole(runtimeDatabase),
       ).resolves.toBe(true);
 
+      // The new product's tenant policies coexist with this retained role,
+      // but they must neither grant it access nor broaden to unrelated roles.
+      for (const table of [
+        "maintaincode_workspaces",
+        "maintaincode_credentials",
+        "maintaincode_maintenance_queue",
+        "maintaincode_sites",
+      ]) {
+        await expect(
+          runtimeDatabase`select 1 from ${runtimeDatabase(table)} where false`,
+        ).rejects.toMatchObject({ code: "42501" });
+      }
+      try {
+        await database`
+          alter policy maintaincode_organization_read
+          on maintainflow_organizations to public
+        `;
+        await expect(verifyRuntimeDatabaseRole(runtimeDatabase)).resolves.toBe(false);
+      } finally {
+        await database`
+          alter policy maintaincode_organization_read
+          on maintainflow_organizations to maintaincode_app
+        `;
+      }
+      await expect(verifyRuntimeDatabaseRole(runtimeDatabase)).resolves.toBe(true);
+
       let immutableUpdateCode: unknown;
       try {
         await runtimeDatabase`

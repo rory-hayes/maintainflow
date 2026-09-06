@@ -275,6 +275,8 @@ describe("OpenAI completed-day costs", () => {
         "https://api.example.test",
       ).searchParams;
       const range = JSON.parse(query.get("time_ranges[]")!);
+      expect(query.get("time_granularity")).toBe("daily");
+      expect(query.get("aggregation_level")).toBe("campaign");
       expect(new Date(range.start * 1000).toISOString()).toBe(first);
       expect(new Date(range.end * 1000).toISOString()).toBe(end);
       expect(result.coverage).toContain("30 complete days");

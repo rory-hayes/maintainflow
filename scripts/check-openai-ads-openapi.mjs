@@ -65,7 +65,37 @@ export function collectOperationKeys(specification) {
   return collectOperations(specification).map(({ key }) => key);
 }
 
-function operationParameters(record) {
+function resolveLocalReference(specification, value, errors, label) {
+  const seen = new Set();
+  while (value && typeof value === "object" && typeof value.$ref === "string") {
+    const reference = value.$ref;
+    if (!reference.startsWith("#/") || seen.has(reference) || seen.size >= 32) {
+      errors.push(`${label}: unsupported or circular reference ${reference}`);
+      return {};
+    }
+    seen.add(reference);
+    let parts;
+    try {
+      parts = decodeURIComponent(reference.slice(2))
+        .split("/")
+        .map((part) => part.replaceAll("~1", "/").replaceAll("~0", "~"));
+    } catch {
+      errors.push(`${label}: invalid reference ${reference}`);
+      return {};
+    }
+    let target = specification;
+    for (const part of parts)
+      target = target && Object.hasOwn(target, part) ? target[part] : undefined;
+    if (!target || typeof target !== "object") {
+      errors.push(`${label}: unresolved reference ${reference}`);
+      return {};
+    }
+    value = target;
+  }
+  return value;
+}
+
+function operationParameters(record, specification, errors) {
   return [
     ...(Array.isArray(record.pathItem?.parameters)
       ? record.pathItem.parameters
@@ -73,11 +103,18 @@ function operationParameters(record) {
     ...(Array.isArray(record.operation?.parameters)
       ? record.operation.parameters
       : []),
-  ];
+  ].map((parameter) =>
+    resolveLocalReference(
+      specification,
+      parameter,
+      errors,
+      `${record.key}.parameters`,
+    ),
+  );
 }
 
-function hasHeader(record, headerName) {
-  return operationParameters(record).some(
+function hasHeader(parameters, headerName) {
+  return parameters.some(
     (parameter) =>
       parameter &&
       typeof parameter === "object" &&
@@ -276,6 +313,15 @@ function validateSchemas(specification, expectations, errors) {
         }
       }
     }
+    for (const [propertyName, reference] of Object.entries(
+      expectation.propertyItemReferences ?? {},
+    )) {
+      const actual = schema.properties?.[propertyName]?.items?.$ref;
+      if (actual !== reference)
+        errors.push(
+          `${label}.${propertyName}.items.$ref: expected ${reference}, received ${String(actual)}`,
+        );
+    }
   }
 }
 
@@ -305,7 +351,77 @@ function validateCoverage(operations, coverage, errors) {
     );
   }
 
-  checkExact(errors, "operationCoverage", coveredKeys, actualKeys);
+  checkExact(errors, "operationCoverage", actualKeys, coveredKeys);
+}
+
+function validateReadContract(
+  specification,
+  record,
+  expected,
+  parameters,
+  errors,
+) {
+  if (expected.responseSchemaRef) {
+    const response = resolveLocalReference(
+      specification,
+      record.operation?.responses?.["200"],
+      errors,
+      `${record.key}.responses.200`,
+    );
+    const actual = response?.content?.["application/json"]?.schema?.$ref;
+    if (actual !== expected.responseSchemaRef)
+      errors.push(
+        `${record.key}.responseSchemaRef: expected ${expected.responseSchemaRef}, received ${String(actual)}`,
+      );
+  }
+  for (const parameter of expected.queryParameters ?? []) {
+    const actual = parameters.find(
+      (item) => item?.in === "query" && item.name === parameter.name,
+    );
+    const label = `${record.key}.query.${parameter.name}`;
+    if (!actual) {
+      errors.push(`${label}: missing`);
+      continue;
+    }
+    const schema = resolveLocalReference(
+      specification,
+      actual.schema,
+      errors,
+      label,
+    );
+    for (const [key, value] of Object.entries(parameter.schema ?? {})) {
+      if (schema?.[key] !== value)
+        errors.push(
+          `${label}.${key}: expected ${JSON.stringify(value)}, received ${JSON.stringify(schema?.[key])}`,
+        );
+    }
+    if (parameter.itemsType && schema?.items?.type !== parameter.itemsType)
+      errors.push(
+        `${label}.items.type: expected ${parameter.itemsType}, received ${String(schema?.items?.type)}`,
+      );
+    if (Boolean(actual.required) !== Boolean(parameter.required))
+      errors.push(
+        `${label}.required: expected ${Boolean(parameter.required)}, received ${Boolean(actual.required)}`,
+      );
+  }
+  if (expected.securityRequirements) {
+    const canonical = (requirements) =>
+      (requirements ?? []).map((requirement) =>
+        JSON.stringify(
+          Object.fromEntries(
+            Object.entries(requirement)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([scheme, scopes]) => [scheme, sortedUnique(scopes)]),
+          ),
+        ),
+      );
+    checkExact(
+      errors,
+      `${record.key}.security`,
+      canonical(record.operation.security ?? specification.security),
+      canonical(expected.securityRequirements),
+    );
+  }
 }
 
 export function validateOpenAiAdsSpec(
@@ -357,14 +473,29 @@ export function validateOpenAiAdsSpec(
   }
 
   validateCoverage(operations, manifest.operationCoverage, errors);
+  const parametersByOperation = new Map(
+    operations.map((record) => [
+      record.key,
+      operationParameters(record, specification, errors),
+    ]),
+  );
 
   for (const critical of expected.criticalOperations ?? []) {
     const record = operationsByKey.get(critical.key);
     if (!record) {
       errors.push(`critical operation: missing ${critical.key}`);
-    } else if (record.operation?.operationId !== critical.operationId) {
-      errors.push(
-        `${critical.key}.operationId: expected ${critical.operationId}, received ${String(record.operation?.operationId)}`,
+    } else {
+      if (record.operation?.operationId !== critical.operationId) {
+        errors.push(
+          `${critical.key}.operationId: expected ${critical.operationId}, received ${String(record.operation?.operationId)}`,
+        );
+      }
+      validateReadContract(
+        specification,
+        record,
+        critical,
+        parametersByOperation.get(record.key),
+        errors,
       );
     }
   }
@@ -379,7 +510,7 @@ export function validateOpenAiAdsSpec(
   }
 
   const adAccountHeaderOperations = operations.filter((record) =>
-    hasHeader(record, "OpenAI-Ad-Account"),
+    hasHeader(parametersByOperation.get(record.key), "OpenAI-Ad-Account"),
   );
   if (
     adAccountHeaderOperations.length !==
@@ -391,7 +522,9 @@ export function validateOpenAiAdsSpec(
   }
 
   const idempotencyOperations = operations
-    .filter((record) => hasHeader(record, "Idempotency-Key"))
+    .filter((record) =>
+      hasHeader(parametersByOperation.get(record.key), "Idempotency-Key"),
+    )
     .map(({ key }) => key);
   checkExact(
     errors,

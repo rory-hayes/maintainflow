@@ -305,7 +305,7 @@ export async function syncOpenAI(
   for (let page = 0; page < 50; page++) {
     signal?.throwIfAborted();
     const query = new URLSearchParams({
-      time_granularity: "day",
+      time_granularity: "daily",
       aggregation_level: "campaign",
       limit: "2000",
     });

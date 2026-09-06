@@ -135,6 +135,46 @@ try {
       true,
       "Maintenance queue migration is required.",
     );
+  if (schema.queue) {
+    const [queueAccess] = await sql`select relrowsecurity as enabled,
+      has_table_privilege(current_user,oid,'SELECT') as can_read,
+      has_table_privilege(current_user,oid,'UPDATE') as can_update,
+      has_table_privilege(current_user,oid,'INSERT') as can_insert,
+      has_table_privilege(current_user,oid,'DELETE') as can_delete
+      from pg_class where oid='public.maintaincode_maintenance_queue'::regclass`;
+    assert.deepEqual(
+      queueAccess,
+      {
+        enabled: true,
+        can_read: true,
+        can_update: true,
+        can_insert: false,
+        can_delete: false,
+      },
+      "Maintenance queue must retain RLS and SELECT/UPDATE-only runtime grants.",
+    );
+    const policies =
+      await sql`select roles::text[] as roles,cmd from pg_policies where schemaname='public' and tablename='maintaincode_maintenance_queue'`;
+    assert.equal(
+      policies.length,
+      1,
+      "Maintenance queue must expose only its dedicated runtime policy.",
+    );
+    assert.deepEqual(policies[0].roles, ["maintaincode_app"]);
+    for (const apiRole of ["anon", "authenticated"]) {
+      const [access] =
+        await sql`select has_table_privilege(${apiRole},'public.maintaincode_maintenance_queue','SELECT') as can_read,
+        has_table_privilege(${apiRole},'public.maintaincode_maintenance_queue','UPDATE') as can_update`;
+      assert.deepEqual(
+        access,
+        { can_read: false, can_update: false },
+        "Data API roles must not access maintenance metadata.",
+      );
+    }
+    check(
+      "maintenance queue RLS, dedicated policy and restricted runtime/Data API grants",
+    );
+  }
   check("restricted runtime role and verified TLS connection");
 
   const run = randomUUID();

@@ -206,7 +206,7 @@ function healthyRole(overrides = {}) {
     incoming_member_count: 1,
     unexpected_incoming_member_count: 0,
     owned_public_relation_count: 0,
-    public_policy_count: 0,
+    unexpected_public_policy_count: 0,
     runtime_lock_guard_count: 3,
     executable_public_function_count: 0,
     usable_public_sequence_count: 0,
@@ -219,10 +219,11 @@ function healthyRole(overrides = {}) {
 }
 
 function healthyPrivileges() {
-  return runtimeReadableTables.map((table_name) => ({
+  const tables = [...runtimeReadableTables, "maintaincode_workspaces", "maintaincode_credentials", "maintaincode_maintenance_queue", "maintaincode_sites"];
+  return tables.map((table_name) => ({
     table_name,
-    row_security_enabled: true,
-    can_select: true,
+    row_security_enabled: table_name !== "maintaincode_sites",
+    can_select: runtimeReadableTables.includes(table_name),
     can_insert: runtimeInsertableTables.has(table_name),
     can_update: runtimeUpdatableTables.has(table_name),
     can_delete: runtimeDeletableTables.has(table_name),
@@ -230,7 +231,7 @@ function healthyPrivileges() {
     can_reference: false,
     can_trigger: false,
     can_maintain: false,
-    can_select_any_column: true,
+    can_select_any_column: runtimeReadableTables.includes(table_name),
     can_insert_any_column:
       runtimeInsertableTables.has(table_name) ||
       runtimeColumnInsertableTables.has(table_name),
@@ -411,7 +412,7 @@ describe("runtime database role deployment readiness", () => {
     ["role membership", { member_of_count: 1 }],
     ["unexpected incoming member", { unexpected_incoming_member_count: 1 }],
     ["owned table", { owned_public_relation_count: 1 }],
-    ["unexpected policy", { public_policy_count: 1 }],
+    ["unexpected policy", { unexpected_public_policy_count: 1 }],
     ["missing runtime lock guard", { runtime_lock_guard_count: 2 }],
     ["function execution", { executable_public_function_count: 1 }],
     ["schema creation", { can_create_in_public_schema: true }],
@@ -433,6 +434,10 @@ describe("runtime database role deployment readiness", () => {
   it("rejects missing, extra, elevated, or RLS-disabled table privileges", async () => {
     const current = healthyPrivileges();
     const variants = [
+      ...["maintaincode_workspaces", "maintaincode_credentials", "maintaincode_maintenance_queue", "maintaincode_sites"].flatMap((table) => [
+        current.map((row) => row.table_name === table ? { ...row, can_select: true, can_select_any_column: true } : row),
+        current.filter((row) => row.table_name !== table),
+      ]),
       current.filter(
         (row) => row.table_name !== "maintainflow_change_approval_requests",
       ),

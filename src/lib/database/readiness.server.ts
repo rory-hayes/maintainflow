@@ -29,7 +29,7 @@ type RuntimeRoleRow = {
   incoming_member_count: number;
   unexpected_incoming_member_count: number;
   owned_public_relation_count: number;
-  public_policy_count: number;
+  unexpected_public_policy_count: number;
   runtime_lock_guard_count: number;
   executable_public_function_count: number;
   usable_public_sequence_count: number;
@@ -100,6 +100,7 @@ const runtimeTablePrivileges = new Map<
     updateAny?: boolean;
     updateColumns?: readonly string[];
     delete: boolean;
+    requireRls?: boolean;
   }>
 >([
   [
@@ -297,6 +298,11 @@ const runtimeTablePrivileges = new Map<
   ["maintainflow_customer_lifecycle_records", { select: true, insert: false, update: false, delete: false }],
   ["maintainflow_monitoring_account_schedule", { select: true, insert: true, update: true, delete: false }],
   ["maintainflow_schema_migrations", { select: true, insert: false, update: false, delete: false }],
+  // This retained legacy role must have no access to the attribution product.
+  ["maintaincode_workspaces", { select: false, insert: false, update: false, delete: false }],
+  ["maintaincode_credentials", { select: false, insert: false, update: false, delete: false }],
+  ["maintaincode_maintenance_queue", { select: false, insert: false, update: false, delete: false }],
+  ["maintaincode_sites", { select: false, insert: false, update: false, delete: false, requireRls: false }],
 ]);
 
 export type DatabaseMigrationReadiness = {
@@ -368,7 +374,29 @@ export async function verifyRuntimeDatabaseRole(
           join pg_catalog.pg_namespace namespace
             on namespace.oid = relation.relnamespace
           where namespace.nspname = 'public'
-        ) as public_policy_count,
+            and not (
+              policy.polpermissive and (
+                (
+                  (relation.relname, policy.polname, policy.polcmd) in (
+                    ('maintainflow_organizations', 'maintaincode_organization_read', 'r'),
+                    ('maintainflow_organizations', 'maintaincode_organization_create', 'a'),
+                    ('maintainflow_organization_memberships', 'maintaincode_member_read', 'r'),
+                    ('maintainflow_organization_memberships', 'maintaincode_member_create', 'a'),
+                    ('maintaincode_maintenance_queue', 'maintaincode_maintenance_runtime', '*')
+                  )
+                  and policy.polroles = array[
+                    (select oid from pg_catalog.pg_roles where rolname = 'maintaincode_app')
+                  ]::oid[]
+                ) or (
+                  (relation.relname, policy.polname, policy.polcmd) in (
+                    ('maintaincode_workspaces', 'maintaincode_workspace_isolation', '*'),
+                    ('maintaincode_credentials', 'maintaincode_credential_isolation', '*')
+                  )
+                  and policy.polroles = array[0]::oid[]
+                )
+              )
+            )
+        ) as unexpected_public_policy_count,
         (
           select count(*)::integer
           from pg_catalog.pg_trigger trigger
@@ -449,7 +477,7 @@ export async function verifyRuntimeDatabaseRole(
       role.incoming_member_count > 1 ||
       role.unexpected_incoming_member_count !== 0 ||
       role.owned_public_relation_count !== 0 ||
-      role.public_policy_count !== 0 ||
+      role.unexpected_public_policy_count !== 0 ||
       role.runtime_lock_guard_count !== 3 ||
       role.executable_public_function_count !== 0 ||
       role.usable_public_sequence_count !== 0 ||
@@ -522,7 +550,7 @@ export async function verifyRuntimeDatabaseRole(
         const expected = runtimeTablePrivileges.get(actual.table_name);
         return (
           expected !== undefined &&
-          actual.row_security_enabled === true &&
+          (expected.requireRls === false || actual.row_security_enabled === true) &&
           actual.can_select === expected.select &&
           actual.can_insert === expected.insert &&
           actual.can_update === expected.update &&

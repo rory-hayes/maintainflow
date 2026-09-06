@@ -2,18 +2,24 @@
   "manifestVersion": 1,
   "source": {
     "url": "https://developers.openai.com/ads/openapi.json",
-    "retrievedAt": "2026-08-30",
-    "sha256": "3e310aeaf81e5d5f7f2dc357f35cc28e3f4eae7115f14809b7eb6a616321650f"
+    "retrievedAt": "2026-09-06",
+    "sha256": "c8b8fa50544f9c5b02f65de6f2f23de9d7f1c494e2a10cf6b3881bf037f528ce",
+    "reviewNotes": [
+      "The published document still identifies as 2.3.0 but now contains 73 operations. Fifteen previously listed operations are absent and remain unavailable in MaintainCode.",
+      "OpenAI-Ad-Account is absent from all operation parameters and there are no component parameter references to resolve. Account-scoped bearer authentication is documented; optional legacy shared/OAuth transport is not the MaintainCode onboarding path.",
+      "The account response no longer lists optional negative_keywords. Its required metadata and the four attribution inventory/insights response contracts remain present.",
+      "The current Insights guide uses time_granularity=daily, campaign aggregation, repeated fields[] and time_ranges[] JSON Unix-second ranges."
+    ]
   },
   "expected": {
     "openapiVersion": "3.1.0",
     "documentVersion": "2.3.0",
     "baseUrl": "https://api.ads.openai.com/v1",
-    "operationCount": 88,
+    "operationCount": 73,
     "advertiserOperationResponseCodesExact": [
       "200"
     ],
-    "openAiAdAccountHeaderOperationCount": 79,
+    "openAiAdAccountHeaderOperationCount": 0,
     "security": {
       "apiKeyScheme": "ApiKeyAuth",
       "oauthScheme": "AdsOAuth",
@@ -36,29 +42,186 @@
       "POST /custom_audiences/{custom_audience_id}/add",
       "POST /custom_audiences/{custom_audience_id}/remove",
       "POST /custom_audiences/{custom_audience_id}/replace",
-      "POST /lead_forms/{lead_form_id}/test_submissions",
       "POST /lead_sync_subscriptions"
     ],
     "criticalOperations": [
       {
         "key": "GET /ad_account",
-        "operationId": "GetAdAccountMethod"
+        "operationId": "GetAdAccountMethod",
+        "responseSchemaRef": "#/components/schemas/AdAccountResource",
+        "queryParameters": [],
+        "securityRequirements": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "AdsOAuth": [
+              "ads.admin.all.read"
+            ]
+          }
+        ]
       },
       {
         "key": "GET /campaigns",
-        "operationId": "ListCampaignsMethod"
+        "operationId": "ListCampaignsMethod",
+        "responseSchemaRef": "#/components/schemas/CampaignsResource",
+        "queryParameters": [
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "after",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "securityRequirements": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "AdsOAuth": [
+              "ads.admin.all.read"
+            ]
+          }
+        ]
       },
       {
         "key": "GET /ad_groups",
-        "operationId": "ListAdGroupsMethod"
+        "operationId": "ListAdGroupsMethod",
+        "responseSchemaRef": "#/components/schemas/AdGroupsResource",
+        "queryParameters": [
+          {
+            "name": "campaign_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "after",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "securityRequirements": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "AdsOAuth": [
+              "ads.admin.all.read"
+            ]
+          }
+        ]
       },
       {
         "key": "GET /ads",
-        "operationId": "ListAdsMethod"
+        "operationId": "ListAdsMethod",
+        "responseSchemaRef": "#/components/schemas/AdsResource",
+        "queryParameters": [
+          {
+            "name": "ad_group_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "after",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "securityRequirements": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "AdsOAuth": [
+              "ads.admin.all.read"
+            ]
+          }
+        ]
       },
       {
         "key": "GET /ad_account/insights",
-        "operationId": "GetAdAccountInsightsMethod"
+        "operationId": "GetAdAccountInsightsMethod",
+        "responseSchemaRef": "#/components/schemas/InsightsResource",
+        "queryParameters": [
+          {
+            "name": "time_granularity",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "aggregation_level",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2000
+            }
+          },
+          {
+            "name": "after",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "time_ranges",
+            "schema": {
+              "type": "array"
+            },
+            "itemsType": "string"
+          },
+          {
+            "name": "fields",
+            "schema": {
+              "type": "array"
+            },
+            "itemsType": "string"
+          }
+        ],
+        "securityRequirements": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "AdsOAuth": [
+              "ads.admin.all.read"
+            ]
+          }
+        ]
       },
       {
         "key": "POST /conversions/insights",
@@ -95,7 +258,6 @@
         ],
         "propertiesInclude": [
           "status",
-          "negative_keywords",
           "account_integrity_review"
         ]
       },
@@ -287,6 +449,21 @@
           "first_id",
           "last_id",
           "has_more"
+        ],
+        "propertyItemReferences": {
+          "data": "#/components/schemas/CampaignItemBody"
+        },
+        "propertyConstraints": {
+          "data": {
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        },
+        "nullableProperties": [
+          "first_id",
+          "last_id"
         ]
       },
       {
@@ -298,23 +475,133 @@
           "first_id",
           "last_id",
           "has_more"
+        ],
+        "propertyItemReferences": {
+          "data": "#/components/schemas/InsightItemBody"
+        },
+        "propertyConstraints": {
+          "data": {
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        },
+        "nullableProperties": [
+          "first_id",
+          "last_id"
         ]
+      },
+      {
+        "name": "AdGroupsResource",
+        "requiredExact": [
+          "object",
+          "data",
+          "first_id",
+          "last_id",
+          "has_more"
+        ],
+        "propertyItemReferences": {
+          "data": "#/components/schemas/AdGroupItemBody"
+        },
+        "propertyConstraints": {
+          "data": {
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        },
+        "nullableProperties": [
+          "first_id",
+          "last_id"
+        ]
+      },
+      {
+        "name": "AdsResource",
+        "requiredExact": [
+          "object",
+          "data",
+          "first_id",
+          "last_id",
+          "has_more"
+        ],
+        "propertyItemReferences": {
+          "data": "#/components/schemas/AdItemBody"
+        },
+        "propertyConstraints": {
+          "data": {
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        },
+        "nullableProperties": [
+          "first_id",
+          "last_id"
+        ]
+      },
+      {
+        "name": "InsightItemBody",
+        "requiredExact": [
+          "id",
+          "start_time",
+          "end_time"
+        ],
+        "propertiesInclude": [
+          "campaign_id",
+          "campaign_name",
+          "spend",
+          "clicks",
+          "impressions"
+        ],
+        "nullableProperties": [
+          "campaign_id",
+          "campaign_name"
+        ],
+        "propertyConstraints": {
+          "id": {
+            "type": "string"
+          },
+          "start_time": {
+            "type": "integer"
+          },
+          "end_time": {
+            "type": "integer"
+          },
+          "spend": {
+            "type": "number"
+          },
+          "clicks": {
+            "type": "integer"
+          },
+          "impressions": {
+            "type": "integer"
+          }
+        }
       }
     ]
   },
   "operationCoverage": [
     {
       "status": "implemented",
-      "reason": "Used by the current live read, monitoring, or approved mutation adapter.",
+      "reason": "The MaintainCode attribution connector uses only these five read-only operations.",
       "operations": [
         "GET /ad_account",
-        "GET /ad_account/insights",
+        "GET /campaigns",
         "GET /ad_groups",
+        "GET /ads",
+        "GET /ad_account/insights"
+      ]
+    },
+    {
+      "status": "legacy_disabled",
+      "reason": "Retained adapter code is outside the MaintainCode customer surface; legacy ad-operation routes are disabled.",
+      "operations": [
         "GET /ad_groups/{ad_group_id}",
         "GET /ad_groups/{ad_group_id}/insights",
-        "GET /ads",
         "GET /ads/{ad_id}",
-        "GET /campaigns",
         "GET /campaigns/{campaign_id}",
         "GET /conversions/event_settings",
         "POST /ad_groups/{ad_group_id}",
@@ -371,22 +658,16 @@
         "GET /ad_account/spend_limit_windows",
         "GET /ad_accounts",
         "GET /ads/{ad_id}/insights",
-        "GET /business_agent_tools",
-        "GET /business_agents",
-        "GET /business_agents/{business_agent_id}",
         "GET /campaigns/{campaign_id}/insights",
         "GET /custom_audiences",
         "GET /custom_audiences/{custom_audience_id}",
         "GET /custom_audiences/{custom_audience_id}/operations/{operation_id}",
         "GET /geo_lookup/search",
-        "GET /lead_forms",
-        "GET /lead_forms/{lead_form_id}",
         "GET /lead_sync_subscriptions",
         "GET /lead_sync_subscriptions/{subscription_id}",
         "GET /me",
         "GET /partner_data/uploads/{upload_id}",
         "POST /ad_account/activate",
-        "POST /ad_account/negative_keywords",
         "POST /ad_account/pause",
         "POST /ad_account/spend_limit_windows",
         "POST /ad_account/spend_limit_windows/{window_id}",
@@ -398,10 +679,6 @@
         "POST /ads/{ad_id}/archive",
         "POST /ads/{ad_id}/preview",
         "POST /api_keys",
-        "POST /business_agents",
-        "POST /business_agents/{business_agent_id}",
-        "POST /business_agents/{business_agent_id}/preview",
-        "POST /business_agents/{business_agent_id}/publish",
         "POST /campaigns",
         "POST /campaigns/{campaign_id}/archive",
         "POST /custom_audiences",
@@ -410,11 +687,6 @@
         "POST /custom_audiences/{custom_audience_id}/archive",
         "POST /custom_audiences/{custom_audience_id}/remove",
         "POST /custom_audiences/{custom_audience_id}/replace",
-        "POST /lead_forms",
-        "POST /lead_forms/{lead_form_id}",
-        "POST /lead_forms/{lead_form_id}/archive",
-        "POST /lead_forms/{lead_form_id}/publish",
-        "POST /lead_forms/{lead_form_id}/test_submissions",
         "POST /lead_sync_subscriptions",
         "POST /partner_data/uploads",
         "POST /upload",
@@ -439,6 +711,28 @@
     "authentication": "https://developers.openai.com/ads/api-reference/authentication",
     "productFeeds": "https://developers.openai.com/ads/product-feeds",
     "deltaFeeds": "https://developers.openai.com/ads/delta-feeds",
-    "conversionSetup": "https://developers.openai.com/ads/api-reference/conversion-setup"
+    "conversionSetup": "https://developers.openai.com/ads/api-reference/conversion-setup",
+    "insights": "https://developers.openai.com/ads/api-reference/insights"
+  },
+  "removedFromPublishedSpecification": {
+    "reviewedAt": "2026-09-06",
+    "previousSha256": "3e310aeaf81e5d5f7f2dc357f35cc28e3f4eae7115f14809b7eb6a616321650f",
+    "operations": [
+      "GET /business_agent_tools",
+      "GET /business_agents",
+      "GET /business_agents/{business_agent_id}",
+      "GET /lead_forms",
+      "GET /lead_forms/{lead_form_id}",
+      "POST /ad_account/negative_keywords",
+      "POST /business_agents",
+      "POST /business_agents/{business_agent_id}",
+      "POST /business_agents/{business_agent_id}/preview",
+      "POST /business_agents/{business_agent_id}/publish",
+      "POST /lead_forms",
+      "POST /lead_forms/{lead_form_id}",
+      "POST /lead_forms/{lead_form_id}/archive",
+      "POST /lead_forms/{lead_form_id}/publish",
+      "POST /lead_forms/{lead_form_id}/test_submissions"
+    ]
   }
 }
