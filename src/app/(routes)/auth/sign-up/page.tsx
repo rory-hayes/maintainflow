@@ -2,14 +2,22 @@ import { SignUp } from "@clerk/nextjs";
 import { LockKeyhole } from "lucide-react";
 import { connection } from "next/server";
 
-
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader } from "@/components/ui/card";
 import Link from "next/link";
 import { isClerkConfigured, isPublicSignUpEnabled } from "@/lib/auth/config";
+import { isSupabaseConfigured } from "@/lib/auth/supabase-config";
+import { SupabaseAuthForm } from "@/components/auth/supabase-auth-form";
+import { AuthUnavailable } from "@/components/auth/auth-unavailable";
 
 export default async function SignUpPage() {
   await connection();
+  if (isSupabaseConfigured())
+    return isPublicSignUpEnabled() ? (
+      <SupabaseAuthForm mode="sign-up" />
+    ) : (
+      <AuthUnavailable />
+    );
   return (
     <main className="grid min-h-[calc(100vh-4rem)] place-items-center bg-[#FAFAFA] p-4">
       {isClerkConfigured() && isPublicSignUpEnabled() ? (
@@ -39,7 +47,9 @@ export default async function SignUpPage() {
               </CardDescription>
               {isClerkConfigured() ? (
                 <Button asChild className="mt-2 w-fit">
-                  <Link href="/auth/sign-in">Sign in to an invited account</Link>
+                  <Link href="/auth/sign-in">
+                    Sign in to an invited account
+                  </Link>
                 </Button>
               ) : null}
             </div>

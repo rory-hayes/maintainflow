@@ -33,6 +33,7 @@ function config(overrides = {}) {
     MAINTAINCODE_APP_ORIGIN: "https://maintainflow.io",
     MAINTAINFLOW_READINESS_PROBE_SECRET: "p".repeat(32),
     MAINTAINCODE_MAINTENANCE_SECRET: "m".repeat(32),
+    CRON_SECRET: "c".repeat(32),
     ...overrides,
   };
 }

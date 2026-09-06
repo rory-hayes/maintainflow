@@ -30,7 +30,12 @@ function responses(overrides = {}) {
             service: "maintaincode-ads",
             scope: "runtime_database_only",
             revision,
-            checks: { runtimeRole: true, tables: 5, isolationPolicies: 6 },
+            checks: {
+              runtimeRole: true,
+              tables: 6,
+              isolationPolicies: 6,
+              maintenanceQueue: true,
+            },
           })
         : Response.json({}, { status: 401 });
     if (path === "/app") return new Response("MaintainCode Ads Sample data");

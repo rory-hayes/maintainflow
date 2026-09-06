@@ -15,12 +15,8 @@ export function getPublicLegalIdentity(): PublicLegalIdentity {
   return {
     entityName:
       optionalValue(process.env.MAINTAINFLOW_LEGAL_ENTITY_NAME) ??
-      "MaintainFlow private beta",
-    privacyEmail: optionalValue(
-      process.env.MAINTAINFLOW_PRIVACY_CONTACT_EMAIL,
-    ),
-    supportEmail: optionalValue(
-      process.env.MAINTAINFLOW_SUPPORT_CONTACT_EMAIL,
-    ),
+      "MaintainCode Ads",
+    privacyEmail: optionalValue(process.env.MAINTAINFLOW_PRIVACY_CONTACT_EMAIL),
+    supportEmail: optionalValue(process.env.MAINTAINFLOW_SUPPORT_CONTACT_EMAIL),
   };
 }

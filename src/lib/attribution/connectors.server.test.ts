@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
+vi.mock("@/lib/openai-ads/client.server", () => ({ adsApiRequest: vi.fn() }));
+vi.mock("@/lib/openai-ads/data.server", () => ({
+  fetchLiveAdAccount: vi.fn(),
+  fetchLiveAttributionInventory: vi.fn(),
+}));
 vi.mock("./store.server", () => ({
   AttributionError: class extends Error {
     constructor(
@@ -10,10 +15,51 @@ vi.mock("./store.server", () => ({
     }
   },
 }));
-import { syncHubspot } from "./connectors.server";
+import { syncHubspot, syncOpenAI } from "./connectors.server";
 import { defaultMapping, emptyWorkspace } from "./model";
-afterEach(() => vi.unstubAllGlobals());
+import { adsApiRequest } from "@/lib/openai-ads/client.server";
+import {
+  fetchLiveAdAccount,
+  fetchLiveAttributionInventory,
+} from "@/lib/openai-ads/data.server";
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+  vi.resetAllMocks();
+});
 describe("HubSpot read-only adapter", () => {
+  it("does not start a provider request after cancellation", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      syncHubspot(
+        emptyWorkspace("w", "Test"),
+        "test-token",
+        AbortSignal.abort(),
+      ),
+    ).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it("cancels a rate-limit wait without another provider request", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(null, { status: 429, headers: { "retry-after": "3" } }),
+      ),
+    );
+    const result = syncHubspot(
+      emptyWorkspace("w", "Test"),
+      "test-token",
+      controller.signal,
+    );
+    const assertion = expect(result).rejects.toThrow();
+    await new Promise((r) => setTimeout(r, 0));
+    controller.abort();
+    await assertion;
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it("reads only mapped attribution fields and separates current references from history", async () => {
     const w = emptyWorkspace("w", "Test");
     w.sites = [
@@ -179,5 +225,93 @@ describe("HubSpot read-only adapter", () => {
     await expect(
       syncHubspot(emptyWorkspace("w", "Test"), "test-token"),
     ).rejects.toThrow("No partial snapshot");
+  });
+});
+
+describe("OpenAI completed-day costs", () => {
+  function provider(timezone = "Europe/Dublin") {
+    vi.mocked(fetchLiveAdAccount).mockResolvedValue({
+      id: "account",
+      name: "Test",
+      url: "https://example.test",
+      preview_url: null,
+      timezone,
+      currency_code: "EUR",
+      review: { status: "approved" },
+    });
+    vi.mocked(fetchLiveAttributionInventory).mockResolvedValue({
+      accountId: "account",
+      campaigns: [],
+      groups: [],
+      ads: [],
+    });
+    vi.mocked(adsApiRequest).mockImplementation(async () => ({
+      data: [],
+      has_more: false,
+    }));
+  }
+  it.each([
+    [
+      "Europe/Dublin",
+      "2026-09-06T12:00:00Z",
+      "2026-08-06T23:00:00.000Z",
+      "2026-09-05T23:00:00.000Z",
+    ],
+    [
+      "America/New_York",
+      "2026-11-03T12:00:00Z",
+      "2026-10-04T04:00:00.000Z",
+      "2026-11-03T05:00:00.000Z",
+    ],
+  ])(
+    "requests complete account days including DST in %s",
+    async (timezone, now, first, end) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(now));
+      provider(timezone);
+      const result = await syncOpenAI("test-token", "account");
+      const query = new URL(
+        vi.mocked(adsApiRequest).mock.calls[0][0],
+        "https://api.example.test",
+      ).searchParams;
+      const range = JSON.parse(query.get("time_ranges[]")!);
+      expect(new Date(range.start * 1000).toISOString()).toBe(first);
+      expect(new Date(range.end * 1000).toISOString()).toBe(end);
+      expect(result.coverage).toContain("30 complete days");
+    },
+  );
+  it("rejects partial and contradictory daily costs instead of silently replacing complete values", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-06T12:00:00Z"));
+    provider();
+    const start = Date.parse("2026-09-04T23:00:00Z") / 1000;
+    const row = {
+      id: "row",
+      campaign_id: "c",
+      spend: 20,
+      start_time: start,
+      end_time: start + 86400,
+    };
+    vi.mocked(adsApiRequest).mockResolvedValueOnce({
+      data: [{ ...row, start_time: start + 3600 }],
+      has_more: false,
+    });
+    await expect(syncOpenAI("test-token", "account")).rejects.toThrow(
+      "incomplete account-day",
+    );
+    vi.mocked(adsApiRequest).mockResolvedValueOnce({
+      data: [row, { ...row, spend: 30 }],
+      has_more: false,
+    });
+    await expect(syncOpenAI("test-token", "account")).rejects.toThrow(
+      "conflicting daily",
+    );
+    vi.mocked(adsApiRequest).mockResolvedValueOnce({
+      data: [row, row],
+      has_more: false,
+    });
+    const result = await syncOpenAI("test-token", "account");
+    expect(result.costs).toHaveLength(1);
+    expect(result.costs[0].amount).toBe(20);
   });
 });

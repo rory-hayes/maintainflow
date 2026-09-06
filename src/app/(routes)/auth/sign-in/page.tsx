@@ -2,18 +2,47 @@ import { SignIn } from "@clerk/nextjs";
 import { LockKeyhole } from "lucide-react";
 import { connection } from "next/server";
 
-
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+} from "@/components/ui/card";
 import { isClerkConfigured, isPublicSignUpEnabled } from "@/lib/auth/config";
 import { safeSignInReturnTo } from "@/lib/auth/return-to";
+import { isSupabaseConfigured } from "@/lib/auth/supabase-config";
+import { SupabaseAuthForm } from "@/components/auth/supabase-auth-form";
 
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ returnTo?: string | string[] }>;
+  searchParams: Promise<{
+    returnTo?: string | string[];
+    error?: string;
+    notice?: string;
+  }>;
 }) {
   await connection();
-  const requested = (await searchParams).returnTo;
+  const params = await searchParams;
+  const requested = params.returnTo;
+  if (isSupabaseConfigured())
+    return (
+      <SupabaseAuthForm
+        mode="sign-in"
+        signUpEnabled={isPublicSignUpEnabled()}
+        next={typeof requested === "string" ? requested : undefined}
+        initialError={
+          params.error === "confirmation"
+            ? "This link is invalid or expired. Request a new confirmation or password reset link below. For a standard email link, use the browser where you started."
+            : ""
+        }
+        initialNotice={
+          params.notice === "signed-out"
+            ? "You have signed out of this browser."
+            : ""
+        }
+      />
+    );
   const returnTo = requested ? safeSignInReturnTo(requested) : "/app?mode=live";
   return (
     <main className="grid min-h-[calc(100vh-4rem)] place-items-center bg-[#FAFAFA] p-4">
@@ -23,9 +52,7 @@ export default async function SignInPage({
           routing="path"
           fallbackRedirectUrl={returnTo}
           forceRedirectUrl={returnTo}
-          {...(isPublicSignUpEnabled()
-            ? { signUpUrl: "/auth/sign-up" }
-            : {})}
+          {...(isPublicSignUpEnabled() ? { signUpUrl: "/auth/sign-up" } : {})}
         />
       ) : (
         <Card className="w-full max-w-md shadow-sm">
@@ -39,9 +66,9 @@ export default async function SignInPage({
                 Workspace sign-in is not configured
               </h1>
               <CardDescription className="leading-6">
-                The local demo remains available, but MaintainCode Ads will not show a
-                workspace sign-in until Clerk credentials
-                are configured on the server.
+                The local demo remains available, but MaintainCode Ads will not
+                show a workspace sign-in until Clerk credentials are configured
+                on the server.
               </CardDescription>
             </div>
           </CardHeader>

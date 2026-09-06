@@ -1,108 +1,133 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
-
 import { getPublicLegalIdentity } from "@/lib/legal/config.server";
 
 export const metadata: Metadata = {
-  title: "Private beta terms | MaintainFlow",
-  description: "Terms for the MaintainFlow demo and admitted private beta.",
+  title: "Service terms | MaintainCode Ads",
+  description: "Terms for the MaintainCode Ads attribution service.",
   alternates: { canonical: "/terms" },
 };
-
 export default async function TermsPage() {
   await connection();
   const identity = getPublicLegalIdentity();
-
   return (
-    <main className="px-4 pb-24 pt-36 md:px-6">
-      <article className="mx-auto grid max-w-3xl gap-10 rounded-3xl border bg-white p-6 shadow-sm md:p-10">
+    <main className="px-4 py-16 md:px-6">
+      <article className="mx-auto grid max-w-3xl gap-10 rounded-3xl border bg-white p-6 md:p-10">
         <header className="grid gap-3">
-          <p className="text-sm font-medium text-muted-foreground">
-            Private beta terms · Last updated 30 August 2026
+          <p className="text-sm text-muted-foreground">
+            Last updated 6 September 2026
           </p>
-          <h1 className="text-4xl font-medium tracking-[-0.04em] md:text-5xl">
-            MaintainFlow service terms
+          <h1 className="text-4xl font-medium tracking-tight">
+            MaintainCode Ads service terms
           </h1>
-          <p className="text-lg leading-8 text-muted-foreground">
-            These terms govern the public demo and admitted private beta
-            provided by {identity.entityName}, unless a signed pilot agreement
-            says otherwise.
+          <p className="text-lg leading-8">
+            These terms govern the attribution service provided by{" "}
+            {identity.entityName} at maintainflow.io. By creating a workspace,
+            you agree to these terms on behalf of yourself or the business you
+            are authorised to represent.
           </p>
         </header>
-
-        <TermsSection title="Private beta scope">
+        <PolicySection title="The service">
           <p>
-            MaintainFlow is a controlled decision-support product. Demo data is
-            illustrative. Live account access is invitation-only and remains
-            read-only unless every release gate and an explicit human approval
-            authorize a supported change.
+            MaintainCode Ads connects website marketing evidence with confirmed
+            form submissions and supported CRM records. Reports distinguish
+            observed evidence, identity matching, field verification and missing
+            data. Sample workspaces contain illustrative data. Results depend on
+            your installation, consent controls, field mapping, provider access
+            and available records.
           </p>
-        </TermsSection>
-
-        <TermsSection title="Your responsibilities">
           <p>
-            You must be authorized to connect each advertiser account, protect
-            your credentials, keep account and event data lawful and accurate,
-            and comply with OpenAI policies and applicable advertising,
-            privacy, and consumer-protection law. Do not submit special-category
-            or unnecessary personal data.
+            Attribution reports are estimates based on the displayed model and
+            reporting period. They do not prove that a marketing interaction
+            caused a sale, and we do not guarantee complete attribution,
+            revenue, savings or advertising performance. You remain responsible
+            for business and advertising decisions.
           </p>
-        </TermsSection>
-
-        <TermsSection title="Approvals and provider behavior">
+        </PolicySection>
+        <PolicySection title="Your account and data">
           <p>
-            Recommendations are not guarantees. You remain responsible for each
-            advertising decision and approval. Provider availability, review,
-            attribution, billing, and API behavior are controlled by OpenAI;
-            ambiguous write outcomes require manual reconciliation and are not
-            automatically retried.
+            You must protect account access and only connect websites, CRM
+            accounts and advertising accounts you are authorised to use. You are
+            responsible for your collection notices, consent choices, data
+            accuracy and lawful processing instructions. Do not intentionally
+            submit sensitive personal information or unnecessary form contents.
+            Do not misuse the service, evade usage limits or interfere with
+            another customer’s account.
           </p>
-        </TermsSection>
-
-        <TermsSection title="Availability and changes">
           <p>
-            Beta features may change, pause, or be withdrawn. We may suspend
-            access to protect customers or the service. Before any paid or
-            broader production use, the commercial terms, support level,
-            retention schedule, processor details, liability allocation, and
-            governing law must be set out in a signed customer agreement.
+            You retain rights in your data. You permit us and our service
+            providers to process it as necessary to deliver, secure and support
+            the service. Our{" "}
+            <a className="underline" href="/privacy">
+              privacy notice
+            </a>{" "}
+            explains the data and providers involved. Ask us for applicable
+            processing terms if required for your use.
           </p>
-        </TermsSection>
-
-        <TermsSection title="Ending a pilot">
+        </PolicySection>
+        <PolicySection title="Trial, plans and payment">
           <p>
-            Either side may end an unsigned beta pilot. We will revoke workspace
-            access and follow the agreed export, retention, credential-revocation,
-            and deletion process. The customer should also revoke provider keys
-            in Ads Manager.
+            New workspaces receive a 14-day trial. A trial does not itself
+            charge your card. Continued attribution capture after the trial
+            requires an eligible subscription. Plan prices, billing intervals,
+            website and submission limits are shown in the workspace and
+            confirmed at Stripe checkout. Any applicable tax is shown at
+            checkout.
           </p>
-        </TermsSection>
-
-        <TermsSection title="Support and notices">
-          {identity.supportEmail ? (
-            <p>
-              Contact {" "}
-              <a
-                className="font-medium underline underline-offset-4"
-                href={`mailto:${identity.supportEmail}`}
-              >
+          <p>
+            A paid subscription renews for the selected interval until cancelled
+            through the billing portal. Cancellation normally takes effect at
+            the end of the paid period. Download the data you need before ending
+            service. Contact support about billing errors or refund requests;
+            applicable statutory rights are unaffected.
+          </p>
+        </PolicySection>
+        <PolicySection title="Connections and availability">
+          <p>
+            External providers control their own APIs, data, outages and account
+            eligibility. Connections may need to be renewed. Manual sync and
+            scheduled maintenance can fail or be delayed; review the timestamps
+            and errors shown in your workspace. We may change features or
+            suspend access when reasonably necessary to protect the service,
+            comply with law or address a material breach. We will provide
+            reasonable notice of material commercial changes where practicable.
+          </p>
+        </PolicySection>
+        <PolicySection title="Ending service">
+          <p>
+            You can disconnect providers and request account closure through
+            support. Disconnecting an integration removes its stored credential
+            but does not cancel its provider account. Cancelling a subscription
+            does not itself erase all records. Export and deletion are handled
+            as described in the privacy notice, subject to required billing and
+            security records.
+          </p>
+        </PolicySection>
+        <PolicySection title="Support and legal rights">
+          <p>
+            For support, billing questions or notices, contact{" "}
+            {identity.entityName} at{" "}
+            {identity.supportEmail ? (
+              <a className="underline" href={`mailto:${identity.supportEmail}`}>
                 {identity.supportEmail}
               </a>
-              {" "}for support or service notices.
-            </p>
-          ) : (
-            <p>
-              Live account connections remain blocked until a monitored support
-              contact is configured for this deployment.
-            </p>
-          )}
-        </TermsSection>
+            ) : (
+              "the service support contact"
+            )}
+            . We provide support by email; no particular response time or uptime
+            commitment applies unless agreed in writing.
+          </p>
+          <p>
+            Nothing in these terms excludes liability or rights that cannot
+            lawfully be excluded. A separate written agreement takes precedence
+            where it expressly changes these terms.
+          </p>
+        </PolicySection>
       </article>
     </main>
   );
 }
-
-function TermsSection({
+function PolicySection({
   title,
   children,
 }: {
@@ -112,7 +137,9 @@ function TermsSection({
   return (
     <section className="grid gap-3 border-t pt-8">
       <h2 className="text-2xl font-medium tracking-[-0.02em]">{title}</h2>
-      <div className="grid gap-3 leading-7 text-muted-foreground">{children}</div>
+      <div className="grid gap-3 leading-7 text-muted-foreground">
+        {children}
+      </div>
     </section>
   );
 }

@@ -22,6 +22,7 @@ import {
   type Submission,
 } from "@/lib/attribution/model";
 import { sampleWorkspace } from "@/lib/attribution/sample";
+import { CustomerSignOut } from "@/components/auth/supabase-auth-form";
 import { Reporting, Leads, LeadDetail } from "./reporting";
 import {
   Setup,
@@ -47,11 +48,13 @@ export function AttributionApp({
   initialView = "Overview",
   initialLive = false,
   initialSample,
+  signedIn = false,
 }: {
   local?: boolean;
   initialView?: string;
   initialLive?: boolean;
   initialSample?: Workspace;
+  signedIn?: boolean;
 }) {
   // A late response belongs to the workspace that started it. It must never
   // replace a newer client selection or a return to the example workspace.
@@ -95,7 +98,7 @@ export function AttributionApp({
   function showSample() {
     requestVersion.current++;
     const url = new URL(location.href);
-    url.searchParams.delete("mode");
+    url.searchParams.set("mode", "sample");
     url.searchParams.delete("workspace");
     history.replaceState(null, "", url);
     setW(sampleWorkspace());
@@ -321,9 +324,13 @@ export function AttributionApp({
                 ? "Isolated local data"
                 : "Customer workspace"}
           </div>
-          <a href="/auth/sign-in">
-            Sign in <ArrowUpRight />
-          </a>
+          {signedIn ? (
+            <CustomerSignOut />
+          ) : (
+            <a href="/auth/sign-in">
+              Sign in <ArrowUpRight />
+            </a>
+          )}
         </div>
       </aside>
       <main className="mc-main">

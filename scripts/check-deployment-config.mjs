@@ -22,6 +22,17 @@ export function validateDeploymentProjectConfiguration(configuration) {
     issues.push(
       "Retired ad-operations endpoints must not remain scheduled in vercel.json.",
     );
+  if (configuration?.fluid !== true)
+    issues.push(
+      "Fluid compute must be enabled for the bounded 300-second maintenance function.",
+    );
+  const maintenance = (configuration?.crons ?? []).filter(
+    (cron) => cron.path === "/api/attribution/maintenance",
+  );
+  if (maintenance.length !== 1 || maintenance[0].schedule !== "15 2 * * *")
+    issues.push(
+      "MaintainCode requires one daily 02:15 UTC maintenance schedule.",
+    );
   return issues;
 }
 export function evaluateDeploymentConfig(

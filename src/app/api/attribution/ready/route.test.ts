@@ -18,6 +18,7 @@ const tableNames = [
   "maintaincode_sites",
   "maintainflow_organizations",
   "maintainflow_organization_memberships",
+  "maintaincode_maintenance_queue",
 ];
 const tables = tableNames.map((relname) => ({
   relname,
@@ -44,7 +45,8 @@ function success() {
     .mockResolvedValueOnce(tables)
     .mockResolvedValueOnce(
       Array.from({ length: 6 }, (_, n) => ({ policyname: `policy${n}` })),
-    );
+    )
+    .mockResolvedValueOnce([{ count: 1 }]);
 }
 function request(auth = true) {
   return new Request("https://maintainflow.io/api/attribution/ready", {

@@ -78,8 +78,9 @@ export async function probeMaintainCodeDeployment(config, fetcher = fetch) {
     ready.scope !== "runtime_database_only" ||
     ready.revision !== config.revision ||
     ready.checks?.runtimeRole !== true ||
-    ready.checks?.tables !== 5 ||
-    ready.checks?.isolationPolicies !== 6
+    ready.checks?.tables !== 6 ||
+    ready.checks?.isolationPolicies !== 6 ||
+    !ready.checks?.maintenanceQueue
   )
     throw new Error(
       "The expected revision did not verify the dedicated database role, table grants and isolation policies.",

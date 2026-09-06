@@ -45,6 +45,24 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe("fail-open HTML adapter", () => {
+  it("expires persisted retry records after their attempt budget is exhausted", async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error("offline"));
+    tracker = installTracker(config());
+    tracker.setConsent(true);
+    tracker.confirm(form());
+    await new Promise((r) => setTimeout(r, 0));
+    const pending = JSON.parse(localStorage.getItem("mc_delivery:site")!);
+    pending[0].attempts = 28;
+    localStorage.setItem("mc_delivery:site", JSON.stringify(pending));
+    tracker.destroy();
+    vi.mocked(fetch).mockClear();
+    tracker = installTracker(config());
+    tracker.setConsent(true);
+    window.dispatchEvent(new Event("online"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetch).not.toHaveBeenCalled();
+    expect(localStorage.getItem("mc_delivery:site")).toBeNull();
+  });
   it("retains failed delivery through navigation and requires renewed consent before retry", async () => {
     vi.mocked(fetch).mockRejectedValue(new Error("offline"));
     tracker = installTracker(config());

@@ -131,15 +131,19 @@ export function validateMaintainCodeConfig(
   for (const key of [
     "MAINTAINFLOW_READINESS_PROBE_SECRET",
     "MAINTAINCODE_MAINTENANCE_SECRET",
+    "CRON_SECRET",
   ])
     if (!env[key] || env[key].length < 32)
       issues.push(`${key} must contain at least 32 characters.`);
-  if (
-    env.MAINTAINFLOW_READINESS_PROBE_SECRET &&
-    env.MAINTAINFLOW_READINESS_PROBE_SECRET ===
-      env.MAINTAINCODE_MAINTENANCE_SECRET
-  )
-    issues.push("Readiness and maintenance secrets must be distinct.");
+  const jobSecrets = [
+    env.MAINTAINFLOW_READINESS_PROBE_SECRET,
+    env.MAINTAINCODE_MAINTENANCE_SECRET,
+    env.CRON_SECRET,
+  ].filter(Boolean);
+  if (new Set(jobSecrets).size !== jobSecrets.length)
+    issues.push(
+      "Readiness, manual maintenance and cron secrets must be distinct.",
+    );
   if (env.MAINTAINCODE_LOCAL_TEST === "1")
     issues.push("Local test mode must be disabled for production.");
   if (

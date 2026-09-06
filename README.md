@@ -26,7 +26,7 @@ Copy `.env.example` into the deployment secret manager, supplying actual values.
 
 `npm run check:production-config` validates required settings without contacting providers. `npm run build` builds the tracker and Next.js artifact. `npm start` additionally checks that public auth settings match the browser build. The Docker entrypoint performs the same check. Vercel runs the new deployment gate before building; legacy ad-operations schedules have been removed.
 
-The maintenance API accepts an authenticated POST per workspace at `/api/attribution/maintenance?workspace=WORKSPACE_UUID`. Configure and verify an external scheduler for the intended workspace cadence. No global Vercel Cron is fabricated: the endpoint requires a workspace and a POST, and successful manual sync is not proof of scheduled execution.
+Vercel schedules a daily GET to `/api/attribution/maintenance` at 02:15 UTC, authenticated with `CRON_SECRET`. Migration 025 registers every workspace in a durable queue. A run processes at most eight workspaces within a 210-second work budget; ten-minute leases prevent overlapping claims, and unfinished backlog remains queued. Retention runs for all workspaces; provider refresh runs only for active subscriptions or unexpired trials. The manual per-workspace POST remains available with the separate maintenance secret. Verify the actual hosted cron registration and execution after deployment; successful manual sync is not scheduled-run proof. See the implementation guide for capacity limits.
 
 ## Verification
 

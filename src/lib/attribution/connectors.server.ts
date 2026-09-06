@@ -1,6 +1,10 @@
 import "server-only";
 import { z } from "zod";
-import { adsApiRequest } from "@/lib/openai-ads/client.server";
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  adsApiRequest,
+  type AdsProviderRequestBudget,
+} from "@/lib/openai-ads/client.server";
 import {
   fetchLiveAdAccount,
   fetchLiveAttributionInventory,
@@ -44,23 +48,26 @@ async function hubspot<T>(
   path: string,
   token: string,
   schema: z.ZodType<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
   for (let attempt = 0; attempt < 3; attempt++) {
+    signal?.throwIfAborted();
     const response = await fetch(`https://api.hubapi.com${path}`, {
       headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(12000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(12000)])
+        : AbortSignal.timeout(12000),
       cache: "no-store",
       redirect: "error",
     });
     if (response.status === 429 && attempt < 2) {
-      await new Promise((r) =>
-        setTimeout(
-          r,
-          Math.min(
-            Number(response.headers.get("retry-after") ?? 1) * 1000,
-            3000,
-          ),
-        ),
+      const requested = Number(response.headers.get("retry-after") ?? 1) * 1000;
+      await delay(
+        Number.isFinite(requested)
+          ? Math.max(0, Math.min(requested, 3000))
+          : 1000,
+        undefined,
+        { signal },
       );
       continue;
     }
@@ -85,6 +92,7 @@ async function listHubspot(
   kind: "contacts" | "deals",
   properties: string[],
   token: string,
+  signal?: AbortSignal,
 ) {
   const items: z.infer<typeof hsObject>[] = [];
   let after = "";
@@ -101,6 +109,7 @@ async function listHubspot(
       `/crm/v3/objects/${kind}?${query}`,
       token,
       hsPage,
+      signal,
     );
     items.push(...result.results);
     if (!result.paging?.next) return items;
@@ -113,12 +122,17 @@ async function listHubspot(
     "HubSpot exceeds 10,000 records or returned a repeated cursor. No partial snapshot was accepted.",
   );
 }
-export async function syncHubspot(w: Workspace, token: string) {
+export async function syncHubspot(
+  w: Workspace,
+  token: string,
+  signal?: AbortSignal,
+) {
   // Required custom property must exist. This connector never creates or overwrites CRM properties.
   await hubspot(
     `/crm/v3/properties/contacts/${encodeURIComponent(w.submissionProperty)}`,
     token,
     z.object({ name: z.string() }),
+    signal,
   );
   const mappedProperties = [
     ...new Set(
@@ -140,6 +154,7 @@ export async function syncHubspot(w: Workspace, token: string) {
         ]),
       ],
       token,
+      signal,
     ),
     listHubspot(
       "deals",
@@ -151,6 +166,7 @@ export async function syncHubspot(w: Workspace, token: string) {
         "closedate",
       ],
       token,
+      signal,
     ),
   ]);
   const splitReferences = (value: string) =>
@@ -224,23 +240,70 @@ export async function syncHubspot(w: Workspace, token: string) {
   });
   return { contacts, deals };
 }
-export async function syncOpenAI(token: string, expectedAccountId?: string) {
+// Resolve day boundaries in the account's IANA timezone, including DST changes.
+function accountDayStart(date: string, timezone: string) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  let low = Date.parse(`${date}T00:00:00Z`) / 1000 - 86400;
+  let high = low + 3 * 86400;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (formatter.format(new Date(middle * 1000)) < date) low = middle + 1;
+    else high = middle;
+  }
+  if (formatter.format(new Date(low * 1000)) !== date)
+    throw new AttributionError(
+      502,
+      "The advertiser account day could not be resolved.",
+    );
+  return low;
+}
+export async function syncOpenAI(
+  token: string,
+  expectedAccountId?: string,
+  signal?: AbortSignal,
+) {
   const credential = expectedAccountId
     ? { kind: "account_api_key" as const, secret: token, expectedAccountId }
     : { apiKey: token };
-  const account = await fetchLiveAdAccount(credential);
+  const providerBudget: AdsProviderRequestBudget | undefined = signal
+    ? {
+        signal,
+        async runRequest<T>(request: () => Promise<T>) {
+          signal.throwIfAborted();
+          const result = await request();
+          signal.throwIfAborted();
+          return result;
+        },
+      }
+    : undefined;
+  signal?.throwIfAborted();
+  const account = await fetchLiveAdAccount(credential, providerBudget);
   if (expectedAccountId && account.id !== expectedAccountId)
     throw new AttributionError(
       409,
       "The key belongs to a different advertiser account.",
     );
-  const inventory = await fetchLiveAttributionInventory(account, credential);
-  const to = Math.floor(Date.now() / 1000),
-    from = to - 30 * 86400;
-  const costs: Cost[] = [];
+  const inventory = await fetchLiveAttributionInventory(
+    account,
+    credential,
+    signal,
+  );
+  const today = localDate(new Date().toISOString(), account.timezone);
+  const firstDay = new Date(Date.parse(`${today}T00:00:00Z`) - 30 * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const to = accountDayStart(today, account.timezone),
+    from = accountDayStart(firstDay, account.timezone);
+  const costs = new Map<string, Cost>();
   let after = "";
   const seen = new Set<string>();
   for (let page = 0; page < 50; page++) {
+    signal?.throwIfAborted();
     const query = new URLSearchParams({
       time_granularity: "day",
       aggregation_level: "campaign",
@@ -262,16 +325,36 @@ export async function syncOpenAI(token: string, expectedAccountId?: string) {
     const result = await adsApiRequest(
       `/ad_account/insights?${query}`,
       insightListResponseSchema,
-      {},
+      { providerBudget },
       credential,
     );
     for (const row of result.data) {
       if (row.spend === undefined || !row.campaign_id) continue;
+      if (
+        row.start_time < from ||
+        row.end_time > to ||
+        row.end_time <= row.start_time
+      )
+        throw new AttributionError(
+          502,
+          "OpenAI returned spend outside the complete account-day window. No partial snapshot was accepted.",
+        );
       const date = localDate(
         new Date(row.start_time * 1000).toISOString(),
         account.timezone,
       );
-      costs.push({
+      const nextDate = new Date(Date.parse(`${date}T00:00:00Z`) + 86400000)
+        .toISOString()
+        .slice(0, 10);
+      if (
+        row.start_time !== accountDayStart(date, account.timezone) ||
+        row.end_time !== accountDayStart(nextDate, account.timezone)
+      )
+        throw new AttributionError(
+          502,
+          "OpenAI returned an incomplete account-day cost row. No partial snapshot was accepted.",
+        );
+      const cost: Cost = {
         id: `${date}:ChatGPT Ads:${row.campaign_id}:${account.currency_code}`,
         source: "openai",
         date,
@@ -282,14 +365,22 @@ export async function syncOpenAI(token: string, expectedAccountId?: string) {
         amount: row.spend,
         clicks: row.clicks,
         impressions: row.impressions,
-      });
+      };
+      const previous = costs.get(cost.id);
+      if (previous && JSON.stringify(previous) !== JSON.stringify(cost))
+        throw new AttributionError(
+          502,
+          "OpenAI returned conflicting daily campaign costs. No partial snapshot was accepted.",
+        );
+      costs.set(cost.id, cost);
     }
     if (!result.has_more)
       return {
         account,
         inventory,
-        costs: [...new Map(costs.map((c) => [c.id, c])).values()],
-        coverage: `${new Date(from * 1000).toISOString()} to ${new Date(to * 1000).toISOString()}`,
+        costs: [...costs.values()],
+        costWindow: { from: firstDay, to: today },
+        coverage: `${firstDay} to ${today} (end exclusive; 30 complete days in ${account.timezone})`,
       };
     if (!result.last_id || seen.has(result.last_id)) break;
     after = result.last_id;

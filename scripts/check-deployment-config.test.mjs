@@ -3,13 +3,17 @@ import {
   evaluateDeploymentConfig,
   validateDeploymentProjectConfiguration,
 } from "./check-deployment-config.mjs";
+const schedule = {
+  fluid: true,
+  crons: [{ path: "/api/attribution/maintenance", schedule: "15 2 * * *" }],
+};
 const buildCommand =
   "node scripts/check-deployment-config.mjs && npm run build";
 describe("MaintainCode hosting configuration", () => {
   it("requires the new environment gate and retires the previous product's schedules", () => {
-    expect(validateDeploymentProjectConfiguration({ buildCommand })).toEqual(
-      [],
-    );
+    expect(
+      validateDeploymentProjectConfiguration({ buildCommand, ...schedule }),
+    ).toEqual([]);
     expect(
       validateDeploymentProjectConfiguration({
         buildCommand,

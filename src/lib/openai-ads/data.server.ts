@@ -644,8 +644,12 @@ export async function fetchLiveWorkbenchData(
 export async function fetchLiveAttributionInventory(
   account: AdAccount,
   credential: AdsApiCredential,
+  signal?: AbortSignal,
 ) {
+  signal?.throwIfAborted();
   const budget = new LiveSyncProviderBudget(1);
+  const onAbort = () => budget.abort(signal?.reason);
+  signal?.addEventListener("abort", onAbort, { once: true });
   try {
     return await budget.runWithinDeadline(async () => {
       const campaigns = await listCampaigns(credential, budget);
@@ -676,6 +680,7 @@ export async function fetchLiveAttributionInventory(
     budget.abort(error);
     throw budget.failureReason ?? error;
   } finally {
+    signal?.removeEventListener("abort", onAbort);
     budget.dispose();
   }
 }

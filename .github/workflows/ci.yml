@@ -93,6 +93,7 @@ jobs:
             --env MAINTAINFLOW_DATABASE_CA_CERT="$ci_database_ca" \
             --env MAINTAINFLOW_READINESS_PROBE_SECRET=pppppppppppppppppppppppppppppppp \
             --env MAINTAINCODE_MAINTENANCE_SECRET=mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm \
+            --env CRON_SECRET=cccccccccccccccccccccccccccccccc \
             --env MAINTAINFLOW_ACTIVE_CREDENTIAL_KEY_ID=ci \
             --env 'MAINTAINFLOW_CREDENTIAL_KEYRING={"ci":"Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M="}' \
             maintaincode-ads:ci

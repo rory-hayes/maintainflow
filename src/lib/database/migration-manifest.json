@@ -94,5 +94,9 @@
   {
     "name": "024_maintaincode_runtime_role.sql",
     "checksumSha256": "62ca38dfcf90b349b9c3bb7411caf5751899a051aa97418f3138d0e02c01a5f6"
+  },
+  {
+    "name": "025_maintaincode_maintenance_queue.sql",
+    "checksumSha256": "497d6f969b0e56d17f5b90618e18821f216edeb248357a29c320eaca31372e4a"
   }
 ]

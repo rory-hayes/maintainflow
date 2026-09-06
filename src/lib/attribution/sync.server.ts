@@ -18,7 +18,9 @@ export async function syncWorkspaceProvider(
         accountId: string;
       }
     | { action: "sync"; provider: "hubspot" | "openai" },
+  signal?: AbortSignal,
 ) {
+  signal?.throwIfAborted();
   const w = await readWorkspace(id);
   const provider = input.provider;
   const token =
@@ -39,6 +41,7 @@ export async function syncWorkspaceProvider(
       409,
       "Use a separate workspace for a different provider account so client histories are not mixed.",
     );
+  signal?.throwIfAborted();
   const operationId = randomUUID();
   await mutateWorkspace(id, (state) => {
     const current = state.connectors.find((c) => c.provider === provider);
@@ -67,10 +70,12 @@ export async function syncWorkspaceProvider(
   };
   try {
     if (provider === "hubspot") {
-      const snapshot = await syncHubspot(w, token);
+      const snapshot = await syncHubspot(w, token, signal);
+      signal?.throwIfAborted();
       await mutateWorkspace(
         id,
         (state) => {
+          signal?.throwIfAborted();
           reconcileCRM(state, snapshot.contacts, snapshot.deals);
           state.connectors = state.connectors.filter(
             (c) => c.provider !== provider,
@@ -85,7 +90,7 @@ export async function syncWorkspaceProvider(
           for (const site of state.sites)
             if (
               state.submissions.some(
-                (s) => s.siteId === site.id && s.test && s.crmVerifiedAt,
+                (s) => s.siteId === site.id && s.test && s.crmFieldsVerifiedAt,
               )
             )
               site.verifiedAt = new Date().toISOString();
@@ -93,14 +98,24 @@ export async function syncWorkspaceProvider(
         change,
       );
     } else {
-      const snapshot = await syncOpenAI(token, accountId);
+      const snapshot = await syncOpenAI(token, accountId, signal);
+      signal?.throwIfAborted();
       await mutateWorkspace(
         id,
         (state) => {
+          signal?.throwIfAborted();
           state.adInventory = snapshot.inventory;
-          const ids = new Set(snapshot.costs.map((c) => c.id));
+          const incomingIds = new Set(snapshot.costs.map((cost) => cost.id));
           state.costs = state.costs
-            .filter((c) => !ids.has(c.id))
+            .filter(
+              (c) =>
+                !(
+                  incomingIds.has(c.id) ||
+                  (c.source === "openai" &&
+                    c.date >= snapshot.costWindow.from &&
+                    c.date < snapshot.costWindow.to)
+                ),
+            )
             .concat(snapshot.costs);
           state.connectors = state.connectors.filter(
             (c) => c.provider !== provider,

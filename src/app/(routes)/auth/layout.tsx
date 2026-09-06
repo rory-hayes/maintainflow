@@ -6,8 +6,7 @@ import { ConditionalClerkProvider } from "@/components/auth/conditional-clerk-pr
 
 export const metadata: Metadata = {
   title: "Workspace access | MaintainCode Ads",
-  description:
-    "Secure access to your attribution workspace.",
+  description: "Secure access to your attribution workspace.",
   robots: { index: false, follow: false },
 };
 
@@ -34,7 +33,11 @@ export default function RootLayout({
       >
         <div className=" h-screen">
           <ConditionalClerkProvider>
-            <header className="border-b p-6"><a href="/app" className="font-semibold">MaintainCode Ads</a></header>
+            <header className="border-b p-6">
+              <a href="/app" className="font-semibold">
+                MaintainCode Ads
+              </a>
+            </header>
             {children}
           </ConditionalClerkProvider>
         </div>

@@ -6,6 +6,8 @@ import {
 } from "next/server";
 
 import { isClerkConfigured } from "@/lib/auth/config";
+import { isSupabaseConfigured } from "@/lib/auth/supabase-config";
+import { refreshSupabaseSession } from "@/lib/auth/supabase-proxy";
 
 const configuredClerkMiddleware = isClerkConfigured()
   ? clerkMiddleware()
@@ -27,6 +29,14 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
       { status: 410 },
     );
   }
+  if (
+    isSupabaseConfigured() &&
+    (request.nextUrl.pathname === "/app" ||
+      request.nextUrl.pathname.startsWith("/auth/") ||
+      request.nextUrl.pathname.startsWith("/api/attribution/workspaces") ||
+      request.nextUrl.pathname === "/api/attribution/billing")
+  )
+    return refreshSupabaseSession(request);
   if (!configuredClerkMiddleware) return NextResponse.next();
   return configuredClerkMiddleware(request, event);
 }

@@ -1,4 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "node scripts/check-deployment-config.mjs && npm run build"
+  "buildCommand": "node scripts/check-deployment-config.mjs && npm run build",
+  "fluid": true,
+  "crons": [
+    {
+      "path": "/api/attribution/maintenance",
+      "schedule": "15 2 * * *"
+    }
+  ]
 }

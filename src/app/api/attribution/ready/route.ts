@@ -42,16 +42,21 @@ export async function GET(request: Request) {
     )
       throw new Error("runtime_role");
     const rows =
-      await sql`select relname,relrowsecurity,relforcerowsecurity,row_security_active(oid) as rls_active,has_table_privilege(current_user,oid,'SELECT') as can_read,has_table_privilege(current_user,oid,'INSERT') as can_insert,has_table_privilege(current_user,oid,'UPDATE') as can_update,has_table_privilege(current_user,oid,'DELETE') as can_delete from pg_class where relnamespace='public'::regnamespace and relname in ('maintaincode_workspaces','maintaincode_credentials','maintaincode_sites','maintainflow_organizations','maintainflow_organization_memberships')`;
+      await sql`select relname,relrowsecurity,relforcerowsecurity,row_security_active(oid) as rls_active,has_table_privilege(current_user,oid,'SELECT') as can_read,has_table_privilege(current_user,oid,'INSERT') as can_insert,has_table_privilege(current_user,oid,'UPDATE') as can_update,has_table_privilege(current_user,oid,'DELETE') as can_delete from pg_class where relnamespace='public'::regnamespace and relname in ('maintaincode_workspaces','maintaincode_credentials','maintaincode_sites','maintainflow_organizations','maintainflow_organization_memberships','maintaincode_maintenance_queue')`;
     if (
-      rows.length !== 5 ||
+      rows.length !== 6 ||
       rows.some(
         (row) =>
           !row.can_read ||
-          !row.can_insert ||
+          (row.relname === "maintaincode_maintenance_queue"
+            ? !row.can_update
+            : !row.can_insert) ||
           (row.relname.startsWith("maintaincode_") &&
+            row.relname !== "maintaincode_maintenance_queue" &&
             (!row.can_update || !row.can_delete)) ||
-          (row.relname !== "maintaincode_sites" &&
+          (!["maintaincode_sites", "maintaincode_maintenance_queue"].includes(
+            row.relname,
+          ) &&
             (!row.relrowsecurity || (!local && !row.rls_active))) ||
           (["maintaincode_workspaces", "maintaincode_credentials"].includes(
             row.relname,
@@ -63,13 +68,21 @@ export async function GET(request: Request) {
     const policies =
       await sql`select policyname from pg_policies where schemaname='public' and policyname in ('maintaincode_workspace_isolation','maintaincode_credential_isolation','maintaincode_member_read','maintaincode_member_create','maintaincode_organization_read','maintaincode_organization_create')`;
     if (policies.length !== 6) throw new Error("isolation_policies");
+    const [registration] =
+      await sql`select count(*)::int as count from pg_trigger where tgname='maintaincode_workspace_maintenance_registration' and tgrelid='public.maintaincode_workspaces'::regclass and tgenabled='O' and not tgisinternal`;
+    if (registration?.count !== 1) throw new Error("maintenance_registration");
     return Response.json(
       {
         ready: true,
         service: "maintaincode-ads",
         scope: local ? "local_database_only" : "runtime_database_only",
         revision: revision ?? "unknown",
-        checks: { runtimeRole: true, tables: 5, isolationPolicies: 6 },
+        checks: {
+          runtimeRole: true,
+          tables: 6,
+          isolationPolicies: 6,
+          maintenanceQueue: true,
+        },
         providers: "not_verified",
         payments: "not_verified",
       },
@@ -82,7 +95,7 @@ export async function GET(request: Request) {
         service: "maintaincode-ads",
         revision: revision ?? "unknown",
         error:
-          "Check build revision, migrations 023/024, dedicated runtime role, isolation policies and table grants.",
+          "Check build revision, migrations 023–025, dedicated runtime role, isolation policies and table grants.",
       },
       { status: 503, headers },
     );
