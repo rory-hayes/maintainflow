@@ -12,6 +12,11 @@ create table public.maintaincode_maintenance_queue (
   check ((lease_token is null) = (lease_until is null))
 );
 create index maintaincode_maintenance_due on public.maintaincode_maintenance_queue(next_due_at,organization_id);
+-- Only the server runtime may traverse this minimal scheduling registry.
+-- RLS also protects the queue if a Data API grant is accidentally added later.
+alter table public.maintaincode_maintenance_queue enable row level security;
+create policy maintaincode_maintenance_runtime on public.maintaincode_maintenance_queue
+ for all to maintaincode_app using (true) with check (true);
 revoke all on public.maintaincode_maintenance_queue from public;
 -- Authenticated/anon Supabase Data API roles must not enumerate the queue.
 do $$ begin
