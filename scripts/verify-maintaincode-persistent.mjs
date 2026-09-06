@@ -167,7 +167,6 @@ try {
     "docs",
     "package.json",
     "next.config.ts",
-    "next-env.d.ts",
     "tsconfig.json",
     "postcss.config.mjs",
     "tailwind.config.ts",
