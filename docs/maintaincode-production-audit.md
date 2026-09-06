@@ -4,14 +4,15 @@ Audit snapshot: 6 September 2026, Europe/Dublin. This is a release working recor
 
 ## Current judgment
 
-The application demonstrates the intended source-to-CRM reporting product. Sample reporting, evidence drill-down, filters, responsive navigation and diagnostics are functional locally. The first paying-customer journey is not yet proved: production authentication, persistent onboarding, destination CRM delivery, real Ads costs and Stripe test subscription administration need end-to-end evidence on `https://maintainflow.io`.
+The application demonstrates the intended source-to-CRM reporting product. Sample reporting, evidence drill-down, filters, responsive navigation and diagnostics are functional locally. The new Supabase project's 25 migrations and hosted runtime-role verification have passed, including tenant persistence, encryption and maintenance queue isolation. The replacement branch is pushed at `4f448ba` in PR #11; `main` and `https://maintainflow.io` still serve the old product. The first paying-customer journey is not yet proved: production authentication, persistent onboarding, destination CRM delivery, real Ads costs and Stripe test subscription administration need end-to-end evidence on the domain after deployment.
 
-The audit found and fixed workspace-context and mobile-accessibility defects. It also found that a CRM contact identity match had been presented as complete field delivery. The implementation now separates those facts and is adding explicit field comparisons. A visual dashboard or passing unit test cannot close the real CRM delivery gate.
+The audit found and fixed workspace-context and mobile-accessibility defects. It also found that a CRM contact identity match had been presented as complete field delivery. The implementation now separates those facts and compares the mapped CRM attribution fields; the correction is complete and tested locally. A visual dashboard or passing unit test cannot close the real CRM delivery gate.
 
 ## Environment and evidence
 
 - Checkout: `/Users/rory/Documents/Ideation/maintaincode-ads`.
-- Base commit at initial inspection: `2f2970a5d51f7ebd75cf770954883072e0962195`, branch `codex/change-integrity-release`, with the new attribution implementation uncommitted. Recheck the deployed revision before release.
+- Historical baseline at initial inspection: `2f2970a5d51f7ebd75cf770954883072e0962195`, branch `codex/change-integrity-release`. The replacement branch is now pushed at `4f448ba` in [PR #11](https://github.com/rory-hayes/maintainflow/pull/11). Merge and deployment are pending; the target `main` branch and domain still show the old product.
+- New Supabase project: `mvzspyhwoqzcygekridy`. The root release task reports all 25 migrations applied and a fresh hosted verifier run with `--require-queue` returning `ok: true`; exact checked boundaries are recorded below.
 - Local URL verified: `http://127.0.0.1:3217/app`, HTTP 200.
 - Browser: Codex in-app browser; desktop plus 390×844 mobile viewport. Temporary viewport override reset after verification.
 - Data operated by this audit: labelled example workspace only. Component tests use mocked responses and create no persisted customers, emails or charges.
@@ -26,7 +27,7 @@ The audit found and fixed workspace-context and mobile-accessibility defects. It
 | CUSTOMER-02 | Major | Creating a second workspace did not record its ID in the URL; refresh could reopen the previous/first client. | `app.tsx`: creation writes the selected workspace and live mode before navigating to setup. Component test verifies refreshable URL. | Fixed locally |
 | CUSTOMER-03 | Major | Slow workspace loads/saves could overwrite a newer client selection or a return to sample mode. | `app.tsx`: request generation guards discard responses from a previous context. Two delayed-response tests verify both selection and save paths. | Fixed locally |
 | CUSTOMER-04 | Major | Closed mobile navigation remained keyboard-focusable offscreen. First Tab focused the brand at x=-236 on a 390px screen. | `styles.css`: closed sidebar is hidden; open state restores visibility. `app.tsx`: expanded/control semantics, visible close action and Escape/focus return. Browser now focuses the visible toggle, opens/closes navigation and reaches Leads. | Fixed and browser verified |
-| CUSTOMER-05 | Major | A CRM submission-ID match marked the site and lead verified without reading any source fields. A mis-mapped form could look successfully installed. | `model.ts` / `connectors.server.ts`: compare mapped fields independently from contact history. `reporting.tsx` and `setup.tsx`: distinguish contact identity, field delivery, missing/different fields and recovery steps. Sample fixture explicitly declares its example verification evidence. | Code correction in progress across release agents; real HubSpot proof pending |
+| CUSTOMER-05 | Major | A CRM submission-ID match marked the site and lead verified without reading any source fields. A mis-mapped form could look successfully installed. | `model.ts` / `connectors.server.ts`: compare mapped fields independently from contact history. `reporting.tsx` and `setup.tsx`: distinguish contact identity, field delivery, missing/different fields and recovery steps. Sample fixture explicitly declares its example verification evidence. | Fixed and tested locally; real HubSpot proof pending |
 | CUSTOMER-06 | Minor | Lead view rendered every retained submission and had no bounded pagination. | `reporting.tsx`: 50-row pages, newest first, filter changes reset the page. Test verifies 50 rows from 128 records; browser verifies page 2 then a one-record search. | Fixed locally |
 | CUSTOMER-07 | Major | Independently generating sample timestamps during SSR and hydration could change sorted lead order and trigger a hydration error. | `app/page.tsx` passes one serializable sample snapshot to `AttributionApp`. A fresh browser tab verified filtered navigation and no warning/error logs after the correction. | Fixed and browser verified |
 
@@ -36,27 +37,27 @@ The audit found and fixed workspace-context and mobile-accessibility defects. It
 | --- | --- | --- |
 | P0 | Production first-user authentication and recovery not proved | Supabase authentication is now implemented and locally verified below. Verify actual account creation, email delivery/confirmation, sign-in, refresh, sign-out, recovery and expired links on the deployed domain. |
 | P0 | No real destination CRM handoff observed | Private-app read code and V4 event tests are not a tested HubSpot account/form. Verify the customer can create dedicated properties, include hidden fields in the exact supported form editor, submit a diagnostic lead, and inspect matched first/latest values in HubSpot. |
-| P0 | New database deployment and effective isolation not proved by this audit | Apply the complete current migration manifest to the new Supabase project, verify the non-bypass runtime role, then test two unrelated populated workspaces with distinct authenticated users and permitted roles. |
-| P0 | Domain/repository revision not yet verified | Record GitHub commit, deployment ID and a domain response that proves that revision. Exercise real app routes, not only health endpoints. |
+| P0 | Deployed authenticated tenant isolation remains unproved | New project schema and hosted runtime-role checks passed: 25 migrations, two-tenant persistence, credential encryption, queue RLS/grants and rollback. Still test two unrelated populated workspaces through the deployed app with distinct authenticated users and permitted roles; direct database fixtures do not prove this customer journey. |
+| P0 | Replacement branch is not yet on the domain | PR #11 is pushed at `4f448ba`; `main` and `maintainflow.io` still show the old product. Complete the merge/deployment and record a domain response tied to the deployed revision, then exercise real app routes. |
 | P1 | Live Ads account and native reporting acceptance missing | Use an authorized eligible advertiser key. Verify account identity, inventory, campaign IDs, original currency/timezone, costs/clicks/impressions and recovery after denial/rate limit. Never treat sample rows as this evidence. |
 | P1 | Stripe test subscription lifecycle missing | Test configured price validation, checkout, webhook replay, portal cancellation, failed payment and capture-limit effects without real charges. |
 | P1 | Consent wiring remains an integration task | Onboarding describes the policy and callback, but a stored setting alone does not prove the customer's CMP actually delays collection or handles withdrawal. Verify before grant, grant, page navigation, direct return and withdrawal on the installed site. |
-| P1 | Automated maintenance not yet observed | An authenticated per-workspace maintenance handler exists. Record the actual hosted schedule, coverage for newly created workspaces, last success and failure monitoring. Verify physical retention cleanup and connector refresh. |
+| P1 | Hosted maintenance execution not yet observed | Scheduler configuration, maintenance processing and the tenant queue are implemented. Hosted verification passed queue RLS/grants and rollback. After deployment, observe the actual scheduled run, coverage for new workspaces, last success and failure monitoring, physical retention cleanup and connector refresh. |
 | P1 | Customer team/agency administration incomplete | Membership access is enforced, but customer invitations and role administration are an operator process. Verify isolated clients now; complete the self-service management flow before advertising it. |
 | P1 | Opted-in health/summary email delivery incomplete | The brief includes recurring opted-in reports. No customer preference, scheduled email summary and observed delivery were exercised. Do not promise this as an available feature. |
-| P1 | Legal and operating notices stale at audit start | `/privacy` and `/terms` described the old ad-operations beta and its old retention schedules. Align them with actual tracker/CRM/billing data handling, operator/contact identity, processors and configured deletion/backup behavior. Recheck final pages after root edits. |
+| P1 | Updated legal notices not yet verified on the domain | `/privacy` and `/terms` have been rewritten for the attribution product, including tracker/CRM/billing handling and operating notices. The domain still serves the old product. Verify the deployed pages, links and actual configured retention/deletion behavior after release. |
 | P1 | Throughput and upper-bound behavior unproved | State remains one locked JSON record per workspace with retained-record/snapshot limits. Load tests must cover realistic form throughput, sync overlap, concurrent tabs and maximum supported data before claiming capacity. |
 | P2 | CRM setup is technical | Customers must know private-app scopes, internal property names, stage IDs, JSON mapping and successful-submit callbacks. Narrow supported compatibility and concise exact setup instructions are essential; an account-tier matrix remains unverified. |
 
 ## Production acceptance coverage matrix
 
-"Local pass" applies only to the indicated code/UI scope. "Pending" requires the authoritative evidence in the final column; it is not a claim that the feature is broken.
+"Local pass" applies only to the indicated code/UI scope. Hosted database verification applies only to the explicitly checked database boundaries. "Pending" requires the authoritative evidence in the final column; it is not a claim that the feature is broken.
 
-| Requirement | Local evidence | Production status | Evidence needed to close |
+| Requirement | Implementation and verification evidence | Production status | Evidence needed to close |
 | --- | --- | --- | --- |
-| New code replaces target GitHub repository | Checkout inspected; remote not assessed by this audit | Pending | Target branch/commit and reviewed changed files |
-| New Supabase project, complete schema and runtime role | Migration/config source inspected | Pending | Project identity, manifest application and effective-role checks |
-| Domain serves intended deployed revision | Local `/app` responds | Pending | `maintainflow.io` deployment/commit linkage and route/browser checks |
+| New code replaces target GitHub repository | Replacement branch pushed at `4f448ba`, PR #11 | Branch pushed; merge pending | Merge accepted replacement into target `main` and record final commit |
+| New Supabase project, complete schema and runtime role | Project `mvzspyhwoqzcygekridy`; 25 migrations; fresh hosted verifier with `--require-queue` returned `ok: true` | Hosted database pass for checked scope | Deployed application connectivity remains a separate gate |
+| Domain serves intended deployed revision | Local `/app` responds; domain still serves old product | Pending | `maintainflow.io` deployment/commit linkage and route/browser checks |
 | Public sign-up and email confirmation | Supabase implementation, route tests and browser entry form pass | Pending | New user registers, receives confirmation, completes session on domain |
 | Sign-in, session refresh and sign-out | Supabase authoritative identity, cookie propagation and sign-out tests pass | Pending | Browser session survives refresh and sign-out removes data access |
 | Recovery and invalid/expired links | Supabase recovery/callback tests and browser entry form pass | Pending | Recovery mail and password update; expired-token error with retry |
@@ -67,6 +68,7 @@ The audit found and fixed workspace-context and mobile-accessibility defects. It
 | Paid ChatGPT / organic AI / ambiguous visits | Explicit rule logic and tests present | Pending | Controlled tagged/referral visits through installed form |
 | HTML successful-submit handoff | Adapter code/tests present | Pending | Actual supported business form succeeds independently and CRM receives fields |
 | HubSpot V4 successful-submit handoff | Public-method test double present | Pending | Supported editor/account-tier form and real CRM properties verified |
+| CRM attribution-field delivery verification | Explicit mapped-field comparisons and missing/mismatched diagnostics complete and tested locally | Pending | Real HubSpot first/latest property values match the captured submission; contact identity alone is insufficient |
 | Retries do not multiply successful submissions | Model and collector tests present | Pending | Duplicate callbacks/retries through deployed collector, one usage record |
 | Tracker/network/quota failure leaves form working | Fail-open adapter logic/tests present | Pending | Deployed controlled failure with underlying form delivery observed |
 | Native HubSpot outcomes | Connector/parser/reconciliation inspected | Pending | Real contact lifecycle, association, amount, currency and close-date changes |
@@ -78,10 +80,12 @@ The audit found and fixed workspace-context and mobile-accessibility defects. It
 | Booked versus collected, models/cohorts/currencies | Explicit labels and model tests present | Pending | Live source-record reconciliation in each selected scope |
 | Missing spend and unsupported ratios | Local sample correctly labels Unknown; ratios unavailable | Pending | Partial-provider/CSV records remain explicitly incomplete |
 | Freshness/failure/recovery diagnostics | States and recovery UI inspected | Pending | Actual expired credential, partial sync and successful retry |
-| Two unrelated workspaces read/write/export isolation | Membership/RLS implementation plus local UI context tests | Pending | Distinct authenticated users, deployed runtime and populated records |
+| Two unrelated workspaces read/write/export isolation | Membership/RLS and UI tests; hosted runtime verifier passed two-tenant persistence, encrypted credentials, queue RLS/grants and rollback | Database checks passed; authenticated app journey pending | Distinct authenticated users exercising the deployed app with populated records, including export and permitted-role behavior |
 | Subscription/trial/usage/cancellation | Code tests present; sample billing disabled | Pending | Stripe test lifecycle and quota behavior, zero real charges |
 | Export, retention, site deletion and revocation | Controls/code present | Pending | Persisted exact export, scoped deletion, cleanup and revoked-key behavior |
-| Recurring refresh and health/summary reports | Maintenance handler exists; email summaries incomplete | Pending | Actual scheduler plus opted-in preferences and observed delivery |
+| Scheduled maintenance and connector refresh | Scheduler/processing/queue implemented; hosted queue RLS/grants and rollback passed | Execution pending | Actual deployed scheduled run, retention cleanup, connector refresh, new-workspace coverage and failure monitoring |
+| Opted-in health/summary reports | Customer preference and email-summary delivery flow remain incomplete | Pending | Opted-in preferences, scheduled summary and observed delivery |
+| Attribution-product privacy and terms | Source pages rewritten for current product | Domain pending | Correct deployed pages/links and consistency with actual retention/deletion configuration |
 | Desktop/mobile/keyboarding | Local pass; mobile overflow 390=390 and hidden focus corrected | Pending | Deployed fresh-user flow at desktop and mobile widths |
 | Production logs and runtime health during journey | Local post-fix browser warning/error logs empty | Pending | Domain request IDs, logs, no relevant runtime failures |
 | External customer's first value | No observation by this audit | Pending | New customer completes source-to-CRM workflow and understands report |
@@ -92,7 +96,15 @@ The audit found and fixed workspace-context and mobile-accessibility defects. It
 
 Browser loop: Overview → Campaigns → AI discovery evidence → lead detail; mobile closed sidebar → first Tab → visible toggle → open → close → Leads → no-match state; fresh desktop Leads → Next page → search `lead-0081` → contact identity and field verification. The final fresh-tab loop had no warning/error console entries. An earlier hydration error was investigated and fixed by sharing the server-generated sample snapshot; it must remain part of regression verification.
 
-This report deliberately leaves account/provider/deployment gates open until the corresponding real evidence exists. Root release work should append exact deployment, database, payment and customer-journey results rather than relabel these local checks as production proof.
+This report deliberately leaves account/provider/deployment gates open until the corresponding real evidence exists. Hosted database results below close their stated scope only. Append exact deployment, payment and customer-journey results as they become available.
+
+## Hosted database and repository evidence update
+
+The root release task reports a fresh successful run of `scripts/verify-maintaincode-database.mjs` with `--require-queue` against new Supabase project `mvzspyhwoqzcygekridy`, returning `ok: true`. All 25 migrations are applied. Checked scope includes the restricted runtime role, two-tenant persistence, stored credential encryption, maintenance queue RLS and grants, and rollback behavior. These are hosted database checks using controlled verification fixtures; they are not evidence of two real authenticated customers using the domain.
+
+Maintenance scheduler configuration, processing and queue implementation are complete. The hosted queue checks establish database access boundaries; scheduled execution, external connector refresh and customer-facing failure recovery must still be observed after deployment.
+
+The replacement source is pushed at `4f448ba` in [PR #11](https://github.com/rory-hayes/maintainflow/pull/11). This is branch publication evidence. `main` and `maintainflow.io` still show the old product, so neither merge nor production deployment is recorded as complete. This document reconciliation did not rerun tests or perform provider actions.
 
 ## Authentication implementation update
 
