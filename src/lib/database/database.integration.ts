@@ -16,6 +16,7 @@ import {
   closeRuntimeDatabase,
   getRuntimeDatabase,
 } from "./client.server";
+import { verifyRuntimeDatabaseRole } from "./readiness.server";
 import {
   applyCustomerOffboarding,
   prepareCustomerOffboarding,
@@ -26,6 +27,17 @@ import {
   prepareProviderRevocationConfirmation,
   prepareRetentionPurge,
 } from "../../../scripts/customer-lifecycle.mjs";
+import {
+  ChangeApprovalRequestForbiddenError,
+  ChangeApprovalRequestTransitionError,
+  cancelChangeApprovalRequest,
+  createLiveChangeApprovalRequest,
+  createSimulatorChangeApprovalRequest,
+  decideChangeApprovalRequest,
+  listChangeApprovalRequestPage,
+  listChangeApprovalRequests,
+  verifyChangeApprovalRequestStore,
+} from "../approvals/change-request-store.server";
 
 import {
   APPROVAL_OPERATION_LEASE_MS,
@@ -61,7 +73,10 @@ import {
   restoreRecommendation,
   verifyRecommendationDecisionStore,
 } from "../audit/recommendation-decision-store.server";
-import { applyRecommendationDismissals } from "../audit/recommendation-decision";
+import {
+  applyRecommendationDismissals,
+  recommendationApprovalFingerprint,
+} from "../audit/recommendation-decision";
 import {
   encryptAdsApiKey,
   encryptConversionsApiCredential,
@@ -82,6 +97,10 @@ import {
   demoCampaigns,
   getDemoRecommendation,
 } from "../openai-ads/demo-data";
+import {
+  agencySimulatorEntryAccountId,
+  resolveSimulatedWorkspace,
+} from "../openai-ads/simulated-workspaces";
 import { MONITORING_ATTRIBUTION_MATURITY_MS } from "../openai-ads/monitoring";
 import {
   claimLiveSyncRefresh,
@@ -91,6 +110,15 @@ import {
   readLiveSyncState,
   verifyLiveSyncStore,
 } from "../openai-ads/live-sync-store.server";
+import {
+  acknowledgeChangeIntegrityEvent,
+  ChangeIntegrityAuthorizationError,
+  ChangeIntegritySnapshotOrderError,
+  ChangeIntegrityTransitionError,
+  verifyChangeIntegrityStore,
+} from "../openai-ads/change-integrity-store.server";
+import { buildChangeIntegritySnapshot } from "../openai-ads/change-integrity";
+import type { LiveWorkbenchData } from "../openai-ads/data.server";
 import { listLivePortfolioAccounts } from "../openai-ads/live-portfolio.server";
 import {
   consumeReadinessAuditQuota,
@@ -113,11 +141,13 @@ import {
   AdvertiserWriteBlockedError,
   attachAdvertiserAccountToAgency,
   bootstrapWorkspace,
+  countEligibleAgencyApprovalReviewers,
   getAccountAccess,
   getAdsApiKeyForAccount,
   getAdsCredentialMaterialForAccount,
   getConversionsApiCredentialForAccount,
   listAccountAccesses,
+  listOrganizationMemberships,
   lockCurrentAccountWriteAccess,
   requireAgencyAccountAttachAuthorization,
   requireAccountAccess,
@@ -147,6 +177,8 @@ const ownerOperatorId = "user_integration_owner";
 const viewerOperatorId = "user_integration_viewer";
 const mixedAccessOperatorId = "user_integration_mixed_access";
 const unknownOperatorId = "user_integration_unknown";
+const approvalAdminOperatorId = "user_integration_approval_admin";
+const approvalAnalystOperatorId = "user_integration_approval_analyst";
 const advertiserAccountId = "adacct_integration_alpha";
 const agencyAccountId = "adacct_integration_beta";
 const initialAdvertiserKey = "ads-integration-alpha-initial";
@@ -154,6 +186,16 @@ const replacementAdvertiserKey = "ads-integration-alpha-replacement";
 const agencyKey = "ads-integration-beta-initial";
 let advertiserAccess: AccountAccess;
 let agencyAccess: AccountAccess;
+
+function integritySnapshotFor(workbench: LiveWorkbenchData) {
+  return buildChangeIntegritySnapshot({
+    account: workbench.account,
+    campaigns: workbench.campaigns,
+    adGroups: [],
+    ads: workbench.ads,
+    observedAt: workbench.syncedAt,
+  });
+}
 
 async function addReviewOnlyAccess(accountId: string) {
   const organizationId = randomUUID();
@@ -227,10 +269,20 @@ async function createMonitoringFairnessFixture(options: {
     accountIds.push(accountId);
     await database`
       insert into maintainflow_advertiser_accounts (
-        id, external_account_id, name, connection_mode, status
+        id, external_account_id, name, owner_organization_id,
+        connection_mode, status
       ) values (
         ${advertiserAccountId}, ${accountId},
-        ${`Fairness fixture ${accountIndex + 1}`}, 'environment', 'active'
+        ${`Fairness fixture ${accountIndex + 1}`},
+        ${advertiserAccess.organizationId}, 'environment', 'active'
+      )
+    `;
+    await database`
+      insert into maintainflow_account_access (
+        organization_id, advertiser_account_id, role, granted_by
+      ) values (
+        ${advertiserAccess.organizationId}, ${advertiserAccountId},
+        'owner', ${ownerOperatorId}
       )
     `;
     for (let rowIndex = 0; rowIndex < dueRows; rowIndex += 1) {
@@ -243,17 +295,21 @@ async function createMonitoringFairnessFixture(options: {
       const startedAt = new Date(endsAt.getTime() - 7 * 24 * 60 * 60 * 1_000);
       await database`
         insert into ads_approval_records (
-          id, account_id, operator_id, recommendation_id,
+          id, account_id, operator_id, acting_organization_id,
+          actor_membership_role, actor_account_role, recommendation_id,
           recommendation_title, entity_id, request_payload,
+          recommendation_approval_fingerprint,
           rollback_payload, evidence_payload, safeguard, status,
           monitoring_plan, monitoring_window_days, monitoring_started_at,
           monitoring_ends_at, applied_at
         ) values (
-          ${randomUUID()}, ${accountId}, 'monitoring_fairness_fixture',
+          ${randomUUID()}, ${accountId}, ${ownerOperatorId},
+          ${advertiserAccess.organizationId}, 'owner', 'owner',
           ${`rec_${options.prefix}_${accountIndex + 1}_${rowIndex + 1}`},
           'Fair monitoring scheduler',
           ${`adgroup_${options.prefix}_${accountIndex + 1}_${rowIndex + 1}`},
           ${database.json({ operation: "update" })},
+          ${"f".repeat(64)},
           ${database.json({ operation: "update" })},
           ${database.json({ source: "integration_fixture" })},
           'Human approval required', 'applied',
@@ -287,6 +343,12 @@ async function removeMonitoringFairnessFixture(accountIds: readonly string[]) {
   await database`
     delete from ads_approval_records
     where account_id = any(${accountIds}::text[])
+  `;
+  await database`
+    delete from maintainflow_account_access account_access
+    using maintainflow_advertiser_accounts account
+    where account_access.advertiser_account_id = account.id
+      and account.external_account_id = any(${accountIds}::text[])
   `;
   await database`
     delete from maintainflow_advertiser_accounts
@@ -328,6 +390,16 @@ describe("PostgreSQL customer and approval boundary", () => {
     });
     await addReviewOnlyAccess(advertiserAccountId);
     await addMixedCapabilityAccess(advertiserAccountId);
+    await database`
+      insert into maintainflow_organization_memberships (
+        organization_id, clerk_user_id, role
+      ) values
+        (${agencyAccess.organizationId}, ${approvalAdminOperatorId}, 'admin'),
+        (${agencyAccess.organizationId}, ${approvalAnalystOperatorId}, 'analyst')
+      on conflict (organization_id, clerk_user_id) do update set
+        role = excluded.role,
+        updated_at = now()
+    `;
   }, 20_000);
 
   afterAll(async () => {
@@ -344,12 +416,18 @@ describe("PostgreSQL customer and approval boundary", () => {
     await expect(verifyRecommendationDecisionStore()).resolves.toBe(true);
     await expect(verifyReadinessHistoryStore()).resolves.toBe(true);
     await expect(verifyLiveSyncStore()).resolves.toBe(true);
+    await expect(verifyChangeIntegrityStore()).resolves.toBe(true);
+    await expect(verifyChangeApprovalRequestStore()).resolves.toBe(true);
 
     const expectedRlsTables = [
       "ads_approval_records",
       "maintainflow_account_access",
+      "maintainflow_ads_config_integrity_events",
+      "maintainflow_ads_config_integrity_state",
       "maintainflow_advertiser_accounts",
       "maintainflow_advertiser_credentials",
+      "maintainflow_approval_notification_deliveries",
+      "maintainflow_change_approval_requests",
       "maintainflow_conversion_credentials",
       "maintainflow_creative_review_events",
       "maintainflow_creative_review_state",
@@ -445,6 +523,47 @@ describe("PostgreSQL customer and approval boundary", () => {
         is_unique: false,
       },
     ]);
+
+    const [integrityGuard] = await database<
+      {
+        trigger_name: string;
+        enabled_state: string;
+        function_name: string;
+        is_row_trigger: boolean;
+        is_before_trigger: boolean;
+        handles_insert: boolean;
+        handles_update: boolean;
+      }[]
+    >`
+      select trigger.tgname as trigger_name,
+        trigger.tgenabled as enabled_state,
+        procedure.proname as function_name,
+        (trigger.tgtype::integer & 1) = 1 as is_row_trigger,
+        (trigger.tgtype::integer & 2) = 2 as is_before_trigger,
+        (trigger.tgtype::integer & 4) = 4 as handles_insert,
+        (trigger.tgtype::integer & 16) = 16 as handles_update
+      from pg_catalog.pg_trigger trigger
+      join pg_catalog.pg_class relation on relation.oid = trigger.tgrelid
+      join pg_catalog.pg_namespace relation_namespace
+        on relation_namespace.oid = relation.relnamespace
+      join pg_catalog.pg_proc procedure on procedure.oid = trigger.tgfoid
+      join pg_catalog.pg_namespace procedure_namespace
+        on procedure_namespace.oid = procedure.pronamespace
+      where relation_namespace.nspname = 'public'
+        and relation.relname = 'maintainflow_ads_config_integrity_events'
+        and trigger.tgname = 'maintainflow_ads_config_integrity_event_guard'
+        and procedure_namespace.nspname = 'public'
+        and not trigger.tgisinternal
+    `;
+    expect(integrityGuard).toEqual({
+      trigger_name: "maintainflow_ads_config_integrity_event_guard",
+      enabled_state: "O",
+      function_name: "maintainflow_enforce_ads_config_integrity_event",
+      is_row_trigger: true,
+      is_before_trigger: true,
+      handles_insert: true,
+      handles_update: true,
+    });
 
     const publicTablePrivileges = await database<
       { table_name: string; privilege_type: string }[]
@@ -679,6 +798,978 @@ describe("PostgreSQL customer and approval boundary", () => {
         connection: { mode: "environment" },
       }),
     ).rejects.toThrow("already claimed");
+  });
+
+  it("keeps approval packets immutable to the dedicated runtime role", async () => {
+    const runtimeUrl = process.env.MAINTAINFLOW_TEST_RUNTIME_DATABASE_URL;
+    if (!runtimeUrl) return;
+
+    const runtimeDatabase = postgres(runtimeUrl, {
+      connect_timeout: 5,
+      idle_timeout: 5,
+      max: 1,
+      prepare: false,
+    });
+    try {
+      await expect(
+        verifyRuntimeDatabaseRole(runtimeDatabase),
+      ).resolves.toBe(true);
+
+      let immutableUpdateCode: unknown;
+      try {
+        await runtimeDatabase`
+          update maintainflow_change_approval_requests
+          set recommendation_title = recommendation_title
+          where false
+        `;
+      } catch (error) {
+        immutableUpdateCode = (error as { code?: unknown }).code;
+      }
+      expect(immutableUpdateCode).toBe("42501");
+      await expect(
+        runtimeDatabase`
+          update maintainflow_change_approval_requests
+          set updated_at = updated_at
+          where false
+        `,
+      ).resolves.toEqual([]);
+
+      let integrityStateIdentityUpdateCode: unknown;
+      try {
+        await runtimeDatabase`
+          update maintainflow_ads_config_integrity_state
+          set advertiser_account_id = advertiser_account_id
+          where false
+        `;
+      } catch (error) {
+        integrityStateIdentityUpdateCode = (error as { code?: unknown }).code;
+      }
+      expect(integrityStateIdentityUpdateCode).toBe("42501");
+      await expect(
+        runtimeDatabase`
+          update maintainflow_ads_config_integrity_state
+          set snapshot_payload = snapshot_payload,
+            observed_at = observed_at,
+            updated_at = updated_at
+          where false
+        `,
+      ).resolves.toEqual([]);
+    } finally {
+      await runtimeDatabase.end({ timeout: 5 });
+    }
+  });
+
+  it("rejects malformed change-integrity path partitions at insert time", async () => {
+    const malformedEvents = [
+      {
+        label: "categorized path outside the changed set",
+        classification: "unexplained",
+        changed: ["status"],
+        explained: [],
+        indeterminate: [],
+        unexplained: ["daily_budget"],
+      },
+      {
+        label: "path assigned to two classifications",
+        classification: "unexplained",
+        changed: ["status", "daily_budget"],
+        explained: ["status"],
+        indeterminate: [],
+        unexplained: ["status"],
+      },
+      {
+        label: "duplicate path inside one list",
+        classification: "unexplained",
+        changed: ["status", "status"],
+        explained: [],
+        indeterminate: [],
+        unexplained: ["status", "status"],
+      },
+      {
+        label: "classification inconsistent with its partition",
+        classification: "maintainflow_consistent",
+        changed: ["status"],
+        explained: [],
+        indeterminate: [],
+        unexplained: ["status"],
+      },
+      {
+        label: "field path exceeds the storage boundary",
+        classification: "unexplained",
+        changed: ["x".repeat(513)],
+        explained: [],
+        indeterminate: [],
+        unexplained: ["x".repeat(513)],
+      },
+    ];
+
+    for (const malformed of malformedEvents) {
+      const eventFingerprint = randomUUID().replaceAll("-", "").repeat(2);
+      await expect(
+        database`
+          insert into maintainflow_ads_config_integrity_events (
+            id,
+            advertiser_account_id,
+            event_fingerprint,
+            projection_version,
+            resource_type,
+            resource_id,
+            resource_label,
+            change_type,
+            classification,
+            current_fingerprint,
+            current_configuration,
+            changed_field_paths,
+            explained_field_paths,
+            indeterminate_field_paths,
+            unexplained_field_paths,
+            baseline_observation_started_at,
+            baseline_observed_at,
+            detection_started_at,
+            detected_at
+          )
+          select
+            ${randomUUID()},
+            account.id,
+            ${eventFingerprint},
+            1,
+            'campaign',
+            ${`campaign_${randomUUID()}`},
+            ${malformed.label},
+            'created',
+            ${malformed.classification},
+            ${"b".repeat(64)},
+            ${database.json({ status: "paused" })},
+            ${malformed.changed}::text[],
+            ${malformed.explained}::text[],
+            ${malformed.indeterminate}::text[],
+            ${malformed.unexplained}::text[],
+            ${new Date("2026-09-04T07:55:00.000Z")},
+            ${new Date("2026-09-04T08:00:00.000Z")},
+            ${new Date("2026-09-04T08:55:00.000Z")},
+            ${new Date("2026-09-04T09:00:00.000Z")}
+          from maintainflow_advertiser_accounts account
+          where account.external_account_id = ${advertiserAccountId}
+        `,
+        malformed.label,
+      ).rejects.toMatchObject({ code: "23514" });
+    }
+  });
+
+  it("enforces the complete change-integrity event review lifecycle", async () => {
+    const eventIds = [randomUUID(), randomUUID()];
+    const resourceId = `campaign_integrity_review_${randomUUID()}`;
+    const path = "budget.daily_spend_limit_micros";
+    const firstFingerprint = randomUUID().replaceAll("-", "").repeat(2);
+    const secondFingerprint = randomUUID().replaceAll("-", "").repeat(2);
+    const firstDetectedAt = new Date("2026-09-04T10:05:00.000Z");
+    const secondDetectedAt = new Date("2026-09-04T10:10:00.000Z");
+
+    try {
+      const inserted = await database<
+        {
+          id: string;
+          classification: string;
+          review_status: string;
+          changed_field_paths: string[];
+          unexplained_field_paths: string[];
+        }[]
+      >`
+        insert into maintainflow_ads_config_integrity_events (
+          id,
+          advertiser_account_id,
+          event_fingerprint,
+          projection_version,
+          resource_type,
+          resource_id,
+          resource_label,
+          change_type,
+          classification,
+          previous_fingerprint,
+          current_fingerprint,
+          previous_configuration,
+          current_configuration,
+          changed_field_paths,
+          explained_field_paths,
+          indeterminate_field_paths,
+          unexplained_field_paths,
+          baseline_observation_started_at,
+          baseline_observed_at,
+          detection_started_at,
+          detected_at
+        )
+        select event.id,
+          account.id,
+          event.event_fingerprint,
+          1,
+          'campaign',
+          ${resourceId},
+          'Integrity review fixture',
+          'updated',
+          'unexplained',
+          event.previous_fingerprint,
+          event.current_fingerprint,
+          event.previous_configuration,
+          event.current_configuration,
+          array[${path}]::text[],
+          '{}'::text[],
+          '{}'::text[],
+          array[${path}]::text[],
+          event.baseline_observation_started_at,
+          event.baseline_observed_at,
+          event.detection_started_at,
+          event.detected_at
+        from maintainflow_advertiser_accounts account
+        cross join (
+          values
+            (
+              ${eventIds[0]}::uuid,
+              ${firstFingerprint}::char(64),
+              ${"a".repeat(64)}::char(64),
+              ${"b".repeat(64)}::char(64),
+              ${database.json({
+                budget: { daily_spend_limit_micros: 100_000_000 },
+              })}::jsonb,
+              ${database.json({
+                budget: { daily_spend_limit_micros: 120_000_000 },
+              })}::jsonb,
+              ${new Date("2026-09-04T09:59:00.000Z")}::timestamptz,
+              ${new Date("2026-09-04T10:00:00.000Z")}::timestamptz,
+              ${new Date("2026-09-04T10:04:00.000Z")}::timestamptz,
+              ${firstDetectedAt}::timestamptz
+            ),
+            (
+              ${eventIds[1]}::uuid,
+              ${secondFingerprint}::char(64),
+              ${"b".repeat(64)}::char(64),
+              ${"a".repeat(64)}::char(64),
+              ${database.json({
+                budget: { daily_spend_limit_micros: 120_000_000 },
+              })}::jsonb,
+              ${database.json({
+                budget: { daily_spend_limit_micros: 100_000_000 },
+              })}::jsonb,
+              ${new Date("2026-09-04T10:04:00.000Z")}::timestamptz,
+              ${firstDetectedAt}::timestamptz,
+              ${new Date("2026-09-04T10:09:00.000Z")}::timestamptz,
+              ${secondDetectedAt}::timestamptz
+            )
+        ) as event(
+          id,
+          event_fingerprint,
+          previous_fingerprint,
+          current_fingerprint,
+          previous_configuration,
+          current_configuration,
+          baseline_observation_started_at,
+          baseline_observed_at,
+          detection_started_at,
+          detected_at
+        )
+        where account.external_account_id = ${advertiserAccountId}
+        returning id, classification, review_status,
+          changed_field_paths, unexplained_field_paths
+      `;
+      expect(inserted).toHaveLength(2);
+      expect(inserted).toEqual(
+        expect.arrayContaining(
+          eventIds.map((id) => ({
+            id,
+            classification: "unexplained",
+            review_status: "open",
+            changed_field_paths: [path],
+            unexplained_field_paths: [path],
+          })),
+        ),
+      );
+
+      const [recurrence] = await database<
+        {
+          event_count: number;
+          fingerprint_count: number;
+          observation_count: number;
+        }[]
+      >`
+        select count(*)::int as event_count,
+          count(distinct event_fingerprint)::int as fingerprint_count,
+          count(distinct detected_at)::int as observation_count
+        from maintainflow_ads_config_integrity_events
+        where id = any(${eventIds}::uuid[])
+          and resource_id = ${resourceId}
+      `;
+      expect(recurrence).toEqual({
+        event_count: 2,
+        fingerprint_count: 2,
+        observation_count: 2,
+      });
+
+      const viewerAccess = await requireAccountAccess(
+        viewerOperatorId,
+        advertiserAccountId,
+        "read",
+      );
+      expect(viewerAccess).toMatchObject({
+        membershipRole: "analyst",
+        accountRole: "viewer",
+      });
+      await expect(
+        acknowledgeChangeIntegrityEvent(
+          {
+            accountId: advertiserAccountId,
+            eventId: eventIds[0],
+            operatorId: viewerOperatorId,
+            reviewerName: "Read only reviewer",
+            access: viewerAccess,
+            note: "This read-only operator must not record a review.",
+          },
+          database,
+        ),
+      ).rejects.toBeInstanceOf(ChangeIntegrityTransitionError);
+
+      await expect(
+        acknowledgeChangeIntegrityEvent(
+          {
+            accountId: advertiserAccountId,
+            eventId: eventIds[0],
+            operatorId: viewerOperatorId,
+            reviewerName: "Forged reviewer",
+            access: {
+              ...viewerAccess,
+              membershipRole: "admin",
+              accountRole: "manager",
+            },
+            note: "The database must reject forged write-role snapshots.",
+          },
+          database,
+        ),
+      ).rejects.toBeInstanceOf(ChangeIntegrityAuthorizationError);
+
+      const [ownerClockBefore] = await database<{ database_now: Date }[]>`
+        select pg_catalog.statement_timestamp() as database_now
+      `;
+      const ownerReviewed = await acknowledgeChangeIntegrityEvent(
+        {
+          accountId: advertiserAccountId,
+          eventId: eventIds[0],
+          operatorId: ownerOperatorId,
+          reviewerName: "Integration Owner",
+          access: advertiserAccess,
+          note: "Confirmed the first recurring change against source evidence.",
+        },
+        database,
+      );
+      const [ownerClockAfter] = await database<{ database_now: Date }[]>`
+        select pg_catalog.statement_timestamp() as database_now
+      `;
+      expect(ownerReviewed).toMatchObject({
+        reviewStatus: "reviewed",
+        reviewedByName: "Integration Owner",
+      });
+      expect(ownerReviewed.reviewedAt).not.toBeNull();
+      expect(new Date(ownerReviewed.reviewedAt!).getTime()).toBeGreaterThanOrEqual(
+        ownerClockBefore!.database_now.getTime(),
+      );
+      expect(new Date(ownerReviewed.reviewedAt!).getTime()).toBeLessThanOrEqual(
+        ownerClockAfter!.database_now.getTime(),
+      );
+
+      const [ownerReviewEvidence] = await database<
+        {
+          reviewed_by_operator_id: string;
+          reviewer_membership_role: string;
+          reviewer_account_role: string;
+          reviewed_at: Date;
+        }[]
+      >`
+        select reviewed_by_operator_id, reviewer_membership_role,
+          reviewer_account_role, reviewed_at
+        from maintainflow_ads_config_integrity_events
+        where id = ${eventIds[0]}
+      `;
+      expect(ownerReviewEvidence).toMatchObject({
+        reviewed_by_operator_id: ownerOperatorId,
+        reviewer_membership_role: "owner",
+        reviewer_account_role: "owner",
+        reviewed_at: expect.any(Date),
+      });
+
+      await expect(
+        database`
+          update maintainflow_ads_config_integrity_events
+          set resource_label = 'Rewritten integrity evidence'
+          where id = ${eventIds[0]}
+        `,
+      ).rejects.toThrow(/event evidence is immutable/i);
+
+      const managerAccess = await requireAccountAccess(
+        mixedAccessOperatorId,
+        advertiserAccountId,
+        "write",
+      );
+      expect(managerAccess).toMatchObject({
+        membershipRole: "admin",
+        accountRole: "manager",
+      });
+      await expect(
+        acknowledgeChangeIntegrityEvent(
+          {
+            accountId: advertiserAccountId,
+            eventId: eventIds[0],
+            operatorId: mixedAccessOperatorId,
+            reviewerName: "Integration Manager",
+            access: managerAccess,
+            note: "A completed event cannot receive a second review.",
+          },
+          database,
+        ),
+      ).rejects.toBeInstanceOf(ChangeIntegrityTransitionError);
+      await expect(
+        database`
+          update maintainflow_ads_config_integrity_events set
+            review_status = 'reviewed',
+            reviewed_by_operator_id = ${mixedAccessOperatorId},
+            reviewed_by_name = 'Integration Manager',
+            reviewed_by_organization_id = ${managerAccess.organizationId},
+            review_note = 'The database must reject a second review directly.'
+          where id = ${eventIds[0]}
+        `,
+      ).rejects.toThrow(/only one open-to-reviewed integrity transition/i);
+
+      const managerReviewed = await acknowledgeChangeIntegrityEvent(
+        {
+          accountId: advertiserAccountId,
+          eventId: eventIds[1],
+          operatorId: mixedAccessOperatorId,
+          reviewerName: "Integration Manager",
+          access: managerAccess,
+          note: "Confirmed the second recurring change against source evidence.",
+        },
+        database,
+      );
+      expect(managerReviewed).toMatchObject({
+        reviewStatus: "reviewed",
+        reviewedByName: "Integration Manager",
+      });
+      expect(managerReviewed.reviewedAt).not.toBeNull();
+      const [managerReviewEvidence] = await database<
+        {
+          reviewed_by_operator_id: string;
+          reviewer_membership_role: string;
+          reviewer_account_role: string;
+          reviewed_at: Date;
+        }[]
+      >`
+        select reviewed_by_operator_id, reviewer_membership_role,
+          reviewer_account_role, reviewed_at
+        from maintainflow_ads_config_integrity_events
+        where id = ${eventIds[1]}
+      `;
+      expect(managerReviewEvidence).toMatchObject({
+        reviewed_by_operator_id: mixedAccessOperatorId,
+        reviewer_membership_role: "admin",
+        reviewer_account_role: "manager",
+        reviewed_at: expect.any(Date),
+      });
+    } finally {
+      await database`
+        delete from maintainflow_ads_config_integrity_events
+        where id = any(${eventIds}::uuid[])
+      `;
+    }
+  });
+
+  it("enforces a durable two-person simulator approval decision", async () => {
+    const workspace = resolveSimulatedWorkspace(agencySimulatorEntryAccountId);
+    const recommendation = workspace.recommendations[0];
+    if (!recommendation) throw new Error("Simulator recommendation missing.");
+    const fingerprint = recommendationApprovalFingerprint(recommendation);
+
+    const created = await createSimulatorChangeApprovalRequest({
+      organizationId: agencyAccess.organizationId,
+      operator: {
+        id: approvalAnalystOperatorId,
+        name: "Alex Analyst",
+        initials: "AA",
+      },
+      account: workspace.account,
+      recommendation,
+      displayedFingerprint: fingerprint,
+      note: "Please check the client safeguard before approval.",
+      now: new Date("2099-09-03T09:00:00.000Z"),
+    });
+    expect(created.created).toBe(true);
+    expect(created.eligibleReviewerCount).toBeGreaterThan(0);
+
+    await expect(
+      createSimulatorChangeApprovalRequest({
+        organizationId: agencyAccess.organizationId,
+        operator: {
+          id: approvalAnalystOperatorId,
+          name: "Alex Analyst",
+          initials: "AA",
+        },
+        account: workspace.account,
+        recommendation,
+        displayedFingerprint: fingerprint,
+        note: "A duplicate browser submission must not create another row.",
+        now: new Date("2099-09-03T09:01:00.000Z"),
+      }),
+    ).resolves.toMatchObject({
+      id: created.id,
+      created: false,
+      eligibleReviewerCount: expect.any(Number),
+    });
+
+    const analystRequests = await listChangeApprovalRequests({
+      operatorId: approvalAnalystOperatorId,
+      organizationId: agencyAccess.organizationId,
+    });
+    const request = analystRequests.find((item) => item.id === created.id);
+    expect(request).toMatchObject({
+      source: "simulator",
+      status: "awaiting_approval",
+      requesterOperatorId: approvalAnalystOperatorId,
+      requesterMembershipRole: "analyst",
+      advertiserAccountId: null,
+      adsApprovalRecordId: null,
+    });
+
+    await expect(
+      decideChangeApprovalRequest({
+        requestId: created.id,
+        operator: {
+          id: approvalAnalystOperatorId,
+          name: "Alex Analyst",
+          initials: "AA",
+        },
+        action: "approve",
+        expectedVersion: request?.version ?? 1,
+      }),
+    ).rejects.toBeInstanceOf(ChangeApprovalRequestForbiddenError);
+
+    await expect(
+      decideChangeApprovalRequest({
+        requestId: created.id,
+        operator: {
+          id: unknownOperatorId,
+          name: "Unknown Operator",
+          initials: "UO",
+        },
+        action: "approve",
+        expectedVersion: request?.version ?? 1,
+      }),
+    ).rejects.toBeInstanceOf(ChangeApprovalRequestForbiddenError);
+
+    await expect(
+      decideChangeApprovalRequest({
+        requestId: created.id,
+        operator: {
+          id: approvalAdminOperatorId,
+          name: "Rory Reviewer",
+          initials: "RR",
+        },
+        action: "approve",
+        note: "Safe to retain for later execution.",
+        expectedVersion: request?.version ?? 1,
+        now: new Date("2099-09-03T10:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ status: "approved", version: 2 });
+
+    const [approved] = (
+      await listChangeApprovalRequests({
+        operatorId: approvalAdminOperatorId,
+        organizationId: agencyAccess.organizationId,
+      })
+    ).filter((item) => item.id === created.id);
+    expect(approved).toMatchObject({
+      status: "approved",
+      decisionOperatorId: approvalAdminOperatorId,
+      decisionName: "Rory Reviewer",
+      decisionMembershipRole: "admin",
+      adsApprovalRecordId: null,
+    });
+    expect(approved?.mutation).toEqual(recommendation.mutation);
+    expect(approved?.rollback).toEqual(recommendation.rollback);
+    expect(approved?.evidence).toEqual(recommendation.evidence);
+    expect(approved?.decisionContext).toMatchObject({
+      schemaVersion: 2,
+      priority: recommendation.priority,
+      summary: recommendation.summary,
+      rationale: recommendation.rationale,
+      entityLabel: recommendation.entityLabel,
+      currentValue: recommendation.currentValue,
+      proposedValue: recommendation.proposedValue,
+      estimatedImpact: recommendation.estimatedImpact,
+      confidence: recommendation.confidence,
+      nextStep: recommendation.nextStep,
+      monitoringPlan: recommendation.monitoringPlan ?? null,
+    });
+
+    let terminalRewriteCode: unknown;
+    try {
+      await database`
+        update maintainflow_change_approval_requests set
+          status = 'awaiting_approval',
+          decision_operator_id = null,
+          decision_name_snapshot = null,
+          decision_membership_role = null,
+          decision_note = null,
+          decided_at = null,
+          version = version + 1,
+          updated_at = now()
+        where id = ${created.id}
+      `;
+    } catch (error) {
+      terminalRewriteCode = (error as { code?: unknown }).code;
+    }
+    expect(terminalRewriteCode).toBe("P0001");
+
+    let evidenceRewriteCode: unknown;
+    try {
+      await database`
+        update maintainflow_change_approval_requests set
+          recommendation_title = 'Rewritten after approval',
+          version = version + 1,
+          updated_at = now()
+        where id = ${created.id}
+      `;
+    } catch (error) {
+      evidenceRewriteCode = (error as { code?: unknown }).code;
+    }
+    expect(evidenceRewriteCode).toBe("P0001");
+  });
+
+  it("fences concurrent approval decisions and lets a requester cancel", async () => {
+    const workspace = resolveSimulatedWorkspace(agencySimulatorEntryAccountId);
+    const [first, second] = workspace.recommendations.slice(1, 3);
+    if (!first || !second) throw new Error("Simulator recommendations missing.");
+
+    const pending = await createSimulatorChangeApprovalRequest({
+      organizationId: agencyAccess.organizationId,
+      operator: {
+        id: ownerOperatorId,
+        name: "Owner Requester",
+        initials: "OR",
+      },
+      account: workspace.account,
+      recommendation: first,
+      displayedFingerprint: recommendationApprovalFingerprint(first),
+      now: new Date("2099-09-03T11:00:00.000Z"),
+    });
+    const outcomes = await Promise.allSettled([
+      decideChangeApprovalRequest({
+        requestId: pending.id,
+        operator: {
+          id: approvalAdminOperatorId,
+          name: "Rory Reviewer",
+          initials: "RR",
+        },
+        action: "approve",
+        expectedVersion: 1,
+        now: new Date("2099-09-03T11:01:00.000Z"),
+      }),
+      decideChangeApprovalRequest({
+        requestId: pending.id,
+        operator: {
+          id: approvalAdminOperatorId,
+          name: "Rory Reviewer",
+          initials: "RR",
+        },
+        action: "request_changes",
+        note: "Retain more evidence before approving this packet.",
+        expectedVersion: 1,
+        now: new Date("2099-09-03T11:01:00.000Z"),
+      }),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    const rejection = outcomes.find((outcome) => outcome.status === "rejected");
+    expect(rejection).toMatchObject({
+      status: "rejected",
+      reason: expect.any(ChangeApprovalRequestTransitionError),
+    });
+
+    const cancellable = await createSimulatorChangeApprovalRequest({
+      organizationId: agencyAccess.organizationId,
+      operator: {
+        id: approvalAnalystOperatorId,
+        name: "Alex Analyst",
+        initials: "AA",
+      },
+      account: workspace.account,
+      recommendation: second,
+      displayedFingerprint: recommendationApprovalFingerprint(second),
+      now: new Date("2099-09-03T12:00:00.000Z"),
+    });
+    await expect(
+      cancelChangeApprovalRequest({
+        requestId: cancellable.id,
+        operator: {
+          id: approvalAnalystOperatorId,
+          name: "Alex Analyst",
+          initials: "AA",
+        },
+        expectedVersion: 1,
+        now: new Date("2099-09-03T12:01:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ status: "cancelled", version: 2 });
+
+    const memberships = await listOrganizationMemberships(
+      approvalAnalystOperatorId,
+    );
+    expect(memberships).toContainEqual(
+      expect.objectContaining({
+        organizationId: agencyAccess.organizationId,
+        membershipRole: "analyst",
+      }),
+    );
+    await expect(
+      countEligibleAgencyApprovalReviewers({
+        organizationId: agencyAccess.organizationId,
+        operatorId: approvalAnalystOperatorId,
+      }),
+    ).resolves.toBe(2);
+  });
+
+  it("expires stale approval packets before decisions and duplicate creation", async () => {
+    const workspace = resolveSimulatedWorkspace(agencySimulatorEntryAccountId);
+    const [decisionRecommendation, duplicateRecommendation] =
+      workspace.recommendations;
+    if (!decisionRecommendation || !duplicateRecommendation) {
+      throw new Error("Simulator recommendations missing.");
+    }
+    const requester = {
+      id: approvalAnalystOperatorId,
+      name: "Alex Analyst",
+      initials: "AA",
+    };
+
+    const expiredBeforeDecision = await createSimulatorChangeApprovalRequest({
+      organizationId: agencyAccess.organizationId,
+      operator: requester,
+      account: workspace.account,
+      recommendation: decisionRecommendation,
+      displayedFingerprint: recommendationApprovalFingerprint(
+        decisionRecommendation,
+      ),
+      now: new Date("2099-08-20T09:00:00.000Z"),
+    });
+    await expect(
+      decideChangeApprovalRequest({
+        requestId: expiredBeforeDecision.id,
+        operator: {
+          id: approvalAdminOperatorId,
+          name: "Rory Reviewer",
+          initials: "RR",
+        },
+        action: "approve",
+        expectedVersion: 1,
+        now: new Date("2099-09-03T09:00:00.000Z"),
+      }),
+    ).rejects.toThrow("expired");
+
+    const staleDuplicate = await createSimulatorChangeApprovalRequest({
+      organizationId: agencyAccess.organizationId,
+      operator: requester,
+      account: workspace.account,
+      recommendation: duplicateRecommendation,
+      displayedFingerprint: recommendationApprovalFingerprint(
+        duplicateRecommendation,
+      ),
+      now: new Date("2099-08-20T10:00:00.000Z"),
+    });
+    const freshDuplicate = await createSimulatorChangeApprovalRequest({
+      organizationId: agencyAccess.organizationId,
+      operator: requester,
+      account: workspace.account,
+      recommendation: duplicateRecommendation,
+      displayedFingerprint: recommendationApprovalFingerprint(
+        duplicateRecommendation,
+      ),
+      now: new Date("2099-09-03T10:00:00.000Z"),
+    });
+    expect(freshDuplicate).toMatchObject({ created: true });
+    expect(freshDuplicate.id).not.toBe(staleDuplicate.id);
+
+    const requests = await listChangeApprovalRequests({
+      operatorId: approvalAnalystOperatorId,
+      organizationId: agencyAccess.organizationId,
+    });
+    expect(
+      requests.find((request) => request.id === expiredBeforeDecision.id),
+    ).toMatchObject({ status: "expired", version: 2 });
+    expect(
+      requests.find((request) => request.id === staleDuplicate.id),
+    ).toMatchObject({ status: "expired", version: 2 });
+    expect(
+      requests.find((request) => request.id === freshDuplicate.id),
+    ).toMatchObject({ status: "awaiting_approval", version: 1 });
+
+    await expect(
+      cancelChangeApprovalRequest({
+        requestId: freshDuplicate.id,
+        operator: requester,
+        expectedVersion: 1,
+        now: new Date("2099-09-20T10:00:00.000Z"),
+      }),
+    ).rejects.toThrow("expired");
+    const afterExpiredCancellation = await listChangeApprovalRequests({
+      operatorId: approvalAnalystOperatorId,
+      organizationId: agencyAccess.organizationId,
+    });
+    expect(
+      afterExpiredCancellation.find(
+        (request) => request.id === freshDuplicate.id,
+      ),
+    ).toMatchObject({ status: "expired", version: 2 });
+  });
+
+  it("counts only admitted agency owners and admins as private-beta reviewers", async () => {
+    const originalMode = process.env.MAINTAINFLOW_ADMISSION_MODE;
+    const originalPrivateBetaIds =
+      process.env.MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS;
+    const originalBootstrapIds = process.env.MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS;
+    try {
+      process.env.MAINTAINFLOW_ADMISSION_MODE = "private_beta";
+      process.env.MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS = "";
+      process.env.MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS = ownerOperatorId;
+      await expect(
+        countEligibleAgencyApprovalReviewers({
+          organizationId: agencyAccess.organizationId,
+          operatorId: approvalAnalystOperatorId,
+        }),
+      ).resolves.toBe(0);
+
+      process.env.MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS = [
+        approvalAnalystOperatorId,
+        ownerOperatorId,
+      ].join(",");
+
+      await expect(
+        countEligibleAgencyApprovalReviewers({
+          organizationId: agencyAccess.organizationId,
+          operatorId: approvalAnalystOperatorId,
+        }),
+      ).resolves.toBe(1);
+
+      process.env.MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS = [
+        approvalAnalystOperatorId,
+        ownerOperatorId,
+        approvalAdminOperatorId,
+      ].join(",");
+      await expect(
+        countEligibleAgencyApprovalReviewers({
+          organizationId: agencyAccess.organizationId,
+          operatorId: approvalAnalystOperatorId,
+        }),
+      ).resolves.toBe(2);
+    } finally {
+      if (originalMode === undefined) {
+        delete process.env.MAINTAINFLOW_ADMISSION_MODE;
+      } else {
+        process.env.MAINTAINFLOW_ADMISSION_MODE = originalMode;
+      }
+      if (originalPrivateBetaIds === undefined) {
+        delete process.env.MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS;
+      } else {
+        process.env.MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS =
+          originalPrivateBetaIds;
+      }
+      if (originalBootstrapIds === undefined) {
+        delete process.env.MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS;
+      } else {
+        process.env.MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS = originalBootstrapIds;
+      }
+    }
+  });
+
+  it("paginates more than one hundred approval packets without omission or duplication", async () => {
+    const requestedAt = new Date("2099-09-04T09:00:00.000Z");
+    const expiresAt = new Date("2099-09-11T09:00:00.000Z");
+    const fixtureRows = Array.from({ length: 101 }, (_, index) => ({
+      id: randomUUID(),
+      organization_id: agencyAccess.organizationId,
+      account_id_snapshot: agencySimulatorEntryAccountId,
+      account_name_snapshot: "Pagination Simulator",
+      source: "simulator",
+      recommendation_id: `rec_pagination_${String(index).padStart(3, "0")}`,
+      recommendation_title: `Pagination recommendation ${index}`,
+      entity_id: `entity_pagination_${String(index).padStart(3, "0")}`,
+      recommendation_fingerprint: index.toString(16).padStart(64, "0"),
+      decision_context: database.json({
+        schemaVersion: 1,
+        priority: "medium",
+        summary: "Pagination fixture",
+        entityLabel: `Pagination entity ${index}`,
+        currentValue: "Before",
+        proposedValue: "After",
+        estimatedImpact: "Fixture only",
+        confidence: 80,
+        nextStep: "Review",
+        monitoringPlan: null,
+      }),
+      request_payload: database.json({
+        method: "POST",
+        path: `/pagination/${index}`,
+        body: { value: "after" },
+      }),
+      rollback_payload: database.json({
+        method: "POST",
+        path: `/pagination/${index}`,
+        body: { value: "before" },
+      }),
+      evidence_payload: database.json([]),
+      safeguard: "Pagination fixture only.",
+      requester_operator_id: approvalAnalystOperatorId,
+      requester_name_snapshot: "Alex Analyst",
+      requester_membership_role: "analyst",
+      requested_at: requestedAt,
+      expires_at: expiresAt,
+    }));
+    await database`
+      insert into maintainflow_change_approval_requests ${database(
+        fixtureRows,
+        "id",
+        "organization_id",
+        "account_id_snapshot",
+        "account_name_snapshot",
+        "source",
+        "recommendation_id",
+        "recommendation_title",
+        "entity_id",
+        "recommendation_fingerprint",
+        "decision_context",
+        "request_payload",
+        "rollback_payload",
+        "evidence_payload",
+        "safeguard",
+        "requester_operator_id",
+        "requester_name_snapshot",
+        "requester_membership_role",
+        "requested_at",
+        "expires_at",
+      )}
+    `;
+
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (let pageNumber = 0; pageNumber < 10; pageNumber += 1) {
+      const page = await listChangeApprovalRequestPage({
+        operatorId: approvalAdminOperatorId,
+        organizationId: agencyAccess.organizationId,
+        pageSize: 40,
+        cursor,
+      });
+      for (const request of page.requests) {
+        expect(seen.has(request.id)).toBe(false);
+        seen.add(request.id);
+      }
+      cursor = page.nextCursor ?? undefined;
+      if (!cursor) break;
+    }
+
+    expect(fixtureRows.every((row) => seen.has(row.id))).toBe(true);
+    expect(seen.size).toBeGreaterThanOrEqual(101);
+    expect(cursor).toBeUndefined();
   });
 
   it("serializes Supavisor-safe queries and preserves transaction isolation", async () => {
@@ -1945,6 +3036,7 @@ describe("PostgreSQL customer and approval boundary", () => {
         credentialGeneration: credential.credentialGeneration,
         claimId: winningClaims[0].claimId,
         snapshot,
+        integritySnapshot: integritySnapshotFor(snapshot),
         now,
         freshForMs: 120_000,
         staleForMs: 900_000,
@@ -1962,6 +3054,57 @@ describe("PostgreSQL customer and approval boundary", () => {
         credentialGeneration: "vault:unreachable-after-rotation:3",
       }),
     ).resolves.toBeNull();
+
+    // If the integrity baseline refuses an older provider snapshot, the
+    // workbench payload must remain on the last confirmed snapshot and the
+    // refresh claim must remain available for the coordinator to fail safely.
+    const rejectedRefreshAt = new Date(now.getTime() + 60_000);
+    const rejectedClaim = await claimLiveSyncRefresh({
+      accountId: advertiserAccountId,
+      credentialGeneration: credential.credentialGeneration,
+      now: rejectedRefreshAt,
+      leaseMs: 90_000,
+    });
+    expect(rejectedClaim).not.toBeNull();
+    const olderSnapshot = {
+      ...snapshot,
+      conversionMeasurement: {
+        ...snapshot.conversionMeasurement,
+        checkedAt: new Date(now.getTime() - 60_000).toISOString(),
+      },
+      syncedAt: new Date(now.getTime() - 60_000).toISOString(),
+    };
+    await expect(
+      completeLiveSyncRefresh({
+        accountId: advertiserAccountId,
+        credentialGeneration: credential.credentialGeneration,
+        claimId: rejectedClaim!.claimId,
+        snapshot: olderSnapshot,
+        integritySnapshot: integritySnapshotFor(olderSnapshot),
+        now: rejectedRefreshAt,
+        freshForMs: 120_000,
+        staleForMs: 900_000,
+      }),
+    ).rejects.toBeInstanceOf(ChangeIntegritySnapshotOrderError);
+    await expect(
+      readLiveSyncState({
+        accountId: advertiserAccountId,
+        credentialGeneration: credential.credentialGeneration,
+      }),
+    ).resolves.toMatchObject({
+      snapshot,
+      claim: { claimId: rejectedClaim!.claimId },
+    });
+    await expect(
+      failLiveSyncRefresh({
+        accountId: advertiserAccountId,
+        credentialGeneration: credential.credentialGeneration,
+        claimId: rejectedClaim!.claimId,
+        failureCode: "integrity_snapshot_rejected",
+        now: rejectedRefreshAt,
+        retryAfter: new Date(rejectedRefreshAt.getTime() + 1_000),
+      }),
+    ).resolves.toBe(true);
 
     // A failed refresh may update retry metadata, but must not extend the
     // retention lifetime of the older customer payload.
@@ -2007,32 +3150,34 @@ describe("PostgreSQL customer and approval boundary", () => {
       leaseMs: 90_000,
     });
     expect(agencyClaim).not.toBeNull();
+    const agencySnapshot: LiveWorkbenchData = {
+      account: { ...demoAccount, id: agencyAccountId, name: "Beacon Client" },
+      campaigns: demoCampaigns,
+      ads: demoAds,
+      performance: demoCampaignPerformance,
+      recommendations: [
+        { ...sourceRecommendation, source: "live" as const },
+      ],
+      budgetGuardEvidence: [],
+      conversionMeasurement: {
+        source: "live",
+        status: "ready",
+        checkedAt: now.toISOString(),
+        activeConversionCampaigns: 0,
+        healthyCampaigns: 0,
+        eventSettingCount: 0,
+        checks: [],
+        message: "Portfolio integration snapshot.",
+      },
+      syncedAt: now.toISOString(),
+    };
     await expect(
       completeLiveSyncRefresh({
         accountId: agencyAccountId,
         credentialGeneration: agencyCredential.credentialGeneration,
         claimId: agencyClaim!.claimId,
-        snapshot: {
-          account: { ...demoAccount, id: agencyAccountId, name: "Beacon Client" },
-          campaigns: demoCampaigns,
-          ads: demoAds,
-          performance: demoCampaignPerformance,
-          recommendations: [
-            { ...sourceRecommendation, source: "live" as const },
-          ],
-          budgetGuardEvidence: [],
-          conversionMeasurement: {
-            source: "live",
-            status: "ready",
-            checkedAt: now.toISOString(),
-            activeConversionCampaigns: 0,
-            healthyCampaigns: 0,
-            eventSettingCount: 0,
-            checks: [],
-            message: "Portfolio integration snapshot.",
-          },
-          syncedAt: now.toISOString(),
-        },
+        snapshot: agencySnapshot,
+        integritySnapshot: integritySnapshotFor(agencySnapshot),
         now,
         freshForMs: 120_000,
         staleForMs: 900_000,
@@ -2060,34 +3205,36 @@ describe("PostgreSQL customer and approval boundary", () => {
       leaseMs: 90_000,
     });
     expect(wrongClaim).not.toBeNull();
+    const wrongGenerationSnapshot: LiveWorkbenchData = {
+      account: {
+        ...demoAccount,
+        id: mismatchedAccountId,
+        name: attached.access.accountName,
+      },
+      campaigns: [],
+      ads: [],
+      performance: [],
+      recommendations: [],
+      budgetGuardEvidence: [],
+      conversionMeasurement: {
+        source: "live",
+        status: "ready",
+        checkedAt: now.toISOString(),
+        activeConversionCampaigns: 0,
+        healthyCampaigns: 0,
+        eventSettingCount: 0,
+        checks: [],
+        message: "Wrong-generation fixture.",
+      },
+      syncedAt: now.toISOString(),
+    };
     await expect(
       completeLiveSyncRefresh({
         accountId: mismatchedAccountId,
         credentialGeneration: wrongGeneration,
         claimId: wrongClaim!.claimId,
-        snapshot: {
-          account: {
-            ...demoAccount,
-            id: mismatchedAccountId,
-            name: attached.access.accountName,
-          },
-          campaigns: [],
-          ads: [],
-          performance: [],
-          recommendations: [],
-          budgetGuardEvidence: [],
-          conversionMeasurement: {
-            source: "live",
-            status: "ready",
-            checkedAt: now.toISOString(),
-            activeConversionCampaigns: 0,
-            healthyCampaigns: 0,
-            eventSettingCount: 0,
-            checks: [],
-            message: "Wrong-generation fixture.",
-          },
-          syncedAt: now.toISOString(),
-        },
+        snapshot: wrongGenerationSnapshot,
+        integritySnapshot: integritySnapshotFor(wrongGenerationSnapshot),
         now,
         freshForMs: 120_000,
         staleForMs: 900_000,
@@ -2183,6 +3330,11 @@ describe("PostgreSQL customer and approval boundary", () => {
       verifiedAt: new Date("2026-08-27T09:00:00.000Z"),
     });
     await database`
+      update maintainflow_advertiser_accounts
+      set owner_organization_id = ${advertiserAccess.organizationId}
+      where external_account_id = ${accountId}
+    `;
+    await database`
       insert into maintainflow_account_access (
         organization_id, advertiser_account_id, role, granted_by
       )
@@ -2242,7 +3394,7 @@ describe("PostgreSQL customer and approval boundary", () => {
         const approvalId = await createApprovalRecord({
           accountId,
           operatorId: ownerOperatorId,
-          access: attached.access,
+          access: sharedAdvertiserAccess,
           recommendation: {
             ...source,
             id: `rec_portfolio_${outcome}_${randomUUID()}`,
@@ -2294,6 +3446,8 @@ describe("PostgreSQL customer and approval boundary", () => {
           expect.objectContaining({
             accountId,
             operationalExceptions: {
+              changeIntegrityUnexplained: { count: 0, oldestAt: null },
+              changeIntegrityIndeterminate: { count: 0, oldestAt: null },
               safeguardTriggered: {
                 count: 1,
                 oldestAt: safeguardAt.toISOString(),
@@ -3844,13 +4998,49 @@ describe("PostgreSQL customer and approval boundary", () => {
       recommendation: freshRecommendation,
       access: advertiserAccess,
     });
-    const otherAccountRecommendation = recommendation("other_account");
-    const otherAccountId = await createApprovalRecord({
-      accountId: agencyAccountId,
-      operatorId: ownerOperatorId,
-      recommendation: otherAccountRecommendation,
+    const otherAccountRecommendation = {
+      ...recommendation("other_account"),
+      source: "live" as const,
+      status: "ready" as const,
+    };
+    const otherAccountRequest = await createLiveChangeApprovalRequest({
+      operator: {
+        id: ownerOperatorId,
+        name: "Integration Owner",
+        initials: "IO",
+      },
       access: agencyAccess,
+      recommendation: otherAccountRecommendation,
+      displayedFingerprint: recommendationApprovalFingerprint(
+        otherAccountRecommendation,
+      ),
     });
+    const otherAccountDecision = await decideChangeApprovalRequest({
+      requestId: otherAccountRequest.id,
+      operator: {
+        id: approvalAdminOperatorId,
+        name: "Integration Approval Admin",
+        initials: "IA",
+      },
+      action: "approve",
+      expectedVersion: 1,
+    });
+    const otherAccountId = await database.begin((transaction) =>
+      createApprovalRecord(
+        {
+          accountId: agencyAccountId,
+          operatorId: ownerOperatorId,
+          recommendation: otherAccountRecommendation,
+          access: agencyAccess,
+          authorization: {
+            kind: "agency_request",
+            requestId: otherAccountRequest.id,
+            expectedVersion: otherAccountDecision.version,
+          },
+        },
+        transaction,
+      ),
+    );
     await database`
       update ads_approval_records set updated_at = ${staleAt}
       where id = ${otherAccountId}

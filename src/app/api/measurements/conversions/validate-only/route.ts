@@ -107,8 +107,9 @@ export async function POST(request: Request) {
       );
     }
     if (error instanceof OperatorUnauthorizedError) {
-      log.warn("conversions.validate_only.rejected", fields(401, error));
-      return json({ error: error.message }, { status: 401 });
+      const status = error.status === 403 ? 403 : 401;
+      log.warn("conversions.validate_only.rejected", fields(status, error));
+      return json({ error: error.message }, { status });
     }
     if (error instanceof AccountAccessForbiddenError) {
       log.warn("conversions.validate_only.rejected", fields(403, error));

@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import "../../globals.css";
 import localFont from "next/font/local";
-import Navigation from "@/sections/navigation";
+
 import { ConditionalClerkProvider } from "@/components/auth/conditional-clerk-provider";
 
 export const metadata: Metadata = {
-  title: "Operator access | MaintainFlow",
+  title: "Workspace access | MaintainCode Ads",
   description:
-    "Secure operator access for reviewing and controlling OpenAI Ads recommendations.",
+    "Secure access to your attribution workspace.",
   robots: { index: false, follow: false },
 };
 
@@ -34,7 +34,7 @@ export default function RootLayout({
       >
         <div className=" h-screen">
           <ConditionalClerkProvider>
-            <Navigation />
+            <header className="border-b p-6"><a href="/app" className="font-semibold">MaintainCode Ads</a></header>
             {children}
           </ConditionalClerkProvider>
         </div>

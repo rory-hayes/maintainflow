@@ -18,9 +18,13 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "MaintainFlow · Ads review",
+  metadataBase: new URL(
+    process.env.MAINTAINCODE_APP_ORIGIN || "https://maintainflow.io",
+  ),
+  applicationName: "MaintainCode Ads",
+  title: "MaintainCode Ads · Attribution",
   description:
-    "Evidence-backed recommendations and guarded changes for OpenAI Ads.",
+    "See which marketing channels become qualified leads and won customers.",
   robots: { index: false, follow: false },
 };
 
@@ -29,7 +33,9 @@ export default function ProductLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
         <ConditionalClerkProvider>
           <TooltipProvider delayDuration={250}>{children}</TooltipProvider>
           <Toaster position="bottom-right" richColors />

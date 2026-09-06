@@ -524,3 +524,9 @@ export function resolveSimulatedWorkspace(
 export function listAgencySimulatedAccountIds() {
   return agencyAccountConfigs.map((config) => config.accountId);
 }
+
+export function listAgencySimulatedWorkspaces() {
+  return agencyAccountConfigs.map((config) =>
+    agencyWorkspaces.get(config.accountId)!,
+  );
+}

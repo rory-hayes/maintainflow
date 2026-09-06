@@ -12,6 +12,8 @@ export type LivePortfolioExceptionEvidence = {
 };
 
 export type LivePortfolioOperationalExceptions = {
+  changeIntegrityUnexplained: LivePortfolioExceptionEvidence;
+  changeIntegrityIndeterminate: LivePortfolioExceptionEvidence;
   safeguardTriggered: LivePortfolioExceptionEvidence;
   insufficientEvidence: LivePortfolioExceptionEvidence;
   monitoringFailures: LivePortfolioExceptionEvidence;
@@ -71,11 +73,13 @@ export function livePortfolioUrgency(
   }
   if (
     account.operationalExceptions.safeguardTriggered.count > 0 ||
-    account.operationalExceptions.insufficientEvidence.count > 0
+    account.operationalExceptions.insufficientEvidence.count > 0 ||
+    account.operationalExceptions.changeIntegrityUnexplained.count > 0
   ) {
     return "attention";
   }
   if (
+    account.operationalExceptions.changeIntegrityIndeterminate.count > 0 ||
     account.detectedSignalCount === null ||
     account.detectedSignalCount > 0 ||
     !["confirmed_fresh", "confirmed_stale"].includes(account.evidenceState)
@@ -147,6 +151,13 @@ export function summarizeLivePortfolioEvidence(
         account.operationalExceptions.safeguardTriggered.count +
         account.operationalExceptions.insufficientEvidence.count +
         account.operationalExceptions.monitoringFailures.count,
+      0,
+    ),
+    changeIntegrityExceptionCount: accounts.reduce(
+      (total, account) =>
+        total +
+        account.operationalExceptions.changeIntegrityUnexplained.count +
+        account.operationalExceptions.changeIntegrityIndeterminate.count,
       0,
     ),
     detectedSignalCount:

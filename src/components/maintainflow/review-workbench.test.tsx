@@ -7,17 +7,80 @@ vi.mock("next/navigation", () => ({
 }));
 
 import {
+  buildChangeApprovalRequestBody,
+  buildDirectLiveApplyBody,
   canReconcileApprovalHistory,
+  canRequestLiveAgencyApproval,
   CampaignsView,
   isConfirmedLiveApplyResponse,
   MaintainFlowWorkbench,
   RecommendationApprovalConfirmation,
+  shouldShowAgencyApprovalInbox,
+  writableApprovalAccountIdsForOrganization,
 } from "./review-workbench";
 import {
   demoAccount,
   demoRecommendations,
 } from "@/lib/openai-ads/demo-data";
 import { unavailableConversionMeasurement } from "@/lib/openai-ads/measurement-readiness";
+import { buildLivePortfolioActionQueue } from "@/lib/openai-ads/action-queue";
+
+const livePortfolioAccountsFixture = [
+  {
+    accountId: "adacct_current",
+    accountName: "Harbour Home",
+    hasConfirmedSnapshot: true,
+    detectedSignalCount: 4,
+    evidenceState: "confirmed_fresh" as const,
+    evidenceAt: "2026-09-02T11:55:00.000Z",
+    operationalExceptions: {
+      changeIntegrityUnexplained: { count: 0, oldestAt: null },
+      changeIntegrityIndeterminate: { count: 0, oldestAt: null },
+      safeguardTriggered: {
+        count: 2,
+        oldestAt: "2026-09-01T10:00:00.000Z",
+      },
+      insufficientEvidence: { count: 0, oldestAt: null },
+      monitoringFailures: { count: 0, oldestAt: null },
+      reconciliationRequired: { count: 0, oldestAt: null },
+    },
+  },
+  {
+    accountId: "adacct_missing",
+    accountName: "Oak & Thread",
+    hasConfirmedSnapshot: false,
+    detectedSignalCount: null,
+    evidenceState: "not_confirmed" as const,
+    evidenceAt: null,
+    operationalExceptions: {
+      changeIntegrityUnexplained: { count: 0, oldestAt: null },
+      changeIntegrityIndeterminate: { count: 0, oldestAt: null },
+      safeguardTriggered: { count: 0, oldestAt: null },
+      insufficientEvidence: { count: 0, oldestAt: null },
+      monitoringFailures: { count: 0, oldestAt: null },
+      reconciliationRequired: {
+        count: 1,
+        oldestAt: "2026-08-31T09:00:00.000Z",
+      },
+    },
+  },
+  {
+    accountId: "adacct_legacy",
+    accountName: "Legacy client",
+    hasConfirmedSnapshot: false,
+    detectedSignalCount: null,
+    evidenceState: "refresh_required" as const,
+    evidenceAt: "2026-09-01T09:00:00.000Z",
+    operationalExceptions: {
+      changeIntegrityUnexplained: { count: 0, oldestAt: null },
+      changeIntegrityIndeterminate: { count: 0, oldestAt: null },
+      safeguardTriggered: { count: 0, oldestAt: null },
+      insufficientEvidence: { count: 0, oldestAt: null },
+      monitoringFailures: { count: 0, oldestAt: null },
+      reconciliationRequired: { count: 0, oldestAt: null },
+    },
+  },
+];
 
 describe("CampaignsView", () => {
   it("requires a write-capable account role before reconciliation is enabled", () => {
@@ -51,12 +114,134 @@ describe("CampaignsView", () => {
     ).toBe(false);
   });
 
+  it("requires a write-capable agency account grant before requesting live approval", () => {
+    const baseAccess = {
+      organizationId: "00000000-0000-4000-8000-000000000001",
+      organizationName: "Northstar Agency",
+      organizationType: "agency" as const,
+      accountId: "adacct_client",
+      accountName: "Client",
+      connectionMode: "vault" as const,
+      membershipRole: "admin" as const,
+    };
+
+    expect(
+      canRequestLiveAgencyApproval({
+        ...baseAccess,
+        membershipRole: "analyst",
+        accountRole: "manager",
+      }),
+    ).toBe(true);
+    expect(
+      canRequestLiveAgencyApproval({
+        ...baseAccess,
+        accountRole: "viewer",
+      }),
+    ).toBe(false);
+    expect(
+      canRequestLiveAgencyApproval({
+        ...baseAccess,
+        organizationType: "advertiser",
+        accountRole: "owner",
+      }),
+    ).toBe(false);
+  });
+
+  it("preserves an exact writable account path for each agency approval inbox", () => {
+    const accountId = "adacct_shared";
+    const baseAccess = {
+      accountId,
+      accountName: "Shared client",
+      connectionMode: "vault" as const,
+      membershipRole: "admin" as const,
+      accountRole: "manager" as const,
+      organizationType: "agency" as const,
+    };
+
+    expect(
+      writableApprovalAccountIdsForOrganization(
+        [
+          {
+            ...baseAccess,
+            organizationId: "org_agency_one",
+            organizationName: "Agency One",
+          },
+          {
+            ...baseAccess,
+            organizationId: "org_agency_two",
+            organizationName: "Agency Two",
+          },
+        ],
+        "org_agency_two",
+      ),
+    ).toEqual([accountId]);
+  });
+
   it("never treats a downgraded 2xx no-write response as a live change", () => {
     expect(
       isConfirmedLiveApplyResponse({ mode: "demo", applied: false }),
     ).toBe(false);
     expect(
       isConfirmedLiveApplyResponse({ mode: "live", applied: true }),
+    ).toBe(true);
+  });
+
+  it("builds distinct live agency-request and direct-apply contracts", () => {
+    expect(
+      buildChangeApprovalRequestBody({
+        source: "live",
+        organizationId: "org_agency",
+        accountId: "adacct_live",
+        recommendationId: "rec_live",
+        recommendationFingerprint: "a".repeat(64),
+        note: "Please review the exact live bid change.",
+      }),
+    ).toEqual({
+      source: "live",
+      organizationId: "org_agency",
+      accountId: "adacct_live",
+      recommendationId: "rec_live",
+      recommendationFingerprint: "a".repeat(64),
+      note: "Please review the exact live bid change.",
+    });
+
+    expect(
+      buildDirectLiveApplyBody({
+        organizationId: "org_direct",
+        accountId: "adacct_direct",
+        recommendationId: "rec_direct",
+        recommendationFingerprint: "b".repeat(64),
+      }),
+    ).toEqual({
+      authorization: "direct",
+      organizationId: "org_direct",
+      accountId: "adacct_direct",
+      recommendationId: "rec_direct",
+      recommendationSource: "live",
+      recommendationFingerprint: "b".repeat(64),
+    });
+  });
+
+  it("hides the agency queue only for an authenticated direct-only workspace", () => {
+    expect(
+      shouldShowAgencyApprovalInbox({
+        operatorAuthenticated: true,
+        workspaceOrganizationType: "advertiser",
+        agencyOrganizationCount: 0,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowAgencyApprovalInbox({
+        operatorAuthenticated: true,
+        workspaceOrganizationType: "advertiser",
+        agencyOrganizationCount: 1,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowAgencyApprovalInbox({
+        operatorAuthenticated: false,
+        agencyOrganizationCount: 0,
+      }),
     ).toBe(true);
   });
 
@@ -97,6 +282,24 @@ describe("CampaignsView", () => {
     expect(markup).toContain(
       `aria-label="Current ${recommendation.currentValue}; proposed ${recommendation.proposedValue}"`,
     );
+
+    const agencyRequestMarkup = renderToStaticMarkup(
+      <RecommendationApprovalConfirmation
+        account={{ ...demoAccount, id: "adacct_live", name: "Live advertiser" }}
+        recommendation={recommendation}
+        dataSource="live"
+        writeMode="demo"
+        syncedAt="2026-09-02T08:30:00.000Z"
+        intent="request"
+      />,
+    );
+    expect(agencyRequestMarkup).toContain(
+      "Live approval request for Live advertiser",
+    );
+    expect(agencyRequestMarkup).toContain(
+      "Requesting approval sends no external write",
+    );
+    expect(agencyRequestMarkup).not.toContain("External write is locked");
   });
 
   it("does not render zero-valued or demo-currency metrics without a confirmed live snapshot", () => {
@@ -114,11 +317,8 @@ describe("CampaignsView", () => {
         onReview={() => undefined}
         reviewing={false}
         snapshotAvailable={false}
-        portfolioAccounts={[]}
         livePortfolioVisible={false}
-        livePortfolioAccounts={[]}
         currentAccountId="adacct_live"
-        onOpenAccount={() => undefined}
       />,
     );
 
@@ -144,73 +344,24 @@ describe("CampaignsView", () => {
         onReview={() => undefined}
         reviewing={false}
         snapshotAvailable={false}
-        portfolioAccounts={[]}
         livePortfolioVisible
-        livePortfolioAccounts={[
-          {
-            accountId: "adacct_current",
-            accountName: "Harbour Home",
-            hasConfirmedSnapshot: true,
-            detectedSignalCount: 4,
-            evidenceState: "confirmed_fresh",
-            evidenceAt: "2026-09-02T11:55:00.000Z",
-            operationalExceptions: {
-              safeguardTriggered: {
-                count: 2,
-                oldestAt: "2026-09-01T10:00:00.000Z",
-              },
-              insufficientEvidence: { count: 0, oldestAt: null },
-              monitoringFailures: { count: 0, oldestAt: null },
-              reconciliationRequired: { count: 0, oldestAt: null },
-            },
-          },
-          {
-            accountId: "adacct_missing",
-            accountName: "Oak & Thread",
-            hasConfirmedSnapshot: false,
-            detectedSignalCount: null,
-            evidenceState: "not_confirmed",
-            evidenceAt: null,
-            operationalExceptions: {
-              safeguardTriggered: { count: 0, oldestAt: null },
-              insufficientEvidence: { count: 0, oldestAt: null },
-              monitoringFailures: { count: 0, oldestAt: null },
-              reconciliationRequired: {
-                count: 1,
-                oldestAt: "2026-08-31T09:00:00.000Z",
-              },
-            },
-          },
-          {
-            accountId: "adacct_legacy",
-            accountName: "Legacy client",
-            hasConfirmedSnapshot: false,
-            detectedSignalCount: null,
-            evidenceState: "refresh_required",
-            evidenceAt: "2026-09-01T09:00:00.000Z",
-            operationalExceptions: {
-              safeguardTriggered: { count: 0, oldestAt: null },
-              insufficientEvidence: { count: 0, oldestAt: null },
-              monitoringFailures: { count: 0, oldestAt: null },
-              reconciliationRequired: { count: 0, oldestAt: null },
-            },
-          },
-        ]}
+        portfolioActionItems={buildLivePortfolioActionQueue(
+          livePortfolioAccountsFixture,
+        )}
+        portfolioAccountCount={3}
         currentAccountId="adacct_current"
-        onOpenAccount={() => undefined}
       />,
     );
 
-    expect(markup).toContain("Live agency exception queue");
-    expect(markup).toContain("3 active clients");
-    expect(markup).toContain("Accounts requiring action");
-    expect(markup).toContain("Unresolved reconciliation");
-    expect(markup).toContain("Monitoring exceptions");
-    expect(markup).toContain("1 reconciliation");
-    expect(markup).toContain("2 safeguard breaches");
+    expect(markup).toContain("Portfolio action queue");
+    expect(markup).toContain("3 client accounts");
+    expect(markup).toContain("Actions requiring attention");
+    expect(markup).toContain("Unquantified actions");
+    expect(markup).toContain("Resolve unknown provider outcomes (1)");
+    expect(markup).toContain("Review triggered safeguards (2)");
     expect(markup).toContain("Detected signals unknown");
-    expect(markup).toContain("Refresh required");
-    expect(markup).toContain("Review exceptions");
+    expect(markup).toContain("Create the first confirmed Ads snapshot");
+    expect(markup).toContain("Review evidence");
     expect(markup).toContain(
       "/app?tab=experiments&amp;account=adacct_missing",
     );
@@ -268,7 +419,6 @@ describe("CampaignsView", () => {
         ]}
         simulatorLabel="Direct merchant simulator"
         livePortfolioVisible={false}
-        livePortfolioAccounts={[]}
         recommendationDecisionReady={false}
         canManageRecommendationDecisions={false}
         recommendationDecisionHistory={[]}

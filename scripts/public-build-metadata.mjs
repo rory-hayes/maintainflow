@@ -27,11 +27,32 @@ export function publicClerkConfigDigest(env) {
     .digest("hex");
 }
 
+const PUBLIC_SUPABASE_CONFIG_KEYS = [
+  "NEXT_PUBLIC_SUPABASE_URL",
+  "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+];
+export function publicSupabaseConfigDigest(env) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        Object.fromEntries(
+          PUBLIC_SUPABASE_CONFIG_KEYS.map((key) => [
+            key,
+            typeof env[key] === "string" ? env[key] : "",
+          ]),
+        ),
+      ),
+      "utf8",
+    )
+    .digest("hex");
+}
+
 export function createPublicBuildMetadata(env) {
   return {
     schemaVersion: 1,
     publicConfigKeys: [...PUBLIC_CLERK_CONFIG_KEYS],
     publicClerkConfigSha256: publicClerkConfigDigest(env),
+    publicSupabaseConfigSha256: publicSupabaseConfigDigest(env),
   };
 }
 

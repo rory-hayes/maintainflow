@@ -11,11 +11,9 @@ describe("process liveness route", () => {
     const payload = await response.json();
     expect(payload).toMatchObject({
       ok: true,
-      service: "maintainflow-ads",
+      service: "maintaincode-ads",
       scope: "process_liveness",
     });
-    expect(payload.revision).toMatch(
-      /^(?:unknown|[a-f0-9]{40}|[a-f0-9]{64})$/,
-    );
+    expect(payload.revision).toMatch(/^(?:unknown|[a-f0-9]{40}|[a-f0-9]{64})$/);
   });
 });

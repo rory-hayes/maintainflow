@@ -45,9 +45,10 @@ export async function GET(
     );
   } catch (error) {
     if (error instanceof OperatorUnauthorizedError) {
+      const status = error.status === 403 ? 403 : 401;
       return Response.json(
         { error: error.message },
-        { status: 401, headers: NO_STORE_HEADERS },
+        { status, headers: NO_STORE_HEADERS },
       );
     }
     if (error instanceof AccountAccessForbiddenError) {

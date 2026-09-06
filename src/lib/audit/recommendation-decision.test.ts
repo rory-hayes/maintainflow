@@ -70,6 +70,17 @@ describe("recommendation dismissal decisions", () => {
     );
   });
 
+  it("binds approval consent to the displayed rationale", () => {
+    const changedRationale = {
+      ...recommendation,
+      rationale: `${recommendation.rationale} Updated after a fresh review.`,
+    };
+
+    expect(recommendationApprovalFingerprint(changedRationale)).not.toBe(
+      recommendationApprovalFingerprint(recommendation),
+    );
+  });
+
   it("marks only the matching ready recommendation as dismissed", () => {
     const [result] = applyRecommendationDismissals(
       [recommendation],

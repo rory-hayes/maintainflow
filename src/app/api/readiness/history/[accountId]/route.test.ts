@@ -4,7 +4,12 @@ vi.mock("server-only", () => ({}));
 
 const state = vi.hoisted(() => {
   class OperatorAuthUnavailableError extends Error {}
-  class OperatorUnauthorizedError extends Error {}
+  class OperatorUnauthorizedError extends Error {
+    readonly status: 401 | 403 = 401;
+  }
+  class OperatorAdmissionForbiddenError extends OperatorUnauthorizedError {
+    override readonly status = 403 as const;
+  }
   class AccountAccessForbiddenError extends Error {}
   class TenancyStoreUnavailableError extends Error {}
   class ReadinessHistoryStoreUnavailableError extends Error {}
@@ -12,6 +17,7 @@ const state = vi.hoisted(() => {
   return {
     OperatorAuthUnavailableError,
     OperatorUnauthorizedError,
+    OperatorAdmissionForbiddenError,
     AccountAccessForbiddenError,
     TenancyStoreUnavailableError,
     ReadinessHistoryStoreUnavailableError,
@@ -90,6 +96,22 @@ describe("readiness history route", () => {
     const response = await GET(request(), context());
 
     expect(response.status).toBe(401);
+    expect(state.requireAccountAccess).not.toHaveBeenCalled();
+    expect(state.listReadinessAuditRuns).not.toHaveBeenCalled();
+  });
+
+  it("preserves an admission denial as forbidden", async () => {
+    state.requireOperatorId.mockRejectedValue(
+      new state.OperatorAdmissionForbiddenError("Workspace access denied."),
+    );
+
+    const response = await GET(request(), context());
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      error: "Workspace access denied.",
+    });
     expect(state.requireAccountAccess).not.toHaveBeenCalled();
     expect(state.listReadinessAuditRuns).not.toHaveBeenCalled();
   });

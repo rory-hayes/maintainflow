@@ -13,6 +13,11 @@ import {
   type ReadinessCheckStatus,
 } from "./schema";
 import { analyzeMeasurementInstallation } from "./measurement";
+import {
+  firstMetaContent,
+  scanReadinessHtml,
+  type ReadinessHtmlEvidence,
+} from "./html-evidence";
 
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_BODY_BYTES = 1_500_000;
@@ -21,6 +26,11 @@ const ROBOTS_MAX_DIRECTIVES = 5_000;
 const ROBOTS_MAX_RULES = 1_000;
 const ROBOTS_MAX_PATTERN_LENGTH = 2_048;
 const ROBOTS_MAX_WILDCARDS = 128;
+const JSON_LD_MAX_DOCUMENTS = 32;
+const JSON_LD_MAX_DOCUMENT_CHARACTERS = 128_000;
+const JSON_LD_MAX_TOTAL_CHARACTERS = 256_000;
+const JSON_LD_MAX_DEPTH = 64;
+const JSON_LD_MAX_NODES = 10_000;
 const AUDITOR_USER_AGENT =
   "MaintainFlow-Readiness/0.1 (+https://maintainflow.io)";
 
@@ -334,85 +344,154 @@ async function fetchDocument(startUrl: URL): Promise<FetchedDocument> {
   throw new Error("The landing page redirected too many times.");
 }
 
-function htmlAttribute(content: string, name: string): string | undefined {
-  const expression = new RegExp(`${name}\\s*=\\s*["']([^"']+)["']`, "i");
-  return content.match(expression)?.[1]?.trim();
-}
+function jsonStructureIsWithinLimits(source: string): boolean {
+  let depth = 0;
+  let nodes = 0;
+  let inString = false;
+  let escaped = false;
 
-function metaContent(html: string, names: string[]): string | undefined {
-  const tags = html.match(/<meta\b[^>]*>/gi) ?? [];
-  for (const tag of tags) {
-    const name = (htmlAttribute(tag, "name") ?? htmlAttribute(tag, "property"))?.toLowerCase();
-    if (name && names.includes(name)) return htmlAttribute(tag, "content");
-  }
-}
-
-function collectJsonLdTypes(value: unknown, types: Set<string>) {
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectJsonLdTypes(item, types));
-    return;
-  }
-  if (!value || typeof value !== "object") return;
-
-  const record = value as Record<string, unknown>;
-  const rawType = record["@type"];
-  const typeValues = Array.isArray(rawType) ? rawType : [rawType];
-  typeValues.forEach((type) => {
-    if (typeof type === "string") types.add(type.toLowerCase());
-  });
-  Object.values(record).forEach((item) => collectJsonLdTypes(item, types));
-}
-
-function jsonLdDocuments(html: string): unknown[] {
-  const documents: unknown[] = [];
-  const expression = /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-  for (const match of html.matchAll(expression)) {
-    try {
-      documents.push(JSON.parse(match[1].trim()));
-    } catch {
-      // An invalid JSON-LD block is treated as absent evidence.
+  for (const character of source) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "{" || character === "[") {
+      depth += 1;
+      nodes += 1;
+      if (depth > JSON_LD_MAX_DEPTH || nodes > JSON_LD_MAX_NODES) return false;
+    } else if (character === "}" || character === "]") {
+      depth -= 1;
+      if (depth < 0) return false;
     }
   }
-  return documents;
+
+  return depth === 0 && !inString;
 }
 
-function containsOfferFacts(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsOfferFacts);
-  if (!value || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  const type = record["@type"];
-  const types = (Array.isArray(type) ? type : [type]).filter(
-    (item): item is string => typeof item === "string",
-  );
-  if (
-    types.some((item) => ["offer", "aggregateoffer"].includes(item.toLowerCase())) &&
-    (record.price !== undefined || record.lowPrice !== undefined || record.highPrice !== undefined) &&
-    record.availability !== undefined
-  ) {
-    return true;
-  }
-  return Object.values(record).some(containsOfferFacts);
-}
-
-export function analyzeHtml(html: string, headers = new Headers()): HtmlSignals {
-  const jsonLd = jsonLdDocuments(html);
+function inspectJsonLd(value: unknown): {
+  complete: boolean;
+  hasOfferFacts: boolean;
+  types: Set<string>;
+} {
   const types = new Set<string>();
-  jsonLd.forEach((document) => collectJsonLdTypes(document, types));
-  const robotsMeta = metaContent(html, ["robots", "oai-searchbot", "oai-adsbot"]);
+  const stack: { depth: number; value: unknown }[] = [{ depth: 0, value }];
+  let hasOfferFacts = false;
+  let nodes = 0;
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    nodes += 1;
+    if (nodes > JSON_LD_MAX_NODES || current.depth > JSON_LD_MAX_DEPTH) {
+      return { complete: false, hasOfferFacts: false, types: new Set() };
+    }
+
+    if (Array.isArray(current.value)) {
+      for (const item of current.value) {
+        stack.push({ depth: current.depth + 1, value: item });
+      }
+      continue;
+    }
+    if (!current.value || typeof current.value !== "object") continue;
+
+    const record = current.value as Record<string, unknown>;
+    const rawType = record["@type"];
+    const typeValues = Array.isArray(rawType) ? rawType : [rawType];
+    const recordTypes: string[] = [];
+    for (const type of typeValues) {
+      if (typeof type !== "string") continue;
+      const normalized = type.toLowerCase();
+      recordTypes.push(normalized);
+      types.add(normalized);
+    }
+    if (
+      recordTypes.some((type) => type === "offer" || type === "aggregateoffer") &&
+      (record.price !== undefined ||
+        record.lowPrice !== undefined ||
+        record.highPrice !== undefined) &&
+      record.availability !== undefined
+    ) {
+      hasOfferFacts = true;
+    }
+
+    for (const item of Object.values(record)) {
+      stack.push({ depth: current.depth + 1, value: item });
+    }
+  }
+
+  return { complete: true, hasOfferFacts, types };
+}
+
+function structuredDataSignals(evidence: ReadinessHtmlEvidence) {
+  const types = new Set<string>();
+  let documents = 0;
+  let totalCharacters = 0;
+  let hasOfferFacts = false;
+
+  for (const script of evidence.scripts) {
+    if (script.type !== "application/ld+json" || script.body === undefined) continue;
+    if (documents >= JSON_LD_MAX_DOCUMENTS) break;
+    documents += 1;
+    const source = script.body.trim();
+    if (
+      !source ||
+      source.length > JSON_LD_MAX_DOCUMENT_CHARACTERS ||
+      totalCharacters + source.length > JSON_LD_MAX_TOTAL_CHARACTERS ||
+      !jsonStructureIsWithinLimits(source)
+    ) {
+      continue;
+    }
+    totalCharacters += source.length;
+
+    try {
+      const inspected = inspectJsonLd(JSON.parse(source));
+      if (!inspected.complete) continue;
+      inspected.types.forEach((type) => types.add(type));
+      hasOfferFacts ||= inspected.hasOfferFacts;
+    } catch {
+      // Invalid or over-complex JSON-LD is treated as absent evidence.
+    }
+  }
+
+  return { hasOfferFacts, types };
+}
+
+export function analyzeHtml(
+  html: string,
+  headers = new Headers(),
+  evidence = scanReadinessHtml(html),
+): HtmlSignals {
+  const structuredData = structuredDataSignals(evidence);
+  const robotsMeta = firstMetaContent(evidence, [
+    "robots",
+    "oai-searchbot",
+    "oai-adsbot",
+  ]);
   const xRobotsTag = headers.get("x-robots-tag") ?? "";
 
   return {
-    hasTitle: /<title\b[^>]*>\s*[^<]+\s*<\/title>/i.test(html),
-    hasDescription: Boolean(metaContent(html, ["description", "og:description"])),
-    hasCanonical: /<link\b[^>]*rel\s*=\s*["'][^"']*canonical[^"']*["'][^>]*>/i.test(html),
+    hasTitle: evidence.hasTitle,
+    hasDescription: Boolean(
+      firstMetaContent(evidence, ["description", "og:description"]),
+    ),
+    hasCanonical: evidence.hasCanonical,
     hasNoIndex: /(?:^|[,\s])noindex(?:$|[,\s])/i.test(
       `${robotsMeta ?? ""},${xRobotsTag}`,
     ),
-    hasProductSchema: types.has("product"),
+    hasProductSchema: structuredData.types.has("product"),
     hasOfferFacts:
-      jsonLd.some(containsOfferFacts) ||
-      Boolean(metaContent(html, ["product:price:amount"])) &&
-        Boolean(metaContent(html, ["product:availability"])),
+      structuredData.hasOfferFacts ||
+      Boolean(firstMetaContent(evidence, ["product:price:amount"])) &&
+        Boolean(firstMetaContent(evidence, ["product:availability"])),
   };
 }
 
@@ -422,7 +501,11 @@ export function parseRobotsTxt(text: string): RobotsGroup[] {
   let directiveCount = 0;
   let ruleCount = 0;
 
-  for (const rawLine of text.split(/\r?\n/)) {
+  for (let lineStart = 0; lineStart <= text.length;) {
+    const nextNewline = text.indexOf("\n", lineStart);
+    const lineEnd = nextNewline === -1 ? text.length : nextNewline;
+    const rawLine = text.slice(lineStart, lineEnd);
+    lineStart = nextNewline === -1 ? text.length + 1 : nextNewline + 1;
     const line = rawLine.replace(/#.*$/, "").trim();
     if (!line) continue;
     const separator = line.indexOf(":");
@@ -564,6 +647,39 @@ export function evaluateOpenAICrawlerAccess(
   }
 }
 
+function isRobotsHorizontalWhitespace(character: string | undefined) {
+  return character === " " || character === "\t" || character === "\r" ||
+    character === "\v" || character === "\f";
+}
+
+export function hasSitemapDirective(text: string): boolean {
+  let lineStart = 0;
+  while (lineStart <= text.length) {
+    const nextNewline = text.indexOf("\n", lineStart);
+    const lineEnd = nextNewline === -1 ? text.length : nextNewline;
+    let cursor = lineStart;
+    while (
+      cursor < lineEnd &&
+      isRobotsHorizontalWhitespace(text[cursor])
+    ) {
+      cursor += 1;
+    }
+    if (text.slice(cursor, cursor + 7).toLowerCase() === "sitemap") {
+      cursor += 7;
+      while (
+        cursor < lineEnd &&
+        isRobotsHorizontalWhitespace(text[cursor])
+      ) {
+        cursor += 1;
+      }
+      if (text[cursor] === ":") return true;
+    }
+    if (nextNewline === -1) break;
+    lineStart = nextNewline + 1;
+  }
+  return false;
+}
+
 function scoreChecks(checks: ReadinessCheck[]): number {
   return Math.round(
     checks.reduce((total, item) => {
@@ -607,8 +723,13 @@ export async function auditStorefront(input: string): Promise<ReadinessAudit> {
   const robots = robotsResult.status === "fulfilled" ? robotsResult.value : null;
   const sitemap = sitemapResult.status === "fulfilled" ? sitemapResult.value : null;
   const html = page.contentType.includes("html") ? page.body : "";
-  const signals = analyzeHtml(html, page.headers);
-  const measurement = analyzeMeasurementInstallation(html, page.headers);
+  const htmlEvidence = scanReadinessHtml(html);
+  const signals = analyzeHtml(html, page.headers, htmlEvidence);
+  const measurement = analyzeMeasurementInstallation(
+    html,
+    page.headers,
+    htmlEvidence,
+  );
   const pageSucceeded = page.status >= 200 && page.status < 300 && Boolean(html);
   const robotsAvailable = Boolean(
     robots && robots.status >= 200 && robots.status < 300,
@@ -622,7 +743,7 @@ export async function auditStorefront(input: string): Promise<ReadinessAudit> {
   const adsBotAllowed = crawlerAccess?.adsBotAllowed ?? robotsAbsent;
   const searchBotAllowed = crawlerAccess?.searchBotAllowed ?? robotsAbsent;
   const sitemapDeclared = Boolean(
-    robotsAvailable && robots && /(?:^|\n)\s*sitemap\s*:/i.test(robots.body),
+    robotsAvailable && robots && hasSitemapDirective(robots.body),
   );
   const sitemapReachable = Boolean(
     sitemap && sitemap.status >= 200 && sitemap.status < 300 && sitemap.body.trim(),

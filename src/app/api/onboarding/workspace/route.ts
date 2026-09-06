@@ -21,11 +21,13 @@ import {
 } from "@/lib/http/request-security.server";
 import { OpenAIAdsApiError } from "@/lib/openai-ads/client.server";
 import { fetchLiveAdAccount } from "@/lib/openai-ads/data.server";
+import { agencySimulatorEntryAccountId } from "@/lib/openai-ads/simulated-workspaces";
 import { createServerLogger } from "@/lib/observability/logger.server";
 import { workspaceBootstrapSchema } from "@/lib/tenancy/schema";
 import {
   AccountAccessForbiddenError,
   bootstrapWorkspace,
+  createAgencyApprovalWorkspace,
   TenancyStoreUnavailableError,
   verifyCredentialStore,
   verifyTenancyStore,
@@ -85,6 +87,25 @@ export async function POST(request: Request) {
     if (!(await verifyTenancyStore())) {
       throw new TenancyStoreUnavailableError(
         "The customer tenancy database migration is not ready.",
+      );
+    }
+
+    if (input.setupMode === "approval_simulator") {
+      const result = await createAgencyApprovalWorkspace({
+        operatorId,
+        organizationName: input.organizationName,
+      });
+      log.info("onboarding.workspace.completed", fields(result.created ? 201 : 200));
+      return Response.json(
+        {
+          created: result.created,
+          membership: result.membership,
+          nextAccountId: agencySimulatorEntryAccountId,
+          message: result.created
+            ? "Agency approval workspace created. Add a second member before testing two-person decisions; no Ads credential was collected."
+            : "Your existing agency approval workspace is ready; no duplicate was created.",
+        },
+        { status: result.created ? 201 : 200 },
       );
     }
 
@@ -156,8 +177,9 @@ export async function POST(request: Request) {
       );
     }
     if (error instanceof OperatorUnauthorizedError) {
-      log.warn("onboarding.workspace.rejected", fields(401, error));
-      return Response.json({ error: error.message }, { status: 401 });
+      const status = error.status === 403 ? 403 : 401;
+      log.warn("onboarding.workspace.rejected", fields(status, error));
+      return Response.json({ error: error.message }, { status });
     }
     if (error instanceof AccountAccessForbiddenError) {
       log.warn("onboarding.workspace.rejected", fields(409, error));

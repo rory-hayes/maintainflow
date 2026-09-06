@@ -88,7 +88,7 @@ describe("privacy-safe server logging", () => {
       "deployment.readiness.failed",
       {
         status: 503,
-        failedChecks: ["database_transaction"],
+        failedChecks: ["change_integrity", "database_transaction"],
         diagnosticCode: "transaction_begin_failed",
         databaseErrorCode: "XX000",
       },
@@ -96,6 +96,7 @@ describe("privacy-safe server logging", () => {
 
     const line = String(vi.mocked(console.error).mock.calls[0][0]);
     expect(JSON.parse(line)).toMatchObject({
+      failedChecks: ["change_integrity", "database_transaction"],
       diagnosticCode: "transaction_begin_failed",
       databaseErrorCode: "XX000",
     });
@@ -136,6 +137,10 @@ describe("privacy-safe server logging", () => {
         "api.measurements.conversions_validate",
         "conversions.validate_only.completed",
       ],
+      [
+        "api.approval_notifications.cron",
+        "approval_notifications.run.completed",
+      ],
     ];
 
     for (const [scope, event] of cases) {
@@ -149,6 +154,34 @@ describe("privacy-safe server logging", () => {
     expect(records.map(({ scope, event }) => ({ scope, event }))).toEqual(
       cases.map(([scope, event]) => ({ scope, event })),
     );
+  });
+
+  it("allows only bounded approval notification counters", () => {
+    createServerLogger("api.approval_notifications.cron").info(
+      "approval_notifications.run.completed",
+      {
+        counts: {
+          notificationClaimed: 3,
+          notificationAccepted: 2,
+          notificationRetryScheduled: 1,
+          notificationPermanentlyFailed: 0,
+          notificationCancelled: 0,
+          notificationLostClaims: 0,
+          [secret]: 99,
+        },
+      },
+    );
+
+    const line = String(vi.mocked(console.info).mock.calls[0][0]);
+    expect(line).not.toContain(secret);
+    expect(JSON.parse(line).counts).toEqual({
+      notificationClaimed: 3,
+      notificationAccepted: 2,
+      notificationRetryScheduled: 1,
+      notificationPermanentlyFailed: 0,
+      notificationCancelled: 0,
+      notificationLostClaims: 0,
+    });
   });
 
   it.each([

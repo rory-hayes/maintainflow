@@ -231,8 +231,9 @@ export async function POST(request: Request) {
       );
     }
     if (error instanceof OperatorUnauthorizedError) {
-      log.warn("ads.recommendation_decision.rejected", fields(401, error));
-      return Response.json({ error: error.message }, { status: 401 });
+      const status = error.status === 403 ? 403 : 401;
+      log.warn("ads.recommendation_decision.rejected", fields(status, error));
+      return Response.json({ error: error.message }, { status });
     }
     if (error instanceof AccountAccessForbiddenError) {
       log.warn("ads.recommendation_decision.rejected", fields(403, error));

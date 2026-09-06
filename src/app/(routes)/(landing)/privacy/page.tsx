@@ -6,6 +6,7 @@ import { getPublicLegalIdentity } from "@/lib/legal/config.server";
 export const metadata: Metadata = {
   title: "Privacy notice | MaintainFlow",
   description: "How MaintainFlow handles data in its demo and private beta.",
+  alternates: { canonical: "/privacy" },
 };
 
 export default async function PrivacyPage() {

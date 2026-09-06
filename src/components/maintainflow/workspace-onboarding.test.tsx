@@ -25,6 +25,13 @@ const agencyAccess = {
   accountRole: "manager" as const,
 };
 
+const agencyMembership = {
+  organizationId: agencyAccess.organizationId,
+  organizationName: agencyAccess.organizationName,
+  organizationType: "agency" as const,
+  membershipRole: "owner" as const,
+};
+
 const disconnectedMeasurement = {
   state: "not_connected" as const,
   source: null,
@@ -142,6 +149,43 @@ describe("Workspace measurement connection", () => {
 });
 
 describe("Agency client account connection eligibility", () => {
+  it("separates agency identity, queue readiness, and reviewer capacity", () => {
+    const unavailable = renderToStaticMarkup(
+      <WorkspaceOnboarding
+        state="approval_ready"
+        approvalOrganization={agencyMembership}
+        approvalQueueReady={false}
+        approvalQueueError="Apply migration 019."
+        conversionsConnection={disconnectedMeasurement}
+      />,
+    );
+    const noReviewer = renderToStaticMarkup(
+      <WorkspaceOnboarding
+        state="approval_ready"
+        approvalOrganization={agencyMembership}
+        approvalQueueReady
+        eligibleApprovalReviewerCount={0}
+        conversionsConnection={disconnectedMeasurement}
+      />,
+    );
+    const ready = renderToStaticMarkup(
+      <WorkspaceOnboarding
+        state="approval_ready"
+        approvalOrganization={agencyMembership}
+        approvalQueueReady
+        eligibleApprovalReviewerCount={1}
+        conversionsConnection={disconnectedMeasurement}
+      />,
+    );
+
+    expect(unavailable).toContain("Approval queue storage unavailable");
+    expect(unavailable).toContain("Apply migration 019.");
+    expect(noReviewer).toContain("second reviewer required");
+    expect(noReviewer).toContain("Approval email is not enabled");
+    expect(ready).toContain("Two-person approval queue ready");
+    expect(ready).toContain("1 other owner or admin is eligible");
+  });
+
   it.each(["owner", "admin"] as const)(
     "shows the attach control to a ready live agency %s",
     (membershipRole) => {

@@ -240,6 +240,114 @@ describe("production release-stage configuration", () => {
     });
   });
 
+  it("accepts normalized, unique private-beta and bootstrap operator IDs", () => {
+    const config = firstAccountPrivateReadConfig({
+      MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS:
+        " user_customer, user_agency ",
+      MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS: " user_pilot ",
+    });
+
+    expect(validateProductionConfig(config)).toEqual({
+      stage: "private_read",
+      issues: [],
+    });
+  });
+
+  it.each([
+    ["a malformed ID", "user_pilot,operator_other"],
+    ["a wildcard", "user_pilot,*"],
+    ["an empty segment", "user_pilot,,user_other"],
+    ["a duplicate ID", "user_pilot, user_pilot"],
+    ["an overlong ID", `user_${"a".repeat(251)}`],
+  ])("rejects private-beta operator IDs containing %s", (_label, value) => {
+    const result = validateProductionConfig(
+      firstAccountPrivateReadConfig({
+        MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS: value,
+      }),
+    );
+
+    expect(result.issues).toContain(
+      "MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS must contain unique comma-separated Clerk user IDs without wildcards or empty segments.",
+    );
+  });
+
+  it("rejects malformed optional bootstrap IDs", () => {
+    const result = validateProductionConfig(
+      firstAccountPrivateReadConfig({
+        MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS: "user_pilot,",
+      }),
+    );
+
+    expect(result.issues).toContain(
+      "MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS must contain unique comma-separated Clerk user IDs without wildcards or empty segments.",
+    );
+  });
+
+  it("rejects an operator ID repeated across admission lists", () => {
+    const result = validateProductionConfig(
+      firstAccountPrivateReadConfig({
+        MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS: "user_pilot",
+        MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS: " user_pilot ",
+      }),
+    );
+
+    expect(result.issues).toContain(
+      "MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS and MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS must not contain the same Clerk user ID.",
+    );
+  });
+
+  it("accepts approval email only with an exact pilot allowlist and provider configuration", () => {
+    const config = firstAccountPrivateReadConfig({
+      MAINTAINFLOW_APPROVAL_EMAIL_ENABLED: "true",
+      MAINTAINFLOW_APPROVAL_EMAIL_ORGANIZATION_IDS:
+        "00000000-0000-4000-8000-000000000101",
+      MAINTAINFLOW_APPROVAL_FROM_EMAIL: "approvals@maintainflow.io",
+      RESEND_API_KEY: "re_production_provider_key_123456",
+      RESEND_WEBHOOK_SECRET: "whsec_production_secret_123456",
+    });
+
+    expect(validateProductionConfig(config)).toEqual({
+      stage: "private_read",
+      issues: [],
+    });
+  });
+
+  it("fails closed when approval email is enabled without every delivery boundary", () => {
+    const result = validateProductionConfig(
+      firstAccountPrivateReadConfig({
+        MAINTAINFLOW_APPROVAL_EMAIL_ENABLED: "true",
+      }),
+    );
+
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "MAINTAINFLOW_APPROVAL_EMAIL_ORGANIZATION_IDS",
+        ),
+        expect.stringContaining("MAINTAINFLOW_APPROVAL_FROM_EMAIL"),
+        expect.stringContaining("RESEND_API_KEY"),
+        expect.stringContaining("RESEND_WEBHOOK_SECRET"),
+      ]),
+    );
+  });
+
+  it("does not allow approval email in the unauthenticated demo stage", () => {
+    const result = validateProductionConfig(
+      demoConfig({
+        MAINTAINFLOW_APPROVAL_EMAIL_ENABLED: "true",
+        MAINTAINFLOW_APPROVAL_EMAIL_ORGANIZATION_IDS:
+          "00000000-0000-4000-8000-000000000101",
+        MAINTAINFLOW_APPROVAL_FROM_EMAIL: "approvals@maintainflow.io",
+        RESEND_API_KEY: "re_production_provider_key_123456",
+        RESEND_WEBHOOK_SECRET: "whsec_production_secret_123456",
+      }),
+    );
+
+    expect(result.issues).toContain(
+      "Approval email cannot be enabled for the unauthenticated demo release stage.",
+    );
+  });
+
   it.each(firstAccountPrivateReadRequiredKeys)(
     "rejects the hosted first-account fixture without %s",
     (key) => {

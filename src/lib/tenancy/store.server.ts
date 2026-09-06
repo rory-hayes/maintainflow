@@ -6,12 +6,19 @@ import type postgres from "postgres";
 import type { Sql } from "postgres";
 
 import {
+  getWorkspaceAdmissionMode,
+  getWorkspaceAdmittedOperatorIds,
+  isWorkspaceAdmissionAllowed,
+} from "../auth/config";
+import {
   accountAccessSchema,
   canWriteAccount,
+  organizationMembershipSchema,
   selectBestAccountAccess,
   selectBestAccessPerAccount,
   type AccountAccess,
   type AccountConnectionMode,
+  type OrganizationMembership,
   type OrganizationType,
 } from "./schema";
 import {
@@ -32,6 +39,13 @@ type AccessRow = {
   connection_mode: AccountConnectionMode;
   membership_role: AccountAccess["membershipRole"];
   account_role: AccountAccess["accountRole"];
+};
+
+type OrganizationMembershipRow = {
+  organization_id: string;
+  organization_name: string;
+  organization_type: OrganizationType;
+  membership_role: OrganizationMembership["membershipRole"];
 };
 
 type CredentialRotationAccessRow = AccessRow & {
@@ -162,6 +176,15 @@ function parseAccess(row: AccessRow) {
   });
 }
 
+function parseOrganizationMembership(row: OrganizationMembershipRow) {
+  return organizationMembershipSchema.parse({
+    organizationId: row.organization_id,
+    organizationName: row.organization_name,
+    organizationType: row.organization_type,
+    membershipRole: row.membership_role,
+  });
+}
+
 async function lockActiveAdvertiserAccount(
   transaction: postgres.TransactionSql,
   accountId: string,
@@ -258,7 +281,70 @@ export async function getAccountAccess(operatorId: string, accountId: string) {
   return selectBestAccountAccess(rows.map(parseAccess));
 }
 
-export async function listAccountAccesses(operatorId: string) {
+/**
+ * Resolves one exact organization/account authorization path. Unlike
+ * getAccountAccess, this never chooses a more privileged membership from a
+ * different organization that happens to share the same advertiser account.
+ */
+export async function getOrganizationAccountAccess(
+  operatorId: string,
+  organizationId: string,
+  accountId: string,
+) {
+  const sql = getDatabase();
+  const [row] = await sql<AccessRow[]>`
+    select
+      organization.id as organization_id,
+      organization.name as organization_name,
+      organization.customer_type as organization_type,
+      account.external_account_id as account_id,
+      account.name as account_name,
+      account.connection_mode as connection_mode,
+      membership.role as membership_role,
+      account_access.role as account_role
+    from maintainflow_organization_memberships membership
+    join maintainflow_organizations organization
+      on organization.id = membership.organization_id
+    join maintainflow_account_access account_access
+      on account_access.organization_id = organization.id
+    join maintainflow_advertiser_accounts account
+      on account.id = account_access.advertiser_account_id
+    where membership.clerk_user_id = ${operatorId}
+      and organization.id = ${organizationId}
+      and account.external_account_id = ${accountId}
+      and organization.status = 'active'
+      and account.status = 'active'
+  `;
+  return row ? parseAccess(row) : null;
+}
+
+export async function requireOrganizationAccountAccess(
+  operatorId: string,
+  organizationId: string,
+  accountId: string,
+  capability: "read" | "write",
+) {
+  if (!(await verifyTenancyStore())) {
+    throw new TenancyStoreUnavailableError(
+      "The customer tenancy database migration is not ready.",
+    );
+  }
+  const access = await getOrganizationAccountAccess(
+    operatorId,
+    organizationId,
+    accountId,
+  );
+  if (!access || (capability === "write" && !canWriteAccount(access))) {
+    throw new AccountAccessForbiddenError(
+      capability === "write"
+        ? "This operator has review-only access to the connected Ads account."
+        : undefined,
+    );
+  }
+  return access;
+}
+
+export async function listAccountAccessPaths(operatorId: string) {
   const sql = getDatabase();
   const rows = await sql.unsafe<AccessRow[]>(`${accessSelection}
     where membership.clerk_user_id = $1
@@ -266,7 +352,122 @@ export async function listAccountAccesses(operatorId: string) {
       and account.status = 'active'
     order by account.name, organization.name
   `, [operatorId]);
-  return selectBestAccessPerAccount(rows.map(parseAccess));
+  return rows.map(parseAccess);
+}
+
+export async function listAccountAccesses(operatorId: string) {
+  return selectBestAccessPerAccount(await listAccountAccessPaths(operatorId));
+}
+
+export async function listOrganizationMemberships(operatorId: string) {
+  const sql = getDatabase();
+  const rows = await sql<OrganizationMembershipRow[]>`
+    select
+      organization.id as organization_id,
+      organization.name as organization_name,
+      organization.customer_type as organization_type,
+      membership.role as membership_role
+    from maintainflow_organization_memberships membership
+    join maintainflow_organizations organization
+      on organization.id = membership.organization_id
+    where membership.clerk_user_id = ${operatorId}
+      and organization.status = 'active'
+    order by
+      case organization.customer_type when 'agency' then 0 else 1 end,
+      organization.name,
+      organization.id
+  `;
+  return rows.map(parseOrganizationMembership);
+}
+
+export async function countEligibleAgencyApprovalReviewers(options: {
+  organizationId: string;
+  operatorId: string;
+}) {
+  if (!isWorkspaceAdmissionAllowed(options.operatorId)) return 0;
+  const sql = getDatabase();
+  const admissionOpen = getWorkspaceAdmissionMode() === "open";
+  const admittedOperatorIds = getWorkspaceAdmittedOperatorIds();
+  const [row] = await sql<{ eligible_reviewer_count: number }[]>`
+    select count(*)::integer as eligible_reviewer_count
+    from maintainflow_organization_memberships reviewer
+    join maintainflow_organizations organization
+      on organization.id = reviewer.organization_id
+    where organization.id = ${options.organizationId}
+      and organization.customer_type = 'agency'
+      and organization.status = 'active'
+      and reviewer.role in ('owner', 'admin')
+      and reviewer.clerk_user_id <> ${options.operatorId}
+      and (
+        ${admissionOpen}
+        or reviewer.clerk_user_id = any(${admittedOperatorIds}::text[])
+      )
+      and exists (
+        select 1
+        from maintainflow_organization_memberships actor
+        where actor.organization_id = organization.id
+          and actor.clerk_user_id = ${options.operatorId}
+      )
+  `;
+  return Number(row?.eligible_reviewer_count ?? 0);
+}
+
+export async function createAgencyApprovalWorkspace(options: {
+  operatorId: string;
+  organizationName: string;
+}) {
+  if (!(await verifyTenancyStore())) {
+    throw new TenancyStoreUnavailableError(
+      "The customer tenancy database migration is not ready.",
+    );
+  }
+  const sql = getDatabase();
+  return sql.begin(async (transaction) => {
+    await transaction`
+      select pg_advisory_xact_lock(
+        hashtextextended(${`maintainflow:agency-approval-workspace:${options.operatorId}`}, 0)
+      )
+    `;
+    const [existing] = await transaction<OrganizationMembershipRow[]>`
+      select
+        organization.id as organization_id,
+        organization.name as organization_name,
+        organization.customer_type as organization_type,
+        membership.role as membership_role
+      from maintainflow_organization_memberships membership
+      join maintainflow_organizations organization
+        on organization.id = membership.organization_id
+      where membership.clerk_user_id = ${options.operatorId}
+        and organization.status = 'active'
+        and organization.customer_type = 'agency'
+      order by organization.created_at, organization.id
+      limit 1
+      for update of organization, membership
+    `;
+    if (existing) {
+      return { created: false, membership: parseOrganizationMembership(existing) };
+    }
+
+    const organizationId = randomUUID();
+    await transaction`
+      insert into maintainflow_organizations (id, name, customer_type)
+      values (${organizationId}, ${options.organizationName}, 'agency')
+    `;
+    await transaction`
+      insert into maintainflow_organization_memberships (
+        organization_id, clerk_user_id, role
+      ) values (${organizationId}, ${options.operatorId}, 'owner')
+    `;
+    return {
+      created: true,
+      membership: organizationMembershipSchema.parse({
+        organizationId,
+        organizationName: options.organizationName,
+        organizationType: "agency",
+        membershipRole: "owner",
+      }),
+    };
+  });
 }
 
 export type AdsCredentialMaterial = {

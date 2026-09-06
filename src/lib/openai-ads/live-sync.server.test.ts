@@ -11,7 +11,10 @@ vi.mock("../database/client.server", () => ({
 }));
 
 import { OpenAIAdsApiError, type AdsApiCredential } from "./client.server";
-import type { LiveWorkbenchData } from "./data.server";
+import type {
+  LiveWorkbenchBundle,
+  LiveWorkbenchData,
+} from "./data.server";
 import { demoAccount } from "./demo-data";
 import { readLiveSyncState } from "./live-sync-store.server";
 import {
@@ -48,6 +51,29 @@ function workbench(
     recommendations: [],
     conversionMeasurement: {} as LiveWorkbenchData["conversionMeasurement"],
     syncedAt,
+  };
+}
+
+function bundle(data: LiveWorkbenchData): LiveWorkbenchBundle {
+  return {
+    data,
+    integritySnapshot: {
+      projectionVersion: 1,
+      accountId: data.account.id,
+      observationStartedAt: data.syncedAt,
+      observedAt: data.syncedAt,
+      resources: [
+        {
+          resourceType: "ad_account",
+          resourceId: data.account.id,
+          parentResourceId: null,
+          resourceLabel: data.account.id,
+          providerUpdatedAt: null,
+          configuration: {},
+          fingerprint: "0".repeat(64),
+        },
+      ],
+    },
   };
 }
 
@@ -181,9 +207,12 @@ function dependencies(
     renewLiveSyncClaim: vi.fn(async () => true),
     completeLiveSyncRefresh: vi.fn(async () => true),
     failLiveSyncRefresh: vi.fn(async () => true),
-    fetchLiveWorkbenchData: vi.fn(async (_account, suppliedCredential) =>
-      workbench(
-        (suppliedCredential as { expectedAccountId: string }).expectedAccountId,
+    fetchLiveWorkbenchBundle: vi.fn(async (_account, suppliedCredential) =>
+      bundle(
+        workbench(
+          (suppliedCredential as { expectedAccountId: string })
+            .expectedAccountId,
+        ),
       ),
     ),
     now: () => new Date(NOW),
@@ -214,7 +243,7 @@ describe("live Ads sync coordinator", () => {
         const refreshed = workbench(accountId);
         const deps = dependencies({
           readLiveSyncState,
-          fetchLiveWorkbenchData: vi.fn(async () => refreshed),
+          fetchLiveWorkbenchBundle: vi.fn(async () => bundle(refreshed)),
         });
 
         const result = await createLiveSyncCoordinator(deps).getLiveWorkbench({
@@ -229,12 +258,13 @@ describe("live Ads sync coordinator", () => {
         expect(JSON.stringify(result.data)).not.toContain(
           "Stored cache sentinel",
         );
-        expect(deps.fetchLiveWorkbenchData).toHaveBeenCalledOnce();
+        expect(deps.fetchLiveWorkbenchBundle).toHaveBeenCalledOnce();
         expect(deps.completeLiveSyncRefresh).toHaveBeenCalledWith(
           expect.objectContaining({
             accountId,
             credentialGeneration,
             snapshot: refreshed,
+            integritySnapshot: bundle(refreshed).integritySnapshot,
           }),
         );
         expect(statement(database.calls[1])).toContain(
@@ -268,7 +298,7 @@ describe("live Ads sync coordinator", () => {
       refreshFailure: "store_unavailable",
     });
     expect(deps.claimLiveSyncRefresh).not.toHaveBeenCalled();
-    expect(deps.fetchLiveWorkbenchData).not.toHaveBeenCalled();
+    expect(deps.fetchLiveWorkbenchBundle).not.toHaveBeenCalled();
   });
 
   it("returns a fresh dashboard snapshot without claiming or calling the provider", async () => {
@@ -288,14 +318,14 @@ describe("live Ads sync coordinator", () => {
 
     expect(result).toEqual({ data: cached, freshness: "fresh" });
     expect(deps.claimLiveSyncRefresh).not.toHaveBeenCalled();
-    expect(deps.fetchLiveWorkbenchData).not.toHaveBeenCalled();
+    expect(deps.fetchLiveWorkbenchBundle).not.toHaveBeenCalled();
   });
 
   it("allows one refresh per account generation and serves stale data to a contending dashboard", async () => {
     const cached = workbench("acct_shared", "2026-08-30T11:50:00.000Z");
     const refreshed = workbench("acct_shared", "2026-08-30T12:00:01.000Z");
     let currentState = state({ ...snapshot(cached, "stale") });
-    const provider = deferred<LiveWorkbenchData>();
+    const provider = deferred<LiveWorkbenchBundle>();
     const deps = dependencies({
       readLiveSyncState: vi.fn(async () => currentState),
       claimLiveSyncRefresh: vi.fn(async () => {
@@ -303,7 +333,7 @@ describe("live Ads sync coordinator", () => {
         currentState = { ...currentState, claim: acquired };
         return acquired;
       }),
-      fetchLiveWorkbenchData: vi.fn(() => provider.promise),
+      fetchLiveWorkbenchBundle: vi.fn(() => provider.promise),
     });
     const coordinator = createLiveSyncCoordinator(deps);
     const input = {
@@ -315,10 +345,10 @@ describe("live Ads sync coordinator", () => {
 
     const refreshing = coordinator.getLiveWorkbench(input);
     await vi.waitFor(() =>
-      expect(deps.fetchLiveWorkbenchData).toHaveBeenCalledTimes(1),
+      expect(deps.fetchLiveWorkbenchBundle).toHaveBeenCalledTimes(1),
     );
     const contending = await coordinator.getLiveWorkbench(input);
-    provider.resolve(refreshed);
+    provider.resolve(bundle(refreshed));
 
     await expect(refreshing).resolves.toEqual({
       data: refreshed,
@@ -329,7 +359,7 @@ describe("live Ads sync coordinator", () => {
       freshness: "stale",
       refreshFailure: "refresh_contended",
     });
-    expect(deps.fetchLiveWorkbenchData).toHaveBeenCalledTimes(1);
+    expect(deps.fetchLiveWorkbenchBundle).toHaveBeenCalledTimes(1);
   });
 
   it("keeps claims and completions separated by account and credential generation", async () => {
@@ -363,7 +393,7 @@ describe("live Ads sync coordinator", () => {
         expect.objectContaining(key),
       );
     }
-    expect(deps.fetchLiveWorkbenchData).toHaveBeenCalledTimes(3);
+    expect(deps.fetchLiveWorkbenchBundle).toHaveBeenCalledTimes(3);
   });
 
   it("falls back to stale dashboard data and persists only a bounded safe failure", async () => {
@@ -375,7 +405,7 @@ describe("live Ads sync coordinator", () => {
           consecutiveFailures: 2,
         }),
       ),
-      fetchLiveWorkbenchData: vi.fn(async () => {
+      fetchLiveWorkbenchBundle: vi.fn(async () => {
         throw new OpenAIAdsApiError(429, "600", {
           retryAfterMs: 10 * 60_000,
         });
@@ -426,7 +456,7 @@ describe("live Ads sync coordinator", () => {
       code: "live_sync_unavailable",
       refreshFailure: "refresh_contended",
     });
-    expect(deps.fetchLiveWorkbenchData).not.toHaveBeenCalled();
+    expect(deps.fetchLiveWorkbenchBundle).not.toHaveBeenCalled();
   });
 
   it("accepts a newer fresh snapshot that wins the claim race for a mutation", async () => {
@@ -449,7 +479,7 @@ describe("live Ads sync coordinator", () => {
     });
 
     expect(result).toEqual({ data: refreshed, freshness: "refreshed" });
-    expect(deps.fetchLiveWorkbenchData).not.toHaveBeenCalled();
+    expect(deps.fetchLiveWorkbenchBundle).not.toHaveBeenCalled();
     expect(deps.sleep).not.toHaveBeenCalled();
   });
 
@@ -476,7 +506,7 @@ describe("live Ads sync coordinator", () => {
 
     expect(result).toEqual({ data: refreshed, freshness: "refreshed" });
     expect(deps.claimLiveSyncRefresh).not.toHaveBeenCalled();
-    expect(deps.fetchLiveWorkbenchData).not.toHaveBeenCalled();
+    expect(deps.fetchLiveWorkbenchBundle).not.toHaveBeenCalled();
   });
 
   it("discards refreshed provider data when completion reports a lost claim", async () => {
@@ -486,7 +516,7 @@ describe("live Ads sync coordinator", () => {
       readLiveSyncState: vi.fn(async () =>
         state({ ...snapshot(cached, "stale") }),
       ),
-      fetchLiveWorkbenchData: vi.fn(async () => refreshed),
+      fetchLiveWorkbenchBundle: vi.fn(async () => bundle(refreshed)),
       completeLiveSyncRefresh: vi.fn(async () => false),
     });
 
@@ -504,10 +534,69 @@ describe("live Ads sync coordinator", () => {
     });
   });
 
+  it("releases the claim with backoff when atomic snapshot completion fails", async () => {
+    const cached = workbench("acct_completion", "2026-08-30T11:50:00.000Z");
+    const deps = dependencies({
+      readLiveSyncState: vi.fn(async () =>
+        state({ ...snapshot(cached, "stale") }),
+      ),
+      fetchLiveWorkbenchBundle: vi.fn(async () =>
+        bundle(workbench("acct_completion", "2026-08-30T12:00:01.000Z")),
+      ),
+      completeLiveSyncRefresh: vi.fn(async () => {
+        throw new Error("integrity transaction rolled back");
+      }),
+    });
+
+    await expect(
+      createLiveSyncCoordinator(deps).getLiveWorkbench({
+        accountId: "acct_completion",
+        credential: credential("acct_completion"),
+        credentialGeneration: "11",
+        policy: "dashboard",
+      }),
+    ).resolves.toEqual({
+      data: cached,
+      freshness: "stale",
+      refreshFailure: "refresh_failed",
+    });
+    expect(deps.failLiveSyncRefresh).toHaveBeenCalledWith({
+      accountId: "acct_completion",
+      credentialGeneration: "11",
+      claimId: "claim_1",
+      failureCode: "refresh_failed",
+      now: NOW,
+      retryAfter: new Date(NOW.getTime() + 30_000),
+    });
+  });
+
+  it("fails closed when completion and claim-release persistence both fail", async () => {
+    const deps = dependencies({
+      completeLiveSyncRefresh: vi.fn(async () => {
+        throw new Error("integrity transaction rolled back");
+      }),
+      failLiveSyncRefresh: vi.fn(async () => {
+        throw new Error("database unavailable");
+      }),
+    });
+
+    await expect(
+      createLiveSyncCoordinator(deps).getLiveWorkbench({
+        accountId: "acct_completion_store",
+        credential: credential("acct_completion_store"),
+        credentialGeneration: "12",
+        policy: "mutation",
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+      refreshFailure: "store_unavailable",
+    });
+  });
+
   it("fails closed and records a safe code when the provider account ID differs", async () => {
     const deps = dependencies({
-      fetchLiveWorkbenchData: vi.fn(async () =>
-        workbench("private-unexpected-account"),
+      fetchLiveWorkbenchBundle: vi.fn(async () =>
+        bundle(workbench("private-unexpected-account")),
       ),
     });
     const request = createLiveSyncCoordinator(deps).getLiveWorkbench({
@@ -533,11 +622,11 @@ describe("live Ads sync coordinator", () => {
   });
 
   it("renews a long-running claim every 20 seconds with a 90-second lease", async () => {
-    const provider = deferred<LiveWorkbenchData>();
+    const provider = deferred<LiveWorkbenchBundle>();
     let renewalCallback: (() => void) | undefined;
     const cancel = vi.fn();
     const deps = dependencies({
-      fetchLiveWorkbenchData: vi.fn(() => provider.promise),
+      fetchLiveWorkbenchBundle: vi.fn(() => provider.promise),
       scheduleInterval: vi.fn((callback, milliseconds) => {
         renewalCallback = callback;
         expect(milliseconds).toBe(LIVE_SYNC_LEASE_RENEWAL_MS);
@@ -562,7 +651,7 @@ describe("live Ads sync coordinator", () => {
         leaseMs: LIVE_SYNC_LEASE_MS,
       }),
     );
-    provider.resolve(workbench("acct_renew"));
+    provider.resolve(bundle(workbench("acct_renew")));
 
     await expect(request).resolves.toMatchObject({ freshness: "refreshed" });
     expect(cancel).toHaveBeenCalledOnce();

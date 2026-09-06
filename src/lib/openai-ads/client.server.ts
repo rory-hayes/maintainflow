@@ -35,10 +35,13 @@ import {
 import { buildAdsResourcePath, parseAdsResourcePath } from "./resource-path";
 import type { AdsMutation, Recommendation } from "./demo-data";
 import {
+  AccountAccessForbiddenError,
+  withAuthorizedAdsWriteFence,
+} from "../tenancy/store.server";
+import {
   canWriteAccount,
   type AccountAccess,
 } from "../tenancy/schema";
-import { withAuthorizedAdsWriteFence } from "../tenancy/store.server";
 import { resolveReleaseStage } from "../release/stage";
 import { createServerLogger } from "../observability/logger.server";
 
@@ -883,6 +886,13 @@ export async function applyAdsMutation(
     access?: AccountAccess;
     credential?: AdsApiCredential;
     credentialGeneration?: string;
+    authorization?:
+      | { kind: "direct" }
+      | {
+          kind: "agency_request";
+          requestId: string;
+          expectedVersion: number;
+        };
   },
 ) {
   const log = createServerLogger("api.ads.apply");
@@ -920,6 +930,23 @@ export async function applyAdsMutation(
   if (!options.credentialGeneration) {
     throw new Error(
       "A generation-scoped live snapshot is required for a live Ads change.",
+    );
+  }
+  const authorization = options.authorization ?? { kind: "direct" as const };
+  if (
+    options.access.organizationType === "agency" &&
+    authorization.kind !== "agency_request"
+  ) {
+    throw new AccountAccessForbiddenError(
+      "Agency live changes require an independently approved change request.",
+    );
+  }
+  if (
+    options.access.organizationType === "advertiser" &&
+    authorization.kind !== "direct"
+  ) {
+    throw new AccountAccessForbiddenError(
+      "This approval request does not belong to a live agency workspace.",
     );
   }
 
@@ -963,6 +990,7 @@ export async function applyAdsMutation(
           operatorId: options.operatorId!,
           recommendation,
           access,
+          authorization,
         },
         transaction,
       ),

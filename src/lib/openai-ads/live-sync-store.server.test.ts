@@ -2,12 +2,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { getRuntimeDatabaseMock } = vi.hoisted(() => ({
+const {
+  getRuntimeDatabaseMock,
+  recordChangeIntegritySnapshotMock,
+  verifyChangeIntegrityStoreMock,
+} = vi.hoisted(() => ({
   getRuntimeDatabaseMock: vi.fn(),
+  recordChangeIntegritySnapshotMock: vi.fn(),
+  verifyChangeIntegrityStoreMock: vi.fn(),
 }));
 
 vi.mock("../database/client.server", () => ({
   getRuntimeDatabase: getRuntimeDatabaseMock,
+}));
+
+vi.mock("./change-integrity-store.server", () => ({
+  recordChangeIntegritySnapshot: recordChangeIntegritySnapshotMock,
+  verifyChangeIntegrityStore: verifyChangeIntegrityStoreMock,
 }));
 
 import {
@@ -17,6 +28,7 @@ import {
   demoCampaigns,
 } from "./demo-data";
 import type { LiveWorkbenchData } from "./data.server";
+import type { ChangeIntegritySnapshot } from "./change-integrity-schema";
 import {
   claimLiveSyncRefresh,
   completeLiveSyncRefresh,
@@ -51,15 +63,38 @@ function snapshot(): LiveWorkbenchData {
   };
 }
 
+function integritySnapshot(): ChangeIntegritySnapshot {
+  return {
+    projectionVersion: 1,
+    accountId: demoAccount.id,
+    observationStartedAt: snapshot().syncedAt,
+    observedAt: snapshot().syncedAt,
+    resources: [
+      {
+        resourceType: "ad_account",
+        resourceId: demoAccount.id,
+        parentResourceId: null,
+        resourceLabel: demoAccount.name,
+        providerUpdatedAt: null,
+        configuration: {},
+        fingerprint: "0".repeat(64),
+      },
+    ],
+  };
+}
+
 function fakeDatabase(responses: unknown[][]) {
   const calls: unknown[][] = [];
   const sql = vi.fn(async (...args: unknown[]) => {
     calls.push(args);
     return responses.shift() ?? [];
   });
-  Object.assign(sql, { json: (value: unknown) => value });
+  Object.assign(sql, {
+    json: (value: unknown) => value,
+    begin: (callback: (transaction: typeof sql) => unknown) => callback(sql),
+  });
   getRuntimeDatabaseMock.mockReturnValue(sql);
-  return { calls };
+  return { calls, sql };
 }
 
 function statement(call: unknown[]) {
@@ -74,17 +109,38 @@ const now = new Date("2026-08-30T12:00:05.000Z");
 
 beforeEach(() => {
   vi.clearAllMocks();
+  recordChangeIntegritySnapshotMock.mockResolvedValue({
+    baselineCreated: true,
+    baselineAdvanced: true,
+    events: [],
+  });
+  verifyChangeIntegrityStoreMock.mockResolvedValue(true);
   process.env.DATABASE_URL = "postgres://localhost/maintainflow";
 });
 
 describe("live sync store", () => {
-  it("verifies the table and cleanup index through the shared runtime client", async () => {
-    fakeDatabase([[{ ready: true }]]);
+  it("verifies the cache and integrity stores through the shared runtime client", async () => {
+    const database = fakeDatabase([[{ ready: true }]]);
 
     await expect(verifyLiveSyncStore()).resolves.toBe(true);
     expect(getRuntimeDatabaseMock).toHaveBeenCalledWith(
       "postgres://localhost/maintainflow",
     );
+    expect(statement(database.calls[0])).toContain(
+      "maintainflow_ads_config_integrity_state",
+    );
+    expect(statement(database.calls[0])).toContain(
+      "maintainflow_enforce_ads_config_integrity_event()",
+    );
+    expect(verifyChangeIntegrityStoreMock).toHaveBeenCalledWith(database.sql);
+  });
+
+  it("fails closed when the exact integrity trigger is unavailable", async () => {
+    const database = fakeDatabase([[{ ready: true }]]);
+    verifyChangeIntegrityStoreMock.mockResolvedValue(false);
+
+    await expect(verifyLiveSyncStore()).resolves.toBe(false);
+    expect(verifyChangeIntegrityStoreMock).toHaveBeenCalledWith(database.sql);
   });
 
   it("parses the versioned snapshot and exposes claim and failure metadata", async () => {
@@ -223,27 +279,66 @@ describe("live sync store", () => {
     );
     expect(statement(renewal.calls[0])).toContain("for share");
 
-    const completion = fakeDatabase([[{ refresh_claim_id: claimId }]]);
+    const completion = fakeDatabase([
+      [{ id: "00000000-0000-4000-8000-000000000099" }],
+      [{ refresh_claim_id: claimId }],
+      [{ refresh_claim_id: claimId }],
+    ]);
     await expect(
       completeLiveSyncRefresh({
         ...scope,
         claimId,
         snapshot: snapshot(),
+        integritySnapshot: integritySnapshot(),
         now,
         freshForMs: 120_000,
         staleForMs: 900_000,
       }),
     ).resolves.toBe(true);
-    expect(statement(completion.calls[0])).toContain(
+    expect(statement(completion.calls[0])).toContain("for update");
+    expect(statement(completion.calls[1])).toContain(
       "state.refresh_claim_id =",
     );
-    expect(statement(completion.calls[0])).toContain(
+    expect(statement(completion.calls[1])).toContain(
       "state.refresh_claim_expires_at >",
     );
-    expect(statement(completion.calls[0])).toContain(
+    expect(statement(completion.calls[2])).toContain(
       "detected_signal_count = ?",
     );
-    expect(statement(completion.calls[0])).toContain("for share");
+    expect(recordChangeIntegritySnapshotMock).toHaveBeenCalledWith(
+      { snapshot: integritySnapshot() },
+      expect.any(Function),
+    );
+  });
+
+  it("does not publish the workbench snapshot when integrity persistence fails", async () => {
+    const claimId = "00000000-0000-4000-8000-000000000001";
+    const database = fakeDatabase([
+      [{ id: "00000000-0000-4000-8000-000000000099" }],
+      [{ refresh_claim_id: claimId }],
+    ]);
+    recordChangeIntegritySnapshotMock.mockRejectedValue(
+      new Error("integrity persistence failed"),
+    );
+
+    await expect(
+      completeLiveSyncRefresh({
+        ...scope,
+        claimId,
+        snapshot: snapshot(),
+        integritySnapshot: integritySnapshot(),
+        now,
+        freshForMs: 120_000,
+        staleForMs: 900_000,
+      }),
+    ).rejects.toThrow("integrity persistence failed");
+
+    expect(database.calls).toHaveLength(2);
+    expect(
+      database.calls.some((call) =>
+        statement(call).includes("detected_signal_count ="),
+      ),
+    ).toBe(false);
   });
 
   it("records only bounded failure codes for an unexpired matching claim", async () => {
@@ -282,11 +377,13 @@ describe("live sync store", () => {
         ...scope,
         claimId,
         snapshot: snapshot(),
+        integritySnapshot: integritySnapshot(),
         now,
         freshForMs: 120_000,
         staleForMs: 900_000,
       }),
     ).resolves.toBe(false);
+    expect(recordChangeIntegritySnapshotMock).not.toHaveBeenCalled();
 
     fakeDatabase([[]]);
     await expect(

@@ -20,6 +20,11 @@ Treat these as immediate operator alerts:
 - `deployment.readiness.failed` or `deployment.readiness.unconfigured`;
 - a missing daily `monitoring.run.completed` event;
 - `monitoring.run.completed_with_failures` or `monitoring.run.failed`;
+- a missing five-minute `approval_notifications.run.completed` event while
+  approval email is enabled;
+- `approval_notifications.run.completed_with_failures`,
+  `approval_notifications.run.failed`, or any non-zero notification recovery,
+  permanent-failure, or lost-claim count;
 - `ads.apply.execution_fence_lost` or
   `ads.rollback.execution_fence_lost` once live writes are enabled;
 - any `reconciliation_required` mutation event once live writes are enabled;
@@ -47,7 +52,8 @@ reviewer for that environment, set its non-secret
 HTTPS origin, and create the environment secrets
 `MAINTAINFLOW_STAGING_READINESS_PROBE_SECRET` and
 `MAINTAINFLOW_STAGING_CRON_SECRET`. Then run the **Hosted deployment smoke**
-workflow from `main` with the exact deployed Git SHA and expected stage. The
+workflow from `main` with the exact deployed Git SHA, expected stage, and
+expected approval-email state. The
 workflow deliberately accepts no destination input, so a dispatch cannot send
 either bearer secret to an arbitrary host.
 
@@ -62,21 +68,25 @@ The same probe can be run locally without writing secrets to the repository:
 MAINTAINFLOW_PROBE_ORIGIN='https://staging.example.com' \
 MAINTAINFLOW_EXPECTED_BUILD_SHA='<exact deployed git sha>' \
 MAINTAINFLOW_EXPECTED_RELEASE_STAGE='demo' \
+MAINTAINFLOW_EXPECTED_APPROVAL_EMAIL_ENABLED='false' \
 MAINTAINFLOW_READINESS_PROBE_SECRET='<dedicated readiness secret>' \
 CRON_SECRET='<dedicated cron secret>' \
 npm run probe:deployment
 ```
 
-The probe must prove all five gate groups in one run:
+The probe must prove all six gate groups in one run:
 
 1. `/api/health` returns the exact compiled revision;
 2. unauthenticated `/api/ready` returns 401;
 3. authenticated `/api/ready` returns the expected stage/revision with the
-   complete contract passed exactly: 7/7 checks in `demo` and 14/14 checks in
+   complete contract passed exactly: 9/9 checks in `demo` and 16/16 checks in
    `private_read` or `live_write`;
 4. the protected monitoring route completes successfully, including bounded
-   cleanup; and
-5. the public landing page, privacy notice, private-beta terms, registration
+   cleanup;
+5. the notification worker rejects an anonymous request and its authenticated
+   run matches the explicitly declared enablement state with bounded accounting,
+   no retries, permanent failures, lost claims, or recovery activity; and
+6. the public landing page, privacy notice, private-beta terms, registration
    access gate, and Readiness workspace all return bounded HTML containing
    their expected product markers.
 
@@ -86,6 +96,11 @@ origin. The script never prints bearer secrets or response bodies. A 503 is
 deployment failure evidence, even if some maintenance or monitoring work
 completed.
 
+For `private_read` and `live_write`, the expected approval-email state must be
+declared explicitly. A clean enabled run with an empty queue proves the worker,
+configuration parsing, and database claim path are available; it does not prove
+that Resend accepted an email or that signed webhooks work.
+
 Container CI runs this same complete probe against the built image through an
 explicit loopback-only HTTP exception. The exception is accepted only when
 `CI=true`, never for a remote HTTP host, and does not relax the hosted probe's
@@ -93,8 +108,8 @@ credential-free HTTPS-origin requirement.
 
 CI also builds a second standalone image with a syntactically valid non-secret
 test Clerk publishable key. It starts that image in `private_read` against the
-migrated TLS PostgreSQL service and requires all fourteen readiness checks, then
-proves that changing the runtime public Clerk key makes startup fail. This
+migrated TLS PostgreSQL service and requires the complete non-demo readiness
+contract, then proves that changing the runtime public Clerk key makes startup fail. This
 covers the account-backed image/configuration boundary without contacting
 Clerk or OpenAI and is not evidence of either hosted service working.
 
@@ -114,6 +129,9 @@ Clerk or OpenAI and is not evidence of either hosted service working.
   revision mismatch or an invalid release stage.
 - Require one successful monitoring completion after every deployment and one
   per UTC day. Respect its `Retry-After` header, retry once, then escalate.
+- While approval email is enabled, require a successful notification-delivery
+  completion at least every ten minutes. A best-effort request-path send does
+  not satisfy worker-liveness evidence.
 - The deployment probe requires both zero recovered operations for that run and
   zero persistent unresolved operations. That count includes stale active rows
   skipped by recovery while a provider-send transaction still holds their lock.

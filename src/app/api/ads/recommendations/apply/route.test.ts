@@ -9,6 +9,10 @@ const testState = vi.hoisted(() => {
   class TenancyStoreUnavailableError extends Error {}
   class ApprovalStoreUnavailableError extends Error {}
   class ApprovalTransitionError extends Error {}
+  class ChangeApprovalRequestForbiddenError extends Error {}
+  class ChangeApprovalRequestInvalidError extends Error {}
+  class ChangeApprovalRequestStoreUnavailableError extends Error {}
+  class ChangeApprovalRequestTransitionError extends Error {}
   class RequestBodyTooLargeError extends Error {}
   class AdsMutationPreconditionFailedError extends Error {
     approvalId: string;
@@ -77,6 +81,10 @@ const testState = vi.hoisted(() => {
     TenancyStoreUnavailableError,
     ApprovalStoreUnavailableError,
     ApprovalTransitionError,
+    ChangeApprovalRequestForbiddenError,
+    ChangeApprovalRequestInvalidError,
+    ChangeApprovalRequestStoreUnavailableError,
+    ChangeApprovalRequestTransitionError,
     RequestBodyTooLargeError,
     AdsMutationPreconditionFailedError,
     AdsMutationReconciliationRequiredError,
@@ -85,11 +93,11 @@ const testState = vi.hoisted(() => {
     LiveSyncUnavailableError,
     applyAdsMutation: vi.fn(),
     getAdsRuntimeMode: vi.fn(),
-    fetchLiveAdAccount: vi.fn(),
     getLiveWorkbench: vi.fn(),
     getDemoRecommendation: vi.fn(),
     requireOperatorId: vi.fn(),
-    requireAccountAccess: vi.fn(),
+    requireOrganizationAccountAccess: vi.fn(),
+    resolveLiveChangeApprovalExecution: vi.fn(),
     getAdsCredentialMaterialForAccount: vi.fn(),
   };
 });
@@ -103,10 +111,6 @@ vi.mock("@/lib/openai-ads/client.server", () => ({
   OpenAIAdsApiError: testState.OpenAIAdsApiError,
   applyAdsMutation: testState.applyAdsMutation,
   getAdsRuntimeMode: testState.getAdsRuntimeMode,
-}));
-
-vi.mock("@/lib/openai-ads/data.server", () => ({
-  fetchLiveAdAccount: testState.fetchLiveAdAccount,
 }));
 
 vi.mock("@/lib/openai-ads/live-sync.server", () => ({
@@ -130,6 +134,18 @@ vi.mock("@/lib/audit/approval-store.server", () => ({
   ApprovalTransitionError: testState.ApprovalTransitionError,
 }));
 
+vi.mock("@/lib/approvals/change-request-store.server", () => ({
+  ChangeApprovalRequestForbiddenError:
+    testState.ChangeApprovalRequestForbiddenError,
+  ChangeApprovalRequestInvalidError: testState.ChangeApprovalRequestInvalidError,
+  ChangeApprovalRequestStoreUnavailableError:
+    testState.ChangeApprovalRequestStoreUnavailableError,
+  ChangeApprovalRequestTransitionError:
+    testState.ChangeApprovalRequestTransitionError,
+  resolveLiveChangeApprovalExecution:
+    testState.resolveLiveChangeApprovalExecution,
+}));
+
 vi.mock("@/lib/http/request-security.server", () => ({
   RequestBodyTooLargeError: testState.RequestBodyTooLargeError,
   isSecureSameOriginRequest: () => true,
@@ -144,7 +160,8 @@ vi.mock("@/lib/tenancy/store.server", () => ({
   TenancyStoreUnavailableError: testState.TenancyStoreUnavailableError,
   getAdsCredentialMaterialForAccount:
     testState.getAdsCredentialMaterialForAccount,
-  requireAccountAccess: testState.requireAccountAccess,
+  requireOrganizationAccountAccess:
+    testState.requireOrganizationAccountAccess,
 }));
 
 import { POST } from "./route";
@@ -162,9 +179,19 @@ const displayedFingerprint = recommendationApprovalFingerprint(
 function request(body: Record<string, unknown>) {
   const recommendationSource =
     body.recommendationSource === "demo" ? "demo" : "live";
+  const authorization =
+    body.authorization ??
+    (recommendationSource === "demo" ? "demo" : "direct");
   const payload =
     "recommendationId" in body && !("recommendationFingerprint" in body)
       ? {
+          authorization,
+          ...(authorization === "agency_request"
+            ? {}
+            : { recommendationSource }),
+          ...(authorization === "direct" && "accountId" in body
+            ? { organizationId: "00000000-0000-4000-8000-000000000001" }
+            : {}),
           ...body,
           recommendationFingerprint:
             recommendationSource === "live"
@@ -174,7 +201,16 @@ function request(body: Record<string, unknown>) {
                   source: "demo",
                 } as never),
         }
-      : body;
+      : {
+          authorization,
+          ...(authorization === "agency_request"
+            ? {}
+            : { recommendationSource }),
+          ...(authorization === "direct" && "accountId" in body
+            ? { organizationId: "00000000-0000-4000-8000-000000000001" }
+            : {}),
+          ...body,
+        };
   return new Request("http://localhost/api/ads/recommendations/apply", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -190,10 +226,35 @@ beforeEach(() => {
     liveReadStage: true,
   });
   testState.requireOperatorId.mockResolvedValue("user_owner");
-  testState.requireAccountAccess.mockResolvedValue({
+  testState.requireOrganizationAccountAccess.mockResolvedValue({
     organizationId: "00000000-0000-4000-8000-000000000001",
+    organizationName: "Client Brand",
+    organizationType: "advertiser",
+    accountId: "adacct_client",
+    accountName: "Client Brand",
+    connectionMode: "vault",
     membershipRole: "owner",
     accountRole: "owner",
+  });
+  testState.resolveLiveChangeApprovalExecution.mockResolvedValue({
+    request: {
+      id: "00000000-0000-4000-8000-000000000010",
+      accountId: "adacct_client",
+      recommendationId: recommendation.id,
+      entityId: recommendation.entityId,
+      recommendationFingerprint: displayedFingerprint,
+      version: 2,
+    },
+    access: {
+      organizationId: "00000000-0000-4000-8000-000000000002",
+      organizationName: "Northstar Agency",
+      organizationType: "agency",
+      accountId: "adacct_client",
+      accountName: "Client Brand",
+      connectionMode: "vault",
+      membershipRole: "owner",
+      accountRole: "manager",
+    },
   });
   testState.getAdsCredentialMaterialForAccount.mockResolvedValue({
     apiKey: "ads_account_key",
@@ -233,14 +294,78 @@ describe("live recommendation application", () => {
       },
       policy: "mutation",
     });
+    expect(testState.requireOrganizationAccountAccess).toHaveBeenCalledWith(
+      "user_owner",
+      "00000000-0000-4000-8000-000000000001",
+      "adacct_client",
+      "write",
+    );
     expect(testState.applyAdsMutation).toHaveBeenCalledWith(
       recommendation,
       expect.objectContaining({
         accountId: "adacct_client",
         operatorId: "user_owner",
         credentialGeneration: "vault:credential-id:2",
+        authorization: { kind: "direct" },
       }),
     );
+  });
+
+  it("executes an agency packet using only its stored account and recommendation identity", async () => {
+    const response = await POST(
+      request({
+        authorization: "agency_request",
+        approvalRequestId: "00000000-0000-4000-8000-000000000010",
+        approvalRequestVersion: 2,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(testState.resolveLiveChangeApprovalExecution).toHaveBeenCalledWith({
+      requestId: "00000000-0000-4000-8000-000000000010",
+      expectedVersion: 2,
+      operatorId: "user_owner",
+    });
+    expect(testState.requireOrganizationAccountAccess).not.toHaveBeenCalled();
+    expect(testState.getAdsCredentialMaterialForAccount).toHaveBeenCalledWith(
+      "adacct_client",
+    );
+    expect(testState.applyAdsMutation).toHaveBeenCalledWith(
+      recommendation,
+      expect.objectContaining({
+        accountId: "adacct_client",
+        authorization: {
+          kind: "agency_request",
+          requestId: "00000000-0000-4000-8000-000000000010",
+          expectedVersion: 2,
+        },
+      }),
+    );
+  });
+
+  it("rejects an agency passed through the direct path before reading credentials", async () => {
+    testState.requireOrganizationAccountAccess.mockResolvedValue({
+      organizationId: "00000000-0000-4000-8000-000000000002",
+      organizationName: "Northstar Agency",
+      organizationType: "agency",
+      accountId: "adacct_client",
+      accountName: "Client Brand",
+      connectionMode: "vault",
+      membershipRole: "owner",
+      accountRole: "manager",
+    });
+
+    const response = await POST(
+      request({
+        accountId: "adacct_client",
+        recommendationId: recommendation.id,
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(testState.getAdsCredentialMaterialForAccount).not.toHaveBeenCalled();
+    expect(testState.getLiveWorkbench).not.toHaveBeenCalled();
+    expect(testState.applyAdsMutation).not.toHaveBeenCalled();
   });
 
   it("requires an explicit authorized account before any legacy live lookup", async () => {
@@ -252,7 +377,6 @@ describe("live recommendation application", () => {
     );
 
     expect(response.status).toBe(422);
-    expect(testState.fetchLiveAdAccount).not.toHaveBeenCalled();
     expect(testState.requireOperatorId).not.toHaveBeenCalled();
     expect(testState.getLiveWorkbench).not.toHaveBeenCalled();
     expect(testState.applyAdsMutation).not.toHaveBeenCalled();
@@ -283,17 +407,23 @@ describe("live recommendation application", () => {
   });
 
   it("rejects missing or stale displayed consent before applying", async () => {
-    for (const fingerprint of [undefined, "0".repeat(64)]) {
-      const response = await POST(
-        request({
-          accountId: "adacct_client",
-          recommendationId: recommendation.id,
-          recommendationFingerprint: fingerprint,
-        }),
-      );
+    const missing = await POST(
+      request({
+        accountId: "adacct_client",
+        recommendationId: recommendation.id,
+        recommendationFingerprint: undefined,
+      }),
+    );
+    const stale = await POST(
+      request({
+        accountId: "adacct_client",
+        recommendationId: recommendation.id,
+        recommendationFingerprint: "0".repeat(64),
+      }),
+    );
 
-      expect(response.status).toBe(409);
-    }
+    expect(missing.status).toBe(422);
+    expect(stale.status).toBe(409);
     expect(testState.applyAdsMutation).not.toHaveBeenCalled();
   });
 
@@ -327,7 +457,7 @@ describe("live recommendation application", () => {
   });
 
   it("does not call the provider or read credentials before write access", async () => {
-    testState.requireAccountAccess.mockRejectedValue(
+    testState.requireOrganizationAccountAccess.mockRejectedValue(
       new testState.AccountAccessForbiddenError("Review-only access."),
     );
 

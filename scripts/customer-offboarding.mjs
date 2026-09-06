@@ -7,13 +7,21 @@ import postgres from "postgres";
 
 import { hostedDatabaseTlsOptions } from "./database-tls.mjs";
 
-const EXPORT_SCHEMA_VERSION = "maintainflow.customer-offboarding.v1";
+const EXPORT_SCHEMA_VERSION = "maintainflow.customer-offboarding.v3";
 const UNRESOLVED_APPROVAL_STATUSES = new Set([
   "pending",
   "reconciliation_required",
   "rollback_pending",
   "rollback_failed",
   "rollback_reconciliation_required",
+]);
+const UNRESOLVED_CHANGE_APPROVAL_REQUEST_STATUSES = new Set([
+  "awaiting_approval",
+]);
+const CANCELLABLE_APPROVAL_NOTIFICATION_STATUSES = new Set([
+  "queued",
+  "retry_scheduled",
+  "sending",
 ]);
 
 export class CustomerOffboardingSafetyError extends Error {
@@ -171,12 +179,17 @@ export function customerOffboardingStateFingerprint(snapshot) {
       accountAccess: snapshot.accountAccess,
       advertiserCredentialMetadata: snapshot.advertiserCredentialMetadata,
       conversionCredentialMetadata: snapshot.conversionCredentialMetadata,
+      changeApprovalRequests: snapshot.changeApprovalRequests,
+      approvalNotificationDeliveries:
+        snapshot.approvalNotificationDeliveries,
       approvals: snapshot.approvals,
       creativeReviewState: snapshot.creativeReviewState,
       creativeReviewEvents: snapshot.creativeReviewEvents,
       recommendationDecisions: snapshot.recommendationDecisions,
       readinessAudits: snapshot.readinessAudits,
       liveWorkbenchSnapshots: snapshot.liveWorkbenchSnapshots,
+      changeIntegrityState: snapshot.changeIntegrityState,
+      changeIntegrityEvents: snapshot.changeIntegrityEvents,
       monitoringAccountSchedules: snapshot.monitoringAccountSchedules,
     }),
   );
@@ -201,6 +214,13 @@ function inventoryCounts(snapshot) {
     accessGrants: snapshot.accountAccess.length,
     advertiserCredentials: snapshot.advertiserCredentialMetadata.length,
     conversionCredentials: snapshot.conversionCredentialMetadata.length,
+    changeApprovalRequests: snapshot.changeApprovalRequests.length,
+    approvalNotificationDeliveries:
+      snapshot.approvalNotificationDeliveries.length,
+    unresolvedChangeApprovalRequests: snapshot.changeApprovalRequests.filter(
+      (record) =>
+        UNRESOLVED_CHANGE_APPROVAL_REQUEST_STATUSES.has(record.status),
+    ).length,
     approvals: snapshot.approvals.length,
     unresolvedApprovals: snapshot.approvals.filter((record) =>
       UNRESOLVED_APPROVAL_STATUSES.has(record.status),
@@ -210,6 +230,8 @@ function inventoryCounts(snapshot) {
     recommendationDecisions: snapshot.recommendationDecisions.length,
     readinessAudits: snapshot.readinessAudits.length,
     liveWorkbenchSnapshots: snapshot.liveWorkbenchSnapshots.length,
+    changeIntegrityState: snapshot.changeIntegrityState.length,
+    changeIntegrityEvents: snapshot.changeIntegrityEvents.length,
     monitoringAccountSchedules: snapshot.monitoringAccountSchedules.length,
   };
 }
@@ -226,6 +248,27 @@ function snapshotBlockers(snapshot, evaluatedAt = new Date()) {
   }
   if (snapshot.lifecycleRecords.length > 0) {
     blockers.push("A completed offboarding lifecycle record already exists.");
+  }
+  const unresolvedChangeApprovalRequests = snapshot.changeApprovalRequests.filter(
+    (record) =>
+      UNRESOLVED_CHANGE_APPROVAL_REQUEST_STATUSES.has(record.status),
+  );
+  if (unresolvedChangeApprovalRequests.length > 0) {
+    blockers.push(
+      `${unresolvedChangeApprovalRequests.length} live change approval request(s) still await a decision. Cancel, decide, or expire them before offboarding.`,
+    );
+  }
+  const activeApprovalNotificationLeases =
+    snapshot.approvalNotificationDeliveries.filter((record) => {
+      if (record.status !== "sending") return false;
+      if (record.claim_expires_at === null) return true;
+      const leaseUntil = new Date(record.claim_expires_at).getTime();
+      return !Number.isFinite(leaseUntil) || leaseUntil > evaluatedAt.getTime();
+    });
+  if (activeApprovalNotificationLeases.length > 0) {
+    blockers.push(
+      `${activeApprovalNotificationLeases.length} approval notification delivery attempt(s) still hold an unexpired or invalid database lease. Let them finish before offboarding.`,
+    );
   }
   const unresolved = snapshot.approvals.filter((record) =>
     UNRESOLVED_APPROVAL_STATUSES.has(record.status),
@@ -418,6 +461,42 @@ async function loadCustomerOffboardingSnapshot(
         where advertiser_account_id = ${account.id}
         order by credential_version, id
       `;
+  const changeApprovalRequests = lock
+    ? await sql`
+        select * from maintainflow_change_approval_requests
+        where advertiser_account_id = ${account.id}
+          and source = 'live'
+        order by id
+        for update
+      `
+    : await sql`
+        select * from maintainflow_change_approval_requests
+        where advertiser_account_id = ${account.id}
+          and source = 'live'
+        order by id
+      `;
+  const approvalNotificationDeliveries = lock
+    ? await sql`
+        select delivery.*
+        from maintainflow_approval_notification_deliveries delivery
+        join maintainflow_change_approval_requests request
+          on request.id = delivery.approval_request_id
+         and request.organization_id = delivery.organization_id
+        where request.advertiser_account_id = ${account.id}
+          and request.source = 'live'
+        order by delivery.created_at, delivery.id
+        for update of delivery
+      `
+    : await sql`
+        select delivery.*
+        from maintainflow_approval_notification_deliveries delivery
+        join maintainflow_change_approval_requests request
+          on request.id = delivery.approval_request_id
+         and request.organization_id = delivery.organization_id
+        where request.advertiser_account_id = ${account.id}
+          and request.source = 'live'
+        order by delivery.created_at, delivery.id
+      `;
   const approvals = lock
     ? await sql`
         select * from ads_approval_records
@@ -490,6 +569,30 @@ async function loadCustomerOffboardingSnapshot(
         where advertiser_account_id = ${account.id}
         order by credential_generation
       `;
+  const changeIntegrityState = lock
+    ? await sql`
+        select * from maintainflow_ads_config_integrity_state
+        where advertiser_account_id = ${account.id}
+        order by advertiser_account_id
+        for update
+      `
+    : await sql`
+        select * from maintainflow_ads_config_integrity_state
+        where advertiser_account_id = ${account.id}
+        order by advertiser_account_id
+      `;
+  const changeIntegrityEvents = lock
+    ? await sql`
+        select * from maintainflow_ads_config_integrity_events
+        where advertiser_account_id = ${account.id}
+        order by detected_at, id
+        for update
+      `
+    : await sql`
+        select * from maintainflow_ads_config_integrity_events
+        where advertiser_account_id = ${account.id}
+        order by detected_at, id
+      `;
   const monitoringAccountSchedules = lock
     ? await sql`
         select * from maintainflow_monitoring_account_schedule
@@ -526,12 +629,16 @@ async function loadCustomerOffboardingSnapshot(
     accountAccess,
     advertiserCredentialMetadata,
     conversionCredentialMetadata,
+    changeApprovalRequests,
+    approvalNotificationDeliveries,
     approvals,
     creativeReviewState,
     creativeReviewEvents,
     recommendationDecisions,
     readinessAudits,
     liveWorkbenchSnapshots,
+    changeIntegrityState,
+    changeIntegrityEvents,
     monitoringAccountSchedules,
     lifecycleRecords,
   };
@@ -557,17 +664,23 @@ function customerOffboardingExport(snapshot, generatedAt) {
       accountAccess: snapshot.accountAccess,
       advertiserCredentialMetadata: snapshot.advertiserCredentialMetadata,
       conversionCredentialMetadata: snapshot.conversionCredentialMetadata,
+      changeApprovalRequests: snapshot.changeApprovalRequests,
+      approvalNotificationDeliveries:
+        snapshot.approvalNotificationDeliveries,
       approvals: snapshot.approvals,
       creativeReviewState: snapshot.creativeReviewState,
       creativeReviewEvents: snapshot.creativeReviewEvents,
       recommendationDecisions: snapshot.recommendationDecisions,
       readinessAudits: snapshot.readinessAudits,
       liveWorkbenchSnapshots: snapshot.liveWorkbenchSnapshots,
+      changeIntegrityState: snapshot.changeIntegrityState,
+      changeIntegrityEvents: snapshot.changeIntegrityEvents,
       monitoringAccountSchedules: snapshot.monitoringAccountSchedules,
     },
     notices: [
       "Encrypted credential bytes and decryption keys are excluded from this export.",
       "Provider source credentials must still be revoked in OpenAI Ads Manager.",
+      "Queued, retry-scheduled, and expired-lease notification deliveries are cancelled during offboarding; provider-accepted and terminal delivery evidence is retained.",
       "Historical evidence remains stored until the signed retention schedule authorizes deletion.",
     ],
   });
@@ -633,6 +746,25 @@ export async function applyCustomerOffboarding(sql, options) {
       sha256: prepared.exportSha256,
     });
 
+    const approvalNotificationDeliveriesCancelled = await transaction`
+      update maintainflow_approval_notification_deliveries delivery set
+        status = 'cancelled',
+        cancellation_code = 'account_offboarded'
+      from maintainflow_change_approval_requests request
+      where request.id = delivery.approval_request_id
+        and request.organization_id = delivery.organization_id
+        and request.advertiser_account_id = ${snapshot.account.id}
+        and request.source = 'live'
+        and (
+          delivery.status in ('queued', 'retry_scheduled')
+          or (
+            delivery.status = 'sending'
+            and delivery.claim_expires_at <= statement_timestamp()
+          )
+        )
+      returning delivery.id
+    `;
+
     const advertiserCredentialsDeleted = await transaction`
       delete from maintainflow_advertiser_credentials
       where advertiser_account_id = ${snapshot.account.id}
@@ -660,6 +792,10 @@ export async function applyCustomerOffboarding(sql, options) {
         snapshot.advertiserCredentialMetadata.length ||
       conversionCredentialsDeleted.length !==
         snapshot.conversionCredentialMetadata.length ||
+      approvalNotificationDeliveriesCancelled.length !==
+        snapshot.approvalNotificationDeliveries.filter((record) =>
+          CANCELLABLE_APPROVAL_NOTIFICATION_STATUSES.has(record.status),
+        ).length ||
       accountAccessDeleted.length !== snapshot.accountAccess.length ||
       disconnected.length !== 1
     ) {
@@ -696,6 +832,10 @@ export async function applyCustomerOffboarding(sql, options) {
         accountAccess: accountAccessDeleted.length,
         advertiserCredentials: advertiserCredentialsDeleted.length,
         conversionCredentials: conversionCredentialsDeleted.length,
+      },
+      cancelled: {
+        approvalNotificationDeliveries:
+          approvalNotificationDeliveriesCancelled.length,
       },
       providerRevocationRequired: true,
     };
@@ -825,6 +965,9 @@ export async function runCustomerOffboardingCli({
         `Encrypted credential rows: ${prepared.inventory.advertiserCredentials + prepared.inventory.conversionCredentials}`,
       );
       console.log(`Historical approval rows retained: ${prepared.inventory.approvals}`);
+      console.log(
+        `Historical live change approval requests retained: ${prepared.inventory.changeApprovalRequests}`,
+      );
       if (prepared.blockers.length > 0) {
         for (const blocker of prepared.blockers) console.log(`Blocker: ${blocker}`);
         return 2;

@@ -141,6 +141,49 @@ defaults are hardened. Application traffic uses the separately reviewed
 and deliberate zero-policy RLS boundary are documented independently from the
 migration credential.
 
+Migration `019_agency_change_approval_requests.sql` adds the credential-free
+agency simulator decision queue. It stores an organization-scoped immutable
+review packet containing the recommendation fingerprint and decision context,
+exact request and rollback payloads, evidence, safeguard, requester snapshot,
+and seven-day deadline. A partial unique index prevents a second awaiting packet
+for the same exact recommendation, a monotonically increasing version fences
+concurrent decisions, and the transition trigger permits only one move from
+`awaiting_approval` to a terminal state. Approval and change requests require a
+different agency owner or admin; simulator rows can never link to a live
+`ads_approval_records` row.
+
+Migration `020_live_change_approval_binding.sql` turns the reserved link into a
+database-enforced live-write authorization boundary. Existing approval rows may
+retain a null fingerprint for compatibility, while every new approval must carry
+the exact 64-character approval fingerprint and an acting organization. A
+deferred constraint requires each new agency approval to reach commit with
+exactly one approved, unexpired, still-authorized request whose organization,
+internal and external account, recommendation identity, fingerprint, mutation,
+rollback, evidence, and safeguard match the pending unattempted approval.
+Direct-advertiser approvals remain link-free and must match the active account
+owner, current account-access grant, executor membership, and stored role
+snapshots; an agency write cannot be disguised as a direct-account record.
+
+The migration also rejects pre-decided request inserts, prevents duplicate
+active unconsumed live packets, and freezes approval identity and evidence after
+creation. Legacy live packets that lack the complete version-two review context
+are expired while awaiting review or retired after approval, so they cannot
+block a fresh executable packet. An approved packet is retired without changing
+its decision when its database-timed window expires, its locked approver
+membership is no longer owner/admin eligible, or its decision schema is not
+executable; retirement is one-way, versioned, and mutually exclusive with an
+execution link. The separately provisioned runtime role can insert only the
+reviewed request-input columns, update only request lifecycle fields, and update
+only Ads approval operation, rollback, reconciliation, and monitoring lifecycle
+fields; deployment readiness verifies those exact column grants. Three authorization
+tables expose one key column each solely so PostgreSQL can acquire their rows
+with `SELECT ... FOR UPDATE`; enabled database guards reject every material
+runtime update, and the restricted-login integration probe proves the lock and
+rejection paths. RLS remains enabled with no browser Data API policy. The
+application reads the selected agency in cursor-paginated 50-row pages,
+ordering awaiting packets before newest history; each store page is bounded at
+100 rows.
+
 The application compiles the same ordered names and SHA-256 checksums into its
 deployment-readiness contract. `/api/ready` compares that immutable manifest
 with `maintainflow_schema_migrations`; a missing, extra, reordered, or

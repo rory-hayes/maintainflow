@@ -2,7 +2,7 @@ import "server-only";
 
 import { auth, currentUser } from "@clerk/nextjs/server";
 
-import { isClerkConfigured } from "./config";
+import { isClerkConfigured, isWorkspaceAdmissionAllowed } from "./config";
 
 export type Operator = {
   id: string;
@@ -18,9 +18,22 @@ export class OperatorAuthUnavailableError extends Error {
 }
 
 export class OperatorUnauthorizedError extends Error {
-  constructor() {
-    super("Sign in as an authorized operator before applying a live change.");
+  readonly status: 401 | 403 = 401;
+
+  constructor(
+    message = "Sign in as an authorized operator before applying a live change.",
+  ) {
+    super(message);
     this.name = "OperatorUnauthorizedError";
+  }
+}
+
+export class OperatorAdmissionForbiddenError extends OperatorUnauthorizedError {
+  override readonly status = 403 as const;
+
+  constructor() {
+    super("This signed-in account is not admitted to MaintainFlow.");
+    this.name = "OperatorAdmissionForbiddenError";
   }
 }
 
@@ -33,15 +46,31 @@ function initialsFor(name: string) {
     .join("") || "OP";
 }
 
-export async function getOptionalOperator(): Promise<Operator | null> {
+async function getOptionalAuthenticatedOperatorId(): Promise<string | null> {
   if (!isClerkConfigured()) return null;
 
   const session = await auth();
   if (!session.isAuthenticated || !session.userId) return null;
+  return session.userId;
+}
+
+async function getOperator(operatorId: string): Promise<Operator> {
   const user = await currentUser();
   const fallbackName = user?.primaryEmailAddress?.emailAddress ?? "Operator";
   const name = user?.fullName || user?.firstName || fallbackName;
-  return { id: session.userId, name, initials: initialsFor(name) };
+  return { id: operatorId, name, initials: initialsFor(name) };
+}
+
+export async function getOptionalOperator(): Promise<Operator | null> {
+  const operatorId = await getOptionalAuthenticatedOperatorId();
+  if (!operatorId) return null;
+  return getOperator(operatorId);
+}
+
+export async function getOptionalAdmittedOperator(): Promise<Operator | null> {
+  const operatorId = await getOptionalAuthenticatedOperatorId();
+  if (!operatorId || !isWorkspaceAdmissionAllowed(operatorId)) return null;
+  return getOperator(operatorId);
 }
 
 export async function requireOperatorId(): Promise<string> {
@@ -51,5 +80,13 @@ export async function requireOperatorId(): Promise<string> {
   if (!session.isAuthenticated || !session.userId) {
     throw new OperatorUnauthorizedError();
   }
+  if (!isWorkspaceAdmissionAllowed(session.userId)) {
+    throw new OperatorAdmissionForbiddenError();
+  }
   return session.userId;
+}
+
+export async function requireOperator(): Promise<Operator> {
+  const operatorId = await requireOperatorId();
+  return getOperator(operatorId);
 }

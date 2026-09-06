@@ -17,6 +17,10 @@ type LivePortfolioRow = {
   synced_at: Date | null;
   fresh_until: Date | null;
   stale_until: Date | null;
+  change_integrity_unexplained_count: number;
+  change_integrity_unexplained_oldest_at: Date | null;
+  change_integrity_indeterminate_count: number;
+  change_integrity_indeterminate_oldest_at: Date | null;
   safeguard_triggered_count: number;
   safeguard_triggered_oldest_at: Date | null;
   insufficient_evidence_count: number;
@@ -62,6 +66,14 @@ function operationalExceptions(
   row: LivePortfolioRow,
 ): LivePortfolioOperationalExceptions {
   return {
+    changeIntegrityUnexplained: parseExceptionEvidence(
+      row.change_integrity_unexplained_count,
+      row.change_integrity_unexplained_oldest_at,
+    ),
+    changeIntegrityIndeterminate: parseExceptionEvidence(
+      row.change_integrity_indeterminate_count,
+      row.change_integrity_indeterminate_oldest_at,
+    ),
     safeguardTriggered: parseExceptionEvidence(
       row.safeguard_triggered_count,
       row.safeguard_triggered_oldest_at,
@@ -193,6 +205,14 @@ export async function listLivePortfolioAccounts(options: {
       snapshot.synced_at,
       snapshot.fresh_until,
       snapshot.stale_until,
+      coalesce(integrity_summary.unexplained_count, 0)::int
+        as change_integrity_unexplained_count,
+      integrity_summary.unexplained_oldest_at
+        as change_integrity_unexplained_oldest_at,
+      coalesce(integrity_summary.indeterminate_count, 0)::int
+        as change_integrity_indeterminate_count,
+      integrity_summary.indeterminate_oldest_at
+        as change_integrity_indeterminate_oldest_at,
       coalesce(exception_summary.safeguard_triggered_count, 0)::int
         as safeguard_triggered_count,
       exception_summary.safeguard_triggered_oldest_at,
@@ -236,6 +256,27 @@ export async function listLivePortfolioAccounts(options: {
         ':',
         active_credential.credential_version::text
       )
+    left join lateral (
+      select
+        count(*) filter (
+          where integrity.classification = 'unexplained'
+            and integrity.review_status = 'open'
+        ) as unexplained_count,
+        min(integrity.detected_at) filter (
+          where integrity.classification = 'unexplained'
+            and integrity.review_status = 'open'
+        ) as unexplained_oldest_at,
+        count(*) filter (
+          where integrity.classification = 'indeterminate'
+            and integrity.review_status = 'open'
+        ) as indeterminate_count,
+        min(integrity.detected_at) filter (
+          where integrity.classification = 'indeterminate'
+            and integrity.review_status = 'open'
+        ) as indeterminate_oldest_at
+      from public.maintainflow_ads_config_integrity_events integrity
+      where integrity.advertiser_account_id = account.id
+    ) integrity_summary on true
     left join lateral (
       select
         count(*) filter (

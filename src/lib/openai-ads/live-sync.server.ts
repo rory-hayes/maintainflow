@@ -6,9 +6,11 @@ import {
 } from "./client.server";
 import {
   AdsProviderBudgetExceededError,
-  fetchLiveWorkbenchData,
+  fetchLiveWorkbenchBundle,
+  type LiveWorkbenchBundle,
   type LiveWorkbenchData,
 } from "./data.server";
+import type { ChangeIntegritySnapshot } from "./change-integrity";
 import {
   claimLiveSyncRefresh,
   completeLiveSyncRefresh,
@@ -84,6 +86,7 @@ export type LiveSyncCoordinatorDependencies = {
     input: LiveSyncKey & {
       claimId: string;
       snapshot: LiveWorkbenchData;
+      integritySnapshot: ChangeIntegritySnapshot;
       now: Date;
       freshForMs: number;
       staleForMs: number;
@@ -97,10 +100,10 @@ export type LiveSyncCoordinatorDependencies = {
       now: Date;
     },
   ) => Promise<boolean>;
-  fetchLiveWorkbenchData: (
+  fetchLiveWorkbenchBundle: (
     prefetchedAccount?: AdAccount,
     credential?: AdsApiCredential,
-  ) => Promise<LiveWorkbenchData>;
+  ) => Promise<LiveWorkbenchBundle>;
   now?: () => Date;
   sleep?: (milliseconds: number) => Promise<void>;
   scheduleInterval?: (callback: () => void, milliseconds: number) => () => void;
@@ -359,12 +362,13 @@ export function createLiveSyncCoordinator(
     };
     const stopLeaseRenewal = startLeaseRenewal(key, claim);
 
-    let data: LiveWorkbenchData;
+    let bundle: LiveWorkbenchBundle;
     try {
-      data = await dependencies.fetchLiveWorkbenchData(
+      bundle = await dependencies.fetchLiveWorkbenchBundle(
         input.prefetchedAccount,
         input.credential,
       );
+      const data = bundle.data;
       if (data.account.id !== input.accountId) {
         throw new LiveSyncAccountMismatchError();
       }
@@ -424,24 +428,44 @@ export function createLiveSyncCoordinator(
     }
 
     const completedAt = now();
+    const data = bundle.data;
     let completed = false;
     try {
       completed = await dependencies.completeLiveSyncRefresh({
         ...key,
         claimId: claim.claimId,
         snapshot: data,
+        integritySnapshot: bundle.integritySnapshot,
         now: completedAt,
         freshForMs: LIVE_SYNC_FRESH_FOR_MS,
         staleForMs: LIVE_SYNC_STALE_FOR_MS,
       });
     } catch {
+      const failedAt = now();
+      const retryAfter = new Date(
+        failedAt.getTime() +
+          failureDelayMs(previousState.consecutiveFailures, null),
+      );
+      let failureCode: LiveSyncFailureCode = "refresh_failed";
+      try {
+        const recorded = await dependencies.failLiveSyncRefresh({
+          ...key,
+          claimId: claim.claimId,
+          failureCode: "refresh_failed",
+          retryAfter,
+          now: failedAt,
+        });
+        if (!recorded) failureCode = "claim_lost";
+      } catch {
+        failureCode = "store_unavailable";
+      }
       if (
         input.policy === "dashboard" &&
         isStaleUsable(previousState, now())
       ) {
-        return staleResult(previousState, "store_unavailable");
+        return staleResult(previousState, failureCode);
       }
-      throw new LiveSyncUnavailableError("store_unavailable");
+      throw new LiveSyncUnavailableError(failureCode, retryAfter);
     }
 
     if (!completed) {
@@ -552,7 +576,7 @@ const defaultCoordinator = createLiveSyncCoordinator({
   renewLiveSyncClaim,
   completeLiveSyncRefresh,
   failLiveSyncRefresh,
-  fetchLiveWorkbenchData,
+  fetchLiveWorkbenchBundle,
 });
 
 export const getLiveWorkbench = defaultCoordinator.getLiveWorkbench;

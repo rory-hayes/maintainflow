@@ -73,6 +73,8 @@ export const CAPTURE_BASELINE_TABLES = Object.freeze([
 // the last production schema accepted by the pre-backup capture.
 export const APPLICATION_TABLES = Object.freeze([
   ...CAPTURE_BASELINE_TABLES,
+  "maintainflow_change_approval_requests",
+  "maintainflow_approval_notification_deliveries",
 ]);
 
 // These are customer and audit records whose exact restored cardinality is a

@@ -53,6 +53,12 @@ export const REQUIRED_MIGRATION_NAMES = Object.freeze([
   "016_live_portfolio_summaries.sql",
   "017_customer_retention_purge.sql",
   "018_supabase_data_api_hardening.sql",
+  "019_agency_change_approval_requests.sql",
+  "020_live_change_approval_binding.sql",
+  "021_approval_notification_outbox.sql",
+  "022_ads_change_integrity.sql",
+  "023_maintaincode_attribution.sql",
+  "024_maintaincode_runtime_role.sql",
 ]);
 
 const DEFAULT_MIGRATIONS_DIRECTORY = fileURLToPath(

@@ -19,6 +19,9 @@ const RESERVED_CONTACT_DOMAINS = new Set([
 ]);
 const SAFE_CONTACT_EMAIL_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9._+-]{0,62}[A-Za-z0-9])?@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CLERK_OPERATOR_ID_PATTERN = /^user_[A-Za-z0-9_-]{1,250}$/;
 
 function present(value) {
   return typeof value === "string" && value.trim().length > 0;
@@ -65,6 +68,57 @@ function requireContactEmail(issues, env, key) {
   ) {
     issues.push(
       `${key} must be a valid non-placeholder monitored email address.`,
+    );
+  }
+}
+
+function parseOperatorIds(value) {
+  if (!present(value)) return [];
+  const operatorIds = value.split(",").map((operatorId) => operatorId.trim());
+  if (
+    operatorIds.some(
+      (operatorId) =>
+        operatorId.length === 0 || !CLERK_OPERATOR_ID_PATTERN.test(operatorId),
+    ) ||
+    new Set(operatorIds).size !== operatorIds.length
+  ) {
+    return null;
+  }
+  return operatorIds;
+}
+
+function validateAdmissionOperatorIds(issues, env, stage) {
+  const privateBetaValue = env.MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS;
+  if (stage !== "demo" && !present(privateBetaValue)) {
+    issues.push("MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS is required.");
+  }
+
+  const privateBetaOperatorIds = parseOperatorIds(privateBetaValue);
+  const bootstrapOperatorIds = parseOperatorIds(
+    env.MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS,
+  );
+  if (present(privateBetaValue) && privateBetaOperatorIds === null) {
+    issues.push(
+      "MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS must contain unique comma-separated Clerk user IDs without wildcards or empty segments.",
+    );
+  }
+  if (
+    present(env.MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS) &&
+    bootstrapOperatorIds === null
+  ) {
+    issues.push(
+      "MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS must contain unique comma-separated Clerk user IDs without wildcards or empty segments.",
+    );
+  }
+  if (
+    privateBetaOperatorIds !== null &&
+    bootstrapOperatorIds !== null &&
+    privateBetaOperatorIds.some((operatorId) =>
+      bootstrapOperatorIds.includes(operatorId),
+    )
+  ) {
+    issues.push(
+      "MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS and MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS must not contain the same Clerk user ID.",
     );
   }
 }
@@ -190,6 +244,55 @@ function validateCredentialKeyring(issues, env) {
   }
 }
 
+function validateApprovalEmailConfiguration(issues, env, stage) {
+  const enabled = env.MAINTAINFLOW_APPROVAL_EMAIL_ENABLED;
+  if (present(enabled) && enabled !== "true" && enabled !== "false") {
+    issues.push(
+      "MAINTAINFLOW_APPROVAL_EMAIL_ENABLED must be exactly true or false.",
+    );
+    return;
+  }
+  if (enabled !== "true") return;
+  if (stage === "demo") {
+    issues.push(
+      "Approval email cannot be enabled for the unauthenticated demo release stage.",
+    );
+  }
+
+  const organizationIds = (
+    env.MAINTAINFLOW_APPROVAL_EMAIL_ORGANIZATION_IDS ?? ""
+  )
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  if (
+    organizationIds.length === 0 ||
+    organizationIds.some((id) => !UUID_PATTERN.test(id)) ||
+    new Set(organizationIds).size !== organizationIds.length
+  ) {
+    issues.push(
+      "MAINTAINFLOW_APPROVAL_EMAIL_ORGANIZATION_IDS must contain unique comma-separated organization UUIDs.",
+    );
+  }
+  if (
+    !present(env.RESEND_API_KEY) ||
+    !env.RESEND_API_KEY.startsWith("re_") ||
+    env.RESEND_API_KEY.length < 20
+  ) {
+    issues.push("RESEND_API_KEY must contain a valid server-side Resend API key.");
+  }
+  if (
+    !present(env.RESEND_WEBHOOK_SECRET) ||
+    !env.RESEND_WEBHOOK_SECRET.startsWith("whsec_") ||
+    env.RESEND_WEBHOOK_SECRET.length < 20
+  ) {
+    issues.push(
+      "RESEND_WEBHOOK_SECRET must contain a valid signed-webhook secret.",
+    );
+  }
+  requireContactEmail(issues, env, "MAINTAINFLOW_APPROVAL_FROM_EMAIL");
+}
+
 export function validateProductionConfig(env) {
   const issues = [];
   const stage = env.MAINTAINFLOW_RELEASE_STAGE ?? "demo";
@@ -210,6 +313,8 @@ export function validateProductionConfig(env) {
   requireSecret(issues, env, "MAINTAINFLOW_READINESS_PROBE_SECRET");
   requireSecret(issues, env, "CRON_SECRET");
   requireDistinctSecrets(issues, env, PRODUCTION_SECRET_KEYS);
+  validateApprovalEmailConfiguration(issues, env, stage);
+  validateAdmissionOperatorIds(issues, env, stage);
 
   if (env.MAINTAINFLOW_ADMISSION_MODE === "open") {
     issues.push(
@@ -244,7 +349,6 @@ export function validateProductionConfig(env) {
       "Pre-payment releases require MAINTAINFLOW_ADMISSION_MODE=private_beta.",
     );
   }
-  requireValue(issues, env, "MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS");
   if (env.OPENAI_ADS_DATA_MODE !== "live") {
     issues.push(`${stage} requires OPENAI_ADS_DATA_MODE=live.`);
   }

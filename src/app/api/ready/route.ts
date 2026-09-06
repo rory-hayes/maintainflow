@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { Sql } from "postgres";
 
 import { verifyApprovalStore } from "@/lib/audit/approval-store.server";
+import { verifyChangeApprovalRequestStore } from "@/lib/approvals/change-request-store.server";
 import { verifyRecommendationDecisionStore } from "@/lib/audit/recommendation-decision-store.server";
 import {
   type RuntimeDatabaseTransactionDiagnostic,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/database/readiness.server";
 import { createReadinessDatabase } from "@/lib/database/client.server";
 import { createServerLogger } from "@/lib/observability/logger.server";
+import { verifyChangeIntegrityStore } from "@/lib/openai-ads/change-integrity-store.server";
 import { verifyCreativeHistoryStore } from "@/lib/openai-ads/creative-history.server";
 import { verifyLiveSyncStore } from "@/lib/openai-ads/live-sync-store.server";
 import { verifyReadinessHistoryStore } from "@/lib/readiness/history.server";
@@ -80,6 +82,16 @@ function dependencyChecks(
     [
       "live_sync",
       database ? () => verifyLiveSyncStore(database) : unavailable,
+    ],
+    [
+      "change_integrity",
+      database ? () => verifyChangeIntegrityStore(database) : unavailable,
+    ],
+    [
+      "agency_approval_queue",
+      database
+        ? () => verifyChangeApprovalRequestStore(database)
+        : unavailable,
     ],
   ];
 

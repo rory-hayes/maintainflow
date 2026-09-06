@@ -215,7 +215,7 @@ export default function Hero({ children }: HeroProps) {
             initial={shouldReduceMotion ? false : { opacity: 0, y: 320, x: 240 }}
             className="absolute hidden lg:block right-24 bottom-[18rem]"
           >
-            <Pointer color="orange" name="Client approver" />
+            <Pointer color="orange" name="Change approver" />
           </motion.div>
 
           <motion.div

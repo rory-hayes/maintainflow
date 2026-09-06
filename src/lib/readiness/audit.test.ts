@@ -7,6 +7,7 @@ import {
   classifyReadiness,
   createPinnedLookup,
   evaluateOpenAICrawlerAccess,
+  hasSitemapDirective,
   isCrawlerAllowed,
   isPrivateAddress,
   normalizeAuditUrl,
@@ -191,6 +192,27 @@ Allow: /
       searchBotAllowed: false,
       evaluationLimited: true,
     });
+  });
+
+  it("detects sitemap directives with a line-local bounded scan", () => {
+    expect(
+      hasSitemapDirective(
+        "User-agent: *\r\n  SiTeMaP \t: https://shop.example/sitemap.xml\r\n",
+      ),
+    ).toBe(true);
+    expect(hasSitemapDirective("User-agent: *\nSitemaps: /not-a-directive"))
+      .toBe(false);
+
+    const newlineStorm = "\n".repeat(1_400_000);
+    const startedAt = performance.now();
+    expect(hasSitemapDirective(newlineStorm)).toBe(false);
+    expect(evaluateOpenAICrawlerAccess(newlineStorm, "/products/item"))
+      .toEqual({
+        adsBotAllowed: true,
+        searchBotAllowed: true,
+        evaluationLimited: false,
+      });
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
   });
 });
 

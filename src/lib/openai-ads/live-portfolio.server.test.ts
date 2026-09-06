@@ -32,6 +32,10 @@ function row(
     synced_at: Date | null;
     fresh_until: Date | null;
     stale_until: Date | null;
+    change_integrity_unexplained_count: number;
+    change_integrity_unexplained_oldest_at: Date | null;
+    change_integrity_indeterminate_count: number;
+    change_integrity_indeterminate_oldest_at: Date | null;
     safeguard_triggered_count: number;
     safeguard_triggered_oldest_at: Date | null;
     insufficient_evidence_count: number;
@@ -50,6 +54,10 @@ function row(
     synced_at: new Date("2026-09-02T11:55:00.000Z"),
     fresh_until: new Date("2026-09-02T12:05:00.000Z"),
     stale_until: new Date("2026-09-02T13:00:00.000Z"),
+    change_integrity_unexplained_count: 0,
+    change_integrity_unexplained_oldest_at: null,
+    change_integrity_indeterminate_count: 0,
+    change_integrity_indeterminate_oldest_at: null,
     safeguard_triggered_count: 0,
     safeguard_triggered_oldest_at: null,
     insufficient_evidence_count: 0,
@@ -107,6 +115,8 @@ describe("live agency portfolio evidence", () => {
         evidenceState: "confirmed_fresh",
         evidenceAt: "2026-09-02T11:55:00.000Z",
         operationalExceptions: {
+          changeIntegrityUnexplained: { count: 0, oldestAt: null },
+          changeIntegrityIndeterminate: { count: 0, oldestAt: null },
           safeguardTriggered: { count: 0, oldestAt: null },
           insufficientEvidence: { count: 0, oldestAt: null },
           monitoringFailures: { count: 0, oldestAt: null },
@@ -137,6 +147,8 @@ describe("live agency portfolio evidence", () => {
     expect(statement).toContain("credential.status = 'active'");
     expect(statement).toContain("snapshot.credential_generation = concat(");
     expect(statement).toContain("snapshot.detected_signal_count");
+    expect(statement).toContain("integrity.classification = 'unexplained'");
+    expect(statement).toContain("integrity.classification = 'indeterminate'");
     expect(statement).toContain("approval.monitoring_outcome = 'safeguard_triggered'");
     expect(statement).toContain("approval.monitoring_outcome = 'insufficient_evidence'");
     expect(statement).toContain("'rollback_reconciliation_required'");
@@ -232,6 +244,7 @@ describe("live agency portfolio evidence", () => {
       operationalExceptionAccountCount: 0,
       reconciliationRequiredCount: 0,
       monitoringExceptionCount: 0,
+      changeIntegrityExceptionCount: 0,
       detectedSignalCount: 5,
     });
   });
@@ -278,10 +291,34 @@ describe("live agency portfolio evidence", () => {
       }),
       now,
     );
+    const unexplained = toLivePortfolioAccount(
+      row({
+        account_id: "adacct_unexplained",
+        account_name: "Unexplained account",
+        change_integrity_unexplained_count: 2,
+        change_integrity_unexplained_oldest_at: new Date(
+          "2026-09-01T09:00:00.000Z",
+        ),
+      }),
+      now,
+    );
+    const indeterminate = toLivePortfolioAccount(
+      row({
+        account_id: "adacct_indeterminate",
+        account_name: "Indeterminate account",
+        change_integrity_indeterminate_count: 1,
+        change_integrity_indeterminate_oldest_at: new Date(
+          "2026-09-02T07:00:00.000Z",
+        ),
+      }),
+      now,
+    );
 
     expect(livePortfolioUrgency(monitoringFailure)).toBe("critical");
     expect(livePortfolioUrgency(reconciliation)).toBe("critical");
     expect(livePortfolioUrgency(safeguard)).toBe("attention");
+    expect(livePortfolioUrgency(unexplained)).toBe("attention");
+    expect(livePortfolioUrgency(indeterminate)).toBe("review");
     expect(livePortfolioUrgency(clear)).toBe("clear");
     expect(oldestLivePortfolioExceptionAt(monitoringFailure)).toBe(
       "2026-09-01T08:00:00.000Z",
@@ -290,26 +327,33 @@ describe("live agency portfolio evidence", () => {
       rankLivePortfolioAccounts([
         clear,
         safeguard,
+        unexplained,
+        indeterminate,
         reconciliation,
         monitoringFailure,
       ]).map((account) => account.accountId),
     ).toEqual([
       "adacct_monitoring_failure",
       "adacct_reconciliation",
+      "adacct_unexplained",
       "adacct_safeguard",
+      "adacct_indeterminate",
       "adacct_clear",
     ]);
     expect(
       summarizeLivePortfolioEvidence([
         clear,
         safeguard,
+        unexplained,
+        indeterminate,
         reconciliation,
         monitoringFailure,
       ]),
     ).toMatchObject({
-      operationalExceptionAccountCount: 3,
+      operationalExceptionAccountCount: 5,
       reconciliationRequiredCount: 1,
       monitoringExceptionCount: 5,
+      changeIntegrityExceptionCount: 3,
     });
   });
 

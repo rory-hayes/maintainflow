@@ -124,7 +124,8 @@ export async function POST(
       );
     }
     if (error instanceof OperatorUnauthorizedError) {
-      return json({ error: error.message }, { status: 401 });
+      const status = error.status === 403 ? 403 : 401;
+      return json({ error: error.message }, { status });
     }
     if (error instanceof AccountAccessForbiddenError) {
       return json({ error: error.message }, { status: 403 });

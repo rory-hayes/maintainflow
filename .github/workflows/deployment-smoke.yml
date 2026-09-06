@@ -1,5 +1,4 @@
-name: Hosted deployment smoke
-
+name: Hosted MaintainCode deployment smoke
 on:
   workflow_dispatch:
     inputs:
@@ -7,35 +6,22 @@ on:
         description: Exact deployed Git revision
         required: true
         type: string
-      stage:
-        description: Expected release stage
-        required: true
-        default: demo
-        type: choice
-        options:
-          - demo
-          - private_read
-          - live_write
-
 permissions:
   contents: read
-
 concurrency:
-  group: hosted-smoke-staging
+  group: hosted-smoke-production
   cancel-in-progress: false
-
 jobs:
   deployment-smoke:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment:
-      name: staging
-      url: ${{ vars.MAINTAINFLOW_STAGING_ORIGIN }}
+      name: production
+      url: https://maintainflow.io
     env:
-      MAINTAINFLOW_PROBE_ORIGIN: ${{ vars.MAINTAINFLOW_STAGING_ORIGIN }}
-      MAINTAINFLOW_EXPECTED_BUILD_SHA: ${{ inputs.revision }}
-      MAINTAINFLOW_EXPECTED_RELEASE_STAGE: ${{ inputs.stage }}
+      MAINTAINCODE_PROBE_ORIGIN: https://maintainflow.io
+      MAINTAINCODE_EXPECTED_BUILD_SHA: ${{ inputs.revision }}
     steps:
       - name: Check out the exact repository state
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -43,20 +29,14 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
-
       - name: Verify deployed revision belongs to main
         run: |
-          verified_revision="$(node scripts/verify-deployment-revision.mjs \
-            "$MAINTAINFLOW_EXPECTED_BUILD_SHA" origin/main)"
-          echo "MAINTAINFLOW_EXPECTED_BUILD_SHA=$verified_revision" >> "$GITHUB_ENV"
-
-      - name: Probe exact revision and dependencies
+          verified_revision="$(node scripts/verify-deployment-revision.mjs "$MAINTAINCODE_EXPECTED_BUILD_SHA" origin/main)"
+          echo "MAINTAINCODE_EXPECTED_BUILD_SHA=$verified_revision" >> "$GITHUB_ENV"
+      - name: Verify exact revision, protected database readiness and application surfaces
         run: npm run probe:deployment
         env:
-          MAINTAINFLOW_READINESS_PROBE_SECRET: ${{ secrets.MAINTAINFLOW_STAGING_READINESS_PROBE_SECRET }}
-          CRON_SECRET: ${{ secrets.MAINTAINFLOW_STAGING_CRON_SECRET }}
+          MAINTAINFLOW_READINESS_PROBE_SECRET: ${{ secrets.MAINTAINFLOW_READINESS_PROBE_SECRET }}

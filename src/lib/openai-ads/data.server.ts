@@ -25,8 +25,17 @@ import {
   buildWorkbenchDataFromProviderSnapshot,
   type LiveWorkbenchData,
 } from "./workbench-builder";
+import {
+  buildChangeIntegritySnapshot,
+  type ChangeIntegritySnapshot,
+} from "./change-integrity";
 
 export type { LiveWorkbenchData } from "./workbench-builder";
+
+export type LiveWorkbenchBundle = {
+  data: LiveWorkbenchData;
+  integritySnapshot: ChangeIntegritySnapshot;
+};
 
 const MAX_LIST_PAGES = 100;
 const AD_GROUP_FETCH_BATCH_SIZE = 5;
@@ -176,8 +185,8 @@ async function allOrAbort<T extends readonly unknown[]>(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   );
   if (rejected) throw budget.failureReason ?? rejected.reason;
-  return settled.map((result) =>
-    (result as PromiseFulfilledResult<unknown>).value,
+  return settled.map(
+    (result) => (result as PromiseFulfilledResult<unknown>).value,
   ) as unknown as T;
 }
 
@@ -224,7 +233,10 @@ function insightsPath(
     limit: "2000",
   });
 
-  params.append("time_ranges[]", JSON.stringify({ type: "unix_range", ...range }));
+  params.append(
+    "time_ranges[]",
+    JSON.stringify({ type: "unix_range", ...range }),
+  );
   for (const field of fields) params.append("fields[]", field);
   if (after) params.set("after", after);
 
@@ -431,11 +443,7 @@ async function listAds(
   providerBudget: LiveSyncProviderBudget,
 ) {
   const results: ScopedAd[] = [];
-  for (
-    let index = 0;
-    index < adGroups.length;
-    index += AD_FETCH_BATCH_SIZE
-  ) {
+  for (let index = 0; index < adGroups.length; index += AD_FETCH_BATCH_SIZE) {
     const batch = adGroups.slice(index, index + AD_FETCH_BATCH_SIZE);
     const batchResults = await allOrAbort(
       providerBudget,
@@ -531,10 +539,14 @@ async function getConversionInsights(
   return response.data;
 }
 
-export async function fetchLiveWorkbenchData(
+export async function fetchLiveWorkbenchBundle(
   prefetchedAccount?: AdAccount,
   credential?: AdsApiCredential,
-): Promise<LiveWorkbenchData> {
+): Promise<LiveWorkbenchBundle> {
+  // Keep the full provider-read interval. MaintainFlow operations that overlap
+  // this interval cannot be ordered reliably against every resource read, and
+  // the next comparison must retain the interval start as its evidence floor.
+  const observationStartedAt = new Date().toISOString();
   // A supplied account was already fetched and schema-verified by the caller.
   // Count that request conservatively so authenticated routes cannot split one
   // logical sync into an unbudgeted identity check plus a budgeted hierarchy.
@@ -542,24 +554,18 @@ export async function fetchLiveWorkbenchData(
 
   try {
     return await providerBudget.runWithinDeadline(async () => {
-      const [account, campaigns] = await allOrAbort(
-        providerBudget,
-        [
-          prefetchedAccount
-            ? Promise.resolve(prefetchedAccount)
-            : fetchLiveAdAccount(credential, providerBudget),
-          listCampaigns(credential, providerBudget),
-        ] as const,
-      );
+      const [account, campaigns] = await allOrAbort(providerBudget, [
+        prefetchedAccount
+          ? Promise.resolve(prefetchedAccount)
+          : fetchLiveAdAccount(credential, providerBudget),
+        listCampaigns(credential, providerBudget),
+      ] as const);
       providerBudget.recordResources(1, "advertiser account");
 
-      const [adGroups, eventSettings] = await allOrAbort(
-        providerBudget,
-        [
-          listAdGroups(campaigns, credential, providerBudget),
-          listConversionEventSettings(credential, providerBudget),
-        ] as const,
-      );
+      const [adGroups, eventSettings] = await allOrAbort(providerBudget, [
+        listAdGroups(campaigns, credential, providerBudget),
+        listConversionEventSettings(credential, providerBudget),
+      ] as const);
       const dashboardWindow = currentMonthRange(account.timezone);
       const recommendationWindow = trailingFullDaysRange(7);
 
@@ -569,41 +575,33 @@ export async function fetchLiveWorkbenchData(
         adGroupRows,
         campaignConversions,
         adGroupConversions,
-      ] = await allOrAbort(
-        providerBudget,
-        [
-          listAds(adGroups, credential, providerBudget),
-          getInsights(
-            "campaign",
-            dashboardWindow,
-            credential,
-            providerBudget,
-          ),
-          getInsights(
-            "ad_group",
-            recommendationWindow,
-            credential,
-            providerBudget,
-          ),
-          getConversionInsights(
-            "campaign",
-            campaigns.map((campaign) => campaign.id),
-            dashboardWindow,
-            credential,
-            providerBudget,
-          ),
-          getConversionInsights(
-            "ad_group",
-            adGroups.map((adGroup) => adGroup.id),
-            recommendationWindow,
-            credential,
-            providerBudget,
-          ),
-        ] as const,
-      );
+      ] = await allOrAbort(providerBudget, [
+        listAds(adGroups, credential, providerBudget),
+        getInsights("campaign", dashboardWindow, credential, providerBudget),
+        getInsights(
+          "ad_group",
+          recommendationWindow,
+          credential,
+          providerBudget,
+        ),
+        getConversionInsights(
+          "campaign",
+          campaigns.map((campaign) => campaign.id),
+          dashboardWindow,
+          credential,
+          providerBudget,
+        ),
+        getConversionInsights(
+          "ad_group",
+          adGroups.map((adGroup) => adGroup.id),
+          recommendationWindow,
+          credential,
+          providerBudget,
+        ),
+      ] as const);
 
       const syncedAt = new Date().toISOString();
-      return buildWorkbenchDataFromProviderSnapshot({
+      const data = buildWorkbenchDataFromProviderSnapshot({
         account,
         campaigns,
         adGroups,
@@ -616,11 +614,68 @@ export async function fetchLiveWorkbenchData(
         recommendationWindow,
         syncedAt,
       });
+      const integritySnapshot = buildChangeIntegritySnapshot({
+        account,
+        campaigns,
+        adGroups,
+        ads,
+        observationStartedAt,
+        observedAt: syncedAt,
+      });
+      return { data, integritySnapshot };
     });
   } catch (error) {
     providerBudget.abort(error);
     throw providerBudget.failureReason ?? error;
   } finally {
     providerBudget.dispose();
+  }
+}
+
+export async function fetchLiveWorkbenchData(
+  prefetchedAccount?: AdAccount,
+  credential?: AdsApiCredential,
+): Promise<LiveWorkbenchData> {
+  return (await fetchLiveWorkbenchBundle(prefetchedAccount, credential)).data;
+}
+
+// Attribution needs only the read-only object hierarchy; conversion-setup permissions
+// and operational recommendation inputs are deliberately not required by this path.
+export async function fetchLiveAttributionInventory(
+  account: AdAccount,
+  credential: AdsApiCredential,
+) {
+  const budget = new LiveSyncProviderBudget(1);
+  try {
+    return await budget.runWithinDeadline(async () => {
+      const campaigns = await listCampaigns(credential, budget);
+      const groups = await listAdGroups(campaigns, credential, budget);
+      const ads = await listAds(groups, credential, budget);
+      return {
+        accountId: account.id,
+        campaigns: campaigns.map((c) => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+        })),
+        groups: groups.map((g) => ({
+          id: g.id,
+          campaignId: g.campaign_id,
+          name: g.name,
+          status: g.status,
+        })),
+        ads: ads.map((a) => ({
+          id: a.id,
+          groupId: a.ad_group_id,
+          name: a.name,
+          status: a.status,
+        })),
+      };
+    });
+  } catch (error) {
+    budget.abort(error);
+    throw budget.failureReason ?? error;
+  } finally {
+    budget.dispose();
   }
 }

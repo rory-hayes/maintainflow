@@ -30,6 +30,7 @@ type RuntimeRoleRow = {
   unexpected_incoming_member_count: number;
   owned_public_relation_count: number;
   public_policy_count: number;
+  runtime_lock_guard_count: number;
   executable_public_function_count: number;
   usable_public_sequence_count: number;
   can_connect_database: boolean;
@@ -40,6 +41,7 @@ type RuntimeRoleRow = {
 
 type RuntimeTablePrivilegeRow = {
   table_name: string;
+  row_security_enabled: boolean;
   can_select: boolean;
   can_insert: boolean;
   can_update: boolean;
@@ -52,6 +54,8 @@ type RuntimeTablePrivilegeRow = {
   can_insert_any_column: boolean;
   can_update_any_column: boolean;
   can_reference_any_column: boolean;
+  insert_columns: string[];
+  update_columns: string[];
 };
 
 type RuntimeTransactionIdentityRow = {
@@ -87,13 +91,166 @@ type RuntimeDatabaseTransactionPhase =
 
 const runtimeTablePrivileges = new Map<
   string,
-  Readonly<{ select: boolean; insert: boolean; update: boolean; delete: boolean }>
+  Readonly<{
+    select: boolean;
+    insert: boolean;
+    insertAny?: boolean;
+    insertColumns?: readonly string[];
+    update: boolean;
+    updateAny?: boolean;
+    updateColumns?: readonly string[];
+    delete: boolean;
+  }>
 >([
-  ["ads_approval_records", { select: true, insert: true, update: true, delete: false }],
-  ["maintainflow_organizations", { select: true, insert: true, update: false, delete: false }],
-  ["maintainflow_organization_memberships", { select: true, insert: true, update: false, delete: false }],
+  [
+    "ads_approval_records",
+    {
+      select: true,
+      insert: true,
+      update: false,
+      updateAny: true,
+      updateColumns: [
+        "applied_at",
+        "apply_provider_attempted_at",
+        "error_message",
+        "monitoring_ends_at",
+        "monitoring_evaluated_at",
+        "monitoring_evaluation_claim_id",
+        "monitoring_evaluation_claimed_at",
+        "monitoring_observation",
+        "monitoring_outcome",
+        "monitoring_started_at",
+        "reconciled_account_role",
+        "reconciled_at",
+        "reconciled_by",
+        "reconciled_membership_role",
+        "reconciled_organization_id",
+        "reconciliation_note",
+        "response_payload",
+        "rollback_account_role",
+        "rollback_error_message",
+        "rollback_membership_role",
+        "rollback_operator_id",
+        "rollback_organization_id",
+        "rollback_provider_attempt_id",
+        "rollback_provider_attempted_at",
+        "rollback_response_payload",
+        "rolled_back_at",
+        "status",
+        "updated_at",
+      ],
+      delete: false,
+    },
+  ],
+  [
+    "maintainflow_change_approval_requests",
+    {
+      select: true,
+      insert: false,
+      insertAny: true,
+      insertColumns: [
+        "account_id_snapshot",
+        "account_name_snapshot",
+        "advertiser_account_id",
+        "decision_context",
+        "entity_id",
+        "evidence_payload",
+        "expires_at",
+        "id",
+        "organization_id",
+        "recommendation_fingerprint",
+        "recommendation_id",
+        "recommendation_title",
+        "request_note",
+        "request_payload",
+        "requested_at",
+        "requester_membership_role",
+        "requester_name_snapshot",
+        "requester_operator_id",
+        "rollback_payload",
+        "safeguard",
+        "source",
+      ],
+      update: false,
+      updateAny: true,
+      updateColumns: [
+        "ads_approval_record_id",
+        "decided_at",
+        "decision_membership_role",
+        "decision_name_snapshot",
+        "decision_note",
+        "decision_operator_id",
+        "retired_at",
+        "status",
+        "updated_at",
+        "version",
+      ],
+      delete: false,
+    },
+  ],
+  [
+    "maintainflow_approval_notification_deliveries",
+    {
+      select: true,
+      insert: false,
+      insertAny: true,
+      insertColumns: [
+        "approval_request_id",
+        "approval_request_version",
+        "event_type",
+        "id",
+        "organization_id",
+        "recipient_membership_role_snapshot",
+        "recipient_operator_id",
+      ],
+      update: false,
+      updateAny: true,
+      updateColumns: [
+        "cancellation_code",
+        "claim_id",
+        "last_failure_code",
+        "provider_event_at",
+        "provider_event_type",
+        "provider_message_id",
+        "status",
+      ],
+      delete: false,
+    },
+  ],
+  [
+    "maintainflow_organizations",
+    {
+      select: true,
+      insert: true,
+      update: false,
+      updateAny: true,
+      updateColumns: ["id"],
+      delete: false,
+    },
+  ],
+  [
+    "maintainflow_organization_memberships",
+    {
+      select: true,
+      insert: true,
+      update: false,
+      updateAny: true,
+      updateColumns: ["organization_id"],
+      delete: false,
+    },
+  ],
   ["maintainflow_advertiser_accounts", { select: true, insert: true, update: true, delete: false }],
-  ["maintainflow_account_access", { select: true, insert: true, update: false, delete: false }],
+  [
+    "maintainflow_account_access",
+    {
+      select: true,
+      insert: true,
+      update: false,
+      updateAny: true,
+      updateColumns: ["organization_id"],
+      delete: false,
+    },
+  ],
   ["maintainflow_advertiser_credentials", { select: true, insert: true, update: true, delete: false }],
   ["maintainflow_creative_review_state", { select: true, insert: true, update: true, delete: false }],
   ["maintainflow_creative_review_events", { select: true, insert: true, update: false, delete: false }],
@@ -102,6 +259,41 @@ const runtimeTablePrivileges = new Map<
   ["maintainflow_conversion_credentials", { select: true, insert: true, update: true, delete: false }],
   ["maintainflow_readiness_audit_runs", { select: true, insert: true, update: false, delete: false }],
   ["maintainflow_live_workbench_snapshots", { select: true, insert: true, update: true, delete: true }],
+  [
+    "maintainflow_ads_config_integrity_state",
+    {
+      select: true,
+      insert: true,
+      update: false,
+      updateAny: true,
+      updateColumns: [
+        "observed_at",
+        "projection_version",
+        "snapshot_fingerprint",
+        "snapshot_payload",
+        "snapshot_resource_count",
+        "updated_at",
+      ],
+      delete: false,
+    },
+  ],
+  [
+    "maintainflow_ads_config_integrity_events",
+    {
+      select: true,
+      insert: true,
+      update: false,
+      updateAny: true,
+      updateColumns: [
+        "review_note",
+        "review_status",
+        "reviewed_by_name",
+        "reviewed_by_operator_id",
+        "reviewed_by_organization_id",
+      ],
+      delete: false,
+    },
+  ],
   ["maintainflow_customer_lifecycle_records", { select: true, insert: false, update: false, delete: false }],
   ["maintainflow_monitoring_account_schedule", { select: true, insert: true, update: true, delete: false }],
   ["maintainflow_schema_migrations", { select: true, insert: false, update: false, delete: false }],
@@ -179,6 +371,31 @@ export async function verifyRuntimeDatabaseRole(
         ) as public_policy_count,
         (
           select count(*)::integer
+          from pg_catalog.pg_trigger trigger
+          join pg_catalog.pg_class relation
+            on relation.oid = trigger.tgrelid
+          join pg_catalog.pg_namespace namespace
+            on namespace.oid = relation.relnamespace
+          where namespace.nspname = 'public'
+            and (relation.relname, trigger.tgname) in (
+              (
+                'maintainflow_organizations',
+                'maintainflow_organizations_runtime_lock_only_guard'
+              ),
+              (
+                'maintainflow_organization_memberships',
+                'maintainflow_memberships_runtime_lock_only_guard'
+              ),
+              (
+                'maintainflow_account_access',
+                'maintainflow_account_access_runtime_lock_only_guard'
+              )
+            )
+            and not trigger.tgisinternal
+            and trigger.tgenabled = 'O'
+        ) as runtime_lock_guard_count,
+        (
+          select count(*)::integer
           from pg_catalog.pg_proc procedure
           join pg_catalog.pg_namespace namespace
             on namespace.oid = procedure.pronamespace
@@ -233,6 +450,7 @@ export async function verifyRuntimeDatabaseRole(
       role.unexpected_incoming_member_count !== 0 ||
       role.owned_public_relation_count !== 0 ||
       role.public_policy_count !== 0 ||
+      role.runtime_lock_guard_count !== 3 ||
       role.executable_public_function_count !== 0 ||
       role.usable_public_sequence_count !== 0 ||
       role.can_connect_database !== true ||
@@ -245,6 +463,7 @@ export async function verifyRuntimeDatabaseRole(
 
     const privileges = await sql<RuntimeTablePrivilegeRow[]>`
       select relation.relname as table_name,
+        relation.relrowsecurity as row_security_enabled,
         has_table_privilege(current_user, relation.oid, 'SELECT') as can_select,
         has_table_privilege(current_user, relation.oid, 'INSERT') as can_insert,
         has_table_privilege(current_user, relation.oid, 'UPDATE') as can_update,
@@ -260,7 +479,35 @@ export async function verifyRuntimeDatabaseRole(
         has_any_column_privilege(current_user, relation.oid, 'UPDATE')
           as can_update_any_column,
         has_any_column_privilege(current_user, relation.oid, 'REFERENCES')
-          as can_reference_any_column
+          as can_reference_any_column,
+        array(
+          select attribute.attname
+          from pg_catalog.pg_attribute attribute
+          where attribute.attrelid = relation.oid
+            and attribute.attnum > 0
+            and not attribute.attisdropped
+            and has_column_privilege(
+              current_user,
+              relation.oid,
+              attribute.attname,
+              'INSERT'
+            )
+          order by attribute.attname
+        ) as insert_columns,
+        array(
+          select attribute.attname
+          from pg_catalog.pg_attribute attribute
+          where attribute.attrelid = relation.oid
+            and attribute.attnum > 0
+            and not attribute.attisdropped
+            and has_column_privilege(
+              current_user,
+              relation.oid,
+              attribute.attname,
+              'UPDATE'
+            )
+          order by attribute.attname
+        ) as update_columns
       from pg_catalog.pg_class relation
       join pg_catalog.pg_namespace namespace
         on namespace.oid = relation.relnamespace
@@ -275,6 +522,7 @@ export async function verifyRuntimeDatabaseRole(
         const expected = runtimeTablePrivileges.get(actual.table_name);
         return (
           expected !== undefined &&
+          actual.row_security_enabled === true &&
           actual.can_select === expected.select &&
           actual.can_insert === expected.insert &&
           actual.can_update === expected.update &&
@@ -284,8 +532,20 @@ export async function verifyRuntimeDatabaseRole(
           actual.can_trigger === false &&
           actual.can_maintain === false &&
           actual.can_select_any_column === expected.select &&
-          actual.can_insert_any_column === expected.insert &&
-          actual.can_update_any_column === expected.update &&
+          actual.can_insert_any_column ===
+            (expected.insertAny ?? expected.insert) &&
+          (expected.insertColumns === undefined ||
+            (actual.insert_columns.length === expected.insertColumns.length &&
+              actual.insert_columns.every(
+                (column, index) => column === expected.insertColumns?.[index],
+              ))) &&
+          actual.can_update_any_column ===
+            (expected.updateAny ?? expected.update) &&
+          (expected.updateColumns === undefined ||
+            (actual.update_columns.length === expected.updateColumns.length &&
+              actual.update_columns.every(
+                (column, index) => column === expected.updateColumns?.[index],
+              ))) &&
           actual.can_reference_any_column === false
         );
       })

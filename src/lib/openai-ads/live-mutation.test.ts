@@ -27,6 +27,7 @@ const approvalMocks = vi.hoisted(() => ({
 }));
 
 const writeFenceMocks = vi.hoisted(() => ({
+  Forbidden: class AccountAccessForbiddenError extends Error {},
   run: vi.fn(),
 }));
 
@@ -48,6 +49,7 @@ vi.mock("../audit/recommendation-decision-store.server", () => ({
 }));
 
 vi.mock("../tenancy/store.server", () => ({
+  AccountAccessForbiddenError: writeFenceMocks.Forbidden,
   withAuthorizedAdsWriteFence: writeFenceMocks.run,
 }));
 
@@ -69,13 +71,20 @@ import type { AccountAccess } from "../tenancy/schema";
 
 const accountAccess: AccountAccess = {
   organizationId: "00000000-0000-4000-8000-000000000002",
-  organizationName: "Northstar Agency",
-  organizationType: "agency",
+  organizationName: "Harbour Home",
+  organizationType: "advertiser",
   accountId: "account-test",
   accountName: "Harbour Home",
   connectionMode: "vault",
   membershipRole: "owner",
   accountRole: "manager",
+};
+
+const agencyAccountAccess: AccountAccess = {
+  ...accountAccess,
+  organizationId: "00000000-0000-4000-8000-000000000003",
+  organizationName: "Northstar Agency",
+  organizationType: "agency",
 };
 
 const environmentKeys = [
@@ -194,10 +203,10 @@ beforeEach(() => {
     };
     const value = await operation({
       transaction: { test: "transaction" },
-      access: accountAccess,
+      access: options.access,
       credentialMaterial,
     });
-    return { value, access: accountAccess, credentialMaterial };
+    return { value, access: options.access, credentialMaterial };
   });
   globalThis.fetch = vi.fn();
 });
@@ -226,6 +235,65 @@ describe("guarded live mutations", () => {
     expect(result.applied).toBe(false);
     expect(approvalMocks.create).not.toHaveBeenCalled();
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects an agency direct apply before claiming an approval or contacting the provider", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+
+    await expect(
+      applyAdsMutation(recommendation, {
+        accountId: "account-test",
+        operatorId: "user_founder",
+        access: agencyAccountAccess,
+        credentialGeneration,
+        authorization: { kind: "direct" },
+      }),
+    ).rejects.toThrow(
+      "Agency live changes require an independently approved change request.",
+    );
+
+    expect(approvalMocks.verify).not.toHaveBeenCalled();
+    expect(approvalMocks.create).not.toHaveBeenCalled();
+    expect(writeFenceMocks.run).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("passes an agency request authorization into the atomic approval claim", async () => {
+    armLiveInfrastructure();
+    const recommendation = { ...demoRecommendations[0], source: "live" as const };
+    const confirmed = adGroupResponse(recommendation.entityId, 216_000_000);
+    queueApplyPrecondition(recommendation);
+    vi.mocked(globalThis.fetch).mockImplementation(async () =>
+      new Response(JSON.stringify(confirmed), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await applyAdsMutation(recommendation, {
+      accountId: "account-test",
+      operatorId: "user_founder",
+      access: agencyAccountAccess,
+      credentialGeneration,
+      authorization: {
+        kind: "agency_request",
+        requestId: "00000000-0000-4000-8000-000000000010",
+        expectedVersion: 2,
+      },
+    });
+
+    expect(approvalMocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access: agencyAccountAccess,
+        authorization: {
+          kind: "agency_request",
+          requestId: "00000000-0000-4000-8000-000000000010",
+          expectedVersion: 2,
+        },
+      }),
+      expect.anything(),
+    );
   });
 
   it("stores a pending approval before making a live API request", async () => {

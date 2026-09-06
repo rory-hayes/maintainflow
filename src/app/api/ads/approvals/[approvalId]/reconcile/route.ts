@@ -78,7 +78,8 @@ export async function POST(
       );
     }
     if (error instanceof OperatorUnauthorizedError) {
-      return Response.json({ error: error.message }, { status: 401 });
+      const status = error.status === 403 ? 403 : 401;
+      return Response.json({ error: error.message }, { status });
     }
     if (error instanceof AccountAccessForbiddenError) {
       log.warn("ads.reconcile.failed", { error, status: 403 });

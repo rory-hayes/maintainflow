@@ -13,6 +13,8 @@ Clerk user
 
 - A direct advertiser workspace normally receives `owner` account access.
 - An agency workspace normally receives `manager` account access.
+- Every protected customer read and mutation first requires a valid Clerk
+  identity and current runtime admission.
 - Read access requires an active membership and any active account role.
 - Apply, rollback, and reconciliation require an `owner` or `admin` membership
   plus `owner` or `manager` account access.
@@ -37,9 +39,64 @@ Setting the mode to `open` permits any authenticated user with a valid,
 unclaimed account key to create a workspace and must wait for paid entitlement,
 support, abuse-control, and offboarding gates.
 
-`MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS` remains a narrower compatibility path for
-the server-managed pilot key. It is not required when a signed-in customer
-supplies and validates the key for their own unclaimed account.
+`MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS` remains a compatibility path for the
+server-managed pilot key. In private-beta mode, its IDs are part of the same
+ongoing runtime-admission union as `MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS`, not
+only the initial claim path. Keep it minimal; when narrower bootstrap behavior
+is desired, atomically move an onboarded user from it to the private-beta list
+in one reviewed configuration change. Production configuration accepts only
+exact, unique, bounded `user_...` IDs and rejects empty entries and wildcards.
+
+## Credential-free agency approval workspace
+
+An admitted, signed-in user can create an agency approval workspace without an
+Ads credential. The transaction creates an active agency organization and makes
+the creator its owner; a retry returns the existing first active agency rather
+than creating a duplicate. With migrations `019` and `020` ready, members can
+select that agency and route exact recommendations from either the labelled
+five-account simulator or a freshly synced live client account into its shared
+PostgreSQL queue.
+
+The queue is a maker-checker boundary. An owner, admin, or analyst may request a
+decision, but that same Clerk user cannot approve or request changes on the
+packet; a different current agency owner or admin must decide it. The requester,
+or any current owner/admin, may cancel while it is awaiting approval. Membership
+is re-read under a database lock for each transition, requests expire after
+seven days, and a client-supplied version must match before the one permitted
+terminal transition is written.
+
+The packet retains immutable organization/account/recommendation snapshots,
+recommendation decision context, exact mutation and rollback payloads, evidence,
+safeguard, requester context, and recommendation fingerprint. The current
+workbench loads 50 records for one selected agency, ordering awaiting packets
+before the newest history, and exposes an opaque cursor to load each older page
+without crossing the selected organization boundary.
+
+This is not self-service team management. Workspace creation adds only the
+creator, and MaintainFlow currently has no teammate invitation, self-service
+membership administration, or notification delivery. A dry-run-first,
+current-owner-gated operator command can add one existing, separately admitted
+Clerk user as `admin` or `analyst`; it changes only
+`maintainflow_organization_memberships` and neither creates a Clerk account nor
+sends an invitation or email. The command rejects self-add and role changes,
+and an `admin` is required when the second person must decide a request. Because
+account access is joined through the organization, either role inherits every
+current and future advertiser-account grant held by the agency; `admin` can also
+satisfy live-write authorization when the account and release gates permit it.
+Apply therefore requires an explicit agency-wide access acknowledgement. Follow
+the exact [private-beta agency member provisioning
+runbook](private-beta-agency-member-provisioning.md) before testing through two
+real sessions. An approved simulator packet is retained as workflow evidence and
+can never be linked to the live approval store. An approved live packet still
+sends nothing by itself; an explicit Apply action must atomically consume that
+exact, unexpired packet, revalidate current roles and provider state, and create
+the durable operation before any OpenAI Ads write.
+
+Runtime admission is rechecked independently of stored membership. Removing a
+Clerk user ID from the admission union blocks that existing member's protected
+access and reviewer eligibility, prevents their approval links and
+notifications from being used or delivered, and prevents execution of any
+unconsumed live packet they approved.
 
 ## Additional agency client accounts
 

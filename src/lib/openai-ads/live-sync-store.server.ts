@@ -6,6 +6,11 @@ import type postgres from "postgres";
 import type { Sql } from "postgres";
 
 import { getRuntimeDatabase } from "../database/client.server";
+import {
+  recordChangeIntegritySnapshot,
+  verifyChangeIntegrityStore,
+} from "./change-integrity-store.server";
+import type { ChangeIntegritySnapshot } from "./change-integrity-schema";
 import type { LiveWorkbenchData } from "./data.server";
 import {
   LIVE_WORKBENCH_SNAPSHOT_SCHEMA_VERSION,
@@ -166,9 +171,18 @@ export async function verifyLiveSyncStore(database?: Sql) {
           and attname = 'detected_signal_count'
           and not attisdropped
       )
+      and to_regclass(
+        'public.maintainflow_ads_config_integrity_state'
+      ) is not null
+      and to_regclass(
+        'public.maintainflow_ads_config_integrity_events'
+      ) is not null
+      and to_regprocedure(
+        'public.maintainflow_enforce_ads_config_integrity_event()'
+      ) is not null
     ) as ready
   `;
-  return row?.ready === true;
+  return row?.ready === true && verifyChangeIntegrityStore(sql);
 }
 
 export async function readLiveSyncState(options: {
@@ -344,6 +358,7 @@ export async function completeLiveSyncRefresh(options: {
   credentialGeneration: string;
   claimId: string;
   snapshot: LiveWorkbenchData;
+  integritySnapshot: ChangeIntegritySnapshot;
   now: Date;
   freshForMs: number;
   staleForMs: number;
@@ -360,45 +375,72 @@ export async function completeLiveSyncRefresh(options: {
     options.accountId,
   );
   const syncedAt = new Date(serialized.snapshot.syncedAt);
+  if (
+    options.integritySnapshot.accountId !== options.accountId ||
+    Date.parse(options.integritySnapshot.observedAt) !== syncedAt.getTime()
+  ) {
+    throw new TypeError(
+      "The workbench and change-integrity snapshots must describe the same account and observation time.",
+    );
+  }
   if (syncedAt > freshUntil) {
     throw new TypeError("snapshot.syncedAt cannot be after the fresh-until timestamp.");
   }
 
   const sql = getDatabase();
-  const rows = await sql<{ refresh_claim_id: string }[]>`
-    with locked_account as materialized (
-      select id
-      from maintainflow_advertiser_accounts
-      where external_account_id = ${options.accountId}
-        and status = 'active'
-      for share
-    )
-    update maintainflow_live_workbench_snapshots state set
-      payload_schema_version = ${LIVE_WORKBENCH_SNAPSHOT_SCHEMA_VERSION},
-      snapshot_payload = ${sql.json(
-        serialized.envelope as unknown as postgres.JSONValue,
-      )},
-      snapshot_bytes = ${serialized.bytes},
-      detected_signal_count = ${serialized.snapshot.recommendations.length},
-      synced_at = ${syncedAt},
-      fresh_until = ${freshUntil},
-      stale_until = ${staleUntil},
-      refresh_claim_id = null,
-      refresh_claimed_at = null,
-      refresh_claim_expires_at = null,
-      consecutive_failures = 0,
-      last_failure_code = null,
-      last_failed_at = null,
-      retry_after = null,
-      updated_at = ${options.now}
-    from locked_account account
-    where account.id = state.advertiser_account_id
-      and state.credential_generation = ${options.credentialGeneration}
-      and state.refresh_claim_id = ${options.claimId}
-      and state.refresh_claim_expires_at > ${options.now}
-    returning ${options.claimId}::uuid as refresh_claim_id
-  `;
-  return Boolean(rows[0]);
+  return sql.begin(async (transaction) => {
+    const [account] = await transaction<{ id: string }[]>`
+      select account.id
+      from maintainflow_advertiser_accounts account
+      where account.external_account_id = ${options.accountId}
+        and account.status = 'active'
+      for update
+    `;
+    if (!account) return false;
+
+    const [ownedClaim] = await transaction<{ refresh_claim_id: string }[]>`
+      select state.refresh_claim_id
+      from maintainflow_live_workbench_snapshots state
+      where state.advertiser_account_id = ${account.id}
+        and state.credential_generation = ${options.credentialGeneration}
+        and state.refresh_claim_id = ${options.claimId}
+        and state.refresh_claim_expires_at > ${options.now}
+      for update
+    `;
+    if (!ownedClaim) return false;
+
+    await recordChangeIntegritySnapshot(
+      { snapshot: options.integritySnapshot },
+      transaction,
+    );
+
+    const rows = await transaction<{ refresh_claim_id: string }[]>`
+      update maintainflow_live_workbench_snapshots state set
+        payload_schema_version = ${LIVE_WORKBENCH_SNAPSHOT_SCHEMA_VERSION},
+        snapshot_payload = ${transaction.json(
+          serialized.envelope as unknown as postgres.JSONValue,
+        )},
+        snapshot_bytes = ${serialized.bytes},
+        detected_signal_count = ${serialized.snapshot.recommendations.length},
+        synced_at = ${syncedAt},
+        fresh_until = ${freshUntil},
+        stale_until = ${staleUntil},
+        refresh_claim_id = null,
+        refresh_claimed_at = null,
+        refresh_claim_expires_at = null,
+        consecutive_failures = 0,
+        last_failure_code = null,
+        last_failed_at = null,
+        retry_after = null,
+        updated_at = ${options.now}
+      where state.advertiser_account_id = ${account.id}
+        and state.credential_generation = ${options.credentialGeneration}
+        and state.refresh_claim_id = ${options.claimId}
+        and state.refresh_claim_expires_at > ${options.now}
+      returning ${options.claimId}::uuid as refresh_claim_id
+    `;
+    return Boolean(rows[0]);
+  });
 }
 
 export async function failLiveSyncRefresh(options: {

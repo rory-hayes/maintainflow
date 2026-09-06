@@ -1,9 +1,4 @@
 {
-  "buildCommand": "node scripts/check-deployment-config.mjs && npm run build",
-  "crons": [
-    {
-      "path": "/api/jobs/monitoring/evaluate",
-      "schedule": "15 1 * * *"
-    }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "node scripts/check-deployment-config.mjs && npm run build"
 }

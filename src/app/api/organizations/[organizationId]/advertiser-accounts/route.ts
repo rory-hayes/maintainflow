@@ -174,8 +174,9 @@ export async function POST(
       );
     }
     if (error instanceof OperatorUnauthorizedError) {
-      log.warn("agency.account_attach.rejected", fields(401, error));
-      return Response.json({ error: error.message }, { status: 401 });
+      const status = error.status === 403 ? 403 : 401;
+      log.warn("agency.account_attach.rejected", fields(status, error));
+      return Response.json({ error: error.message }, { status });
     }
     if (error instanceof AccountAccessForbiddenError) {
       log.warn("agency.account_attach.rejected", fields(403, error));

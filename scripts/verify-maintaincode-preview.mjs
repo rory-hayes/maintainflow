@@ -1,0 +1,88 @@
+import { chromium } from "playwright";
+import { expect } from "@playwright/test";
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1536, height: 1024 } });
+const errors = [];
+page.on("pageerror", (e) => errors.push(e.message));
+try {
+  await page.goto("http://127.0.0.1:3217/app");
+  await expect(
+    page.getByRole("button", { name: "Enquiries 128", exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: "/tmp/maintaincode-desktop-verified.png" });
+  await page
+    .getByRole("button", { name: "Enquiries 128", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "lead-0001", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Leads", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Search leads" })
+    .fill("no-match-for-qa");
+  await expect(
+    page.getByText("No leads match this view.", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("textbox", { name: "Search leads" }).fill("lead-0081");
+  await expect(page.locator("tbody tr")).toHaveCount(1);
+  await page.getByRole("button", { name: "lead-0081", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Acquisition timeline" }),
+  ).toBeVisible();
+  await page.screenshot({ path: "/tmp/maintaincode-lead-verified.png" });
+  for (const name of [
+    "Campaigns",
+    "Websites & forms",
+    "Tracking health",
+    "Integrations",
+    "Setup",
+    "Workspace & billing",
+  ]) {
+    await page.getByRole("button", { name, exact: true }).click();
+    await expect(page.locator("h1")).toBeVisible();
+    console.log(name + ": rendered");
+  }
+  await page.getByRole("button", { name: "Campaigns", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "Attribution model", exact: true })
+    .selectOption("latest");
+  await page
+    .getByRole("combobox", { name: "Reporting period", exact: true })
+    .selectOption("sales");
+  await page
+    .getByRole("combobox", { name: "Currency", exact: true })
+    .selectOption("USD");
+  await expect(
+    page.getByRole("button", { name: "Booked deal value US$0", exact: true }),
+  ).toBeVisible();
+  const download = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Export report", exact: true })
+    .click();
+  console.log("Export:", (await download).suggestedFilename());
+  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    page.getByRole("button", { name: "Toggle navigation" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Toggle navigation" }).click();
+  await page.getByRole("button", { name: "Leads", exact: true }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Search leads" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: "/tmp/maintaincode-mobile-verified.png" });
+  await page.getByRole("textbox", { name: "Search leads" }).focus();
+  await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("combobox", { name: "Filter channel" }),
+  ).toBeFocused();
+  expect(errors).toEqual([]);
+  console.log(
+    "PASS: sample evidence, filters, detail, six views, models, currency, export, mobile, keyboard; no page errors.",
+  );
+} finally {
+  await browser.close();
+}

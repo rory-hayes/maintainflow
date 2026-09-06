@@ -16,13 +16,34 @@ export const accountAccessSchema = z.object({
   accountRole: accountAccessRoleSchema,
 });
 
+export const organizationMembershipSchema = z.object({
+  organizationId: z.string().uuid(),
+  organizationName: z.string(),
+  organizationType: organizationTypeSchema,
+  membershipRole: membershipRoleSchema,
+});
+
 export const workspaceBootstrapSchema = z
   .object({
     organizationName: z.string().trim().min(2).max(120),
     organizationType: organizationTypeSchema,
     adsApiKey: z.string().trim().min(10).max(4096).optional(),
+    setupMode: z.enum(["connected", "approval_simulator"]).default("connected"),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.setupMode === "approval_simulator" &&
+      (value.organizationType !== "agency" || value.adsApiKey)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "A credential-free approval workspace must be an agency and cannot include an Ads API key.",
+        path: ["setupMode"],
+      });
+    }
+  });
 
 export const organizationIdSchema = z.string().uuid();
 
@@ -51,6 +72,9 @@ export type AccountConnectionMode = z.infer<
   typeof accountConnectionModeSchema
 >;
 export type AccountAccess = z.infer<typeof accountAccessSchema>;
+export type OrganizationMembership = z.infer<
+  typeof organizationMembershipSchema
+>;
 
 const membershipRank: Record<MembershipRole, number> = {
   owner: 3,

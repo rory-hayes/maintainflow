@@ -128,12 +128,13 @@ export function recommendationApprovalFingerprint(
   recommendation: Recommendation,
 ) {
   const displayedDecision = canonicalize({
-    version: 1,
+    version: 2,
     recommendationId: recommendation.id,
     source: recommendation.source,
     title: recommendation.title,
     priority: recommendation.priority,
     summary: recommendation.summary,
+    rationale: recommendation.rationale,
     entityId: recommendation.entityId,
     entityLabel: recommendation.entityLabel,
     currentValue: recommendation.currentValue,

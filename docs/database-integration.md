@@ -66,7 +66,7 @@ this explicitly disposable harness.
 
 ## What it proves
 
-- migrations `001` through `018` apply together on PostgreSQL in filename
+- migrations `001` through `022` apply together on PostgreSQL in filename
   order;
 - two concurrent migration runners begin on one fresh database with all
   migrations pending, serialize, record one immutable SHA-256 ledger row per
@@ -80,6 +80,38 @@ this explicitly disposable harness.
 - advertiser owners and agency managers receive their intended account roles;
 - analysts/viewers can read but cannot write, unknown users are denied, and an
   already-claimed advertiser account cannot be claimed again;
+- completed live-sync publication and Change Integrity baseline advancement
+  share one transaction; a rejected integrity snapshot leaves the prior
+  workbench payload intact and the refresh claim recoverable;
+- Change Integrity state is credential-independent, repeated identical changes
+  at different observation times remain distinct events, event field paths must
+  be a unique, bounded, complete, disjoint partition, event evidence cannot be
+  rewritten, and review requires current database-authorized account write
+  access;
+- the credential-free agency simulator queue preserves the exact decision
+  context, request, rollback, evidence, safeguard, and fingerprint as JSONB;
+  rejects duplicate active packets; requires a different owner/admin for an
+  approval or change request; fences concurrent decisions by version; lets the
+  requester cancel; expires stale packets before decision or duplicate
+  creation; and prevents both terminal-state rewrites and request-evidence
+  rewrites; a 101-row fixture is retrieved through bounded cursor pages without
+  omissions or duplicates;
+- a live agency approval is bound to one exact approval record, cannot be
+  replayed, and is rejected when its account, organization, actors, evidence,
+  request, rollback, safeguard, fingerprint, monitoring plan, or expiry no
+  longer matches the reviewed packet; expired, ineligible-approver, and legacy
+  approved packets retire without losing their decision history, while legacy
+  awaiting packets expire before approval;
+- the operator-only private-beta membership workflow defaults to a read-only dry
+  run, requires an exact current-owner state token before apply, creates one
+  `admin` or `analyst` membership, treats a same-role retry as idempotent, and
+  rejects stale state, non-owner, inactive-agency, non-agency, and role-change
+  attempts while serializing concurrent use of one absent-target token; it also
+  refuses the deliberately restricted `maintainflow_app` runtime role rather
+  than widening that role's grants for an operator-only action;
+- when the dedicated runtime role fixture is available, its column grants allow
+  decision-state and confirmed integrity-baseline updates, but reject updates to
+  immutable packet fields or the integrity state's advertiser identity;
 - account keys are stored as ciphertext, decrypt for the correct account, and
   rotate with one active version;
 - Pixel/CAPI pairs use a distinct purpose-bound encryption envelope, retain one

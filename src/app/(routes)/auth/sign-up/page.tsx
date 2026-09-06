@@ -2,7 +2,7 @@ import { SignUp } from "@clerk/nextjs";
 import { LockKeyhole } from "lucide-react";
 import { connection } from "next/server";
 
-import { MaintainFlowBrand } from "@/components/maintainflow/brand";
+
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader } from "@/components/ui/card";
 import Link from "next/link";
@@ -16,26 +16,26 @@ export default async function SignUpPage() {
         <SignUp
           path="/auth/sign-up"
           routing="path"
-          fallbackRedirectUrl="/app"
+          fallbackRedirectUrl="/app?mode=live"
           signInUrl="/auth/sign-in"
         />
       ) : (
         <Card className="w-full max-w-md shadow-sm">
           <CardHeader className="gap-5">
-            <MaintainFlowBrand />
+            <strong>MaintainCode Ads</strong>
             <div className="grid size-10 place-items-center rounded-lg bg-primary/10 text-primary">
               <LockKeyhole className="size-5" />
             </div>
             <div className="grid gap-1.5">
               <h1 className="font-semibold leading-none tracking-tight">
                 {isClerkConfigured()
-                  ? "MaintainFlow is invitation-only"
+                  ? "MaintainCode Ads is invitation-only"
                   : "Account creation is not configured"}
               </h1>
               <CardDescription className="leading-6">
                 {isClerkConfigured()
-                  ? "Private-beta operators are provisioned directly. Public registration stays closed so an unadmitted account cannot create a MaintainFlow workspace or access advertiser data."
-                  : "MaintainFlow will enable customer registration after the Clerk tenant and production access policy are configured."}
+                  ? "Private-beta operators are provisioned directly. Public registration stays closed so an unadmitted account cannot create a MaintainCode Ads workspace or access advertiser data."
+                  : "MaintainCode Ads will enable customer registration after the Clerk tenant and production access policy are configured."}
               </CardDescription>
               {isClerkConfigured() ? (
                 <Button asChild className="mt-2 w-fit">

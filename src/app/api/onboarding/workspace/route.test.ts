@@ -34,6 +34,7 @@ const testState = vi.hoisted(() => {
     verifyCredentialStore: vi.fn(),
     verifyTenancyStore: vi.fn(),
     bootstrapWorkspace: vi.fn(),
+    createAgencyApprovalWorkspace: vi.fn(),
     logInfo: vi.fn(),
     logWarn: vi.fn(),
     logError: vi.fn(),
@@ -77,6 +78,7 @@ vi.mock("@/lib/tenancy/store.server", () => ({
   AccountAccessForbiddenError: testState.AccountAccessForbiddenError,
   TenancyStoreUnavailableError: testState.TenancyStoreUnavailableError,
   bootstrapWorkspace: testState.bootstrapWorkspace,
+  createAgencyApprovalWorkspace: testState.createAgencyApprovalWorkspace,
   verifyCredentialStore: testState.verifyCredentialStore,
   verifyTenancyStore: testState.verifyTenancyStore,
 }));
@@ -88,6 +90,7 @@ vi.mock("@/lib/tenancy/schema", async () => {
       organizationName: z.string().trim().min(2).max(120),
       organizationType: z.enum(["advertiser", "agency"]),
       adsApiKey: z.string().trim().min(10).max(4096).optional(),
+      setupMode: z.enum(["connected", "approval_simulator"]).default("connected"),
     }),
   };
 });
@@ -134,9 +137,41 @@ beforeEach(() => {
     organizationId: "00000000-0000-4000-8000-000000000001",
     accountId: "adacct_client",
   });
+  testState.createAgencyApprovalWorkspace.mockResolvedValue({
+    created: true,
+    membership: {
+      organizationId: "00000000-0000-4000-8000-000000000009",
+      organizationName: "Northstar Agency",
+      organizationType: "agency",
+      membershipRole: "owner",
+    },
+  });
 });
 
 describe("customer workspace onboarding", () => {
+  it("creates a credential-free agency workspace and routes to an agency simulator", async () => {
+    const response = await POST(
+      request({
+        organizationName: "Northstar Agency",
+        organizationType: "agency",
+        setupMode: "approval_simulator",
+      }),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(testState.createAgencyApprovalWorkspace).toHaveBeenCalledWith({
+      operatorId: "user_customer",
+      organizationName: "Northstar Agency",
+    });
+    expect(payload).toMatchObject({
+      created: true,
+      nextAccountId: "adacct_sim_northstar",
+    });
+    expect(testState.fetchLiveAdAccount).not.toHaveBeenCalled();
+    expect(testState.encryptAdsApiKey).not.toHaveBeenCalled();
+  });
+
   it("blocks an unadmitted customer before validating their provider key", async () => {
     testState.isWorkspaceAdmissionAllowed.mockReturnValue(false);
 

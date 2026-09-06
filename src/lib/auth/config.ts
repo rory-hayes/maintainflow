@@ -5,12 +5,28 @@ export function isClerkConfigured() {
   );
 }
 
+const OPERATOR_ID_PATTERN = /^user_[A-Za-z0-9_-]{1,250}$/;
+
+function parseOperatorIds(value: string | undefined): string[] | null {
+  if (value === undefined || value.trim().length === 0) return [];
+
+  const operatorIds = value.split(",").map((operatorId) => operatorId.trim());
+  if (
+    operatorIds.some(
+      (operatorId) =>
+        operatorId.length === 0 || !OPERATOR_ID_PATTERN.test(operatorId),
+    ) ||
+    new Set(operatorIds).size !== operatorIds.length
+  ) {
+    return null;
+  }
+
+  return operatorIds;
+}
+
 export function getBootstrapOperatorIds() {
   return new Set(
-    (process.env.MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
+    parseOperatorIds(process.env.MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS) ?? [],
   );
 }
 
@@ -18,13 +34,26 @@ export function isBootstrapOperator(operatorId: string) {
   return getBootstrapOperatorIds().has(operatorId);
 }
 
-function privateBetaOperatorIds() {
-  return new Set(
-    (process.env.MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
+export function getWorkspaceAdmittedOperatorIds(): string[] {
+  const privateBetaOperatorIds = parseOperatorIds(
+    process.env.MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS,
   );
+  const bootstrapOperatorIds = parseOperatorIds(
+    process.env.MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS,
+  );
+  if (privateBetaOperatorIds === null || bootstrapOperatorIds === null) {
+    return [];
+  }
+
+  const combinedOperatorIds = [
+    ...privateBetaOperatorIds,
+    ...bootstrapOperatorIds,
+  ];
+  if (new Set(combinedOperatorIds).size !== combinedOperatorIds.length) {
+    return [];
+  }
+
+  return [...combinedOperatorIds].sort();
 }
 
 export function getWorkspaceAdmissionMode() {
@@ -43,7 +72,6 @@ export function isPublicSignUpEnabled() {
 export function isWorkspaceAdmissionAllowed(operatorId: string) {
   return (
     getWorkspaceAdmissionMode() === "open" ||
-    privateBetaOperatorIds().has(operatorId) ||
-    isBootstrapOperator(operatorId)
+    getWorkspaceAdmittedOperatorIds().includes(operatorId)
   );
 }

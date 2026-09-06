@@ -70,5 +70,29 @@
   {
     "name": "018_supabase_data_api_hardening.sql",
     "checksumSha256": "fdd6811c5b6406de9fcd5bfcbf3d48d95d74ed2885c16da31149502a491513c4"
+  },
+  {
+    "name": "019_agency_change_approval_requests.sql",
+    "checksumSha256": "1dc727593e2bf342635cc4291ec3cfcbf19da7043581c888febf8789c8e31ed4"
+  },
+  {
+    "name": "020_live_change_approval_binding.sql",
+    "checksumSha256": "2e68af65c264997fbade40e34734b02eaa7fa670d9340b5b66b33fd4f2b91f4b"
+  },
+  {
+    "name": "021_approval_notification_outbox.sql",
+    "checksumSha256": "b4bddbeb76bfafa19412a46c8416a6b357f27bc51021a0270863244cb71dd6a9"
+  },
+  {
+    "name": "022_ads_change_integrity.sql",
+    "checksumSha256": "d1eae39667bad1dbfb3c30ed72f101b66cbc1d6aaeaed5713e83ec9095f545fe"
+  },
+  {
+    "name": "023_maintaincode_attribution.sql",
+    "checksumSha256": "5bf01f18e52c36901c5c6b4abf49574bef01bad74e5bf53dfc679367c0ce5641"
+  },
+  {
+    "name": "024_maintaincode_runtime_role.sql",
+    "checksumSha256": "62ca38dfcf90b349b9c3bb7411caf5751899a051aa97418f3138d0e02c01a5f6"
   }
 ]

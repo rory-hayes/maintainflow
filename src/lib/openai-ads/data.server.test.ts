@@ -11,6 +11,7 @@ vi.mock("./client.server", () => ({
 }));
 
 import {
+  fetchLiveWorkbenchBundle,
   fetchLiveWorkbenchData,
   LIVE_SYNC_PROVIDER_LIMITS,
 } from "./data.server";
@@ -121,6 +122,7 @@ describe("live workbench adapter", () => {
           return { object: "list", data: [], has_more: false };
         }
         if (path === `/ads?ad_group_id=${adGroup.id}&limit=500`) {
+          vi.setSystemTime(new Date("2026-08-31T16:00:30.000Z"));
           return { object: "list", data: [ad], has_more: false };
         }
         if (path === "/conversions/event_settings?limit=500&order=desc") {
@@ -224,7 +226,8 @@ describe("live workbench adapter", () => {
       },
     );
 
-    const result = await fetchLiveWorkbenchData(account);
+    const { data: result, integritySnapshot } =
+      await fetchLiveWorkbenchBundle(account);
 
     expect(result.account).toBe(account);
     expect(result.campaigns.map((item) => item.id)).toEqual([
@@ -232,6 +235,19 @@ describe("live workbench adapter", () => {
       secondCampaign.id,
     ]);
     expect(result.ads).toEqual([{ ...ad, ad_group_id: adGroup.id }]);
+    expect(integritySnapshot).toMatchObject({
+      accountId: account.id,
+      observationStartedAt: "2026-08-31T16:00:00.000Z",
+      observedAt: result.syncedAt,
+      resources: [
+        { resourceType: "ad_account", resourceId: account.id },
+        { resourceType: "campaign", resourceId: campaign.id },
+        { resourceType: "campaign", resourceId: secondCampaign.id },
+        { resourceType: "ad_group", resourceId: adGroup.id },
+        { resourceType: "ad", resourceId: ad.id },
+      ],
+    });
+    expect(result.syncedAt).toBe("2026-08-31T16:00:30.000Z");
     expect(result.recommendations).toHaveLength(1);
     expect(result.conversionMeasurement).toMatchObject({
       status: "ready",

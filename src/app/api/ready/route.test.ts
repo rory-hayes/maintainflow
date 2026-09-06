@@ -11,7 +11,9 @@ const state = vi.hoisted(() => ({
   verifyCredentialStore: vi.fn(),
   verifyConversionCredentialStore: vi.fn(),
   verifyLiveSyncStore: vi.fn(),
+  verifyChangeIntegrityStore: vi.fn(),
   verifyApprovalStore: vi.fn(),
+  verifyChangeApprovalRequestStore: vi.fn(),
   verifyRecommendationDecisionStore: vi.fn(),
   verifyCreativeHistoryStore: vi.fn(),
   verifyReadinessHistoryStore: vi.fn(),
@@ -40,8 +42,14 @@ vi.mock("@/lib/tenancy/store.server", () => ({
 vi.mock("@/lib/openai-ads/live-sync-store.server", () => ({
   verifyLiveSyncStore: state.verifyLiveSyncStore,
 }));
+vi.mock("@/lib/openai-ads/change-integrity-store.server", () => ({
+  verifyChangeIntegrityStore: state.verifyChangeIntegrityStore,
+}));
 vi.mock("@/lib/audit/approval-store.server", () => ({
   verifyApprovalStore: state.verifyApprovalStore,
+}));
+vi.mock("@/lib/approvals/change-request-store.server", () => ({
+  verifyChangeApprovalRequestStore: state.verifyChangeApprovalRequestStore,
 }));
 vi.mock("@/lib/audit/recommendation-decision-store.server", () => ({
   verifyRecommendationDecisionStore:
@@ -84,7 +92,9 @@ beforeEach(() => {
     state.verifyCredentialStore,
     state.verifyConversionCredentialStore,
     state.verifyLiveSyncStore,
+    state.verifyChangeIntegrityStore,
     state.verifyApprovalStore,
+    state.verifyChangeApprovalRequestStore,
     state.verifyRecommendationDecisionStore,
     state.verifyCreativeHistoryStore,
     state.verifyReadinessHistoryStore,
@@ -117,7 +127,7 @@ describe("deployment readiness route", () => {
       scope: "deployment_readiness",
       stage: "demo",
       revision: "a".repeat(40),
-      checks: { passed: 7, total: 7 },
+      checks: { passed: 9, total: 9 },
     });
     expect(state.verifyTenancyStore).not.toHaveBeenCalled();
     expect(state.createReadinessDatabase).toHaveBeenCalledOnce();
@@ -135,7 +145,7 @@ describe("deployment readiness route", () => {
     ).toMatchObject({
       event: "deployment.readiness.completed",
       status: 200,
-      counts: { checksPassed: 7, checksTotal: 7 },
+      counts: { checksPassed: 9, checksTotal: 9 },
     });
   });
 
@@ -147,12 +157,32 @@ describe("deployment readiness route", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
       stage: "demo",
-      checks: { passed: 6, total: 7 },
+      checks: { passed: 8, total: 9 },
     });
     expect(state.verifyLiveSyncStore).toHaveBeenCalledTimes(1);
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
       failedChecks: ["live_sync"],
+    });
+  });
+
+  it("fails when the exact change-integrity store guard is unavailable", async () => {
+    state.verifyChangeIntegrityStore.mockResolvedValue(false);
+    const response = await GET(request());
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      stage: "demo",
+      checks: { passed: 8, total: 9 },
+    });
+    const dedicatedDatabase = state.createReadinessDatabase.mock.results[0].value;
+    expect(state.verifyChangeIntegrityStore).toHaveBeenCalledWith(
+      dedicatedDatabase,
+    );
+    expect(lastErrorRecord()).toMatchObject({
+      event: "deployment.readiness.failed",
+      failedChecks: ["change_integrity"],
     });
   });
 
@@ -163,7 +193,7 @@ describe("deployment readiness route", () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
-      checks: { passed: 6, total: 7 },
+      checks: { passed: 8, total: 9 },
     });
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
@@ -187,7 +217,7 @@ describe("deployment readiness route", () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
-      checks: { passed: 6, total: 7 },
+      checks: { passed: 8, total: 9 },
     });
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
@@ -209,7 +239,7 @@ describe("deployment readiness route", () => {
       ok: false,
       stage: "demo",
       revision: "unknown",
-      checks: { passed: 5, total: 7 },
+      checks: { passed: 7, total: 9 },
     });
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",
@@ -227,7 +257,7 @@ describe("deployment readiness route", () => {
     expect(payload).toMatchObject({
       ok: false,
       stage: "private_read",
-      checks: { passed: 13, total: 14 },
+      checks: { passed: 15, total: 16 },
     });
     expect(state.verifyTenancyStore).toHaveBeenCalledTimes(1);
     expect(state.verifyApprovalStore).toHaveBeenCalledTimes(1);
@@ -237,6 +267,8 @@ describe("deployment readiness route", () => {
       state.verifyDatabaseMigrationLedger,
       state.verifyReadinessRateLimitStore,
       state.verifyLiveSyncStore,
+      state.verifyChangeIntegrityStore,
+      state.verifyChangeApprovalRequestStore,
       state.verifyTenancyStore,
       state.verifyCredentialStore,
       state.verifyConversionCredentialStore,
@@ -266,11 +298,12 @@ describe("deployment readiness route", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       stage: "live_write",
-      checks: { passed: 14, total: 14 },
+      checks: { passed: 16, total: 16 },
     });
     expect(state.verifyTenancyStore).toHaveBeenCalledTimes(1);
     expect(state.verifyCredentialStore).toHaveBeenCalledTimes(1);
     expect(state.verifyConversionCredentialStore).toHaveBeenCalledTimes(1);
+    expect(state.verifyChangeIntegrityStore).toHaveBeenCalledTimes(1);
     expect(state.verifyApprovalStore).toHaveBeenCalledTimes(1);
     expect(state.verifyRecommendationDecisionStore).toHaveBeenCalledTimes(1);
     expect(state.verifyCreativeHistoryStore).toHaveBeenCalledTimes(1);
@@ -285,6 +318,7 @@ describe("deployment readiness route", () => {
     expect(state.verifyRuntimeDatabaseRole).not.toHaveBeenCalled();
     expect(state.verifyRuntimeDatabaseTransaction).not.toHaveBeenCalled();
     expect(state.verifyReadinessRateLimitStore).not.toHaveBeenCalled();
+    expect(state.verifyChangeIntegrityStore).not.toHaveBeenCalled();
     expect(state.createReadinessDatabase).not.toHaveBeenCalled();
     expect(state.probeEnd).not.toHaveBeenCalled();
   });
@@ -295,6 +329,7 @@ describe("deployment readiness route", () => {
     expect(response.status).toBe(401);
     expect(state.verifyDatabaseMigrationLedger).not.toHaveBeenCalled();
     expect(state.verifyLiveSyncStore).not.toHaveBeenCalled();
+    expect(state.verifyChangeIntegrityStore).not.toHaveBeenCalled();
     expect(state.createReadinessDatabase).not.toHaveBeenCalled();
     expect(state.probeEnd).not.toHaveBeenCalled();
   });
@@ -310,13 +345,14 @@ describe("deployment readiness route", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
       stage: "demo",
-      checks: { passed: 2, total: 7 },
+      checks: { passed: 2, total: 9 },
     });
     expect(state.verifyRuntimeDatabaseRole).not.toHaveBeenCalled();
     expect(state.verifyRuntimeDatabaseTransaction).not.toHaveBeenCalled();
     expect(state.verifyDatabaseMigrationLedger).not.toHaveBeenCalled();
     expect(state.verifyReadinessRateLimitStore).not.toHaveBeenCalled();
     expect(state.verifyLiveSyncStore).not.toHaveBeenCalled();
+    expect(state.verifyChangeIntegrityStore).not.toHaveBeenCalled();
     expect(state.probeEnd).not.toHaveBeenCalled();
   });
 
@@ -343,7 +379,7 @@ describe("deployment readiness route", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
       stage: "demo",
-      checks: { passed: 5, total: 7 },
+      checks: { passed: 7, total: 9 },
     });
     expect(lastErrorRecord()).toMatchObject({
       event: "deployment.readiness.failed",

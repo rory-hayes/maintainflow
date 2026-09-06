@@ -136,7 +136,7 @@ test("landing page opens the five-client agency portfolio", async ({ page }) => 
     page.getByText("Simulator data", { exact: true }).first(),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Campaign health" }),
+    page.getByRole("heading", { name: "Action queue" }),
   ).toBeVisible();
   await expect(page.getByText("Budget Guard", { exact: true })).toBeVisible();
   await expect(
@@ -164,7 +164,7 @@ test("landing page opens the five-client agency portfolio", async ({ page }) => 
     page.locator("#budget-campaign-cmpn_northstar_101"),
   ).toBeInViewport();
   await expect(
-    page.getByText("Agency exception queue", { exact: true }),
+    page.getByText("Portfolio action queue", { exact: true }),
   ).toBeVisible();
   await expect(page.getByText("5 client accounts", { exact: true })).toBeVisible();
   await expect(
@@ -249,33 +249,87 @@ test("simulator exposes actionable attribution and monitoring evidence", async (
   expect(browserErrors).toEqual([]);
 });
 
-test("agency exception queue opens the selected advertiser deep link", async ({
+test("Change Integrity review records a local evidence note and resets with the simulator", async ({
+  page,
+}) => {
+  const browserErrors = collectBrowserErrors(page);
+
+  await page.goto("/app?tab=experiments&account=adacct_sim_northstar");
+  await expect(
+    page.getByRole("heading", { name: "Change assurance" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Change Integrity Guard", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Inspect" })).toHaveCount(3);
+
+  await page.getByRole("button", { name: "Inspect" }).first().click();
+  const reviewDialog = page.getByRole("dialog");
+  await expect(reviewDialog).toContainText("Indeterminate at detection");
+  await expect(
+    reviewDialog.getByRole("textbox", { name: "Verification note" }),
+  ).toBeFocused();
+  await expect(
+    reviewDialog.getByRole("button", { name: "Record reviewed" }),
+  ).toBeDisabled();
+
+  await reviewDialog
+    .getByRole("textbox", { name: "Verification note" })
+    .fill("Too short");
+  await expect(
+    reviewDialog.getByRole("button", { name: "Record reviewed" }),
+  ).toBeDisabled();
+  await reviewDialog
+    .getByRole("textbox", { name: "Verification note" })
+    .fill("Reviewed against the retained simulator evidence.");
+  await reviewDialog.getByRole("button", { name: "Record reviewed" }).click();
+
+  await expect(reviewDialog).toContainText("Human review recorded");
+  await expect(reviewDialog).toContainText(
+    "Reviewed against the retained simulator evidence.",
+  );
+  await reviewDialog.getByRole("button", { name: "Close" }).last().click();
+  await expect(page.getByRole("button", { name: "View review" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Inspect" })).toHaveCount(2);
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Inspect" })).toHaveCount(3);
+  await expect(page.getByRole("button", { name: "View review" })).toHaveCount(0);
+  expect(browserErrors).toEqual([]);
+});
+
+test("portfolio action queue opens the selected advertiser evidence deep link", async ({
   page,
 }) => {
   const browserErrors = collectBrowserErrors(page);
 
   await page.goto(agencyEntryPath);
-  const alderRow = page.getByRole("row", { name: /Alder & Ash/ });
-  await expect(alderRow).toContainText("Review needed");
-  await alderRow.getByRole("button", { name: "Open account" }).click();
+  const alderRow = page.getByRole("row", {
+    name: /Critical Alder & Ash Reconciliation/,
+  });
+  await expect(alderRow).toContainText("Impact unknown");
+  await expect(
+    alderRow.getByRole("link", { name: "Review evidence" }),
+  ).toHaveAttribute(
+    "href",
+    "/app?tab=experiments&account=adacct_sim_alder",
+  );
+  await alderRow.getByRole("link", { name: "Review evidence" }).click();
 
   await expect(page).toHaveURL((url) => {
     return (
       url.pathname === "/app" &&
-      url.searchParams.get("tab") === "campaigns" &&
+      url.searchParams.get("tab") === "experiments" &&
       url.searchParams.get("account") === "adacct_sim_alder"
     );
   });
   await expect(
     page.getByRole("combobox", { name: "Ad account", exact: true }),
   ).toContainText("Alder & Ash");
-  const selectedAlderRow = page.getByRole("row", { name: /Alder & Ash/ });
   await expect(
-    selectedAlderRow.getByRole("button", { name: "Current" }),
-  ).toBeDisabled();
-  await expect(
-    page.getByText("Entryway storage", { exact: true }).first(),
+    page.getByRole("heading", { name: "Change assurance" }),
   ).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("Northstar Home");
   expect(browserErrors).toEqual([]);
 });
 

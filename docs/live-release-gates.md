@@ -16,9 +16,10 @@ returns the baked Git revision without checking dependencies. `/api/ready`
 first requires the dedicated readiness-probe bearer header,
 `Authorization: Bearer $MAINTAINFLOW_READINESS_PROBE_SECRET`, then verifies
 revision provenance, an exact migration-name/checksum ledger, the public
-readiness quota and live snapshot stores in every stage, and the remaining live
-stores used by non-demo stages. It does not contact OpenAI or require an
-advertiser credential. Container CI provisions TLS PostgreSQL, applies the
+readiness quota, live snapshot, agency approval, and exact trigger-backed Change
+Integrity stores in every stage, and the remaining live stores used by non-demo
+stages. It does not contact OpenAI or require an advertiser credential.
+Container CI provisions TLS PostgreSQL, applies the
 checked-in migrations, starts the production image, exercises an authenticated
 readiness probe, and verifies that a runtime environment override cannot change
 the revision served by the image.
@@ -86,7 +87,7 @@ and real Ads Manager ownership, receipt, and attribution evidence.
 
 ## Approval-store migration
 
-Apply migrations `001` through `018` in filename order before enabling the full
+Apply migrations `001` through `022` in filename order before enabling the full
 live product. Migration `005` adds the typed monitoring baseline, seven-day
 timestamps, and partial unique index that prevents a second active approval for
 the same recommendation. Migration `006` adds an atomic outcome, observation,
@@ -107,6 +108,42 @@ fair account scheduling, attempt leases, and
 bounded failure backoff for scheduled monitoring. The app verifies the required
 approval, tenancy, credential, and monitoring structures before showing or
 accepting the live-write state.
+
+Migration `019` adds the durable agency change-request queue. An
+admitted Clerk user can create an agency workspace without an Ads key and submit
+an exact labelled simulator recommendation for a different owner/admin to
+decide. The stored packet freezes the recommendation context, request, rollback,
+evidence, safeguard, and fingerprint; duplicate awaiting packets are collapsed,
+the decision deadline is seven days, and a version increment plus row lock makes
+the first valid concurrent decision terminal.
+
+Migration `020` binds that queue to the live-write ledger. A live agency
+recommendation must be approved by a different current owner/admin; the exact,
+unexpired packet is then atomically linked to one pending
+`ads_approval_records` operation before any provider write. The database rejects
+unlinked agency operations, cross-organization/account paths, changed
+fingerprints or evidence, replay, and stale approver/executor roles. Simulator
+packets remain non-executable, while a direct-advertiser owner/admin retains the
+single-person path for an account owned by that exact advertiser organization.
+Expired, approver-ineligible, or legacy-schema approved live packets are retired
+one way without changing the recorded decision, allowing a fresh exact request;
+legacy-schema awaiting packets expire before they can become non-executable
+approvals.
+Migration `021` adds the opt-in approval-notification outbox and signed delivery
+state. Migration `022` adds credential-independent Change Integrity baselines,
+immutable material-change events, and the database-authorized one-way review
+transition. Neither migration is production evidence until its external or
+hosted acceptance gates have passed.
+The workbench loads 50 rows for the selected agency at a time, ordering awaiting
+packets before newest history and using an opaque cursor for older pages.
+Agency-workspace creation also provisions only the creator as owner;
+the application has no member invitation or self-service membership flow. For a
+controlled private-beta test, the dry-run-first
+[`agency:member:provision`](private-beta-agency-member-provisioning.md) operator
+command can add one existing, separately admitted Clerk user as `admin`; it
+inserts database membership only and sends no invitation or email. That
+membership inherits all current and future account grants held by the agency,
+so the operator must explicitly acknowledge the agency-wide access scope.
 
 Each record stores:
 
@@ -184,7 +221,7 @@ to retain creative review and delivery transitions between live syncs. This
 read-only history is not itself a write-authorization rule: the application can
 report its absence without inventing transitions, and the independent approval
 rules remain fail-closed. Deployment readiness nevertheless requires the exact
-`001` through `018` migration ledger, so an account-backed release must not be
+`001` through `022` migration ledger, so an account-backed release must not be
 promoted while migration `004` is absent or unavailable.
 
 ## Recommendation dismissal migration
@@ -206,7 +243,7 @@ keyset-ready index and shows both the dismissal and restoration actor contexts.
 
 ## Local database proof
 
-`npm run test:db` now applies all eighteen migrations to a uniquely named,
+`npm run test:db` now applies all twenty-two migrations to a uniquely named,
 disposable PostgreSQL database and exercises the real tenancy, credential, and
 approval stores. It covers direct-advertiser and agency roles, review-only
 access, duplicate account claims, encrypted key rotation with transaction
@@ -215,7 +252,12 @@ JSONB approval payloads, concurrent approval deduplication, exact monitoring
 windows, account-scoped single-write monitoring outcomes, evaluation lease
 expiry/recovery, concurrent readiness quotas, concurrent and account-scoped
 recommendation dismissals, reversible decision audit data, concurrent rollback
-claims, and manual reconciliation.
+claims, manual reconciliation, and the durable two-person simulator decision
+queue with expiry, duplicate suppression, immutable evidence, and concurrent
+decision fencing. It also proves recurring same-resource Change Integrity
+events, exact evidence-path partitions, database-authoritative reviewer roles,
+single acknowledgement, and rejection of forged or mutated audit evidence at
+the trigger boundary.
 See [`database-integration.md`](database-integration.md) for the exact boundary.
 
 Migration `016` adds the bounded live-portfolio signal summary written only
@@ -226,10 +268,17 @@ loads the full snapshot payload.
 Migration `017` adds bounded customer-retention and purge evidence. Migration
 `018` completes the remaining organization foreign-key indexes and installs the
 deny-all Supabase Data API posture: RLS is enabled, ambient schema/object
-privileges are revoked, and the server-only owner connection remains the sole
-runtime database path until a separately reviewed role-policy migration exists.
+privileges are revoked, while application traffic stays on a server-only direct
+PostgreSQL path. The dedicated `maintainflow_app` runtime role and its exact
+grants are provisioned and reviewed separately from immutable application
+migrations.
+Migration `019` adds the agency change-request queue and its transition guard.
+Migration `020` adds exact live packet-to-operation binding, single-use replay
+protection, immutable approval identity, and a safe retirement path for stale
+approved packets; the separately managed `maintainflow_app` role grants only
+the reviewed lifecycle columns needed by those transitions.
 
-## Scheduled monitoring
+## Scheduled workers
 
 `vercel.json` invokes `GET /api/jobs/monitoring/evaluate` once daily at 01:15
 UTC, a cadence compatible with Vercel Hobby. The route requires the server-only
@@ -238,6 +287,19 @@ in bounded batches, independently attempts retention cleanup, and returns
 aggregate counts without account identifiers.
 Vercel schedules run only on production deployments; a non-Vercel host must
 invoke the same route with `Authorization: Bearer $CRON_SECRET`.
+
+The same configuration invokes `GET /api/jobs/notifications/deliver` every five
+minutes to recover approval-email fan-out, transient provider failures, and
+expired worker leases. That cadence requires Vercel Pro (or a separately proven
+external scheduler); the currently linked Vercel team must be upgraded before
+this configuration can be deployed. Immediate delivery attempts after an
+approval transition reduce latency but are not a substitute for the durable
+retry worker.
+
+The exact-revision deployment probe must invoke this worker as well as the
+daily monitor. It fails on an enablement mismatch, unsafe delivery accounting,
+any retry or terminal failure, or any recovery activity; an empty clean run is
+not a substitute for the two-recipient Resend acceptance exercise.
 
 A worker atomically claims due rows with `FOR UPDATE SKIP LOCKED`, then releases
 the database transaction before calling OpenAI. Successful observations clear
@@ -258,19 +320,36 @@ retry signal, without discarding completed monitoring outcomes.
 ## Current authorization model
 
 The MVP uses Clerk for identity and PostgreSQL for authorization. A user must be
-an owner, admin, or analyst in an active organization and that organization must
-hold owner, manager, or viewer access to the advertiser account. Writes require
-both an owner/admin membership and owner/manager account access.
+authenticated by Clerk and currently admitted at runtime for every protected
+customer read or mutation. They must also be an owner, admin, or analyst in an
+active organization, and that organization must hold owner, manager, or viewer
+access to the advertiser account. Writes require both an owner/admin membership
+and owner/manager account access.
 
-`MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS` is deliberately narrower: it only permits
-listed Clerk users to claim a newly connected, unowned account and create the
-first workspace. It is not consulted for ongoing account access.
+In private-beta mode, runtime admission is the union of
+`MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS` and
+`MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS`. Bootstrap IDs remain admitted for ongoing
+access after initial claim for compatibility; keep that list minimal, and
+atomically move an onboarded user from it to the private-beta list in one
+reviewed configuration change when narrower bootstrap behavior is desired.
+Production configuration requires exact, unique, bounded `user_...` IDs and
+rejects empty entries and wildcards.
+Removing a user from the union blocks their existing membership access,
+reviewer eligibility, approval links and notifications, and execution of any
+unconsumed live packet they approved.
 
 Public account creation is independently closed unless admission mode is
 `open` and `MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED=true`. A private-beta deployment
-therefore shows sign-in only and provisions invited Clerk users directly. The
+therefore shows sign-in only. Admitted Clerk identities and additional agency
+members must currently be prepared operationally: the application does not send
+an invitation, create a teammate, or expose membership administration. The
+operator-only membership command assumes the target Clerk account already exists
+and treats independent admission as a human-verified precondition; it cannot
+prove either condition, and membership alone grants no runtime access. The
 Clerk tenant must also disable unrestricted hosted sign-up; that external
-setting is verified separately from this application gate.
+setting is verified separately from this application gate. Follow the
+[private-beta provisioning runbook](private-beta-agency-member-provisioning.md)
+for the exact database-only boundary.
 
 ## Still required before an account-backed public or live-write release
 
@@ -287,8 +366,20 @@ hosted smoke, alert, containment, and recovery procedure.
 - Configure an independent 32+ character
   `MAINTAINFLOW_READINESS_PROBE_SECRET` and verify one authenticated
   `/api/ready` probe.
-- Configure a strong `CRON_SECRET` and verify one protected production cron run.
+- Configure a strong `CRON_SECRET`; verify one protected monitoring run and one
+  protected notification-delivery run. Confirm the production hosting plan
+  accepts the five-minute notification schedule before enabling approval email.
 - Verify a real authenticated session and database record end to end.
+- Admit two existing Clerk users, then use the dry-run-first operator command to
+  provision the second user as `admin` in one test agency. Complete one simulator
+  request, decision, expiry, and concurrent-decision exercise through distinct
+  real sessions. No invitation is sent; approval email should be expected only
+  after the exact organization passes the separate
+  [delivery runbook](approval-notifications.md).
+- Before delegating or automating member provisioning, replace the private-beta
+  bridge with account-scoped membership controls, an environment-bound expiring
+  confirmation, and a durable `granted_by` plus authorization-reference audit
+  record. The manual support record is acceptable only for the controlled beta.
 - Configure and exercise the encryption keyring and credential migration in a
   non-production environment, including a real client-key rotation.
 - Configure `READINESS_RATE_LIMIT_SECRET`, apply migration `008`, and test the
@@ -296,6 +387,12 @@ hosted smoke, alert, containment, and recovery procedure.
 - Configure a Vercel WAF rate-limit rule for the public readiness route, first
   in log mode and then in enforcement mode after observing real traffic.
 - Run the contract suite against a real OpenAI Ads test account.
+- Apply migration `020` and the refreshed `maintainflow_app` grants in a hosted
+  non-production database, then prove through two real Clerk sessions that an
+  agency write cannot bypass one approved, unexpired, fingerprint-matched,
+  single-use packet. The implementation and disposable-database proof are local;
+  agency `live_write` remains blocked until this hosted exercise and the real
+  OpenAI Ads account acceptance plan pass.
 - Apply migration `010` on a disposable hosted database and exercise one direct
   advertiser and one agency-managed credential rotation through real Clerk
   sessions without relaxing account roles.

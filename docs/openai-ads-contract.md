@@ -206,6 +206,17 @@ and tenancy migrations. The bootstrap operator list only controls the first
 unclaimed account connection; it does not grant ongoing access. Demo IDs can
 never be sent to the Ads API.
 
+Migration `019` supplies the durable agency maker-checker queue, and migration
+`020` makes its live packets an enforced authorization boundary. The live agency
+mutation route accepts only a stored request id and version, reloads the account
+and a fresh provider recommendation from server-owned state, and atomically
+links the exact approved packet to one pending approval record before any
+provider write. The packet is single-use even when a later provider check or
+write fails; simulator packets remain non-executable. This is implemented and
+verified against disposable PostgreSQL locally, but remains a release gate until
+`020` and the runtime grants are applied to the hosted database and exercised
+with two real Clerk sessions and a real OpenAI Ads account.
+
 Before a live request, MaintainFlow stores the exact request, rollback payload,
 evidence, safeguard, account, operator, and recommendation in PostgreSQL. An HTTP
 4xx rejection is recorded as failed. A network error, timeout, HTTP 408, or 5xx

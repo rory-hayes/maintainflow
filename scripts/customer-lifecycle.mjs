@@ -24,12 +24,16 @@ export const RETENTION_PURGE_LIMITS = Object.freeze({
   accessGrants: 100,
   advertiserCredentials: 100,
   conversionCredentials: 100,
+  changeApprovalRequests: 10_000,
+  approvalNotificationDeliveries: 100_000,
   approvals: 10_000,
   creativeReviewState: 100_000,
   creativeReviewEvents: 100_000,
   recommendationDecisions: 100_000,
   readinessAudits: 10_000,
   liveWorkbenchSnapshots: 100,
+  changeIntegrityState: 1,
+  changeIntegrityEvents: 100_000,
   monitoringAccountSchedules: 1,
 });
 
@@ -499,6 +503,22 @@ async function loadBoundedPurgeInventory(sql, record) {
         limit ${RETENTION_PURGE_LIMITS.conversionCredentials + 1}
       ) rows) as conversion_credentials,
       (select count(*)::int from (
+        select 1 from maintainflow_change_approval_requests
+        where advertiser_account_id = ${accountId}
+          and source = 'live'
+        limit ${RETENTION_PURGE_LIMITS.changeApprovalRequests + 1}
+      ) rows) as change_approval_requests,
+      (select count(*)::int from (
+        select 1
+        from maintainflow_approval_notification_deliveries delivery
+        join maintainflow_change_approval_requests request
+          on request.id = delivery.approval_request_id
+         and request.organization_id = delivery.organization_id
+        where request.advertiser_account_id = ${accountId}
+          and request.source = 'live'
+        limit ${RETENTION_PURGE_LIMITS.approvalNotificationDeliveries + 1}
+      ) rows) as approval_notification_deliveries,
+      (select count(*)::int from (
         select 1 from ads_approval_records
         where account_id = ${externalAccountId}
         limit ${RETENTION_PURGE_LIMITS.approvals + 1}
@@ -529,10 +549,27 @@ async function loadBoundedPurgeInventory(sql, record) {
         limit ${RETENTION_PURGE_LIMITS.liveWorkbenchSnapshots + 1}
       ) rows) as live_workbench_snapshots,
       (select count(*)::int from (
+        select 1 from maintainflow_ads_config_integrity_state
+        where advertiser_account_id = ${accountId}
+        limit ${RETENTION_PURGE_LIMITS.changeIntegrityState + 1}
+      ) rows) as change_integrity_state,
+      (select count(*)::int from (
+        select 1 from maintainflow_ads_config_integrity_events
+        where advertiser_account_id = ${accountId}
+        limit ${RETENTION_PURGE_LIMITS.changeIntegrityEvents + 1}
+      ) rows) as change_integrity_events,
+      (select count(*)::int from (
         select 1 from maintainflow_monitoring_account_schedule
         where advertiser_account_id = ${accountId}
         limit ${RETENTION_PURGE_LIMITS.monitoringAccountSchedules + 1}
       ) rows) as monitoring_account_schedules,
+      (select count(*)::int from (
+        select 1 from maintainflow_change_approval_requests
+        where advertiser_account_id = ${accountId}
+          and source = 'live'
+          and status = 'awaiting_approval'
+        limit 2
+      ) rows) as unresolved_change_approval_requests,
       (select count(*)::int from (
         select 1 from ads_approval_records
         where account_id = ${externalAccountId}
@@ -544,13 +581,20 @@ async function loadBoundedPurgeInventory(sql, record) {
     accessGrants: counts.access_grants,
     advertiserCredentials: counts.advertiser_credentials,
     conversionCredentials: counts.conversion_credentials,
+    changeApprovalRequests: counts.change_approval_requests,
+    approvalNotificationDeliveries:
+      counts.approval_notification_deliveries,
     approvals: counts.approvals,
     creativeReviewState: counts.creative_review_state,
     creativeReviewEvents: counts.creative_review_events,
     recommendationDecisions: counts.recommendation_decisions,
     readinessAudits: counts.readiness_audits,
     liveWorkbenchSnapshots: counts.live_workbench_snapshots,
+    changeIntegrityState: counts.change_integrity_state,
+    changeIntegrityEvents: counts.change_integrity_events,
     monitoringAccountSchedules: counts.monitoring_account_schedules,
+    unresolvedChangeApprovalRequests:
+      counts.unresolved_change_approval_requests,
     unresolvedApprovals: counts.unresolved_approvals,
   };
 }
@@ -604,6 +648,11 @@ function buildPurgePlan(record, account, inventory, options) {
       "Provider mutation evidence still has an unresolved state and must be reconciled before purging.",
     );
   }
+  if (inventory.unresolvedChangeApprovalRequests > 0) {
+    blockers.push(
+      "A live change approval request still awaits a decision and must be cancelled, decided, or expired before purging.",
+    );
+  }
 
   const boundedInventory = Object.fromEntries(
     Object.keys(RETENTION_PURGE_LIMITS).map((name) => [name, inventory[name]]),
@@ -645,9 +694,36 @@ export async function prepareRetentionPurge(sql, options) {
   });
 }
 
+async function lockLiveChangeApprovalRequests(transaction, record) {
+  return transaction`
+    select id
+    from maintainflow_change_approval_requests
+    where advertiser_account_id = ${record.advertiser_account_id}
+      and source = 'live'
+    order by id
+    limit ${RETENTION_PURGE_LIMITS.changeApprovalRequests + 1}
+    for update
+  `;
+}
+
 async function deleteRetentionInventory(transaction, record) {
   const accountId = record.advertiser_account_id;
   const externalAccountId = record.external_account_id;
+  const approvalNotificationDeliveries = await transaction`
+    delete from maintainflow_approval_notification_deliveries delivery
+    using maintainflow_change_approval_requests request
+    where request.id = delivery.approval_request_id
+      and request.organization_id = delivery.organization_id
+      and request.advertiser_account_id = ${accountId}
+      and request.source = 'live'
+    returning delivery.id
+  `;
+  const changeApprovalRequests = await transaction`
+    delete from maintainflow_change_approval_requests
+    where advertiser_account_id = ${accountId}
+      and source = 'live'
+    returning id
+  `;
   const approvals = await transaction`
     delete from ads_approval_records
     where account_id = ${externalAccountId}
@@ -678,6 +754,16 @@ async function deleteRetentionInventory(transaction, record) {
     where advertiser_account_id = ${accountId}
     returning credential_generation
   `;
+  const changeIntegrityEvents = await transaction`
+    delete from maintainflow_ads_config_integrity_events
+    where advertiser_account_id = ${accountId}
+    returning id
+  `;
+  const changeIntegrityState = await transaction`
+    delete from maintainflow_ads_config_integrity_state
+    where advertiser_account_id = ${accountId}
+    returning advertiser_account_id
+  `;
   const monitoringAccountSchedules = await transaction`
     delete from maintainflow_monitoring_account_schedule
     where advertiser_account_id = ${accountId}
@@ -702,12 +788,16 @@ async function deleteRetentionInventory(transaction, record) {
     accessGrants: accessGrants.length,
     advertiserCredentials: advertiserCredentials.length,
     conversionCredentials: conversionCredentials.length,
+    changeApprovalRequests: changeApprovalRequests.length,
+    approvalNotificationDeliveries: approvalNotificationDeliveries.length,
     approvals: approvals.length,
     creativeReviewState: creativeReviewState.length,
     creativeReviewEvents: creativeReviewEvents.length,
     recommendationDecisions: recommendationDecisions.length,
     readinessAudits: readinessAudits.length,
     liveWorkbenchSnapshots: liveWorkbenchSnapshots.length,
+    changeIntegrityState: changeIntegrityState.length,
+    changeIntegrityEvents: changeIntegrityEvents.length,
     monitoringAccountSchedules: monitoringAccountSchedules.length,
   };
 }
@@ -756,6 +846,16 @@ export async function applyRetentionPurge(sql, options) {
       sha256: plan.evidenceSha256,
     });
 
+    const lockedChangeApprovalRequests =
+      await lockLiveChangeApprovalRequests(transaction, record);
+    if (
+      lockedChangeApprovalRequests.length !==
+      plan.inventory.changeApprovalRequests
+    ) {
+      throw new CustomerLifecycleSafetyError(
+        "The locked retention inventory changed before completion; all mutations were rolled back.",
+      );
+    }
     const deleted = await deleteRetentionInventory(transaction, record);
     for (const name of Object.keys(RETENTION_PURGE_LIMITS)) {
       if (deleted[name] !== plan.inventory[name]) {

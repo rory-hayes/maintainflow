@@ -6,7 +6,7 @@ export function GET() {
   return Response.json(
     {
       ok: true,
-      service: "maintainflow-ads",
+      service: "maintaincode-ads",
       scope: "process_liveness",
       revision: resolveBuildRevision() ?? "unknown",
     },

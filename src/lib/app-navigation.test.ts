@@ -9,6 +9,7 @@ import {
 describe("MaintainFlow app navigation", () => {
   it("accepts only named product tabs", () => {
     expect(parseAppTab("readiness")).toBe("readiness");
+    expect(parseAppTab("approvals")).toBe("approvals");
     expect(parseAppTab("workspace")).toBe("workspace");
     expect(parseAppTab("billing")).toBeNull();
     expect(parseAppTab(["review", "workspace"])).toBeNull();
@@ -20,6 +21,15 @@ describe("MaintainFlow app navigation", () => {
     expect(
       buildAppHref({ tab: "readiness", accountId: "adacct/client one" }),
     ).toBe("/app?tab=readiness&account=adacct%2Fclient+one");
+    expect(
+      buildAppHref({
+        tab: "approvals",
+        accountId: "adacct_shared",
+        organizationId: "org_agency_two",
+      }),
+    ).toBe(
+      "/app?tab=approvals&account=adacct_shared&organization=org_agency_two",
+    );
   });
 
   it("switches tabs without dropping account context or other safe URL state", () => {

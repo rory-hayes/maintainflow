@@ -6,6 +6,7 @@ import type postgres from "postgres";
 import type { Sql } from "postgres";
 
 import type { Recommendation } from "../openai-ads/demo-data";
+import { linkLiveChangeApprovalExecution } from "../approvals/change-request-store.server";
 import { getRuntimeDatabase } from "../database/client.server";
 import {
   monitoringAttributionMaturityCutoff,
@@ -16,7 +17,10 @@ import {
 } from "../openai-ads/monitoring";
 import type { AccountAccess } from "../tenancy/schema";
 import { lockCurrentAccountWriteAccess } from "../tenancy/store.server";
-import { recommendationFingerprint } from "./recommendation-decision";
+import {
+  recommendationApprovalFingerprint,
+  recommendationFingerprint,
+} from "./recommendation-decision";
 import {
   approvalRecordSchema,
   type ApprovalRecord,
@@ -29,6 +33,13 @@ type ApprovalRecordInput = {
   operatorId: string;
   recommendation: Recommendation;
   access: AccountAccess;
+  authorization?:
+    | { kind: "direct" }
+    | {
+        kind: "agency_request";
+        requestId: string;
+        expectedVersion: number;
+      };
 };
 
 type ApprovalRow = {
@@ -155,7 +166,7 @@ export async function verifyApprovalStore(database?: Sql) {
     select (
       to_regclass('public.ads_approval_records') is not null
       and (
-        select count(*) = 28
+        select count(*) = 29
         from information_schema.columns
         where table_schema = 'public'
           and table_name = 'ads_approval_records'
@@ -187,7 +198,8 @@ export async function verifyApprovalStore(database?: Sql) {
             'apply_provider_attempted_at',
             'rollback_provider_attempted_at',
             'apply_provider_attempt_id',
-            'rollback_provider_attempt_id'
+            'rollback_provider_attempt_id',
+            'recommendation_approval_fingerprint'
           )
       )
       and to_regclass(
@@ -208,6 +220,25 @@ export async function verifyApprovalStore(database?: Sql) {
       and to_regclass(
         'public.maintainflow_monitoring_account_schedule_due_idx'
       ) is not null
+      and to_regprocedure(
+        'public.maintainflow_enforce_ads_approval_identity()'
+      ) is not null
+      and exists (
+        select 1
+        from pg_catalog.pg_trigger trigger
+        join pg_catalog.pg_class relation
+          on relation.oid = trigger.tgrelid
+        join pg_catalog.pg_namespace namespace
+          on namespace.oid = relation.relnamespace
+        where namespace.nspname = 'public'
+          and relation.relname = 'ads_approval_records'
+          and trigger.tgname = 'maintainflow_ads_approval_identity_guard'
+          and trigger.tgfoid = to_regprocedure(
+            'public.maintainflow_enforce_ads_approval_identity()'
+          )
+          and not trigger.tgisinternal
+          and trigger.tgenabled = 'O'
+      )
     ) as ready
   `;
   return result?.ready === true;
@@ -256,9 +287,32 @@ export async function createApprovalRecord({
   operatorId,
   recommendation,
   access,
+  authorization = { kind: "direct" },
 }: ApprovalRecordInput, transaction?: postgres.TransactionSql) {
+  if (
+    access.organizationType === "agency" &&
+    authorization.kind !== "agency_request"
+  ) {
+    throw new ApprovalTransitionError(
+      "Agency live changes require an independently approved change request.",
+    );
+  }
+  if (
+    access.organizationType === "advertiser" &&
+    authorization.kind !== "direct"
+  ) {
+    throw new ApprovalTransitionError(
+      "An agency approval request cannot authorize a direct-advertiser workspace.",
+    );
+  }
+  if (authorization.kind === "agency_request" && !transaction) {
+    throw new ApprovalTransitionError(
+      "Agency approval consumption must share the live-write database transaction.",
+    );
+  }
   const sql = transaction ?? getDatabase();
   const id = randomUUID();
+  const approvalFingerprint = recommendationApprovalFingerprint(recommendation);
   const monitoringPlan = recommendation.monitoringPlan
     ? sql.json(recommendation.monitoringPlan as postgres.JSONValue)
     : null;
@@ -289,12 +343,13 @@ export async function createApprovalRecord({
     insert into ads_approval_records (
       id, account_id, operator_id, acting_organization_id,
       actor_membership_role, actor_account_role, recommendation_id, recommendation_title,
-      entity_id, request_payload, rollback_payload, evidence_payload, safeguard,
+      entity_id, recommendation_approval_fingerprint,
+      request_payload, rollback_payload, evidence_payload, safeguard,
       monitoring_plan, monitoring_window_days, apply_provider_attempt_id, status
     ) values (
       ${id}, ${accountId}, ${operatorId}, ${access.organizationId},
       ${access.membershipRole}, ${access.accountRole}, ${recommendation.id},
-      ${recommendation.title}, ${recommendation.entityId},
+      ${recommendation.title}, ${recommendation.entityId}, ${approvalFingerprint},
       ${sql.json(recommendation.mutation as postgres.JSONValue)},
       ${sql.json(recommendation.rollback as postgres.JSONValue)},
       ${sql.json(recommendation.evidence as postgres.JSONValue)},
@@ -317,6 +372,17 @@ export async function createApprovalRecord({
     throw new ApprovalTransitionError(
       "This recommendation already has an active or unresolved approval. Refresh before taking another action.",
     );
+  }
+  if (authorization.kind === "agency_request") {
+    await linkLiveChangeApprovalExecution({
+      transaction: transaction!,
+      requestId: authorization.requestId,
+      expectedVersion: authorization.expectedVersion,
+      operatorId,
+      access,
+      recommendation,
+      approvalRecordId: id,
+    });
   }
   return id;
 }

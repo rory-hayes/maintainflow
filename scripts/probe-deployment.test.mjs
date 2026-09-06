@@ -9,10 +9,10 @@ const revision = "a".repeat(40);
 const readinessSecret = "readiness-secret-at-least-32-characters";
 const cronSecret = "monitoring-secret-at-least-32-characters";
 
-function jsonResponse(payload, status = 200) {
+function jsonResponse(payload, status = 200, headers = {}) {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
 }
 
@@ -24,12 +24,19 @@ function htmlResponse(body, status = 200) {
 }
 
 function successfulFetch({
+  approvalEmailEnabled,
   landingHtml,
   monitoringOverrides,
+  notificationOverrides,
+  notificationResponseHeaders = { "Cache-Control": "no-store" },
+  notificationStatus = 200,
   readinessOverrides,
   stage = "demo",
+  unauthorizedNotificationHeaders = { "Cache-Control": "no-store" },
+  unauthorizedNotificationStatus = 401,
 } = {}) {
-  const expectedReadinessChecks = stage === "demo" ? 7 : 14;
+  const expectedReadinessChecks = stage === "demo" ? 9 : 16;
+  const notificationsEnabled = approvalEmailEnabled ?? stage !== "demo";
   return vi
     .fn()
     .mockResolvedValueOnce(
@@ -56,6 +63,13 @@ function successfulFetch({
       }),
     )
     .mockResolvedValueOnce(
+      jsonResponse(
+        { ok: false },
+        unauthorizedNotificationStatus,
+        unauthorizedNotificationHeaders,
+      ),
+    )
+    .mockResolvedValueOnce(
       jsonResponse({
         ok: true,
         releaseStage: stage,
@@ -77,6 +91,30 @@ function successfulFetch({
         evaluated: 0,
         ...monitoringOverrides,
       }),
+    )
+    .mockResolvedValueOnce(
+      jsonResponse(
+        {
+          ok: true,
+          enabled: notificationsEnabled,
+          claimed: 0,
+          accepted: 0,
+          retryScheduled: 0,
+          permanentlyFailed: 0,
+          cancelled: 0,
+          lostClaims: 0,
+          recovery: {
+            cancelledIneligible: 0,
+            retryScheduledAfterLeaseExpiry: 0,
+            permanentFailuresAfterLeaseExpiry: 0,
+            permanentFailuresAfterIdempotencyExpiry: 0,
+            permanentFailuresAfterConfirmationTimeout: 0,
+          },
+          ...notificationOverrides,
+        },
+        notificationStatus,
+        notificationResponseHeaders,
+      ),
     )
     .mockResolvedValueOnce(
       htmlResponse(
@@ -124,20 +162,25 @@ describe("hosted deployment probe", () => {
       service: "maintainflow-ads",
       stage: "demo",
       revision,
-      readinessChecks: 7,
+      readinessChecks: 9,
+      notificationDeliveryEnabled: false,
       surfaceChecks: 5,
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(9);
+    expect(fetchImpl).toHaveBeenCalledTimes(11);
     expect(fetchImpl.mock.calls.every(([, init]) => init?.redirect === "error"))
       .toBe(true);
     expect(fetchImpl.mock.calls[1][1]?.headers).toBeUndefined();
     expect(fetchImpl.mock.calls[2][1]?.headers).toEqual({
       Authorization: `Bearer ${readinessSecret}`,
     });
-    expect(fetchImpl.mock.calls[3][1]?.headers).toEqual({
+    expect(fetchImpl.mock.calls[3][1]?.headers).toBeUndefined();
+    expect(fetchImpl.mock.calls[4][1]?.headers).toEqual({
       Authorization: `Bearer ${cronSecret}`,
     });
-    expect(fetchImpl.mock.calls.slice(4).map(([url]) => url)).toEqual([
+    expect(fetchImpl.mock.calls[5][1]?.headers).toEqual({
+      Authorization: `Bearer ${cronSecret}`,
+    });
+    expect(fetchImpl.mock.calls.slice(6).map(([url]) => url)).toEqual([
       "https://staging.maintainflow.io/",
       "https://staging.maintainflow.io/privacy",
       "https://staging.maintainflow.io/terms",
@@ -145,13 +188,13 @@ describe("hosted deployment probe", () => {
       "https://staging.maintainflow.io/app?tab=readiness",
     ]);
     expect(
-      fetchImpl.mock.calls.slice(4).every(([, init]) => !init?.headers),
+      fetchImpl.mock.calls.slice(6).every(([, init]) => !init?.headers),
     ).toBe(true);
   });
 
   it.each([
-    ["private_read", 14],
-    ["live_write", 14],
+    ["private_read", 16],
+    ["live_write", 16],
   ])(
     "requires the complete %s readiness contract",
     async (expectedStage, expectedReadinessChecks) => {
@@ -162,15 +205,183 @@ describe("hosted deployment probe", () => {
           cronSecret,
           expectedRevision: revision,
           expectedStage,
+          expectedApprovalEmailEnabled: true,
           fetchImpl: successfulFetch({ stage: expectedStage }),
         }),
       ).resolves.toMatchObject({
         ok: true,
         stage: expectedStage,
         readinessChecks: expectedReadinessChecks,
+        notificationDeliveryEnabled: true,
       });
     },
   );
+
+  it.each(["private_read", "live_write"])(
+    "accepts an explicitly disabled notification worker in %s",
+    async (expectedStage) => {
+      await expect(
+        probeDeployment({
+          origin: "https://staging.maintainflow.io",
+          readinessSecret,
+          cronSecret,
+          expectedRevision: revision,
+          expectedStage,
+          expectedApprovalEmailEnabled: false,
+          fetchImpl: successfulFetch({
+            approvalEmailEnabled: false,
+            stage: expectedStage,
+          }),
+        }),
+      ).resolves.toMatchObject({
+        notificationDeliveryEnabled: false,
+      });
+    },
+  );
+
+  it("requires an explicit notification state for account-backed stages", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(
+      probeDeployment({
+        origin: "https://staging.maintainflow.io",
+        readinessSecret,
+        cronSecret,
+        expectedRevision: revision,
+        expectedStage: "private_read",
+        fetchImpl,
+      }),
+    ).rejects.toThrow("Expected approval email state is not configured");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects an enabled notification expectation in demo", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(
+      probeDeployment({
+        origin: "https://staging.maintainflow.io",
+        readinessSecret,
+        cronSecret,
+        expectedRevision: revision,
+        expectedStage: "demo",
+        expectedApprovalEmailEnabled: true,
+        fetchImpl,
+      }),
+    ).rejects.toThrow("cannot be expected in the demo release stage");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("accepts a clean enabled notification run with accepted and cancelled work", async () => {
+    await expect(
+      probeDeployment({
+        origin: "https://staging.maintainflow.io",
+        readinessSecret,
+        cronSecret,
+        expectedRevision: revision,
+        expectedStage: "private_read",
+        expectedApprovalEmailEnabled: true,
+        fetchImpl: successfulFetch({
+          stage: "private_read",
+          notificationOverrides: {
+            claimed: 2,
+            accepted: 1,
+            cancelled: 1,
+          },
+        }),
+      }),
+    ).resolves.toMatchObject({ notificationDeliveryEnabled: true });
+  });
+
+  it("rejects a notification enablement mismatch", async () => {
+    await expect(
+      probeDeployment({
+        origin: "https://staging.maintainflow.io",
+        readinessSecret,
+        cronSecret,
+        expectedRevision: revision,
+        expectedStage: "demo",
+        expectedApprovalEmailEnabled: false,
+        fetchImpl: successfulFetch({ approvalEmailEnabled: true }),
+      }),
+    ).rejects.toThrow("complete clean delivery run");
+  });
+
+  it.each([
+    ["negative", { claimed: -1 }],
+    ["fractional", { claimed: 0.5 }],
+    ["unsafe", { claimed: Number.MAX_SAFE_INTEGER + 1 }],
+    ["over-cap", { claimed: 26, accepted: 26 }],
+    ["accounting mismatch", { claimed: 2, accepted: 1 }],
+    ["retry", { claimed: 1, retryScheduled: 1 }],
+    ["permanent failure", { claimed: 1, permanentlyFailed: 1 }],
+    ["lost claim", { claimed: 1, lostClaims: 1 }],
+  ])("rejects an unsafe notification summary: %s", async (_label, overrides) => {
+    await expect(
+      probeDeployment({
+        origin: "https://staging.maintainflow.io",
+        readinessSecret,
+        cronSecret,
+        expectedRevision: revision,
+        expectedStage: "private_read",
+        expectedApprovalEmailEnabled: true,
+        fetchImpl: successfulFetch({
+          stage: "private_read",
+          notificationOverrides: overrides,
+        }),
+      }),
+    ).rejects.toThrow("complete clean delivery run");
+  });
+
+  it.each([
+    "cancelledIneligible",
+    "retryScheduledAfterLeaseExpiry",
+    "permanentFailuresAfterLeaseExpiry",
+    "permanentFailuresAfterIdempotencyExpiry",
+    "permanentFailuresAfterConfirmationTimeout",
+  ])("rejects notification recovery activity: %s", async (recoveryField) => {
+    await expect(
+      probeDeployment({
+        origin: "https://staging.maintainflow.io",
+        readinessSecret,
+        cronSecret,
+        expectedRevision: revision,
+        expectedStage: "private_read",
+        expectedApprovalEmailEnabled: true,
+        fetchImpl: successfulFetch({
+          stage: "private_read",
+          notificationOverrides: {
+            recovery: {
+              cancelledIneligible: 0,
+              retryScheduledAfterLeaseExpiry: 0,
+              permanentFailuresAfterLeaseExpiry: 0,
+              permanentFailuresAfterIdempotencyExpiry: 0,
+              permanentFailuresAfterConfirmationTimeout: 0,
+              [recoveryField]: 1,
+            },
+          },
+        }),
+      }),
+    ).rejects.toThrow("complete clean delivery run");
+  });
+
+  it.each([
+    ["anonymous status", { unauthorizedNotificationStatus: 200 }],
+    ["anonymous caching", { unauthorizedNotificationHeaders: {} }],
+    ["authenticated caching", { notificationResponseHeaders: {} }],
+    ["authenticated failure", { notificationStatus: 503 }],
+  ])("rejects an unsafe notification HTTP contract: %s", async (_label, fixture) => {
+    await expect(
+      probeDeployment({
+        origin: "https://staging.maintainflow.io",
+        readinessSecret,
+        cronSecret,
+        expectedRevision: revision,
+        expectedStage: "demo",
+        fetchImpl: successfulFetch(fixture),
+      }),
+    ).rejects.toBeInstanceOf(DeploymentProbeError);
+  });
 
   it("fails closed when a public surface returns the wrong application", async () => {
     const plantedSecret = "PLANTED_SURFACE_SECRET_f8f24a";
@@ -346,7 +557,7 @@ describe("hosted deployment probe", () => {
     ).rejects.toThrow("expected stage, revision, and checks");
   });
 
-  it.each([6, 8])(
+  it.each([8, 10])(
     "rejects a demo readiness response with %i checks",
     async (reportedChecks) => {
       await expect(
@@ -386,8 +597,11 @@ describe("hosted deployment probe", () => {
           scope: "deployment_readiness",
           stage: "demo",
           revision,
-          checks: { passed: 7, total: 7 },
+          checks: { passed: 9, total: 9 },
         }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: false }, 401, { "Cache-Control": "no-store" }),
       )
       .mockResolvedValueOnce(jsonResponse({ ok: true }));
 

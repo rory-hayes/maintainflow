@@ -133,6 +133,8 @@ grant usage on schema public to maintainflow_app;
 
 grant select on table
   public.ads_approval_records,
+  public.maintainflow_change_approval_requests,
+  public.maintainflow_approval_notification_deliveries,
   public.maintainflow_organizations,
   public.maintainflow_organization_memberships,
   public.maintainflow_advertiser_accounts,
@@ -145,6 +147,8 @@ grant select on table
   public.maintainflow_conversion_credentials,
   public.maintainflow_readiness_audit_runs,
   public.maintainflow_live_workbench_snapshots,
+  public.maintainflow_ads_config_integrity_state,
+  public.maintainflow_ads_config_integrity_events,
   public.maintainflow_customer_lifecycle_records,
   public.maintainflow_monitoring_account_schedule,
   public.maintainflow_schema_migrations
@@ -164,11 +168,53 @@ grant insert on table
   public.maintainflow_conversion_credentials,
   public.maintainflow_readiness_audit_runs,
   public.maintainflow_live_workbench_snapshots,
+  public.maintainflow_ads_config_integrity_state,
+  public.maintainflow_ads_config_integrity_events,
   public.maintainflow_monitoring_account_schedule
   to maintainflow_app;
 
+-- The request always starts in the database-defined awaiting/version-one
+-- state. The runtime cannot provide a decision, terminal status, version,
+-- timestamps, or an execution link at insert time.
+grant insert (
+  id,
+  organization_id,
+  advertiser_account_id,
+  account_id_snapshot,
+  account_name_snapshot,
+  source,
+  recommendation_id,
+  recommendation_title,
+  entity_id,
+  recommendation_fingerprint,
+  decision_context,
+  request_payload,
+  rollback_payload,
+  evidence_payload,
+  safeguard,
+  requester_operator_id,
+  requester_name_snapshot,
+  requester_membership_role,
+  request_note,
+  requested_at,
+  expires_at
+) on table public.maintainflow_change_approval_requests
+  to maintainflow_app;
+
+-- The producer supplies only the immutable request/event/recipient identity.
+-- Database defaults and the lifecycle trigger own queue and delivery state.
+grant insert (
+  id,
+  approval_request_id,
+  organization_id,
+  event_type,
+  recipient_operator_id,
+  recipient_membership_role_snapshot,
+  approval_request_version
+) on table public.maintainflow_approval_notification_deliveries
+  to maintainflow_app;
+
 grant update on table
-  public.ads_approval_records,
   public.maintainflow_advertiser_accounts,
   public.maintainflow_advertiser_credentials,
   public.maintainflow_creative_review_state,
@@ -177,6 +223,108 @@ grant update on table
   public.maintainflow_conversion_credentials,
   public.maintainflow_live_workbench_snapshots,
   public.maintainflow_monitoring_account_schedule
+  to maintainflow_app;
+
+-- The approval's account, actors, recommendation, reviewed payloads,
+-- safeguard, monitoring baseline, apply-attempt identity, and fingerprint are
+-- immutable. Only operation, rollback, reconciliation, and monitoring
+-- lifecycle state may advance.
+grant update (
+  status,
+  response_payload,
+  error_message,
+  rollback_operator_id,
+  rollback_response_payload,
+  rollback_error_message,
+  reconciled_by,
+  reconciled_at,
+  reconciliation_note,
+  updated_at,
+  applied_at,
+  rolled_back_at,
+  monitoring_started_at,
+  monitoring_ends_at,
+  monitoring_outcome,
+  monitoring_observation,
+  monitoring_evaluated_at,
+  monitoring_evaluation_claim_id,
+  monitoring_evaluation_claimed_at,
+  apply_provider_attempted_at,
+  rollback_provider_attempted_at,
+  rollback_provider_attempt_id,
+  rollback_organization_id,
+  rollback_membership_role,
+  rollback_account_role,
+  reconciled_organization_id,
+  reconciled_membership_role,
+  reconciled_account_role
+) on table public.ads_approval_records
+  to maintainflow_app;
+
+-- Approval packets are immutable after insert. The runtime may move only the
+-- decision/lifecycle fields; it cannot rewrite the reviewed account, actor,
+-- request, rollback, evidence, safeguard, or fingerprint snapshots.
+grant update (
+  status,
+  decision_operator_id,
+  decision_name_snapshot,
+  decision_membership_role,
+  decision_note,
+  decided_at,
+  version,
+  updated_at,
+  retired_at,
+  ads_approval_record_id
+) on table public.maintainflow_change_approval_requests
+  to maintainflow_app;
+
+-- Workers provide only bounded lifecycle commands. Migration 021 derives
+-- attempts, leases, retry times, provider acceptance, and audit timestamps.
+grant update (
+  status,
+  claim_id,
+  provider_message_id,
+  last_failure_code,
+  provider_event_type,
+  provider_event_at,
+  cancellation_code
+) on table public.maintainflow_approval_notification_deliveries
+  to maintainflow_app;
+
+-- The integrity-state account identity and creation time are immutable. The
+-- runtime may advance only the versioned confirmed baseline and database-owned
+-- update timestamp.
+grant update (
+  projection_version,
+  snapshot_fingerprint,
+  snapshot_payload,
+  snapshot_resource_count,
+  observed_at,
+  updated_at
+) on table public.maintainflow_ads_config_integrity_state
+  to maintainflow_app;
+
+-- Integrity event evidence is immutable. Reviewers may submit only the
+-- one-way acknowledgement inputs; migration 022 derives role snapshots and
+-- database time after re-checking current account write authority.
+grant update (
+  review_status,
+  reviewed_by_operator_id,
+  reviewed_by_name,
+  reviewed_by_organization_id,
+  review_note
+) on table public.maintainflow_ads_config_integrity_events
+  to maintainflow_app;
+
+-- PostgreSQL checks UPDATE privilege for SELECT ... FOR UPDATE. These single
+-- key-column grants permit row locking on the immutable authorization tables;
+-- migration 020's BEFORE UPDATE guards reject every material runtime change.
+grant update (id) on table public.maintainflow_organizations
+  to maintainflow_app;
+grant update (organization_id) on table
+  public.maintainflow_organization_memberships
+  to maintainflow_app;
+grant update (organization_id) on table public.maintainflow_account_access
   to maintainflow_app;
 
 grant delete on table
@@ -188,6 +336,8 @@ do $maintainflow_runtime_invariants$
 declare
   expected_tables text[] := array[
     'ads_approval_records',
+    'maintainflow_change_approval_requests',
+    'maintainflow_approval_notification_deliveries',
     'maintainflow_organizations',
     'maintainflow_organization_memberships',
     'maintainflow_advertiser_accounts',
@@ -200,6 +350,8 @@ declare
     'maintainflow_conversion_credentials',
     'maintainflow_readiness_audit_runs',
     'maintainflow_live_workbench_snapshots',
+    'maintainflow_ads_config_integrity_state',
+    'maintainflow_ads_config_integrity_events',
     'maintainflow_customer_lifecycle_records',
     'maintainflow_monitoring_account_schedule',
     'maintainflow_schema_migrations'
@@ -244,6 +396,555 @@ begin
       and relation.relname = any(expected_tables)
   ) then
     raise exception 'MaintainFlow zero-policy RLS invariant failed';
+  end if;
+
+  if has_table_privilege(
+    'maintainflow_app',
+    'public.maintainflow_change_approval_requests',
+    'INSERT'
+  ) then
+    raise exception 'Approval requests unexpectedly have table-level INSERT';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_attribute attribute
+    where attribute.attrelid =
+      'public.maintainflow_change_approval_requests'::regclass
+      and attribute.attnum > 0
+      and not attribute.attisdropped
+      and attribute.attname <> all(array[
+        'id',
+        'organization_id',
+        'advertiser_account_id',
+        'account_id_snapshot',
+        'account_name_snapshot',
+        'source',
+        'recommendation_id',
+        'recommendation_title',
+        'entity_id',
+        'recommendation_fingerprint',
+        'decision_context',
+        'request_payload',
+        'rollback_payload',
+        'evidence_payload',
+        'safeguard',
+        'requester_operator_id',
+        'requester_name_snapshot',
+        'requester_membership_role',
+        'request_note',
+        'requested_at',
+        'expires_at'
+      ])
+      and has_column_privilege(
+        'maintainflow_app',
+        'public.maintainflow_change_approval_requests',
+        attribute.attname,
+        'INSERT'
+      )
+  ) then
+    raise exception 'A database-owned approval-request column is insertable';
+  end if;
+
+  if exists (
+    select 1
+    from unnest(array[
+      'id',
+      'organization_id',
+      'advertiser_account_id',
+      'account_id_snapshot',
+      'account_name_snapshot',
+      'source',
+      'recommendation_id',
+      'recommendation_title',
+      'entity_id',
+      'recommendation_fingerprint',
+      'decision_context',
+      'request_payload',
+      'rollback_payload',
+      'evidence_payload',
+      'safeguard',
+      'requester_operator_id',
+      'requester_name_snapshot',
+      'requester_membership_role',
+      'request_note',
+      'requested_at',
+      'expires_at'
+    ]) expected_column(column_name)
+    where not has_column_privilege(
+      'maintainflow_app',
+      'public.maintainflow_change_approval_requests',
+      expected_column.column_name,
+      'INSERT'
+    )
+  ) then
+    raise exception 'A required approval-request input column is not insertable';
+  end if;
+
+  if has_table_privilege(
+    'maintainflow_app',
+    'public.maintainflow_approval_notification_deliveries',
+    'INSERT'
+  ) then
+    raise exception
+      'Approval notifications unexpectedly have table-level INSERT';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_attribute attribute
+    where attribute.attrelid =
+      'public.maintainflow_approval_notification_deliveries'::regclass
+      and attribute.attnum > 0
+      and not attribute.attisdropped
+      and attribute.attname <> all(array[
+        'id',
+        'approval_request_id',
+        'organization_id',
+        'event_type',
+        'recipient_operator_id',
+        'recipient_membership_role_snapshot',
+        'approval_request_version'
+      ])
+      and has_column_privilege(
+        'maintainflow_app',
+        'public.maintainflow_approval_notification_deliveries',
+        attribute.attname,
+        'INSERT'
+      )
+  ) then
+    raise exception
+      'A database-owned approval-notification column is insertable';
+  end if;
+
+  if exists (
+    select 1
+    from unnest(array[
+      'id',
+      'approval_request_id',
+      'organization_id',
+      'event_type',
+      'recipient_operator_id',
+      'recipient_membership_role_snapshot',
+      'approval_request_version'
+    ]) expected_column(column_name)
+    where not has_column_privilege(
+      'maintainflow_app',
+      'public.maintainflow_approval_notification_deliveries',
+      expected_column.column_name,
+      'INSERT'
+    )
+  ) then
+    raise exception
+      'A required approval-notification identity column is not insertable';
+  end if;
+
+  if has_table_privilege(
+    'maintainflow_app',
+    'public.maintainflow_change_approval_requests',
+    'UPDATE'
+  ) then
+    raise exception 'Approval requests unexpectedly have table-level UPDATE';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_attribute attribute
+    where attribute.attrelid =
+      'public.maintainflow_change_approval_requests'::regclass
+      and attribute.attnum > 0
+      and not attribute.attisdropped
+      and attribute.attname <> all(array[
+        'status',
+        'decision_operator_id',
+        'decision_name_snapshot',
+        'decision_membership_role',
+        'decision_note',
+        'decided_at',
+        'version',
+        'updated_at',
+        'retired_at',
+        'ads_approval_record_id'
+      ])
+      and has_column_privilege(
+        'maintainflow_app',
+        'public.maintainflow_change_approval_requests',
+        attribute.attname,
+        'UPDATE'
+      )
+  ) then
+    raise exception 'An immutable approval-request column is updateable';
+  end if;
+
+  if exists (
+    select 1
+    from unnest(array[
+      'status',
+      'decision_operator_id',
+      'decision_name_snapshot',
+      'decision_membership_role',
+      'decision_note',
+      'decided_at',
+      'version',
+      'updated_at',
+      'retired_at',
+      'ads_approval_record_id'
+    ]) expected_column(column_name)
+    where not has_column_privilege(
+      'maintainflow_app',
+      'public.maintainflow_change_approval_requests',
+      expected_column.column_name,
+      'UPDATE'
+    )
+  ) then
+    raise exception 'An approval-request lifecycle column is not updateable';
+  end if;
+
+  if has_table_privilege(
+    'maintainflow_app',
+    'public.maintainflow_approval_notification_deliveries',
+    'UPDATE'
+  ) then
+    raise exception
+      'Approval notifications unexpectedly have table-level UPDATE';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_attribute attribute
+    where attribute.attrelid =
+      'public.maintainflow_approval_notification_deliveries'::regclass
+      and attribute.attnum > 0
+      and not attribute.attisdropped
+      and attribute.attname <> all(array[
+        'status',
+        'claim_id',
+        'provider_message_id',
+        'last_failure_code',
+        'provider_event_type',
+        'provider_event_at',
+        'cancellation_code'
+      ])
+      and has_column_privilege(
+        'maintainflow_app',
+        'public.maintainflow_approval_notification_deliveries',
+        attribute.attname,
+        'UPDATE'
+      )
+  ) then
+    raise exception
+      'An immutable approval-notification column is updateable';
+  end if;
+
+  if exists (
+    select 1
+    from unnest(array[
+      'status',
+      'claim_id',
+      'provider_message_id',
+      'last_failure_code',
+      'provider_event_type',
+      'provider_event_at',
+      'cancellation_code'
+    ]) expected_column(column_name)
+    where not has_column_privilege(
+      'maintainflow_app',
+      'public.maintainflow_approval_notification_deliveries',
+      expected_column.column_name,
+      'UPDATE'
+    )
+  ) then
+    raise exception
+      'An approval-notification lifecycle command column is not updateable';
+  end if;
+
+  if has_table_privilege(
+    'maintainflow_app',
+    'public.maintainflow_ads_config_integrity_state',
+    'UPDATE'
+  ) then
+    raise exception
+      'Change-integrity state unexpectedly has table-level UPDATE';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_attribute attribute
+    where attribute.attrelid =
+      'public.maintainflow_ads_config_integrity_state'::regclass
+      and attribute.attnum > 0
+      and not attribute.attisdropped
+      and attribute.attname <> all(array[
+        'projection_version',
+        'snapshot_fingerprint',
+        'snapshot_payload',
+        'snapshot_resource_count',
+        'observed_at',
+        'updated_at'
+      ])
+      and has_column_privilege(
+        'maintainflow_app',
+        'public.maintainflow_ads_config_integrity_state',
+        attribute.attname,
+        'UPDATE'
+      )
+  ) then
+    raise exception 'Immutable change-integrity state is updateable';
+  end if;
+
+  if exists (
+    select 1
+    from unnest(array[
+      'projection_version',
+      'snapshot_fingerprint',
+      'snapshot_payload',
+      'snapshot_resource_count',
+      'observed_at',
+      'updated_at'
+    ]) expected_column(column_name)
+    where not has_column_privilege(
+      'maintainflow_app',
+      'public.maintainflow_ads_config_integrity_state',
+      expected_column.column_name,
+      'UPDATE'
+    )
+  ) then
+    raise exception 'A change-integrity baseline field is not updateable';
+  end if;
+
+  if has_table_privilege(
+    'maintainflow_app',
+    'public.maintainflow_ads_config_integrity_events',
+    'UPDATE'
+  ) then
+    raise exception
+      'Change-integrity events unexpectedly have table-level UPDATE';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_attribute attribute
+    where attribute.attrelid =
+      'public.maintainflow_ads_config_integrity_events'::regclass
+      and attribute.attnum > 0
+      and not attribute.attisdropped
+      and attribute.attname <> all(array[
+        'review_status',
+        'reviewed_by_operator_id',
+        'reviewed_by_name',
+        'reviewed_by_organization_id',
+        'review_note'
+      ])
+      and has_column_privilege(
+        'maintainflow_app',
+        'public.maintainflow_ads_config_integrity_events',
+        attribute.attname,
+        'UPDATE'
+      )
+  ) then
+    raise exception 'Immutable change-integrity evidence is updateable';
+  end if;
+
+  if exists (
+    select 1
+    from unnest(array[
+      'review_status',
+      'reviewed_by_operator_id',
+      'reviewed_by_name',
+      'reviewed_by_organization_id',
+      'review_note'
+    ]) expected_column(column_name)
+    where not has_column_privilege(
+      'maintainflow_app',
+      'public.maintainflow_ads_config_integrity_events',
+      expected_column.column_name,
+      'UPDATE'
+    )
+  ) then
+    raise exception 'A change-integrity review input is not updateable';
+  end if;
+
+  if has_table_privilege(
+    'maintainflow_app',
+    'public.ads_approval_records',
+    'UPDATE'
+  ) then
+    raise exception 'Approval records unexpectedly have table-level UPDATE';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_attribute attribute
+    where attribute.attrelid = 'public.ads_approval_records'::regclass
+      and attribute.attnum > 0
+      and not attribute.attisdropped
+      and attribute.attname <> all(array[
+        'status',
+        'response_payload',
+        'error_message',
+        'rollback_operator_id',
+        'rollback_response_payload',
+        'rollback_error_message',
+        'reconciled_by',
+        'reconciled_at',
+        'reconciliation_note',
+        'updated_at',
+        'applied_at',
+        'rolled_back_at',
+        'monitoring_started_at',
+        'monitoring_ends_at',
+        'monitoring_outcome',
+        'monitoring_observation',
+        'monitoring_evaluated_at',
+        'monitoring_evaluation_claim_id',
+        'monitoring_evaluation_claimed_at',
+        'apply_provider_attempted_at',
+        'rollback_provider_attempted_at',
+        'rollback_provider_attempt_id',
+        'rollback_organization_id',
+        'rollback_membership_role',
+        'rollback_account_role',
+        'reconciled_organization_id',
+        'reconciled_membership_role',
+        'reconciled_account_role'
+      ])
+      and has_column_privilege(
+        'maintainflow_app',
+        'public.ads_approval_records',
+        attribute.attname,
+        'UPDATE'
+      )
+  ) then
+    raise exception 'An immutable approval-record column is updateable';
+  end if;
+
+  if exists (
+    select 1
+    from unnest(array[
+      'status',
+      'response_payload',
+      'error_message',
+      'rollback_operator_id',
+      'rollback_response_payload',
+      'rollback_error_message',
+      'reconciled_by',
+      'reconciled_at',
+      'reconciliation_note',
+      'updated_at',
+      'applied_at',
+      'rolled_back_at',
+      'monitoring_started_at',
+      'monitoring_ends_at',
+      'monitoring_outcome',
+      'monitoring_observation',
+      'monitoring_evaluated_at',
+      'monitoring_evaluation_claim_id',
+      'monitoring_evaluation_claimed_at',
+      'apply_provider_attempted_at',
+      'rollback_provider_attempted_at',
+      'rollback_provider_attempt_id',
+      'rollback_organization_id',
+      'rollback_membership_role',
+      'rollback_account_role',
+      'reconciled_organization_id',
+      'reconciled_membership_role',
+      'reconciled_account_role'
+    ]) expected_column(column_name)
+    where not has_column_privilege(
+      'maintainflow_app',
+      'public.ads_approval_records',
+      expected_column.column_name,
+      'UPDATE'
+    )
+  ) then
+    raise exception 'An approval-record lifecycle column is not updateable';
+  end if;
+
+  if exists (
+    with expected_lock_grant(table_name, column_name) as (
+      values
+        ('maintainflow_organizations', 'id'),
+        ('maintainflow_organization_memberships', 'organization_id'),
+        ('maintainflow_account_access', 'organization_id')
+    )
+    select 1
+    from expected_lock_grant expected
+    where has_table_privilege(
+        'maintainflow_app',
+        format('public.%I', expected.table_name),
+        'UPDATE'
+      )
+      or not has_column_privilege(
+        'maintainflow_app',
+        format('public.%I', expected.table_name),
+        expected.column_name,
+        'UPDATE'
+      )
+  ) then
+    raise exception 'A lock-only authorization grant is missing or too broad';
+  end if;
+
+  if exists (
+    with expected_lock_grant(table_name, column_name) as (
+      values
+        ('maintainflow_organizations', 'id'),
+        ('maintainflow_organization_memberships', 'organization_id'),
+        ('maintainflow_account_access', 'organization_id')
+    )
+    select 1
+    from pg_catalog.pg_attribute attribute
+    join pg_catalog.pg_class relation
+      on relation.oid = attribute.attrelid
+    join pg_catalog.pg_namespace namespace
+      on namespace.oid = relation.relnamespace
+    left join expected_lock_grant expected
+      on expected.table_name = relation.relname
+      and expected.column_name = attribute.attname
+    where namespace.nspname = 'public'
+      and relation.relname in (
+        'maintainflow_organizations',
+        'maintainflow_organization_memberships',
+        'maintainflow_account_access'
+      )
+      and attribute.attnum > 0
+      and not attribute.attisdropped
+      and expected.column_name is null
+      and has_column_privilege(
+        'maintainflow_app',
+        relation.oid,
+        attribute.attname,
+        'UPDATE'
+      )
+  ) then
+    raise exception 'An authorization table has a non-lock UPDATE grant';
+  end if;
+
+  if (
+    select count(*)
+    from pg_catalog.pg_trigger trigger
+    join pg_catalog.pg_class relation
+      on relation.oid = trigger.tgrelid
+    join pg_catalog.pg_namespace namespace
+      on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'public'
+      and (relation.relname, trigger.tgname) in (
+        (
+          'maintainflow_organizations',
+          'maintainflow_organizations_runtime_lock_only_guard'
+        ),
+        (
+          'maintainflow_organization_memberships',
+          'maintainflow_memberships_runtime_lock_only_guard'
+        ),
+        (
+          'maintainflow_account_access',
+          'maintainflow_account_access_runtime_lock_only_guard'
+        )
+      )
+      and not trigger.tgisinternal
+      and trigger.tgenabled = 'O'
+  ) <> 3 then
+    raise exception 'A runtime lock-only authorization guard is missing';
   end if;
 end
 $maintainflow_runtime_invariants$;

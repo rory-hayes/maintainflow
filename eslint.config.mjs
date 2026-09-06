@@ -14,5 +14,6 @@ export default defineConfig([
     "reports/**",
     "test-results/**",
     "next-env.d.ts",
+    "public/mc-tracker.js",
   ]),
 ]);

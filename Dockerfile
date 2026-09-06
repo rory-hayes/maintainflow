@@ -28,14 +28,14 @@ FROM node:${NODE_VERSION} AS builder
 WORKDIR /app
 
 # Next.js inlines NEXT_PUBLIC values into the browser bundle at build time.
-# The Clerk publishable key is public, but must match the runtime Clerk tenant.
-ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""
-ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL="/auth/sign-in"
-ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL="/auth/sign-up"
+# The Supabase publishable key is public, but must match the runtime Supabase tenant.
+ARG NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=""
+ARG NEXT_PUBLIC_SUPABASE_URL=""
 ARG MAINTAINFLOW_BUILD_SHA=""
-ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-ENV NEXT_PUBLIC_CLERK_SIGN_IN_URL=${NEXT_PUBLIC_CLERK_SIGN_IN_URL}
-ENV NEXT_PUBLIC_CLERK_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_SIGN_UP_URL}
+ARG MAINTAINCODE_APP_ORIGIN="https://maintainflow.io"
+ENV MAINTAINCODE_APP_ORIGIN=${MAINTAINCODE_APP_ORIGIN}
+ENV NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
 ENV MAINTAINFLOW_BUILD_SHA=${MAINTAINFLOW_BUILD_SHA}
 
 # Copy project dependencies from dependencies stage
@@ -73,15 +73,13 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Preserve the same public Clerk configuration used to compile the browser
-# bundle. Secret Clerk and provider credentials are supplied only at runtime.
-ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""
-ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL="/auth/sign-in"
-ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL="/auth/sign-up"
+# Preserve the same public Supabase configuration used to compile the browser
+# bundle. Secret Supabase and provider credentials are supplied only at runtime.
+ARG NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=""
+ARG NEXT_PUBLIC_SUPABASE_URL=""
 ARG MAINTAINFLOW_BUILD_SHA
-ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-ENV NEXT_PUBLIC_CLERK_SIGN_IN_URL=${NEXT_PUBLIC_CLERK_SIGN_IN_URL}
-ENV NEXT_PUBLIC_CLERK_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_SIGN_UP_URL}
+ENV NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
 
 LABEL org.opencontainers.image.revision=${MAINTAINFLOW_BUILD_SHA}
 
@@ -102,7 +100,7 @@ RUN chown node:node .next
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/.next/maintainflow-public-build-metadata.json ./.next/maintainflow-public-build-metadata.json
-COPY --from=builder --chown=node:node /app/scripts/check-production-config.mjs ./scripts/check-production-config.mjs
+COPY --from=builder --chown=node:node /app/scripts/check-maintaincode-config.mjs ./scripts/check-maintaincode-config.mjs
 COPY --from=builder --chown=node:node /app/scripts/database-tls.mjs ./scripts/database-tls.mjs
 COPY --from=builder --chown=node:node /app/scripts/public-build-metadata.mjs ./scripts/public-build-metadata.mjs
 COPY --from=builder --chown=node:node /app/scripts/start-standalone-production.mjs ./scripts/start-standalone-production.mjs

@@ -1,4 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
+import { X509Certificate } from "node:crypto";
+import { rootCertificates } from "node:tls";
 
 const productionE2eOrigin = "https://maintainflow.io";
 const localBaseUrl = "http://127.0.0.1:3100";
@@ -89,12 +91,32 @@ if (externalBaseUrl === productionE2eOrigin) {
   requireProductionBuildSha();
 }
 
-const demoEnvironment = {
+const demoDatabaseCaCertificate = rootCertificates.find((pem) => {
+  const certificate = new X509Certificate(pem);
+  const now = Date.now();
+  return (
+    certificate.ca &&
+    Date.parse(certificate.validFrom) <= now &&
+    Date.parse(certificate.validTo) > now &&
+    certificate.checkIssued(certificate) &&
+    certificate.verify(certificate.publicKey)
+  );
+});
+
+if (!demoDatabaseCaCertificate) {
+  throw new Error("No currently valid self-signed CA is available for E2E.");
+}
+
+export const demoEnvironment = {
   MAINTAINFLOW_BUILD_SHA: "0000000000000000000000000000000000000000",
   MAINTAINFLOW_RELEASE_STAGE: "demo",
   OPENAI_ADS_DATA_MODE: "demo",
   OPENAI_ADS_API_KEY: "",
+  OPENAI_ADS_LIVE_TEST_ENABLED: "false",
   OPENAI_ADS_LIVE_WRITES_ENABLED: "false",
+  OPENAI_CONVERSIONS_ACCOUNT_ID: "",
+  OPENAI_CONVERSIONS_API_KEY: "",
+  OPENAI_CONVERSIONS_PIXEL_ID: "",
   OPENAI_CONVERSIONS_VALIDATE_ONLY_ENABLED: "false",
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
   CLERK_SECRET_KEY: "",
@@ -106,12 +128,25 @@ const demoEnvironment = {
   MAINTAINFLOW_SUPPORT_CONTACT_EMAIL: "support@maintainflow.io",
   DATABASE_URL:
     "postgres://e2e:e2e@database.invalid:5432/maintainflow?sslmode=verify-full",
+  MAINTAINFLOW_DATABASE_CA_CERT: demoDatabaseCaCertificate,
+  MAINTAINFLOW_DATABASE_POOL_MAX: "4",
+  MAINTAINFLOW_CREDENTIAL_KEYRING: "",
+  MAINTAINFLOW_ACTIVE_CREDENTIAL_KEY_ID: "",
   CRON_SECRET: "cccccccccccccccccccccccccccccccc",
   READINESS_RATE_LIMIT_SECRET: "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
   MAINTAINFLOW_READINESS_PROBE_SECRET:
     "pppppppppppppppppppppppppppppppp",
   MAINTAINFLOW_ADMISSION_MODE: "private_beta",
+  MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS: "",
+  MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS: "",
   MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED: "false",
+  MAINTAINFLOW_APPROVAL_EMAIL_ENABLED: "false",
+  MAINTAINFLOW_APPROVAL_EMAIL_ORGANIZATION_IDS: "",
+  MAINTAINFLOW_APPROVAL_FROM_EMAIL: "",
+  RESEND_API_KEY: "",
+  RESEND_WEBHOOK_SECRET: "",
+  MAINTAINFLOW_TRUST_PROXY_HEADERS: "false",
+  READINESS_TRUST_X_FORWARDED_FOR: "false",
 };
 
 export default defineConfig({

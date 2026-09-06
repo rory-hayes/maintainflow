@@ -5,9 +5,9 @@ const MAX_HTML_RESPONSE_BYTES = 512 * 1024;
 const REVISION_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i;
 const RELEASE_STAGES = new Set(["demo", "private_read", "live_write"]);
 const EXPECTED_READINESS_CHECKS = Object.freeze({
-  demo: 7,
-  private_read: 14,
-  live_write: 14,
+  demo: 9,
+  private_read: 16,
+  live_write: 16,
 });
 
 export class DeploymentProbeError extends Error {
@@ -148,6 +148,39 @@ function assertStatus(response, expected, label) {
   }
 }
 
+function assertNoStore(response, label) {
+  if (response.headers.get("cache-control") !== "no-store") {
+    throw new DeploymentProbeError(`${label} did not disable response caching.`);
+  }
+}
+
+function isNonNegativeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function expectedApprovalEmailState(options, expectedStage) {
+  const configured = options.expectedApprovalEmailEnabled;
+  if (configured === undefined && expectedStage === "demo") return false;
+  if (typeof configured !== "boolean") {
+    throw new DeploymentProbeError(
+      "Expected approval email state is not configured.",
+    );
+  }
+  if (expectedStage === "demo" && configured) {
+    throw new DeploymentProbeError(
+      "Approval email cannot be expected in the demo release stage.",
+    );
+  }
+  return configured;
+}
+
+function environmentBoolean(value) {
+  if (value === undefined) return undefined;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return null;
+}
+
 export async function probeDeployment(options) {
   const origin = deploymentOrigin(options.origin, {
     allowInsecureLoopback: options.allowInsecureLoopback === true,
@@ -172,6 +205,10 @@ export async function probeDeployment(options) {
   if (!RELEASE_STAGES.has(expectedStage)) {
     throw new DeploymentProbeError("Expected release stage is invalid.");
   }
+  const expectedApprovalEmailEnabled = expectedApprovalEmailState(
+    options,
+    expectedStage,
+  );
   const fetchImpl = options.fetchImpl ?? fetch;
 
   const healthResponse = await request(
@@ -227,6 +264,21 @@ export async function probeDeployment(options) {
     );
   }
 
+  const unauthorizedNotificationResponse = await request(
+    fetchImpl,
+    `${origin}/api/jobs/notifications/deliver`,
+    "Unauthenticated notification worker probe",
+  );
+  assertStatus(
+    unauthorizedNotificationResponse,
+    401,
+    "Unauthenticated notification worker probe",
+  );
+  assertNoStore(
+    unauthorizedNotificationResponse,
+    "Unauthenticated notification worker probe",
+  );
+
   const cronResponse = await request(
     fetchImpl,
     `${origin}/api/jobs/monitoring/evaluate`,
@@ -261,6 +313,58 @@ export async function probeDeployment(options) {
   ) {
     throw new DeploymentProbeError(
       "Monitoring probe did not confirm a complete maintenance run.",
+    );
+  }
+
+  const notificationResponse = await request(
+    fetchImpl,
+    `${origin}/api/jobs/notifications/deliver`,
+    "Notification worker probe",
+    { headers: { Authorization: `Bearer ${cronSecret}` } },
+    65_000,
+  );
+  assertStatus(notificationResponse, 200, "Notification worker probe");
+  assertNoStore(notificationResponse, "Notification worker probe");
+  const notifications = await responseJson(
+    notificationResponse,
+    "Notification worker probe",
+  );
+  const notificationCounts = [
+    notifications?.claimed,
+    notifications?.accepted,
+    notifications?.retryScheduled,
+    notifications?.permanentlyFailed,
+    notifications?.cancelled,
+    notifications?.lostClaims,
+  ];
+  const recoveryCounts = [
+    notifications?.recovery?.cancelledIneligible,
+    notifications?.recovery?.retryScheduledAfterLeaseExpiry,
+    notifications?.recovery?.permanentFailuresAfterLeaseExpiry,
+    notifications?.recovery?.permanentFailuresAfterIdempotencyExpiry,
+    notifications?.recovery?.permanentFailuresAfterConfirmationTimeout,
+  ];
+  if (
+    notifications?.ok !== true ||
+    notifications?.enabled !== expectedApprovalEmailEnabled ||
+    !notificationCounts.every(isNonNegativeInteger) ||
+    !recoveryCounts.every(isNonNegativeInteger) ||
+    notifications.claimed > 25 ||
+    notifications.claimed !==
+      notifications.accepted +
+        notifications.retryScheduled +
+        notifications.permanentlyFailed +
+        notifications.cancelled +
+        notifications.lostClaims ||
+    notifications.retryScheduled !== 0 ||
+    notifications.permanentlyFailed !== 0 ||
+    notifications.lostClaims !== 0 ||
+    recoveryCounts.some((count) => count !== 0) ||
+    (!expectedApprovalEmailEnabled &&
+      notificationCounts.some((count) => count !== 0))
+  ) {
+    throw new DeploymentProbeError(
+      "Notification worker probe did not confirm a complete clean delivery run.",
     );
   }
 
@@ -311,6 +415,7 @@ export async function probeDeployment(options) {
     stage: expectedStage,
     revision: expectedRevision,
     readinessChecks: readiness.checks.total,
+    notificationDeliveryEnabled: expectedApprovalEmailEnabled,
     surfaceChecks: publicSurfaces.length,
   };
 }
@@ -322,6 +427,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     cronSecret: process.env.CRON_SECRET,
     expectedRevision: process.env.MAINTAINFLOW_EXPECTED_BUILD_SHA,
     expectedStage: process.env.MAINTAINFLOW_EXPECTED_RELEASE_STAGE,
+    expectedApprovalEmailEnabled: environmentBoolean(
+      process.env.MAINTAINFLOW_EXPECTED_APPROVAL_EMAIL_ENABLED,
+    ),
     allowInsecureLoopback:
       process.env.CI === "true" &&
       process.env.MAINTAINFLOW_PROBE_ALLOW_INSECURE_LOOPBACK === "true",

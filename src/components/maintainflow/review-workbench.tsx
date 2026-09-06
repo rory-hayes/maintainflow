@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { SignOutButton } from "@clerk/nextjs";
 import {
@@ -32,12 +31,23 @@ import {
 import { toast } from "sonner";
 
 import { MaintainFlowBrand } from "@/components/maintainflow/brand";
+import {
+  ApprovalInbox,
+  isChangeApprovalRequestExpired,
+  isChangeApprovalRequestReadyToApply,
+  type ApprovalInboxFilter,
+} from "@/components/maintainflow/approval-inbox";
 import { ApprovalHistory } from "@/components/maintainflow/approval-history";
 import { ChangeAssuranceReportCard } from "@/components/maintainflow/change-assurance-report-card";
+import {
+  ChangeIntegrityGuard,
+  changeIntegrityPageVersion,
+} from "@/components/maintainflow/change-integrity-guard";
 import { CreativeReviewHistory } from "@/components/maintainflow/creative-review-history";
 import { CreativeReviewTable } from "@/components/maintainflow/creative-review-table";
 import { BudgetGuard } from "@/components/maintainflow/budget-guard";
 import { MonitoringWindows } from "@/components/maintainflow/monitoring-windows";
+import { PortfolioActionQueue } from "@/components/maintainflow/portfolio-action-queue";
 import { ReadinessWorkbench } from "@/components/maintainflow/readiness-workbench";
 import { RecommendationDecisionHistory } from "@/components/maintainflow/recommendation-decision-history";
 import {
@@ -114,6 +124,7 @@ import {
 } from "@/lib/app-navigation";
 import type { AdAccount, Campaign, ScopedAd } from "@/lib/openai-ads/schema";
 import type { ApprovalRecordDto } from "@/lib/audit/approval-schema";
+import type { ChangeApprovalRequestDto } from "@/lib/approvals/change-request-schema";
 import type { RecommendationDecisionHistoryDto } from "@/lib/audit/recommendation-decision";
 import type { CreativeReviewEvent } from "@/lib/openai-ads/creative-history";
 import type { MonitoringWindowDto } from "@/lib/openai-ads/monitoring";
@@ -121,21 +132,16 @@ import { buildMonitoringWindows } from "@/lib/openai-ads/recommendation-lifecycl
 import type { ConversionMeasurementReadiness } from "@/lib/openai-ads/measurement-readiness";
 import type { BudgetGuardEvidence } from "@/lib/openai-ads/budget-guard";
 import type { ConversionsConnectionStatus } from "@/lib/openai-ads/conversions-connection";
+import type { PortfolioActionItem } from "@/lib/openai-ads/action-queue";
 import {
-  livePortfolioOperationalExceptionCount,
-  livePortfolioUrgency,
-  oldestLivePortfolioExceptionAt,
-  rankLivePortfolioAccounts,
-  summarizeLivePortfolioEvidence,
-  type LivePortfolioAccount,
-  type LivePortfolioEvidenceState,
-  type LivePortfolioExceptionEvidence,
-  type LivePortfolioUrgency,
-} from "@/lib/openai-ads/live-portfolio";
+  emptyChangeIntegrityEventPage,
+  type ChangeIntegrityEventPage,
+} from "@/lib/openai-ads/change-integrity-schema";
 import type { ReadinessAuditHistoryEntry } from "@/lib/readiness/history";
 import {
   canWriteAccount,
   type AccountAccess,
+  type OrganizationMembership,
 } from "@/lib/tenancy/schema";
 import type {
   CampaignPerformance,
@@ -147,6 +153,8 @@ import { cn } from "@/lib/utils";
 
 type WorkbenchProps = {
   initialTab: AppTab;
+  initialApprovalInboxFilter?: ApprovalInboxFilter;
+  initialApprovalRequestId?: string;
   account: AdAccount;
   ads: ScopedAd[];
   creativeReviewHistory: CreativeReviewEvent[];
@@ -176,20 +184,35 @@ type WorkbenchProps = {
   approvalHistoryReady: boolean;
   workspaceSetupState: WorkspaceSetupState;
   workspaceAccess?: AccountAccess;
+  approvalOrganization?: OrganizationMembership;
+  approvalOrganizations?: OrganizationMembership[];
   workspaceAccountName?: string;
   workspaceMessage?: string;
   conversionsConnection: ConversionsConnectionStatus;
   availableAccounts: AccountAccess[];
+  approvalAccountAccesses?: AccountAccess[];
   agencyClientAttachEnabled: boolean;
+  changeApprovalRequests?: ChangeApprovalRequestDto[];
+  changeApprovalRequestsNextCursor?: string | null;
+  changeApprovalRequestReady?: boolean;
+  changeApprovalRequestError?: string;
+  eligibleApprovalReviewerCount?: number;
+  approvalEmailEnabled?: boolean;
   simulatedAccounts: SimulatedAccountOption[];
   simulatorLabel: string;
+  simulatorApprovalEligible?: boolean;
   livePortfolioVisible: boolean;
-  livePortfolioAccounts: LivePortfolioAccount[];
   livePortfolioError?: string;
+  portfolioActionItems?: PortfolioActionItem[];
+  portfolioAccountCount?: number;
   recommendationDecisionReady: boolean;
   recommendationDecisionError?: string;
   canManageRecommendationDecisions: boolean;
   recommendationDecisionHistory: RecommendationDecisionHistoryDto[];
+  changeIntegrityPage?: ChangeIntegrityEventPage;
+  changeIntegrityReady?: boolean;
+  changeIntegrityError?: string;
+  canReviewChangeIntegrity?: boolean;
   readinessHistoryReady: boolean;
   readinessHistoryError?: string;
   initialReadinessHistory: ReadinessAuditHistoryEntry[];
@@ -218,6 +241,68 @@ export function isConfirmedLiveApplyResponse(
   return result.mode === "live" && result.applied === true;
 }
 
+export function buildChangeApprovalRequestBody({
+  source,
+  organizationId,
+  accountId,
+  recommendationId,
+  recommendationFingerprint,
+  note,
+}: {
+  source: "simulator" | "live";
+  organizationId: string;
+  accountId: string;
+  recommendationId: string;
+  recommendationFingerprint: string;
+  note?: string;
+}) {
+  return {
+    source,
+    organizationId,
+    accountId,
+    recommendationId,
+    recommendationFingerprint,
+    note,
+  };
+}
+
+export function buildDirectLiveApplyBody({
+  organizationId,
+  accountId,
+  recommendationId,
+  recommendationFingerprint,
+}: {
+  organizationId: string;
+  accountId: string;
+  recommendationId: string;
+  recommendationFingerprint: string;
+}) {
+  return {
+    authorization: "direct" as const,
+    organizationId,
+    accountId,
+    recommendationId,
+    recommendationSource: "live" as const,
+    recommendationFingerprint,
+  };
+}
+
+export function shouldShowAgencyApprovalInbox({
+  operatorAuthenticated,
+  workspaceOrganizationType,
+  agencyOrganizationCount,
+}: {
+  operatorAuthenticated: boolean;
+  workspaceOrganizationType?: AccountAccess["organizationType"];
+  agencyOrganizationCount: number;
+}) {
+  return Boolean(
+    !operatorAuthenticated ||
+      workspaceOrganizationType === "agency" ||
+      agencyOrganizationCount > 0,
+  );
+}
+
 export function canReconcileApprovalHistory(
   approvalHistoryReady: boolean,
   workspaceAccess: AccountAccess | undefined,
@@ -229,20 +314,45 @@ export function canReconcileApprovalHistory(
   );
 }
 
+export function canRequestLiveAgencyApproval(
+  workspaceAccess: AccountAccess | undefined,
+) {
+  return Boolean(
+    workspaceAccess?.organizationType === "agency" &&
+      (workspaceAccess.accountRole === "owner" ||
+        workspaceAccess.accountRole === "manager"),
+  );
+}
+
+export function writableApprovalAccountIdsForOrganization(
+  accountAccesses: AccountAccess[],
+  organizationId: string | undefined,
+) {
+  return accountAccesses
+    .filter(
+      (access) =>
+        access.organizationId === organizationId && canWriteAccount(access),
+    )
+    .map((access) => access.accountId);
+}
+
 export function RecommendationApprovalConfirmation({
   account,
   recommendation,
   dataSource,
   writeMode,
   syncedAt,
+  intent = "apply",
 }: {
   account: AdAccount;
   recommendation: Recommendation;
   dataSource: "demo" | "live";
   writeMode: "demo" | "live";
   syncedAt?: string;
+  intent?: "request" | "apply";
 }) {
   const liveWrite = dataSource === "live" && writeMode === "live";
+  const liveApprovalRequest = dataSource === "live" && intent === "request";
   const sourceLabel =
     dataSource === "demo"
       ? "Labelled simulator fixture"
@@ -254,19 +364,24 @@ export function RecommendationApprovalConfirmation({
     <div className="grid gap-3 text-sm">
       <Alert
         className={cn(
-          liveWrite && "border-warning/30 bg-warning/10 text-foreground",
+          (liveWrite || liveApprovalRequest) &&
+            "border-warning/30 bg-warning/10 text-foreground",
         )}
       >
         <ShieldCheck />
         <AlertTitle>
-          {liveWrite
+          {liveApprovalRequest
+            ? `Live approval request for ${account.name}`
+            : liveWrite
             ? `Live write to ${account.name}`
             : dataSource === "demo"
               ? "Simulator approval only"
               : "External write is locked"}
         </AlertTitle>
         <AlertDescription>
-          {liveWrite
+          {liveApprovalRequest
+            ? "Confirm the advertiser, exact API request, stored rollback, and safeguard before submitting this immutable packet. Requesting approval sends no external write."
+            : liveWrite
             ? "Confirm the advertiser, exact API request, stored rollback, and safeguard before sending this non-idempotent change."
             : dataSource === "demo"
               ? "This records a local workflow example. It does not contact OpenAI Ads."
@@ -362,6 +477,8 @@ function statusBadge(status: RecommendationStatus) {
 
 export function MaintainFlowWorkbench({
   initialTab,
+  initialApprovalInboxFilter = "needs-review",
+  initialApprovalRequestId,
   account,
   ads,
   creativeReviewHistory,
@@ -391,29 +508,54 @@ export function MaintainFlowWorkbench({
   approvalHistoryReady,
   workspaceSetupState,
   workspaceAccess,
+  approvalOrganization,
+  approvalOrganizations = [],
   workspaceAccountName,
   workspaceMessage,
   conversionsConnection,
   availableAccounts,
+  approvalAccountAccesses = availableAccounts,
   agencyClientAttachEnabled,
+  changeApprovalRequests = [],
+  changeApprovalRequestsNextCursor = null,
+  changeApprovalRequestReady = false,
+  changeApprovalRequestError,
+  eligibleApprovalReviewerCount = 0,
+  approvalEmailEnabled = false,
   simulatedAccounts,
   simulatorLabel,
+  simulatorApprovalEligible = false,
   livePortfolioVisible,
-  livePortfolioAccounts,
   livePortfolioError,
+  portfolioActionItems = [],
+  portfolioAccountCount = 0,
   recommendationDecisionReady,
   recommendationDecisionError,
   canManageRecommendationDecisions,
   recommendationDecisionHistory,
+  changeIntegrityPage = emptyChangeIntegrityEventPage(),
+  changeIntegrityReady = false,
+  changeIntegrityError,
+  canReviewChangeIntegrity = false,
   readinessHistoryReady,
   readinessHistoryError,
   initialReadinessHistory,
   readinessHistoryCanSave,
 }: WorkbenchProps) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<AppTab>(initialTab);
+  const approvalInboxVisible = shouldShowAgencyApprovalInbox({
+    operatorAuthenticated,
+    workspaceOrganizationType: workspaceAccess?.organizationType,
+    agencyOrganizationCount: approvalOrganizations.length,
+  });
+  const [activeTab, setActiveTab] = useState<AppTab>(
+    initialTab === "approvals" && !approvalInboxVisible
+      ? "review"
+      : initialTab,
+  );
   const tabListRef = useRef<HTMLDivElement>(null);
   const approvalTitleRef = useRef<HTMLHeadingElement>(null);
+  const approvalTriggerRef = useRef<HTMLButtonElement>(null);
   const [demoRecommendations, setDemoRecommendations] = useState(
     initialRecommendations,
   );
@@ -436,6 +578,9 @@ export function MaintainFlowWorkbench({
   );
   const [filter, setFilter] = useState("all");
   const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalRequestNote, setApprovalRequestNote] = useState("");
+  const [approvalInboxFilter, setApprovalInboxFilter] =
+    useState<ApprovalInboxFilter>(initialApprovalInboxFilter);
   const [applying, setApplying] = useState(false);
   const [dismissalOpen, setDismissalOpen] = useState(false);
   const [dismissalReason, setDismissalReason] = useState("");
@@ -474,7 +619,33 @@ export function MaintainFlowWorkbench({
   }
 
   function openAccount(accountId: string) {
-    router.push(buildAppHref({ tab: activeTab, accountId }));
+    const accountAccess =
+      approvalAccountAccesses.find(
+        (access) =>
+          access.accountId === accountId &&
+          access.organizationId === workspaceAccess?.organizationId,
+      ) ?? availableAccounts.find((access) => access.accountId === accountId);
+    router.push(
+      buildAppHref({
+        tab: activeTab,
+        accountId,
+        organizationId: accountAccess?.organizationId,
+      }),
+    );
+  }
+
+  function changeApprovalOrganization(organizationId: string) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("organization", organizationId);
+    url.searchParams.set("tab", "approvals");
+    router.push(`${url.pathname}?${url.searchParams.toString()}`);
+  }
+
+  function changeApprovalInboxFilter(filter: ApprovalInboxFilter) {
+    setApprovalInboxFilter(filter);
+    const url = new URL(window.location.href);
+    url.searchParams.set("approvalFilter", filter);
+    window.history.replaceState(null, "", url);
   }
 
   const selected =
@@ -495,6 +666,72 @@ export function MaintainFlowWorkbench({
   const readyCount = recommendations.filter(
     (recommendation) => recommendation.status === "ready",
   ).length;
+  const hasAgencyApprovalWorkspace = Boolean(
+    operatorAuthenticated &&
+      approvalOrganization?.organizationType === "agency",
+  );
+  const routeSimulatorApproval =
+    dataSource === "demo" &&
+    hasAgencyApprovalWorkspace &&
+    simulatorApprovalEligible;
+  const routeLiveAgencyApproval = Boolean(
+    dataSource === "live" &&
+      operatorAuthenticated &&
+      workspaceAccess?.organizationType === "agency",
+  );
+  const liveAgencyApprovalWritable = canRequestLiveAgencyApproval(
+    workspaceAccess,
+  );
+  const routeAgencyApproval =
+    routeSimulatorApproval || routeLiveAgencyApproval;
+  const approvalRequestOrganizationId = routeLiveAgencyApproval
+    ? workspaceAccess?.organizationId
+    : approvalOrganization?.organizationId;
+  const canRouteAgencyApproval = Boolean(
+    routeAgencyApproval &&
+      changeApprovalRequestReady &&
+      approvalRequestOrganizationId &&
+      (!routeLiveAgencyApproval || liveAgencyApprovalWritable),
+  );
+  const canDecideAgencyApprovals = Boolean(
+    approvalOrganization &&
+      (approvalOrganization.membershipRole === "owner" ||
+        approvalOrganization.membershipRole === "admin"),
+  );
+  const approvalsNeedingDecision = changeApprovalRequests.filter(
+    (request) =>
+      canDecideAgencyApprovals &&
+      request.status === "awaiting_approval" &&
+      !isChangeApprovalRequestExpired(request) &&
+      request.requesterOperatorId !== operator.id,
+  ).length;
+  const writableApprovalAccountIds = useMemo(
+    () =>
+      writableApprovalAccountIdsForOrganization(
+        approvalAccountAccesses,
+        approvalOrganization?.organizationId,
+      ),
+    [approvalOrganization?.organizationId, approvalAccountAccesses],
+  );
+  const writableApprovalAccountIdSet = useMemo(
+    () => new Set(writableApprovalAccountIds),
+    [writableApprovalAccountIds],
+  );
+  const approvalActionCount =
+    approvalsNeedingDecision +
+    changeApprovalRequests.filter(
+      (request) =>
+        writableApprovalAccountIdSet.has(request.accountId) &&
+        isChangeApprovalRequestReadyToApply(request),
+    ).length;
+  const portfolioUrgentActionCount = portfolioActionItems.filter(
+    (item) => item.severity === "critical" || item.severity === "high",
+  ).length;
+  const portfolioQueueVisible = Boolean(
+    portfolioAccountCount > 0 ||
+      livePortfolioVisible ||
+      (dataSource === "demo" && simulatedAccounts.length > 1),
+  );
 
   const connectionStatusTone =
     syncError && dataSource === "live"
@@ -525,6 +762,8 @@ export function MaintainFlowWorkbench({
   const connectionStatusText =
     workspaceSetupState === "needs_setup"
       ? "Setup required"
+      : workspaceSetupState === "approval_ready"
+        ? "Approval workspace"
       : workspaceSetupState === "unavailable" && dataSource === "demo"
         ? "Access locked"
         : syncError && dataSource === "live"
@@ -538,6 +777,7 @@ export function MaintainFlowWorkbench({
                 : "Live data · writes off";
   const accountSelectorVisible =
     workspaceSetupState === "demo" ||
+    workspaceSetupState === "approval_ready" ||
     workspaceSetupState === "ready" ||
     workspaceSetupState === "connection_error";
   const selectableAccounts: SimulatedAccountOption[] =
@@ -596,6 +836,66 @@ export function MaintainFlowWorkbench({
 
     setApplying(true);
     try {
+      if (routeAgencyApproval) {
+        if (!canRouteAgencyApproval || !approvalRequestOrganizationId) {
+          throw new Error(
+            changeApprovalRequestError ??
+              "The durable approval queue is not ready for this agency workspace.",
+          );
+        }
+        const response = await fetch("/api/approvals/requests", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            buildChangeApprovalRequestBody({
+              source: dataSource === "live" ? "live" : "simulator",
+              organizationId: approvalRequestOrganizationId,
+              accountId: workspaceAccess?.accountId ?? account.id,
+              recommendationId: selected.id,
+              recommendationFingerprint:
+                recommendationApprovalFingerprints[selected.id],
+              note: approvalRequestNote.trim() || undefined,
+            }),
+          ),
+        });
+        const result = (await response.json()) as {
+          error?: string;
+          message?: string;
+        };
+        if (!response.ok) {
+          throw new Error(
+            result.error ?? "The approval packet could not be created.",
+          );
+        }
+        const message =
+          result.message ??
+          (dataSource === "live"
+            ? "Live approval packet created. A different agency owner or admin must approve it before the exact change can be applied."
+            : "Simulator approval packet created. A different agency owner or admin can review it; no external change can be sent.");
+        addAuditEvent({
+          action: "Approval packet created",
+          entity: selected.entityLabel,
+          outcome: message,
+          mode: dataSource,
+        });
+        setApprovalOpen(false);
+        setApprovalRequestNote("");
+        setApprovalInboxFilter("requested-by-me");
+        toast.success("Approval requested", { description: message });
+        setActiveTab("approvals");
+        const approvalUrl = new URL(
+          replaceAppTabInUrl(window.location, "approvals"),
+          window.location.origin,
+        );
+        approvalUrl.searchParams.set(
+          "organization",
+          approvalRequestOrganizationId,
+        );
+        approvalUrl.searchParams.set("approvalFilter", "requested-by-me");
+        window.history.replaceState(null, "", approvalUrl);
+        router.refresh();
+        return;
+      }
       if (dataSource === "demo") {
         updateStatus(selected.id, "monitoring");
         const startedAt = new Date();
@@ -660,13 +960,15 @@ export function MaintainFlowWorkbench({
       const response = await fetch("/api/ads/recommendations/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recommendationId: selected.id,
-          accountId: workspaceAccess.accountId,
-          recommendationSource: selected.source,
-          recommendationFingerprint:
-            recommendationApprovalFingerprints[selected.id],
-        }),
+        body: JSON.stringify(
+          buildDirectLiveApplyBody({
+            organizationId: workspaceAccess.organizationId,
+            recommendationId: selected.id,
+            accountId: workspaceAccess.accountId,
+            recommendationFingerprint:
+              recommendationApprovalFingerprints[selected.id],
+          }),
+        ),
       });
       const result = (await response.json()) as RecommendationApplyResponse;
 
@@ -1064,11 +1366,29 @@ export function MaintainFlowWorkbench({
                 {readyCount}
               </Badge>
             </TabsTrigger>
+            {approvalInboxVisible ? (
+              <TabsTrigger
+                value="approvals"
+                className="h-12 rounded-none border-b-2 border-transparent px-3 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                Approvals
+                {approvalActionCount > 0 ? (
+                  <Badge variant="secondary" className="ml-2 px-1.5 py-0">
+                    {approvalActionCount}
+                  </Badge>
+                ) : null}
+              </TabsTrigger>
+            ) : null}
             <TabsTrigger
               value="campaigns"
               className="h-12 rounded-none border-b-2 border-transparent px-3 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
             >
-              Campaigns
+              {portfolioQueueVisible ? "Action queue" : "Campaigns"}
+              {portfolioQueueVisible && portfolioUrgentActionCount > 0 ? (
+                <Badge variant="secondary" className="ml-2 px-1.5 py-0">
+                  {portfolioUrgentActionCount}
+                </Badge>
+              ) : null}
             </TabsTrigger>
             <TabsTrigger
               value="experiments"
@@ -1150,7 +1470,10 @@ export function MaintainFlowWorkbench({
                     </div>
                     <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                       <span>{recommendation.entityLabel.split(" · ")[0]}</span>
-                      <span>{recommendation.confidence}% confidence</span>
+                      <span>
+                        {dataSource === "demo" ? "Illustrative · " : ""}
+                        {recommendation.confidence}% confidence
+                      </span>
                     </div>
                   </button>
                 ))}
@@ -1175,7 +1498,14 @@ export function MaintainFlowWorkbench({
                 recommendation={selected}
                 dataSource={dataSource}
                 writeMode={writeMode}
-                onApprove={() => setApprovalOpen(true)}
+                routeAgencyApproval={routeAgencyApproval}
+                routeLiveAgencyApproval={routeLiveAgencyApproval}
+                liveAgencyApprovalWritable={liveAgencyApprovalWritable}
+                approvalQueueReady={changeApprovalRequestReady}
+                onApprove={(trigger) => {
+                  approvalTriggerRef.current = trigger;
+                  setApprovalOpen(true);
+                }}
                 onDismiss={() => setDismissalOpen(true)}
                 onRestore={() => recordRecommendationDecision("restore")}
                 canManageDecision={
@@ -1194,6 +1524,28 @@ export function MaintainFlowWorkbench({
           </section>
         </TabsContent>
 
+        {approvalInboxVisible ? (
+          <TabsContent value="approvals" className="m-0">
+            <ApprovalInbox
+              key={`${approvalOrganization?.organizationId ?? "none"}:${initialApprovalRequestId ?? "none"}`}
+              requests={changeApprovalRequests}
+              nextCursor={changeApprovalRequestsNextCursor}
+              currentOperatorId={operatorAuthenticated ? operator.id : null}
+              organizations={approvalOrganizations}
+              selectedOrganizationId={approvalOrganization?.organizationId}
+              onOrganizationChange={changeApprovalOrganization}
+              eligibleReviewerCount={eligibleApprovalReviewerCount}
+              emailNotificationsEnabled={approvalEmailEnabled}
+              canDecide={canDecideAgencyApprovals}
+              writableAccountIds={writableApprovalAccountIds}
+              initialFilter={approvalInboxFilter}
+              initialRequestId={initialApprovalRequestId}
+              onFilterChange={changeApprovalInboxFilter}
+              error={changeApprovalRequestError}
+            />
+          </TabsContent>
+        ) : null}
+
         <TabsContent value="campaigns" className="m-0 min-w-0">
           <CampaignsView
             ads={ads}
@@ -1209,14 +1561,12 @@ export function MaintainFlowWorkbench({
             onReview={runAccountReview}
             reviewing={reviewing}
             snapshotAvailable={snapshotAvailable}
-            portfolioAccounts={
-              dataSource === "demo" ? simulatedAccounts : []
-            }
             livePortfolioVisible={livePortfolioVisible}
-            livePortfolioAccounts={livePortfolioAccounts}
             livePortfolioError={livePortfolioError}
+            portfolioActionItems={portfolioActionItems}
+            portfolioAccountCount={portfolioAccountCount}
             currentAccountId={account.id}
-            onOpenAccount={openAccount}
+            organizationId={workspaceAccess?.organizationId}
           />
         </TabsContent>
 
@@ -1238,6 +1588,20 @@ export function MaintainFlowWorkbench({
             )}
             recommendationDecisionHistory={recommendationDecisionHistory}
             recommendationDecisionError={recommendationDecisionError}
+            changeIntegrityPage={changeIntegrityPage}
+            changeIntegrityFreshness={
+              dataSource === "demo"
+                ? "current"
+                : syncWarning
+                  ? "stale"
+                  : syncedAt
+                    ? "current"
+                    : "unknown"
+            }
+            changeIntegrityReady={changeIntegrityReady}
+            changeIntegrityError={changeIntegrityError}
+            canReviewChangeIntegrity={canReviewChangeIntegrity}
+            operatorName={operator.name}
           />
         </TabsContent>
 
@@ -1259,6 +1623,11 @@ export function MaintainFlowWorkbench({
           <WorkspaceOnboarding
             state={workspaceSetupState}
             access={workspaceAccess}
+            approvalOrganization={approvalOrganization}
+            approvalQueueReady={changeApprovalRequestReady}
+            approvalQueueError={changeApprovalRequestError}
+            eligibleApprovalReviewerCount={eligibleApprovalReviewerCount}
+            approvalEmailEnabled={approvalEmailEnabled}
             connectedAccountName={workspaceAccountName}
             message={workspaceMessage}
             conversionsConnection={conversionsConnection}
@@ -1267,56 +1636,132 @@ export function MaintainFlowWorkbench({
         </TabsContent>
       </Tabs>
 
-      <Dialog open={approvalOpen && Boolean(selected)} onOpenChange={setApprovalOpen}>
+      <Dialog
+        open={approvalOpen && Boolean(selected)}
+        onOpenChange={(open) => {
+          setApprovalOpen(open);
+          if (!open) setApprovalRequestNote("");
+        }}
+      >
         <DialogContent
-          className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl"
+          className="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-xl"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             approvalTitleRef.current?.focus();
           }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const trigger = approvalTriggerRef.current;
+
+            if (trigger?.isConnected && !trigger.disabled) {
+              trigger.focus();
+              return;
+            }
+
+            tabListRef.current
+              ?.querySelector<HTMLElement>('[data-state="active"]')
+              ?.focus();
+          }}
         >
-          <DialogHeader>
+          <DialogHeader className="border-b px-6 pb-4 pt-6 pr-12">
             <DialogTitle ref={approvalTitleRef} tabIndex={-1}>
-              Approve this change?
+              {routeLiveAgencyApproval
+                ? "Request approval for this live change?"
+                : routeSimulatorApproval
+                  ? "Request a simulator review?"
+                  : "Approve this change?"}
             </DialogTitle>
             <DialogDescription>
-              MaintainFlow will use the exact request shown in the review and retain
-              the rollback payload. {dataSource === "live" && writeMode !== "live"
-                ? "External changes are locked until every live-write gate is restored."
-                : writeMode === "demo"
-                  ? "This is a simulator action. No external write will be made."
-                  : "This live recommendation is connected for an external write."}
+              MaintainFlow will retain the exact request, evidence, safeguard,
+              and rollback shown in this review. {routeLiveAgencyApproval
+                ? `A different agency owner or admin must approve this exact packet before anyone can apply it. ${approvalEmailEnabled ? "An eligible reviewer receives a privacy-safe email." : "Approval email is off for this workspace."} This request sends no external change.`
+                : routeSimulatorApproval
+                  ? "A different agency owner or admin can review it. This simulator packet can never make an external change."
+                : dataSource === "live" && writeMode !== "live"
+                  ? "External changes are locked until every live-write gate is restored."
+                  : writeMode === "demo"
+                    ? "This is a simulator action. No external write will be made."
+                    : "This direct advertiser recommendation is connected for an external write."}
             </DialogDescription>
           </DialogHeader>
-          {selected ? (
-            <RecommendationApprovalConfirmation
-              account={account}
-              recommendation={selected}
-              dataSource={dataSource}
-              writeMode={writeMode}
-              syncedAt={syncedAt}
-            />
-          ) : null}
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setApprovalOpen(false)}>
+          <div
+            role="region"
+            aria-label="Approval evidence"
+            tabIndex={0}
+            className="min-h-0 overflow-y-auto px-6 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          >
+            {selected ? (
+              <div className="grid gap-4">
+                <RecommendationApprovalConfirmation
+                  account={account}
+                  recommendation={selected}
+                  dataSource={dataSource}
+                  writeMode={writeMode}
+                  syncedAt={syncedAt}
+                  intent={routeLiveAgencyApproval ? "request" : "apply"}
+                />
+                {routeAgencyApproval ? (
+                  <Field>
+                    <FieldLabel htmlFor="approval-request-note">
+                      Context for the reviewer <span className="font-normal text-muted-foreground">(optional)</span>
+                    </FieldLabel>
+                    <Textarea
+                      id="approval-request-note"
+                      value={approvalRequestNote}
+                      onChange={(event) =>
+                        setApprovalRequestNote(event.target.value)
+                      }
+                      maxLength={500}
+                      rows={3}
+                      placeholder="Why should the client or team owner review this now?"
+                    />
+                    <FieldDescription>
+                      A decision is due within seven days. The immutable packet
+                      remains in the agency evidence history. Creating this
+                      request does not send an external write.
+                    </FieldDescription>
+                  </Field>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter className="border-t bg-background px-6 py-4">
+            <Button
+              variant="outline"
+              onClick={() => setApprovalOpen(false)}
+              disabled={applying}
+              className="min-h-11"
+            >
               Cancel
             </Button>
             <Button
               onClick={approveRecommendation}
               disabled={
-                applying || (dataSource === "live" && writeMode !== "live")
+                applying ||
+                (!routeAgencyApproval &&
+                  dataSource === "live" &&
+                  writeMode !== "live") ||
+                (routeAgencyApproval && !canRouteAgencyApproval)
               }
+              aria-busy={applying}
+              className="min-h-11"
             >
               {applying ? (
                 <Loader2 data-icon="inline-start" className="animate-spin" />
               ) : (
                 <Check data-icon="inline-start" />
               )}
-              {dataSource === "live" && writeMode !== "live"
-                ? "External changes locked"
-                : writeMode === "demo"
-                  ? "Record simulator approval"
-                  : "Approve and apply live change"}
+              {routeAgencyApproval && !canRouteAgencyApproval
+                ? "Approval queue unavailable"
+                : routeLiveAgencyApproval
+                  ? "Request approval"
+                  : routeSimulatorApproval
+                    ? "Request simulator review"
+                  : dataSource === "live" && writeMode !== "live"
+                    ? "External changes locked"
+                    : writeMode === "demo"
+                      ? "Record simulator approval"
+                      : "Approve and apply live change"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1402,6 +1847,10 @@ function RecommendationDetail({
   recommendation,
   dataSource,
   writeMode,
+  routeAgencyApproval,
+  routeLiveAgencyApproval,
+  liveAgencyApprovalWritable,
+  approvalQueueReady,
   onApprove,
   onDismiss,
   onRestore,
@@ -1411,7 +1860,11 @@ function RecommendationDetail({
   recommendation: Recommendation;
   dataSource: "demo" | "live";
   writeMode: "demo" | "live";
-  onApprove: () => void;
+  routeAgencyApproval: boolean;
+  routeLiveAgencyApproval: boolean;
+  liveAgencyApprovalWritable: boolean;
+  approvalQueueReady: boolean;
+  onApprove: (trigger: HTMLButtonElement) => void;
   onDismiss: () => void;
   onRestore: () => void;
   canManageDecision: boolean;
@@ -1495,7 +1948,11 @@ function RecommendationDetail({
             <div className="flex items-start gap-3 text-sm">
               <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
               <p>
-                <span className="font-medium">Estimated effect: </span>
+                <span className="font-medium">
+                  {dataSource === "demo"
+                    ? "Illustrative effect: "
+                    : "Estimated effect: "}
+                </span>
                 <span className="text-muted-foreground">
                   {recommendation.estimatedImpact}
                 </span>
@@ -1568,17 +2025,30 @@ function RecommendationDetail({
                 Dismiss
               </Button>
               <Button
-                onClick={onApprove}
+                onClick={(event) => onApprove(event.currentTarget)}
                 disabled={
                   recommendation.status !== "ready" ||
-                  (dataSource === "live" && writeMode !== "live")
+                  (!routeAgencyApproval &&
+                    dataSource === "live" &&
+                    writeMode !== "live") ||
+                  (routeAgencyApproval && !approvalQueueReady) ||
+                  (routeLiveAgencyApproval && !liveAgencyApprovalWritable)
                 }
+                className="min-h-11"
               >
                 <Check data-icon="inline-start" />
                 {recommendation.status === "monitoring"
                   ? "Monitoring"
-                  : writeMode === "live"
-                    ? "Approve and apply"
+                  : routeLiveAgencyApproval && !liveAgencyApprovalWritable
+                    ? "Manager access required"
+                  : routeAgencyApproval && !approvalQueueReady
+                      ? "Approval queue unavailable"
+                      : routeLiveAgencyApproval
+                        ? "Request approval"
+                        : routeAgencyApproval
+                          ? "Request simulator review"
+                          : writeMode === "live"
+                            ? "Approve and apply"
                     : dataSource === "live"
                       ? "External changes locked"
                       : "Approve in simulator"}
@@ -1652,91 +2122,6 @@ function NoRecommendations({
   );
 }
 
-function livePortfolioEvidenceLabel(state: LivePortfolioEvidenceState) {
-  switch (state) {
-    case "confirmed_fresh":
-      return "Fresh";
-    case "confirmed_stale":
-      return "Stale";
-    case "confirmed_expired":
-      return "Expired";
-    case "invalid":
-      return "Rejected";
-    case "refresh_required":
-      return "Refresh required";
-    default:
-      return "Not captured";
-  }
-}
-
-function livePortfolioEvidenceTone(state: LivePortfolioEvidenceState) {
-  if (state === "confirmed_fresh") {
-    return "border-success/30 bg-success/10 text-success";
-  }
-  if (state === "confirmed_stale") {
-    return "border-warning/30 bg-warning/10 text-warning-foreground";
-  }
-  if (state === "confirmed_expired" || state === "invalid") {
-    return "border-destructive/30 bg-destructive/10 text-destructive";
-  }
-  if (state === "refresh_required") {
-    return "border-warning/30 bg-warning/10 text-warning-foreground";
-  }
-  return "text-muted-foreground";
-}
-
-function livePortfolioUrgencyLabel(urgency: LivePortfolioUrgency) {
-  if (urgency === "critical") return "Urgent action";
-  if (urgency === "attention") return "Action needed";
-  if (urgency === "review") return "Evidence review";
-  return "No exception";
-}
-
-function livePortfolioUrgencyVariant(
-  urgency: LivePortfolioUrgency,
-): "destructive" | "secondary" | "outline" {
-  if (urgency === "critical") return "destructive";
-  if (urgency === "attention") return "secondary";
-  return "outline";
-}
-
-function exceptionCountLabel(
-  count: number,
-  singular: string,
-  plural = `${singular}s`,
-) {
-  return `${formatGroupedInteger(count)} ${count === 1 ? singular : plural}`;
-}
-
-function LivePortfolioExceptionItem({
-  evidence,
-  singular,
-  plural,
-  variant,
-}: {
-  evidence: LivePortfolioExceptionEvidence;
-  singular: string;
-  plural?: string;
-  variant: "destructive" | "secondary";
-}) {
-  if (evidence.count === 0) return null;
-
-  return (
-    <div className="flex min-w-72 items-center justify-between gap-3">
-      <Badge variant={variant}>
-        {exceptionCountLabel(evidence.count, singular, plural)}
-      </Badge>
-      <span className="whitespace-nowrap text-xs text-muted-foreground">
-        {evidence.oldestAt
-          ? `Oldest ${formatUtcDateTime(evidence.oldestAt, {
-              includeTimeZone: true,
-            })}`
-          : "Timestamp unavailable"}
-      </span>
-    </div>
-  );
-}
-
 export function CampaignsView({
   ads,
   creativeReviewHistory,
@@ -1751,12 +2136,12 @@ export function CampaignsView({
   onReview,
   reviewing,
   snapshotAvailable,
-  portfolioAccounts,
   livePortfolioVisible,
-  livePortfolioAccounts,
   livePortfolioError,
+  portfolioActionItems = [],
+  portfolioAccountCount = 0,
   currentAccountId,
-  onOpenAccount,
+  organizationId,
 }: {
   ads: ScopedAd[];
   creativeReviewHistory: CreativeReviewEvent[];
@@ -1771,12 +2156,12 @@ export function CampaignsView({
   onReview: () => void;
   reviewing: boolean;
   snapshotAvailable: boolean;
-  portfolioAccounts: SimulatedAccountOption[];
   livePortfolioVisible: boolean;
-  livePortfolioAccounts: LivePortfolioAccount[];
   livePortfolioError?: string;
+  portfolioActionItems?: PortfolioActionItem[];
+  portfolioAccountCount?: number;
   currentAccountId: string;
-  onOpenAccount: (accountId: string) => void;
+  organizationId?: string;
 }) {
   const currency = moneyFormatter(currencyCode);
   const totalSpend = performance.reduce((sum, item) => sum + item.spend, 0);
@@ -1784,27 +2169,10 @@ export function CampaignsView({
     (sum, item) => sum + item.conversions,
     0,
   );
-  const portfolioRows = portfolioAccounts.filter(
-    (item) => item.portfolioSummary,
-  );
-  const portfolioExposure = portfolioRows.reduce(
-    (sum, item) => sum + (item.portfolioSummary?.projectedExposure ?? 0),
-    0,
-  );
-  const portfolioReviews = portfolioRows.reduce(
-    (sum, item) => sum + (item.portfolioSummary?.openReviews ?? 0),
-    0,
-  );
-  const portfolioTemplateFixes = portfolioRows.reduce(
-    (sum, item) => sum + (item.portfolioSummary?.campaignTemplateFixes ?? 0),
-    0,
-  );
-  const livePortfolioSummary = summarizeLivePortfolioEvidence(
-    livePortfolioAccounts,
-  );
-  const rankedLivePortfolioAccounts = rankLivePortfolioAccounts(
-    livePortfolioAccounts,
-  );
+  const hasPortfolioQueue =
+    portfolioActionItems.length > 0 ||
+    portfolioAccountCount > 0 ||
+    (dataSource === "live" && livePortfolioVisible);
 
   return (
     <section className="mx-auto grid w-full min-w-0 max-w-7xl gap-6 p-4 md:p-6 lg:p-8">
@@ -1812,11 +2180,12 @@ export function CampaignsView({
         <div className="grid gap-2">
           <Badge variant="outline" className="w-fit">OpenAI Ads</Badge>
           <h1 className="text-2xl font-semibold tracking-[-0.03em] md:text-3xl">
-            Campaign health
+            {hasPortfolioQueue ? "Action queue" : "Campaign health"}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Delivery metrics use the Insights field names; CPA is derived from
-            click-attributed conversions.
+            {hasPortfolioQueue
+              ? "Start with the most urgent, evidence-backed client exception, then open the exact account workflow."
+              : "Delivery metrics use the Insights field names; CPA is derived from click-attributed conversions."}
           </p>
         </div>
         <Button variant="outline" onClick={onReview} disabled={reviewing}>
@@ -1829,309 +2198,15 @@ export function CampaignsView({
         </Button>
       </div>
 
-      {portfolioRows.length > 1 ? (
-        <Card className="min-w-0 shadow-sm">
-          <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
-            <div className="grid gap-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <CardTitle className="text-base">Agency exception queue</CardTitle>
-                <Badge variant="secondary">Simulator portfolio</Badge>
-              </div>
-              <CardDescription>
-                Triage money at risk, open reviews, and campaign-template gaps
-                across clients before opening one advertiser account.
-              </CardDescription>
-            </div>
-            <Badge variant="outline">{portfolioRows.length} client accounts</Badge>
-          </CardHeader>
-          <CardContent className="grid gap-4 p-4 md:p-5">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <MetricCard
-                label="Projected weekly exposure"
-                value={currency.format(portfolioExposure)}
-                detail="Illustrative confirmed-budget windows"
-              />
-              <MetricCard
-                label="Open reviews"
-                value={formatGroupedInteger(portfolioReviews)}
-                detail="Across the simulated agency portfolio"
-              />
-              <MetricCard
-                label="Campaign template fixes"
-                value={formatGroupedInteger(portfolioTemplateFixes)}
-                detail="Campaign-level checks only"
-              />
-            </div>
-            <Table
-              scrollAreaLabel="Agency account exception queue"
-              scrollAreaClassName="pb-2"
-            >
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Client account</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Money at risk</TableHead>
-                    <TableHead className="text-right">Open reviews</TableHead>
-                    <TableHead className="text-right">Template fixes</TableHead>
-                    <TableHead className="text-right">Workspace</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {portfolioRows.map((item) => {
-                    const summary = item.portfolioSummary!;
-                    const selected = item.accountId === currentAccountId;
-                    return (
-                      <TableRow key={item.accountId}>
-                        <TableCell>
-                          <div className="flex min-w-44 items-center gap-2">
-                            <span className="font-medium">{item.accountName}</span>
-                            {selected ? <Badge variant="outline">Open</Badge> : null}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "whitespace-nowrap",
-                              summary.status === "critical"
-                                ? "border-destructive/30 bg-destructive/10 text-destructive"
-                                : summary.status === "attention"
-                                  ? "border-warning/30 bg-warning/10 text-warning-foreground"
-                                  : "border-success/30 bg-success/10 text-success",
-                            )}
-                          >
-                            {summary.status === "critical"
-                              ? "Budget risk"
-                              : summary.status === "attention"
-                                ? "Review needed"
-                                : "No exception"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {currency.format(summary.projectedExposure)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {summary.openReviews}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {summary.campaignTemplateFixes}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={selected ? "secondary" : "outline"}
-                            disabled={selected}
-                            onClick={() => onOpenAccount(item.accountId)}
-                          >
-                            {selected ? "Current" : "Open account"}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {dataSource === "live" && livePortfolioVisible ? (
-        <Card className="min-w-0 shadow-sm">
-          <CardHeader className="gap-3 border-b bg-muted/20 sm:flex-row sm:items-start sm:justify-between">
-            <div className="grid gap-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <CardTitle className="text-base">Live agency exception queue</CardTitle>
-                <Badge variant="secondary">Agency portfolio</Badge>
-              </div>
-              <CardDescription>
-                Reconciliation and monitoring exceptions are ranked ahead of
-                read-only snapshot signals. Missing evidence is never counted as zero.
-              </CardDescription>
-            </div>
-            <Badge variant="outline">
-              {livePortfolioError
-                ? "Account count unavailable"
-                : `${livePortfolioAccounts.length} active client${livePortfolioAccounts.length === 1 ? "" : "s"}`}
-            </Badge>
-          </CardHeader>
-          <CardContent className="grid gap-4 p-4 md:p-5">
-            {livePortfolioError ? (
-              <Alert>
-                <Info />
-                <AlertTitle>Live portfolio evidence unavailable</AlertTitle>
-                <AlertDescription>{livePortfolioError}</AlertDescription>
-              </Alert>
-            ) : (
-              <>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <MetricCard
-                    label="Accounts requiring action"
-                    value={formatGroupedInteger(
-                      livePortfolioSummary.operationalExceptionAccountCount,
-                    )}
-                    detail={`Across ${livePortfolioAccounts.length} active client${livePortfolioAccounts.length === 1 ? "" : "s"}`}
-                  />
-                  <MetricCard
-                    label="Unresolved reconciliation"
-                    value={formatGroupedInteger(
-                      livePortfolioSummary.reconciliationRequiredCount,
-                    )}
-                    detail="Provider outcomes requiring an Ads Manager check"
-                  />
-                  <MetricCard
-                    label="Monitoring exceptions"
-                    value={formatGroupedInteger(
-                      livePortfolioSummary.monitoringExceptionCount,
-                    )}
-                    detail="Safeguard breaches, evidence gaps, and failed evaluations"
-                  />
-                </div>
-
-                <Table
-                  scrollAreaLabel="Live agency client evidence"
-                  scrollAreaClassName="pb-2"
-                >
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Client account</TableHead>
-                      <TableHead>Priority</TableHead>
-                      <TableHead>Operational exceptions</TableHead>
-                      <TableHead>Oldest attention</TableHead>
-                      <TableHead>Snapshot evidence</TableHead>
-                      <TableHead className="text-right">Review</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rankedLivePortfolioAccounts.map((item) => {
-                      const selected = item.accountId === currentAccountId;
-                      const urgency = livePortfolioUrgency(item);
-                      const oldestExceptionAt =
-                        oldestLivePortfolioExceptionAt(item);
-                      const hasOperationalExceptions =
-                        livePortfolioOperationalExceptionCount(item) > 0;
-                      return (
-                        <TableRow key={item.accountId}>
-                          <TableCell>
-                            <div className="flex min-w-44 items-center gap-2">
-                              <span className="font-medium">
-                                {item.accountName}
-                              </span>
-                              {selected ? (
-                                <Badge variant="outline">Open</Badge>
-                              ) : null}
-                            </div>
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {item.accountId}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={livePortfolioUrgencyVariant(urgency)}
-                              className="whitespace-nowrap"
-                            >
-                              {livePortfolioUrgencyLabel(urgency)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="grid min-w-80 gap-1.5">
-                              <LivePortfolioExceptionItem
-                                evidence={
-                                  item.operationalExceptions
-                                    .reconciliationRequired
-                                }
-                                singular="reconciliation"
-                                variant="destructive"
-                              />
-                              <LivePortfolioExceptionItem
-                                evidence={
-                                  item.operationalExceptions.monitoringFailures
-                                }
-                                singular="monitoring failure"
-                                variant="destructive"
-                              />
-                              <LivePortfolioExceptionItem
-                                evidence={
-                                  item.operationalExceptions.safeguardTriggered
-                                }
-                                singular="safeguard breach"
-                                plural="safeguard breaches"
-                                variant="secondary"
-                              />
-                              <LivePortfolioExceptionItem
-                                evidence={
-                                  item.operationalExceptions.insufficientEvidence
-                                }
-                                singular="evidence gap"
-                                variant="secondary"
-                              />
-                              {!hasOperationalExceptions ? (
-                                <Badge variant="outline">
-                                  No active monitoring exception
-                                </Badge>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap text-muted-foreground">
-                            {oldestExceptionAt
-                              ? formatUtcDateTime(oldestExceptionAt, {
-                                  includeTimeZone: true,
-                                })
-                              : "—"}
-                          </TableCell>
-                          <TableCell className="min-w-48">
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "whitespace-nowrap",
-                                livePortfolioEvidenceTone(item.evidenceState),
-                              )}
-                            >
-                              {livePortfolioEvidenceLabel(item.evidenceState)}
-                            </Badge>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {item.detectedSignalCount === null
-                                ? "Detected signals unknown"
-                                : `${formatGroupedInteger(item.detectedSignalCount)} detected signal${item.detectedSignalCount === 1 ? "" : "s"}`}
-                            </p>
-                            {item.evidenceAt ? (
-                              <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
-                                {formatUtcDateTime(item.evidenceAt, {
-                                  includeTimeZone: true,
-                                })}
-                              </p>
-                            ) : null}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              asChild
-                              size="sm"
-                              variant={
-                                hasOperationalExceptions ? "default" : "outline"
-                              }
-                            >
-                              <Link
-                                href={buildAppHref({
-                                  tab: "experiments",
-                                  accountId: item.accountId,
-                                })}
-                              >
-                                {hasOperationalExceptions
-                                  ? "Review exceptions"
-                                  : "Open history"}
-                                <ArrowRight data-icon="inline-end" />
-                              </Link>
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </>
-            )}
-          </CardContent>
-        </Card>
+      {hasPortfolioQueue ? (
+        <PortfolioActionQueue
+          items={portfolioActionItems}
+          accountCount={portfolioAccountCount}
+          currentAccountId={currentAccountId}
+          organizationId={organizationId}
+          source={dataSource === "live" ? "live" : "simulator"}
+          error={livePortfolioError}
+        />
       ) : null}
 
       {!snapshotAvailable ? (
@@ -2328,6 +2403,12 @@ function ExperimentsView({
   canReconcile,
   recommendationDecisionHistory,
   recommendationDecisionError,
+  changeIntegrityPage,
+  changeIntegrityFreshness,
+  changeIntegrityReady,
+  changeIntegrityError,
+  canReviewChangeIntegrity,
+  operatorName,
 }: {
   account: { id: string; name: string };
   recommendations: Recommendation[];
@@ -2342,15 +2423,42 @@ function ExperimentsView({
   canReconcile: boolean;
   recommendationDecisionHistory: RecommendationDecisionHistoryDto[];
   recommendationDecisionError?: string;
+  changeIntegrityPage: ChangeIntegrityEventPage;
+  changeIntegrityFreshness: "current" | "stale" | "unknown";
+  changeIntegrityReady: boolean;
+  changeIntegrityError?: string;
+  canReviewChangeIntegrity: boolean;
+  operatorName: string;
 }) {
   return (
     <section className="mx-auto grid min-w-0 max-w-6xl gap-6 p-4 md:p-6 lg:p-8">
       <div className="grid gap-2">
         <Badge variant="outline" className="w-fit">Human-approved</Badge>
         <h1 className="text-2xl font-semibold tracking-[-0.03em] md:text-3xl">
-          Monitoring windows
+          Change assurance
         </h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
+          Detect material configuration changes, trace approved operations, and
+          monitor every applied change against a human-reviewed safeguard.
+        </p>
+      </div>
+
+      <ChangeIntegrityGuard
+        key={`${dataSource}:${account.id}:${changeIntegrityPageVersion(changeIntegrityPage)}`}
+        accountId={account.id}
+        currencyCode={currencyCode}
+        source={dataSource === "demo" ? "simulator" : "live"}
+        initialPage={changeIntegrityPage}
+        freshness={changeIntegrityFreshness}
+        ready={changeIntegrityReady}
+        error={changeIntegrityError}
+        canReview={canReviewChangeIntegrity}
+        operatorName={operatorName}
+      />
+
+      <div className="grid gap-1">
+        <h2 className="text-lg font-semibold tracking-tight">Monitoring windows</h2>
+        <p className="text-sm text-muted-foreground">
           Every approved change gets a baseline, success rule, rollback rule, and
           audit trail. Simulator experiments are clearly separated from live results.
         </p>

@@ -11,11 +11,24 @@ labelled fixtures and the stateful local provider simulator, keeps all OpenAI
 Ads and Conversions API writes disabled, and must never label simulated results
 as advertiser delivery evidence.
 
-The demo can be used to validate the complete customer journey, responsive UI,
-recommendation review, approvals, rollback planning, monitoring presentation,
-storefront readiness, product-feed checks, event-payload preflight, and report
-export. It cannot validate OpenAI authentication, account permissions, live
-delivery data, attribution, or external write acceptance.
+The public fixture demo can validate the responsive UI, recommendation review,
+approval presentation, rollback planning, monitoring presentation, storefront
+readiness, product-feed checks, event-payload preflight, and report export. It
+cannot validate OpenAI authentication, account permissions, live delivery data,
+attribution, durable multi-user approval, or external write acceptance.
+
+An authenticated credential-free variant can additionally validate the durable
+agency simulator queue when Clerk, PostgreSQL, admission, migrations `019` and `020`, an
+agency workspace, and a second existing, separately admitted Clerk user
+provisioned as `admin` through the reviewed
+[operator runbook](private-beta-agency-member-provisioning.md) are present.
+It proves only that the exact simulator packet can move through the
+maker-checker, expiry, and concurrency boundary. Approval email is separately
+opted in per organization and must pass the
+[delivery runbook](approval-notifications.md); it is not implied by queue
+readiness. The product has no member invitation or self-service provisioning and lists
+only 50 selected-agency requests per cursor page—awaiting packets first, then
+newest history. Simulator packets can never connect to live execution.
 
 A deployed production demo still exposes the public readiness scanner and legal
 pages. It therefore requires an identified legal entity, monitored privacy and
@@ -49,6 +62,15 @@ contract supports it, exact response validation, and a canonical readback before
 MaintainFlow calls the change confirmed. Ambiguous outcomes enter reconciliation
 and are never retried automatically.
 
+For an agency, migration `020` makes migration `019`'s two-person request
+mandatory: a different owner/admin approves the exact packet, and one authorized
+operator may atomically consume it into one live approval record. Direct
+advertiser organizations retain the single-person owner/admin path. The local
+implementation rejects unlinked agency attempts, replay, stale roles, expired
+packets, and changed request/evidence fingerprints, but `live_write` is not
+agency-release-ready until migration `020` and its runtime grants are applied to
+the hosted database and this path passes real-account acceptance.
+
 ## Deployment check
 
 Set `MAINTAINFLOW_RELEASE_STAGE` and run:
@@ -81,10 +103,11 @@ claim to be the current HEAD commit. `GET
 /api/ready` is the separate no-store deployment gate. It requires
 `Authorization: Bearer $MAINTAINFLOW_READINESS_PROBE_SECRET` before performing
 database work, then checks valid revision provenance, the exact checked-in
-migration ledger, the quota and live snapshot stores in every stage, and the
-remaining stage-appropriate stores. It never calls OpenAI and therefore remains
-usable before an Ads credential is available. A `503` is a failed deployment
-gate, not evidence that the process is down.
+migration ledger, the quota, live snapshot, agency approval, and Change
+Integrity stores in every stage, and the remaining stage-appropriate stores. It
+never calls OpenAI and therefore remains usable before an Ads credential is
+available. A `503` is a failed deployment gate, not evidence that the process is
+down.
 
 The OpenAI Ads key is deliberately not a global deployment requirement. Each
 pilot customer can connect an account-scoped key into the encrypted vault when

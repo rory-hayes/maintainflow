@@ -7,10 +7,12 @@ import { rootCertificates } from "node:tls";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  applyRetentionPurge,
   CustomerLifecycleSafetyError,
   formatCustomerLifecycleFailure,
   parseCustomerLifecycleArgs,
   prepareProviderRevocationConfirmation,
+  prepareRetentionPurge,
   runCustomerLifecycleCli,
   writePrivateLifecycleEvidence,
 } from "./customer-lifecycle.mjs";
@@ -93,6 +95,110 @@ function fakeReadOnlyDatabase() {
   const sql = () => {};
   sql.begin = (callback) => callback(transaction);
   return sql;
+}
+
+function fakeRetentionDatabase({
+  changeApprovalRequests = 1,
+  approvalNotificationDeliveries = 0,
+  unresolvedChangeApprovalRequests = 0,
+} = {}) {
+  const lifecycle = {
+    id: lifecycleId,
+    advertiser_account_id: advertiserAccountId,
+    external_account_id: externalAccountId,
+    acting_organization_id: organizationId,
+    operator_id: operatorId,
+    action: "offboarded",
+    state_fingerprint: "a".repeat(64),
+    export_sha256: "b".repeat(64),
+    inventory_counts: {},
+    provider_revocation_required: false,
+    completed_at: new Date("2026-08-01T09:00:00.000Z"),
+    provider_revoked_at: new Date("2026-08-01T10:00:00.000Z"),
+    provider_revocation_confirmed_at: new Date("2026-08-01T10:05:00.000Z"),
+    provider_revocation_evidence_ref: evidenceReference,
+    provider_revocation_confirmation_sha256: "c".repeat(64),
+    retain_until: new Date("2026-09-01T10:00:00.000Z"),
+    purge_completed_at: null,
+    purge_evidence_sha256: null,
+  };
+  const account = {
+    id: advertiserAccountId,
+    external_account_id: externalAccountId,
+    status: "disconnected",
+  };
+  const counts = {
+    access_grants: 0,
+    advertiser_credentials: 0,
+    conversion_credentials: 0,
+    change_approval_requests: changeApprovalRequests,
+    approval_notification_deliveries: approvalNotificationDeliveries,
+    approvals: 0,
+    creative_review_state: 0,
+    creative_review_events: 0,
+    recommendation_decisions: 0,
+    readiness_audits: 0,
+    live_workbench_snapshots: 0,
+    change_integrity_state: 0,
+    change_integrity_events: 0,
+    monitoring_account_schedules: 0,
+    unresolved_change_approval_requests: unresolvedChangeApprovalRequests,
+    unresolved_approvals: 0,
+  };
+  const statements = [];
+  const transaction = (strings) => {
+    if (!Object.hasOwn(strings, "raw")) return strings;
+    const statement = strings.join(" ").replace(/\s+/g, " ").trim();
+    statements.push(statement);
+    if (statement.startsWith("set ")) return Promise.resolve([]);
+    if (statement.startsWith("update maintainflow_customer_lifecycle_records")) {
+      return Promise.resolve([{ id: lifecycleId }]);
+    }
+    if (statement.startsWith("delete from maintainflow_advertiser_accounts")) {
+      return Promise.resolve([{ id: advertiserAccountId }]);
+    }
+    if (
+      statement.startsWith(
+        "delete from maintainflow_approval_notification_deliveries delivery",
+      )
+    ) {
+      return Promise.resolve(
+        Array.from({ length: approvalNotificationDeliveries }, (_, index) => ({
+          id: `notification-${index}`,
+        })),
+      );
+    }
+    if (statement.startsWith("delete from maintainflow_change_approval_requests")) {
+      return Promise.resolve(
+        Array.from({ length: changeApprovalRequests }, (_, index) => ({
+          id: `request-${index}`,
+        })),
+      );
+    }
+    if (
+      statement.startsWith("select id from maintainflow_change_approval_requests")
+    ) {
+      return Promise.resolve(
+        Array.from({ length: changeApprovalRequests }, (_, index) => ({
+          id: `request-${index}`,
+        })),
+      );
+    }
+    if (statement.startsWith("delete from ")) return Promise.resolve([]);
+    if (statement.includes("from maintainflow_customer_lifecycle_records")) {
+      return Promise.resolve([lifecycle]);
+    }
+    if (statement.includes("from maintainflow_advertiser_accounts")) {
+      return Promise.resolve([account]);
+    }
+    if (statement.startsWith("select (select count(*)::int")) {
+      return Promise.resolve([counts]);
+    }
+    throw new Error(`Unexpected fake query: ${statement}`);
+  };
+  const sql = () => {};
+  sql.begin = (callback) => callback(transaction);
+  return { sql, statements };
 }
 
 afterEach(async () => {
@@ -201,6 +307,126 @@ describe("customer lifecycle operator safety", () => {
     );
     expect(plan.serializedEvidence).not.toMatch(
       /"(?:api[_-]?key|credential|ciphertext|password|secret|token)"\s*:/i,
+    );
+  });
+
+  it("inventories account-linked live approvals and their notification deliveries", async () => {
+    const retained = fakeRetentionDatabase({
+      changeApprovalRequests: 3,
+      approvalNotificationDeliveries: 7,
+    });
+    const plan = await prepareRetentionPurge(retained.sql, {
+      lifecycleId,
+      now: new Date("2026-09-03T10:00:00.000Z"),
+    });
+    expect(plan.blockers).toEqual([]);
+    expect(plan.inventory.changeApprovalRequests).toBe(3);
+    expect(plan.inventory.approvalNotificationDeliveries).toBe(7);
+    expect(plan.serializedEvidence).toContain('"changeApprovalRequests": 3');
+    expect(plan.serializedEvidence).toContain(
+      '"approvalNotificationDeliveries": 7',
+    );
+    const inventoryStatement = retained.statements.find((statement) =>
+      statement.startsWith("select (select count(*)::int"),
+    );
+    expect(inventoryStatement).toContain(
+      "from maintainflow_change_approval_requests",
+    );
+    expect(inventoryStatement).toContain(
+      "from maintainflow_approval_notification_deliveries delivery",
+    );
+    expect(inventoryStatement).toContain(
+      "from maintainflow_ads_config_integrity_state",
+    );
+    expect(inventoryStatement).toContain(
+      "from maintainflow_ads_config_integrity_events",
+    );
+    expect(inventoryStatement).toContain(
+      "request.id = delivery.approval_request_id",
+    );
+    expect(inventoryStatement).toContain(
+      "request.organization_id = delivery.organization_id",
+    );
+    expect(inventoryStatement).toContain("and source = 'live'");
+
+    const unresolved = fakeRetentionDatabase({
+      unresolvedChangeApprovalRequests: 1,
+    });
+    const blocked = await prepareRetentionPurge(unresolved.sql, {
+      lifecycleId,
+      now: new Date("2026-09-03T10:00:00.000Z"),
+    });
+    expect(blocked.confirmationToken).toBeNull();
+    expect(blocked.blockers).toContain(
+      "A live change approval request still awaits a decision and must be cancelled, decided, or expired before purging.",
+    );
+  });
+
+  it("deletes notification deliveries before their live approval requests", async () => {
+    const database = fakeRetentionDatabase({
+      changeApprovalRequests: 2,
+      approvalNotificationDeliveries: 5,
+    });
+    const now = new Date("2026-09-03T10:00:00.000Z");
+    const plan = await prepareRetentionPurge(database.sql, { lifecycleId, now });
+    const writeValidatedEvidence = vi.fn(async () => {});
+    const result = await applyRetentionPurge(database.sql, {
+      lifecycleId,
+      now,
+      confirmationToken: plan.confirmationToken,
+      writeValidatedEvidence,
+    });
+    expect(result.deleted.changeApprovalRequests).toBe(2);
+    expect(result.deleted.approvalNotificationDeliveries).toBe(5);
+    expect(writeValidatedEvidence).toHaveBeenCalledOnce();
+    const notificationDeleteIndex = database.statements.findIndex((statement) =>
+      statement.startsWith(
+        "delete from maintainflow_approval_notification_deliveries delivery",
+      ),
+    );
+    const requestLockIndex = database.statements.findIndex((statement) =>
+      statement.startsWith("select id from maintainflow_change_approval_requests"),
+    );
+    const requestDeleteIndex = database.statements.findIndex((statement) =>
+      statement.startsWith("delete from maintainflow_change_approval_requests"),
+    );
+    const approvalDeleteIndex = database.statements.findIndex((statement) =>
+      statement.startsWith("delete from ads_approval_records"),
+    );
+    const integrityEventDeleteIndex = database.statements.findIndex(
+      (statement) =>
+        statement.startsWith(
+          "delete from maintainflow_ads_config_integrity_events",
+        ),
+    );
+    const integrityStateDeleteIndex = database.statements.findIndex(
+      (statement) =>
+        statement.startsWith(
+          "delete from maintainflow_ads_config_integrity_state",
+        ),
+    );
+    const accountDeleteIndex = database.statements.findIndex((statement) =>
+      statement.startsWith("delete from maintainflow_advertiser_accounts"),
+    );
+    expect(requestLockIndex).toBeGreaterThan(-1);
+    expect(requestLockIndex).toBeLessThan(notificationDeleteIndex);
+    expect(database.statements[requestLockIndex]).toContain("order by id");
+    expect(database.statements[requestLockIndex]).toContain("for update");
+    expect(notificationDeleteIndex).toBeLessThan(requestDeleteIndex);
+    expect(requestDeleteIndex).toBeLessThan(approvalDeleteIndex);
+    expect(integrityEventDeleteIndex).toBeGreaterThanOrEqual(0);
+    expect(integrityStateDeleteIndex).toBeGreaterThan(
+      integrityEventDeleteIndex,
+    );
+    expect(accountDeleteIndex).toBeGreaterThan(integrityStateDeleteIndex);
+    expect(database.statements[notificationDeleteIndex]).toContain(
+      "request.organization_id = delivery.organization_id",
+    );
+    expect(database.statements[notificationDeleteIndex]).toContain(
+      "and request.source = 'live'",
+    );
+    expect(database.statements[requestDeleteIndex]).toContain(
+      "and source = 'live'",
     );
   });
 

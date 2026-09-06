@@ -18,6 +18,8 @@ import {
 
 const runtimeReadableTables = [
   "ads_approval_records",
+  "maintainflow_change_approval_requests",
+  "maintainflow_approval_notification_deliveries",
   "maintainflow_organizations",
   "maintainflow_organization_memberships",
   "maintainflow_advertiser_accounts",
@@ -30,6 +32,8 @@ const runtimeReadableTables = [
   "maintainflow_conversion_credentials",
   "maintainflow_readiness_audit_runs",
   "maintainflow_live_workbench_snapshots",
+  "maintainflow_ads_config_integrity_state",
+  "maintainflow_ads_config_integrity_events",
   "maintainflow_customer_lifecycle_records",
   "maintainflow_monitoring_account_schedule",
   "maintainflow_schema_migrations",
@@ -39,12 +43,17 @@ const runtimeInsertableTables = new Set(
     (table) =>
       !new Set([
         "maintainflow_customer_lifecycle_records",
+        "maintainflow_change_approval_requests",
+        "maintainflow_approval_notification_deliveries",
         "maintainflow_schema_migrations",
       ]).has(table),
   ),
 );
+const runtimeColumnInsertableTables = new Set([
+  "maintainflow_change_approval_requests",
+  "maintainflow_approval_notification_deliveries",
+]);
 const runtimeUpdatableTables = new Set([
-  "ads_approval_records",
   "maintainflow_advertiser_accounts",
   "maintainflow_advertiser_credentials",
   "maintainflow_creative_review_state",
@@ -54,6 +63,119 @@ const runtimeUpdatableTables = new Set([
   "maintainflow_live_workbench_snapshots",
   "maintainflow_monitoring_account_schedule",
 ]);
+const runtimeColumnUpdatableTables = new Set([
+  "ads_approval_records",
+  "maintainflow_account_access",
+  "maintainflow_approval_notification_deliveries",
+  "maintainflow_change_approval_requests",
+  "maintainflow_organization_memberships",
+  "maintainflow_organizations",
+  "maintainflow_ads_config_integrity_state",
+  "maintainflow_ads_config_integrity_events",
+]);
+const lockOnlyUpdateColumns = new Map([
+  ["maintainflow_account_access", ["organization_id"]],
+  ["maintainflow_organization_memberships", ["organization_id"]],
+  ["maintainflow_organizations", ["id"]],
+]);
+const approvalRequestInsertColumns = [
+  "account_id_snapshot",
+  "account_name_snapshot",
+  "advertiser_account_id",
+  "decision_context",
+  "entity_id",
+  "evidence_payload",
+  "expires_at",
+  "id",
+  "organization_id",
+  "recommendation_fingerprint",
+  "recommendation_id",
+  "recommendation_title",
+  "request_note",
+  "request_payload",
+  "requested_at",
+  "requester_membership_role",
+  "requester_name_snapshot",
+  "requester_operator_id",
+  "rollback_payload",
+  "safeguard",
+  "source",
+];
+const approvalNotificationInsertColumns = [
+  "approval_request_id",
+  "approval_request_version",
+  "event_type",
+  "id",
+  "organization_id",
+  "recipient_membership_role_snapshot",
+  "recipient_operator_id",
+];
+const approvalRecordUpdateColumns = [
+  "applied_at",
+  "apply_provider_attempted_at",
+  "error_message",
+  "monitoring_ends_at",
+  "monitoring_evaluated_at",
+  "monitoring_evaluation_claim_id",
+  "monitoring_evaluation_claimed_at",
+  "monitoring_observation",
+  "monitoring_outcome",
+  "monitoring_started_at",
+  "reconciled_account_role",
+  "reconciled_at",
+  "reconciled_by",
+  "reconciled_membership_role",
+  "reconciled_organization_id",
+  "reconciliation_note",
+  "response_payload",
+  "rollback_account_role",
+  "rollback_error_message",
+  "rollback_membership_role",
+  "rollback_operator_id",
+  "rollback_organization_id",
+  "rollback_provider_attempt_id",
+  "rollback_provider_attempted_at",
+  "rollback_response_payload",
+  "rolled_back_at",
+  "status",
+  "updated_at",
+];
+const approvalRequestUpdateColumns = [
+  "ads_approval_record_id",
+  "decided_at",
+  "decision_membership_role",
+  "decision_name_snapshot",
+  "decision_note",
+  "decision_operator_id",
+  "retired_at",
+  "status",
+  "updated_at",
+  "version",
+];
+const approvalNotificationUpdateColumns = [
+  "cancellation_code",
+  "claim_id",
+  "last_failure_code",
+  "provider_event_at",
+  "provider_event_type",
+  "provider_message_id",
+  "status",
+];
+const integrityEventUpdateColumns = [
+  "review_note",
+  "review_status",
+  "reviewed_by_name",
+  "reviewed_by_operator_id",
+  "reviewed_by_organization_id",
+];
+const integrityStateUpdateColumns = [
+  "observed_at",
+  "projection_version",
+  "snapshot_fingerprint",
+  "snapshot_payload",
+  "snapshot_resource_count",
+  "updated_at",
+];
 const runtimeDeletableTables = new Set([
   "maintainflow_rate_limit_buckets",
   "maintainflow_live_workbench_snapshots",
@@ -85,6 +207,7 @@ function healthyRole(overrides = {}) {
     unexpected_incoming_member_count: 0,
     owned_public_relation_count: 0,
     public_policy_count: 0,
+    runtime_lock_guard_count: 3,
     executable_public_function_count: 0,
     usable_public_sequence_count: 0,
     can_connect_database: true,
@@ -98,6 +221,7 @@ function healthyRole(overrides = {}) {
 function healthyPrivileges() {
   return runtimeReadableTables.map((table_name) => ({
     table_name,
+    row_security_enabled: true,
     can_select: true,
     can_insert: runtimeInsertableTables.has(table_name),
     can_update: runtimeUpdatableTables.has(table_name),
@@ -107,9 +231,36 @@ function healthyPrivileges() {
     can_trigger: false,
     can_maintain: false,
     can_select_any_column: true,
-    can_insert_any_column: runtimeInsertableTables.has(table_name),
-    can_update_any_column: runtimeUpdatableTables.has(table_name),
+    can_insert_any_column:
+      runtimeInsertableTables.has(table_name) ||
+      runtimeColumnInsertableTables.has(table_name),
+    can_update_any_column:
+      runtimeUpdatableTables.has(table_name) ||
+      runtimeColumnUpdatableTables.has(table_name),
     can_reference_any_column: false,
+    insert_columns: runtimeInsertableTables.has(table_name)
+      ? ["all_columns_via_table_grant"]
+      : runtimeColumnInsertableTables.has(table_name)
+        ? table_name === "maintainflow_change_approval_requests"
+          ? approvalRequestInsertColumns
+          : approvalNotificationInsertColumns
+        : [],
+    update_columns: runtimeUpdatableTables.has(table_name)
+      ? ["all_columns_via_table_grant"]
+      : runtimeColumnUpdatableTables.has(table_name)
+        ? table_name === "ads_approval_records"
+          ? approvalRecordUpdateColumns
+          : table_name === "maintainflow_change_approval_requests"
+            ? approvalRequestUpdateColumns
+            : table_name ===
+                "maintainflow_approval_notification_deliveries"
+              ? approvalNotificationUpdateColumns
+              : table_name === "maintainflow_ads_config_integrity_state"
+                ? integrityStateUpdateColumns
+              : table_name === "maintainflow_ads_config_integrity_events"
+                ? integrityEventUpdateColumns
+              : lockOnlyUpdateColumns.get(table_name)
+        : [],
   }));
 }
 
@@ -261,6 +412,7 @@ describe("runtime database role deployment readiness", () => {
     ["unexpected incoming member", { unexpected_incoming_member_count: 1 }],
     ["owned table", { owned_public_relation_count: 1 }],
     ["unexpected policy", { public_policy_count: 1 }],
+    ["missing runtime lock guard", { runtime_lock_guard_count: 2 }],
     ["function execution", { executable_public_function_count: 1 }],
     ["schema creation", { can_create_in_public_schema: true }],
     ["missing role timeout", { role_settings: ["statement_timeout=20s"] }],
@@ -278,10 +430,17 @@ describe("runtime database role deployment readiness", () => {
     await expect(verifyRuntimeDatabaseRole()).resolves.toBe(false);
   });
 
-  it("rejects missing, extra, or elevated table privileges", async () => {
+  it("rejects missing, extra, elevated, or RLS-disabled table privileges", async () => {
     const current = healthyPrivileges();
     const variants = [
-      current.slice(0, -1),
+      current.filter(
+        (row) => row.table_name !== "maintainflow_change_approval_requests",
+      ),
+      current.filter(
+        (row) =>
+          row.table_name !==
+          "maintainflow_approval_notification_deliveries",
+      ),
       [
         ...current,
         {
@@ -289,11 +448,185 @@ describe("runtime database role deployment readiness", () => {
           table_name: "unexpected_public_table",
         },
       ],
-      current.map((row, index) =>
-        index === 0 ? { ...row, can_delete: true } : row,
+      current.map((row) =>
+        row.table_name === "maintainflow_change_approval_requests"
+          ? { ...row, can_insert: true }
+          : row,
       ),
-      current.map((row, index) =>
-        index === 1 ? { ...row, can_update_any_column: true } : row,
+      current.map((row) =>
+        row.table_name ===
+        "maintainflow_approval_notification_deliveries"
+          ? { ...row, can_insert: true }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name ===
+        "maintainflow_approval_notification_deliveries"
+          ? {
+              ...row,
+              insert_columns: approvalNotificationInsertColumns.map(
+                (column) =>
+                  column === "event_type" ? "channel" : column,
+              ),
+            }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_change_approval_requests"
+          ? { ...row, can_insert_any_column: false }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name ===
+        "maintainflow_approval_notification_deliveries"
+          ? { ...row, can_update: true }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name ===
+        "maintainflow_approval_notification_deliveries"
+          ? {
+              ...row,
+              update_columns: approvalNotificationUpdateColumns.map(
+                (column) =>
+                  column === "claim_id" ? "claimed_at" : column,
+              ),
+            }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name ===
+        "maintainflow_approval_notification_deliveries"
+          ? { ...row, can_delete: true }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_change_approval_requests"
+          ? {
+              ...row,
+              insert_columns: approvalRequestInsertColumns.map((column) =>
+                column === "source" ? "status" : column,
+              ),
+            }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name ===
+        "maintainflow_approval_notification_deliveries"
+          ? { ...row, row_security_enabled: false }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_change_approval_requests"
+          ? {
+              ...row,
+              update_columns: approvalRequestUpdateColumns.filter(
+                (column) => column !== "retired_at",
+              ),
+            }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_change_approval_requests"
+          ? { ...row, can_delete: true }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_change_approval_requests"
+          ? { ...row, can_update: true }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_change_approval_requests"
+          ? { ...row, can_update_any_column: false }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_change_approval_requests"
+          ? {
+              ...row,
+              update_columns: approvalRequestUpdateColumns.map((column) =>
+                column === "status" ? "request_payload" : column,
+              ),
+            }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "ads_approval_records"
+          ? { ...row, can_update: true }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "ads_approval_records"
+          ? {
+              ...row,
+              update_columns: approvalRecordUpdateColumns.map((column) =>
+                column === "status" ? "request_payload" : column,
+              ),
+            }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_organizations"
+          ? { ...row, update_columns: ["name"] }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_change_approval_requests"
+          ? { ...row, row_security_enabled: false }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_ads_config_integrity_state"
+          ? { ...row, can_update: true }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_ads_config_integrity_state"
+          ? {
+              ...row,
+              update_columns: integrityStateUpdateColumns.filter(
+                (column) => column !== "observed_at",
+              ),
+            }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_ads_config_integrity_state"
+          ? {
+              ...row,
+              update_columns: [
+                ...integrityStateUpdateColumns,
+                "advertiser_account_id",
+              ].sort(),
+            }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_ads_config_integrity_events"
+          ? { ...row, can_update: true }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_ads_config_integrity_events"
+          ? {
+              ...row,
+              update_columns: integrityEventUpdateColumns.filter(
+                (column) => column !== "review_note",
+              ),
+            }
+          : row,
+      ),
+      current.map((row) =>
+        row.table_name === "maintainflow_ads_config_integrity_events"
+          ? {
+              ...row,
+              update_columns: [
+                ...integrityEventUpdateColumns,
+                "current_configuration",
+              ].sort(),
+            }
+          : row,
       ),
     ];
 

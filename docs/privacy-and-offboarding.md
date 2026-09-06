@@ -26,7 +26,9 @@ processor list, transfer mechanism where applicable, retention schedule,
 support route, breach-notification route, and the authorized people who may
 request export or deletion. Confirm whether readiness URLs, advertising data,
 approval evidence, and monitoring records contain personal or commercially
-sensitive information for that customer.
+sensitive information for that customer. Treat live change approval packets,
+requester and decision-maker snapshots, notes, and decision history as retained
+customer evidence too.
 
 ## Executable private-pilot offboarding
 
@@ -57,7 +59,11 @@ evidence, excludes encrypted credential bytes and key material, inventories all
 account-scoped retained evidence, and prints a confirmation token bound to the
 current inventory observed by the command. Apply re-locks and re-inventories the
 same exact account before accepting that token. It does not emit a token
-while an Ads mutation is pending, ambiguous, or has a failed/unconfirmed
+while a live change approval request still awaits a decision; cancel, decide,
+or expire that request first. Simulator approval requests are organization-level
+evidence with no advertiser-account link, so an exact live-account offboarding
+does not export, block on, or mutate them. It also does not emit a token while an
+Ads mutation is pending, ambiguous, or has a failed/unconfirmed
 rollback. Reconcile that record first. A legacy `connection_mode=environment`
 account is also blocked because a shared environment key cannot be removed
 account-by-account; rotate or remove it
@@ -99,10 +105,11 @@ credential rows, removes every account access grant, marks the account
 disconnected, and inserts one non-secret
 `maintainflow_customer_lifecycle_records` completion record with the export hash
 and deletion counts. Organizations and memberships are preserved because an
-agency organization may serve other accounts. Approval, monitoring, creative,
-decision, readiness, and live-snapshot evidence is retained until its signed
-schedule authorizes a separate deletion; disconnected accounts are excluded from
-scheduled monitoring claims.
+agency organization may serve other accounts. Linked live change-approval, Ads
+approval, monitoring, creative-review, recommendation-decision, readiness, and
+live-snapshot evidence is retained until its signed schedule authorizes a
+separate deletion; disconnected accounts are excluded from scheduled monitoring
+claims.
 
 The command cannot revoke source credentials held by OpenAI. Immediately
 instruct the customer to revoke Ads and Conversions keys in Ads Manager. Actual
@@ -161,9 +168,10 @@ npm run customer:purge-retention -- \
 ```
 
 No apply token is issued if provider revocation is unconfirmed, the deadline
-has not elapsed, an unresolved provider mutation remains, access or credential
-rows have reappeared, or any table exceeds its reviewed deletion bound. Apply
-re-locks the account, re-counts every covered table, and rejects a stale token:
+has not elapsed, a live change approval still awaits a decision, an unresolved
+provider mutation remains, access or credential rows have reappeared, or any
+table exceeds its reviewed deletion bound. Apply re-locks the account, re-counts
+every covered table, and rejects a stale token:
 
 ```bash
 npm run customer:purge-retention -- \
@@ -174,12 +182,14 @@ npm run customer:purge-retention -- \
 ```
 
 The bounded transaction deletes the disconnected account and its retained
-approval, monitoring, creative-review, recommendation-decision, readiness, and
-live-snapshot rows in foreign-key-safe order. It preserves shared organizations
-and memberships, then removes customer and operator identifiers from the
-lifecycle row while retaining the non-secret revocation and purge receipt
-hashes and completion times. Mode-`0600` purge evidence contains counts and
-hashes, not customer identifiers or secrets.
+live change-approval, Ads approval, monitoring, creative-review,
+recommendation-decision, readiness, and live-snapshot rows in foreign-key-safe
+order. Linked live change approval requests are removed before the Ads approval
+records they may reference. Simulator approval requests remain untouched. The
+transaction preserves shared organizations and memberships, then removes
+customer and operator identifiers from the lifecycle row while retaining the
+non-secret revocation and purge receipt hashes and completion times. Mode-`0600`
+purge evidence contains counts and hashes, not customer identifiers or secrets.
 
 Removing Clerk access for an ending organization, expiring provider backups,
 and deleting any separately retained exports remain external operational steps;

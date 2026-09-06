@@ -134,4 +134,39 @@ describe("readiness audit network binding", () => {
     expect(connectedAddresses).toEqual(["93.184.216.34"]);
     expect(httpRequestMock).toHaveBeenCalledTimes(1);
   });
+
+  it("bounds hostile HTML parsing across the full fetch-to-analysis path", async () => {
+    const hostileHtml = "<meta ".repeat(240_000).slice(0, 1_400_000);
+    responsePlans.splice(
+      0,
+      responsePlans.length,
+      {
+        status: 200,
+        headers: { "content-type": "text/html" },
+        body: hostileHtml,
+      },
+      {
+        status: 404,
+        headers: { "content-type": "text/plain" },
+        body: "",
+      },
+      {
+        status: 404,
+        headers: { "content-type": "text/plain" },
+        body: "",
+      },
+    );
+    dnsLookupMock.mockResolvedValue([
+      { address: "93.184.216.34", family: 4 },
+    ]);
+    const startedAt = performance.now();
+
+    const audit = await auditStorefront("http://public.example/hostile");
+
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+    expect(audit.measurement.status).toBe("not_detected");
+    expect(audit.checks.find((check) => check.id === "page_metadata")?.status)
+      .toBe("fail");
+    expect(httpRequestMock).toHaveBeenCalledTimes(3);
+  });
 });

@@ -1,5 +1,6 @@
 export const appTabs = [
   "review",
+  "approvals",
   "campaigns",
   "experiments",
   "readiness",
@@ -16,9 +17,13 @@ export function parseAppTab(value: string | string[] | undefined): AppTab | null
 export function buildAppHref(options: {
   tab: AppTab;
   accountId?: string;
+  organizationId?: string;
 }) {
   const searchParams = new URLSearchParams({ tab: options.tab });
   if (options.accountId) searchParams.set("account", options.accountId);
+  if (options.organizationId) {
+    searchParams.set("organization", options.organizationId);
+  }
   return `/app?${searchParams.toString()}`;
 }
 

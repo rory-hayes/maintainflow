@@ -59,6 +59,7 @@ import {
 } from "@/lib/readiness/conversions-api";
 import type {
   AccountAccess,
+  OrganizationMembership,
   OrganizationType,
 } from "@/lib/tenancy/schema";
 import { canWriteAccount } from "@/lib/tenancy/schema";
@@ -66,6 +67,7 @@ import { canWriteAccount } from "@/lib/tenancy/schema";
 export type WorkspaceSetupState =
   | "demo"
   | "needs_setup"
+  | "approval_ready"
   | "ready"
   | "connection_error"
   | "unavailable";
@@ -73,6 +75,11 @@ export type WorkspaceSetupState =
 type WorkspaceOnboardingProps = {
   state: WorkspaceSetupState;
   access?: AccountAccess;
+  approvalOrganization?: OrganizationMembership;
+  approvalQueueReady?: boolean;
+  approvalQueueError?: string;
+  eligibleApprovalReviewerCount?: number;
+  approvalEmailEnabled?: boolean;
   connectedAccountName?: string;
   message?: string;
   conversionsConnection: ConversionsConnectionStatus;
@@ -143,6 +150,13 @@ const stateContent: Record<
     badge: "Setup",
     progress: 66,
   },
+  approval_ready: {
+    title: "Agency approval workspace",
+    description:
+      "Your agency identity is ready; queue storage and a second reviewer are verified separately.",
+    badge: "Workspace ready",
+    progress: 33,
+  },
   ready: {
     title: "Connected workspace",
     description:
@@ -209,6 +223,11 @@ function formatValidationTime(value: string | null) {
 export function WorkspaceOnboarding({
   state,
   access,
+  approvalOrganization,
+  approvalQueueReady = false,
+  approvalQueueError,
+  eligibleApprovalReviewerCount = 0,
+  approvalEmailEnabled = false,
   connectedAccountName,
   message,
   conversionsConnection,
@@ -234,12 +253,17 @@ export function WorkspaceOnboarding({
     organizationName.length > 0 && organizationName.trim().length < 2;
   const keyInvalid = adsApiKey.length > 0 && adsApiKey.trim().length < 10;
   const connectionReady =
-    adsApiKey.trim().length >= 10 || Boolean(connectedAccountName);
+    organizationType === "agency" ||
+    adsApiKey.trim().length >= 10 ||
+    Boolean(connectedAccountName);
   const replacementKeyInvalid =
     replacementKey.length > 0 && replacementKey.trim().length < 10;
   const canManageConnection = access ? canWriteAccount(access) : false;
   const hasConnectedWorkspace =
     Boolean(access) && (state === "ready" || state === "connection_error");
+  const hasApprovalWorkspace =
+    Boolean(approvalOrganization) && state === "approval_ready";
+  const hasWorkspace = hasConnectedWorkspace || hasApprovalWorkspace;
   const content = stateContent[state];
   const measurementContent = measurementStateContent[conversionsConnection.state];
   const pixelInvalid = measurementAttempted && pixelId.trim().length === 0;
@@ -290,13 +314,27 @@ export function WorkspaceOnboarding({
           organizationName,
           organizationType,
           adsApiKey: adsApiKey.trim() || undefined,
+          setupMode:
+            organizationType === "agency" && !adsApiKey.trim()
+              ? "approval_simulator"
+              : "connected",
         }),
       });
-      const result = (await response.json()) as { error?: string; message?: string };
+      const result = (await response.json()) as {
+        error?: string;
+        message?: string;
+        nextAccountId?: string;
+      };
       if (!response.ok) throw new Error(result.error ?? "Workspace setup failed.");
       setAdsApiKey("");
       toast.success("Workspace created", { description: result.message });
-      router.refresh();
+      if (result.nextAccountId) {
+        router.push(
+          `/app?tab=review&account=${encodeURIComponent(result.nextAccountId)}`,
+        );
+      } else {
+        router.refresh();
+      }
     } catch (error) {
       toast.error("Unable to create workspace", {
         description: error instanceof Error ? error.message : "Please try again.",
@@ -516,6 +554,71 @@ export function WorkspaceOnboarding({
                   ) : null}
                 </div>
               </div>
+            ) : hasApprovalWorkspace && approvalOrganization ? (
+              <div className="grid gap-5">
+                <div className="grid gap-1">
+                  <p className="text-sm text-muted-foreground">Organization</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold">
+                      {approvalOrganization.organizationName}
+                    </p>
+                    <Badge variant="secondary">Agency</Badge>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline" className="capitalize">
+                    Workspace {approvalOrganization.membershipRole}
+                  </Badge>
+                  <Badge variant="outline">No Ads credential stored</Badge>
+                </div>
+                {approvalQueueReady ? (
+                  <Alert
+                    className={
+                      eligibleApprovalReviewerCount > 0
+                        ? undefined
+                        : "border-warning/30 bg-warning/10"
+                    }
+                  >
+                    <ShieldCheck />
+                    <AlertTitle>
+                      {eligibleApprovalReviewerCount > 0
+                        ? "Two-person approval queue ready"
+                        : "Approval queue ready; second reviewer required"}
+                    </AlertTitle>
+                    <AlertDescription>
+                      {eligibleApprovalReviewerCount > 0
+                        ? `${eligibleApprovalReviewerCount} other owner or admin ${eligibleApprovalReviewerCount === 1 ? "is" : "are"} eligible to decide simulator packets.`
+                        : "Provision a different agency owner or admin before a packet can be decided."}{" "}
+                      Approval never means an Ads change was applied. {" "}
+                      {approvalEmailEnabled
+                        ? "Eligible reviewers and requesters receive a privacy-safe approval email."
+                        : "Approval email is not enabled for this workspace."}
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <Alert variant="destructive">
+                    <DatabaseZap />
+                    <AlertTitle>Approval queue storage unavailable</AlertTitle>
+                    <AlertDescription>
+                      {approvalQueueError ??
+                        "Apply the agency approval queue migration before routing decisions."}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {agencyClientAttachEnabled &&
+                (approvalOrganization.membershipRole === "owner" ||
+                  approvalOrganization.membershipRole === "admin") ? (
+                  <ConnectClientAccountDialog
+                    organizationId={approvalOrganization.organizationId}
+                    organizationName={approvalOrganization.organizationName}
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    A workspace owner or admin can connect the first client account
+                    after the encrypted credential vault is ready.
+                  </p>
+                )}
+              </div>
             ) : (
               <FieldGroup>
                 <FieldSet>
@@ -575,9 +678,9 @@ export function WorkspaceOnboarding({
                     disabled={state !== "needs_setup"}
                   />
                   <FieldDescription>
-                    Issued in OpenAI Ads Manager for one client account.
-                    MaintainFlow verifies it, encrypts it on the server, and
-                    never displays it again.
+                    Issued in OpenAI Ads Manager for one client account. An agency
+                    can leave this blank to create its approval workspace first;
+                    MaintainFlow will not claim a live connection.
                   </FieldDescription>
                   {keyInvalid ? (
                     <FieldError>Check the account key and try again.</FieldError>
@@ -596,7 +699,7 @@ export function WorkspaceOnboarding({
               </FieldGroup>
             )}
           </CardContent>
-          {!hasConnectedWorkspace ? (
+          {!hasWorkspace ? (
             <CardFooter className="justify-between gap-3">
               <p className="text-xs text-muted-foreground">
                 {state === "demo"
@@ -618,7 +721,9 @@ export function WorkspaceOnboarding({
                   <Check data-icon="inline-start" />
                 )}
                 {state === "needs_setup"
-                  ? "Create workspace"
+                  ? organizationType === "agency" && !adsApiKey.trim()
+                    ? "Create approval workspace"
+                    : "Create and connect workspace"
                   : state === "demo"
                     ? "Preview only"
                     : "Setup unavailable"}

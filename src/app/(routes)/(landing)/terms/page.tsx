@@ -6,6 +6,7 @@ import { getPublicLegalIdentity } from "@/lib/legal/config.server";
 export const metadata: Metadata = {
   title: "Private beta terms | MaintainFlow",
   description: "Terms for the MaintainFlow demo and admitted private beta.",
+  alternates: { canonical: "/terms" },
 };
 
 export default async function TermsPage() {

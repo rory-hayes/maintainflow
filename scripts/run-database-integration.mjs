@@ -879,6 +879,12 @@ function runVitest(databaseUrl, runtimeDatabaseUrl) {
     MAINTAINFLOW_CREDENTIAL_KEYRING: JSON.stringify({
       integration: randomBytes(32).toString("base64"),
     }),
+    // Most database contract tests exercise tenancy independently of the
+    // application admission policy. Individual admission tests switch this
+    // back to private_beta with an explicit reviewed operator list.
+    MAINTAINFLOW_ADMISSION_MODE: "open",
+    MAINTAINFLOW_PRIVATE_BETA_OPERATOR_IDS: "",
+    MAINTAINFLOW_BOOTSTRAP_OPERATOR_IDS: "",
     READINESS_RATE_LIMIT_SECRET: randomBytes(32).toString("base64"),
     ...(runtimeDatabaseUrl
       ? { MAINTAINFLOW_TEST_RUNTIME_DATABASE_URL: runtimeDatabaseUrl }

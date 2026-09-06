@@ -235,10 +235,17 @@ export function ReadinessWorkbench({
               Load sample audit
             </Button>
           </form>
-          <p className="mt-3 text-xs text-muted-foreground">
-            MaintainFlow makes a read-only request and does not submit, edit, or
-            approve an ad.
-          </p>
+          <div className="mt-3 grid gap-1 text-xs text-muted-foreground">
+            <p>
+              Best for product-detail URLs. Category, service, and home pages can
+              still be scanned, but missing Product and Offer schema will count
+              against the commerce score.
+            </p>
+            <p>
+              MaintainFlow makes a read-only request and does not submit, edit,
+              or approve an ad.
+            </p>
+          </div>
         </CardContent>
       </Card>
 
@@ -287,16 +294,16 @@ export function ReadinessWorkbench({
 
       <ConversionMeasurementCard readiness={conversionMeasurement} />
 
+      <ProductFeedPreflight onAuditChange={setProductFeedAudit} />
+
+      <ConversionsApiPreflight onAuditChange={setConversionsApiAudit} />
+
       <ReadinessReportCard
         storefront={audit}
         productFeed={productFeedAudit}
         conversionsApi={conversionsApiAudit}
         accountMeasurement={conversionMeasurement}
       />
-
-      <ProductFeedPreflight onAuditChange={setProductFeedAudit} />
-
-      <ConversionsApiPreflight onAuditChange={setConversionsApiAudit} />
     </section>
   );
 }

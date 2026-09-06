@@ -15,9 +15,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   APPLICATION_TABLES,
+  CAPTURE_BASELINE_TABLES,
   capturePreBackupEvidence,
   collectDatabaseEvidence,
   compareRestoredEvidence,
+  CRITICAL_COUNT_TABLES,
   databaseTargetIdentity,
   formatRestoreVerificationFailure,
   inspectDatabase,
@@ -266,6 +268,17 @@ afterEach(async () => {
 });
 
 describe("database backup and restore verification", () => {
+  it("treats approval workflow tables as additive critical restore evidence", () => {
+    for (const table of [
+      "maintainflow_change_approval_requests",
+      "maintainflow_approval_notification_deliveries",
+    ]) {
+      expect(CAPTURE_BASELINE_TABLES).not.toContain(table);
+      expect(APPLICATION_TABLES).toContain(table);
+      expect(CRITICAL_COUNT_TABLES).toContain(table);
+    }
+  });
+
   it("derives a credential-free exact target identity and requires hosted verify-full TLS", () => {
     const credentialVariant = databaseTargetIdentity(
       "postgres://different-user:different-password@prod.db.example:5432/maintainflow?sslmode=verify-full",

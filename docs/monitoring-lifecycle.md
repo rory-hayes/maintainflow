@@ -30,6 +30,10 @@ not mix the two attribution types.
 
 ## State transitions
 
+The `ads_approval_records` rows below are live execution records. They are not
+migration `019`'s credential-free agency simulator requests; the current
+application does not yet link an approved simulator packet to this lifecycle.
+
 1. A pending approval and its monitoring plan are inserted before the Ads API
    request.
 2. A confirmed apply starts at the next full UTC hour, matching the Insights

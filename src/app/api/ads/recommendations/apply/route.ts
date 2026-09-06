@@ -8,10 +8,21 @@ import {
   type AdsApiCredential,
 } from "@/lib/openai-ads/client.server";
 import {
+  ChangeApprovalRequestForbiddenError,
+  ChangeApprovalRequestInvalidError,
+  ChangeApprovalRequestStoreUnavailableError,
+  ChangeApprovalRequestTransitionError,
+  resolveLiveChangeApprovalExecution,
+} from "@/lib/approvals/change-request-store.server";
+import {
   getLiveWorkbench,
   LiveSyncUnavailableError,
 } from "@/lib/openai-ads/live-sync.server";
-import { demoAccount, getDemoRecommendation } from "@/lib/openai-ads/demo-data";
+import {
+  demoAccount,
+  getDemoRecommendation,
+  type Recommendation,
+} from "@/lib/openai-ads/demo-data";
 import {
   OperatorAuthUnavailableError,
   OperatorUnauthorizedError,
@@ -32,23 +43,79 @@ import {
   AdvertiserCredentialUnavailableError,
   AdvertiserWriteBlockedError,
   getAdsCredentialMaterialForAccount,
-  requireAccountAccess,
+  requireOrganizationAccountAccess,
   TenancyStoreUnavailableError,
 } from "@/lib/tenancy/store.server";
 import type { AccountAccess } from "@/lib/tenancy/schema";
 import { z, ZodError } from "zod";
 
-const requestSchema = z
-  .object({
-    recommendationId: z.string().min(1),
-    recommendationSource: z.enum(["demo", "live"]).optional(),
-    accountId: z.string().min(1).max(200).optional(),
-    recommendationFingerprint: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/)
-      .optional(),
-  })
-  .strict();
+const requestSchema = z.discriminatedUnion("authorization", [
+  z
+    .object({
+      authorization: z.literal("demo"),
+      recommendationId: z.string().trim().min(1).max(255),
+      recommendationSource: z.literal("demo"),
+      recommendationFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    })
+    .strict(),
+  z
+    .object({
+      authorization: z.literal("direct"),
+      organizationId: z.string().uuid(),
+      accountId: z.string().trim().min(1).max(255),
+      recommendationId: z.string().trim().min(1).max(255),
+      recommendationSource: z.literal("live"),
+      recommendationFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    })
+    .strict(),
+  z
+    .object({
+      authorization: z.literal("agency_request"),
+      approvalRequestId: z.string().uuid(),
+      approvalRequestVersion: z.number().int().positive(),
+    })
+    .strict(),
+]);
+
+class LiveChangeUnavailableError extends Error {
+  constructor() {
+    super(
+      "Live Ads data and a fresh mutation snapshot are required before applying a change.",
+    );
+    this.name = "LiveChangeUnavailableError";
+  }
+}
+
+async function loadFreshLiveRecommendation(options: {
+  accountId: string;
+  recommendationId: string;
+  entityId?: string;
+}) {
+  const credentialMaterial = await getAdsCredentialMaterialForAccount(
+    options.accountId,
+  );
+  const credential: AdsApiCredential = {
+    kind: "account_api_key",
+    secret: credentialMaterial.apiKey,
+    expectedAccountId: options.accountId,
+  };
+  const runtime = getAdsRuntimeMode({ hasAccountKey: true });
+  if (runtime.dataSource !== "live") throw new LiveChangeUnavailableError();
+  const live = (
+    await getLiveWorkbench({
+      accountId: options.accountId,
+      credentialGeneration: credentialMaterial.credentialGeneration,
+      credential,
+      policy: "mutation",
+    })
+  ).data;
+  const recommendation = live.recommendations.find(
+    (item) =>
+      item.id === options.recommendationId &&
+      (options.entityId === undefined || item.entityId === options.entityId),
+  );
+  return { credentialMaterial, credential, recommendation };
+}
 
 export async function POST(request: Request) {
   try {
@@ -61,57 +128,74 @@ export async function POST(request: Request) {
     const body = requestSchema.parse(
       await readJsonBodyWithLimit(request, 4_096),
     );
-    let runtime = getAdsRuntimeMode();
     let operatorId: string | undefined;
     let accountId = demoAccount.id;
-    let recommendation = getDemoRecommendation(body.recommendationId);
+    let recommendation: Recommendation | undefined;
     let access: AccountAccess | undefined;
     let credential: AdsApiCredential | undefined;
     let credentialGeneration: string | undefined;
+    let authorization:
+      | { kind: "direct" }
+      | {
+          kind: "agency_request";
+          requestId: string;
+          expectedVersion: number;
+        }
+      | undefined;
 
-    if (
-      !body.accountId &&
-      runtime.liveDataRequested &&
-      runtime.liveReadStage &&
-      body.recommendationSource !== "demo"
-    ) {
-      return Response.json(
-        {
-          error:
-            "Select an authorized advertiser account before applying a live recommendation.",
-        },
-        { status: 422 },
-      );
-    }
-
-    if (body.accountId) {
+    if (body.authorization === "demo") {
+      recommendation = getDemoRecommendation(body.recommendationId);
+    } else if (body.authorization === "direct") {
       operatorId = await requireOperatorId();
-      access = await requireAccountAccess(
+      access = await requireOrganizationAccountAccess(
         operatorId,
+        body.organizationId,
         body.accountId,
         "write",
       );
-      const credentialMaterial =
-        await getAdsCredentialMaterialForAccount(body.accountId);
-      credential = {
-        kind: "account_api_key",
-        secret: credentialMaterial.apiKey,
-        expectedAccountId: body.accountId,
-      };
-      credentialGeneration = credentialMaterial.credentialGeneration;
-      runtime = getAdsRuntimeMode({ hasAccountKey: true });
+      if (access.organizationType !== "advertiser") {
+        throw new AccountAccessForbiddenError(
+          "Agency live changes require an independently approved change request.",
+        );
+      }
       accountId = body.accountId;
-      if (runtime.dataSource === "live") {
-        const live = (
-          await getLiveWorkbench({
-            accountId: body.accountId,
-            credentialGeneration: credentialMaterial.credentialGeneration,
-            credential,
-            policy: "mutation",
-          })
-        ).data;
-        recommendation = live.recommendations.find(
-          (item) => item.id === body.recommendationId,
+      const fresh = await loadFreshLiveRecommendation({
+        accountId,
+        recommendationId: body.recommendationId,
+      });
+      recommendation = fresh.recommendation;
+      credential = fresh.credential;
+      credentialGeneration = fresh.credentialMaterial.credentialGeneration;
+      authorization = { kind: "direct" };
+    } else {
+      operatorId = await requireOperatorId();
+      const execution = await resolveLiveChangeApprovalExecution({
+        requestId: body.approvalRequestId,
+        expectedVersion: body.approvalRequestVersion,
+        operatorId,
+      });
+      access = execution.access;
+      accountId = execution.request.accountId;
+      const fresh = await loadFreshLiveRecommendation({
+        accountId,
+        recommendationId: execution.request.recommendationId,
+        entityId: execution.request.entityId,
+      });
+      recommendation = fresh.recommendation;
+      credential = fresh.credential;
+      credentialGeneration = fresh.credentialMaterial.credentialGeneration;
+      authorization = {
+        kind: "agency_request",
+        requestId: execution.request.id,
+        expectedVersion: execution.request.version,
+      };
+      if (
+        !recommendation ||
+        recommendationApprovalFingerprint(recommendation) !==
+          execution.request.recommendationFingerprint
+      ) {
+        throw new ChangeApprovalRequestTransitionError(
+          "OpenAI Ads changed after approval. Nothing was sent. Review the latest recommendation and request approval again.",
         );
       }
     }
@@ -123,7 +207,7 @@ export async function POST(request: Request) {
       );
     }
     if (
-      body.recommendationSource &&
+      body.authorization !== "agency_request" &&
       body.recommendationSource !== recommendation.source
     ) {
       return Response.json(
@@ -135,8 +219,8 @@ export async function POST(request: Request) {
       );
     }
     if (
-      body.recommendationFingerprint !==
-      recommendationApprovalFingerprint(recommendation)
+      body.authorization !== "agency_request" &&
+      body.recommendationFingerprint !== recommendationApprovalFingerprint(recommendation)
     ) {
       return Response.json(
         {
@@ -153,6 +237,7 @@ export async function POST(request: Request) {
       access,
       credential,
       credentialGeneration,
+      authorization,
     });
     return Response.json(result);
   } catch (error) {
@@ -163,16 +248,27 @@ export async function POST(request: Request) {
       );
     }
     if (error instanceof OperatorUnauthorizedError) {
-      return Response.json({ error: error.message }, { status: 401 });
+      const status = error.status === 403 ? 403 : 401;
+      return Response.json({ error: error.message }, { status });
     }
     if (error instanceof ZodError || error instanceof SyntaxError) {
       return Response.json(
-        { error: "Enter a valid recommendation and optional Ads account." },
+        { error: "Enter a valid, explicitly authorized recommendation action." },
         { status: 422 },
       );
     }
     if (error instanceof AccountAccessForbiddenError) {
       return Response.json({ error: error.message }, { status: 403 });
+    }
+    if (error instanceof ChangeApprovalRequestForbiddenError) {
+      return Response.json({ error: error.message }, { status: 403 });
+    }
+    if (
+      error instanceof ChangeApprovalRequestInvalidError ||
+      error instanceof ChangeApprovalRequestTransitionError ||
+      error instanceof LiveChangeUnavailableError
+    ) {
+      return Response.json({ error: error.message }, { status: 409 });
     }
     if (error instanceof ApprovalTransitionError) {
       return Response.json({ error: error.message }, { status: 409 });
@@ -231,6 +327,7 @@ export async function POST(request: Request) {
     if (
       error instanceof OperatorAuthUnavailableError ||
       error instanceof ApprovalStoreUnavailableError ||
+      error instanceof ChangeApprovalRequestStoreUnavailableError ||
       error instanceof AdvertiserCredentialUnavailableError ||
       error instanceof TenancyStoreUnavailableError
     ) {

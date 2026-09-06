@@ -23,7 +23,8 @@ stateful rather than fixed response snapshots.
 
 The public workbench also has two explicitly labelled, provider-free sales
 workspaces. They never create `AccountAccess`, never store credentials or
-approval records, and simulated approvals remain inside the browser session:
+approval records, and their unauthenticated simulated approvals remain inside
+the browser session:
 
 - `/app?tab=review` opens a single direct-merchant workspace;
 - `/app?tab=campaigns&account=adacct_sim_northstar` opens a five-client agency
@@ -36,6 +37,25 @@ disabled. The CPA bid example mirrors the request shape and safeguard used by
 the current deterministic live rule. Creative, context-hint, and destination
 examples remain illustrative simulator workflows until equivalent live rules
 are implemented and account-tested.
+
+An admitted, signed-in agency user has a separate credential-free path. The app
+can create a PostgreSQL-backed agency workspace and, when migrations `019` and `020` are
+ready, route an exact labelled agency-simulator recommendation to a shared
+maker-checker queue. A different pre-provisioned owner/admin can record the
+decision. A separately gated approval-email path can notify eligible members
+after its [delivery acceptance](approval-notifications.md), but the product
+cannot invite or self-service provision that second member. A reviewed, dry-run-first
+[operator command](private-beta-agency-member-provisioning.md) can add one
+existing, separately admitted Clerk user to the agency database membership; it
+does not create a Clerk account or send an invitation or email. The new member
+inherits every current and future account grant held by the agency, so this is
+not an approval-queue-only role. Simulator approvals are retained only as
+workflow evidence and can never connect to `ads_approval_records` or any OpenAI
+request. A separately sourced live recommendation may use the same durable
+maker-checker model, but migration `020` requires the exact approved live packet
+to be consumed into one approval record before the provider write. The queue's
+workbench view loads 50 rows for the selected agency at a time—awaiting packets
+first, then newest history—and uses an opaque cursor to load older pages.
 
 The existing-agency connection flow is also testable without a real key. Route
 tests substitute the provider account lookup while keeping the production
