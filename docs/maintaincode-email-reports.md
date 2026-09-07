@@ -6,7 +6,7 @@ The recipient is the current authenticated user's confirmed account email at opt
 
 ## Configuration
 
-Apply the current migration manifest through `026_maintaincode_notification_recipient.sql`. Existing migrations 001–025 are unchanged. Protected readiness checks that the function exists, uses its fixed safe search path and has the intended execution grants.
+For a fresh database, apply the current migration manifest through `026_maintaincode_notification_recipient.sql`. All 26 migrations are applied to the new hosted project, and current-recipient/runtime permission checks have passed. Existing migrations 001–025 are unchanged. Protected readiness checks that the function exists, uses its fixed safe search path and has the intended execution grants.
 
 Reports stay disabled unless all of these server settings are configured:
 
@@ -15,7 +15,7 @@ Reports stay disabled unless all of these server settings are configured:
 - `RESEND_API_KEY`: an authorized Resend key held only by the server
 - `MAINTAINCODE_APP_ORIGIN`: the exact HTTPS application origin
 
-The production configuration validator checks enabled report-mail settings. Missing configuration produces an unavailable state in Workspace & billing and still permits opt-out. No key is included in browser code, workspace exports or preference responses. Saving a key to a hosting/provider environment is a separate authorized configuration action; this implementation does not enable it or send test emails.
+The approved report-mail settings are configured on the live deployment. Both per-user preferences remain off until explicitly enabled; server configuration does not subscribe anyone. The production configuration validator checks enabled report-mail settings. Missing configuration produces an unavailable state in Workspace & billing and still permits opt-out. No key is included in browser code, workspace exports or preference responses. Further hosting/provider credential changes require authorization for their destination. See [the release ledger](maintaincode-release-status.md) for current configuration and acceptance evidence.
 
 ## Content and preferences
 
@@ -35,6 +35,6 @@ Before sending, a locked workspace mutation persists an immutable message, stabl
 
 Retries keep the original payload/key. After three attempts or twenty-three hours from the initial reservation, an uncertain send requires review instead of an automatic resend. This stays inside Resend's twenty-four-hour idempotency window. **Resume future reports** deliberately skips the uncertain message, takes the current health baseline and starts a new seven-day weekly period. It does not resend the old message. Unresolved delivery is reflected as partial maintenance.
 
-The app records **provider acceptance**, not inbox delivery. Current tests mock mail; they do not prove sender authentication, deliverability, inbox placement or real scheduled execution. Remaining operating gates are authorized server mail configuration, hosted migration 026/current-recipient checks, a controlled user-owned opt-in/acceptance/inbox/opt-out test and actual hosted scheduling. No real emails were sent while implementing this feature.
+The app records **provider acceptance**, not inbox delivery. Report tests mock mail. Approved server configuration, hosted migration 026/current-recipient checks and production cron registration are complete. A separate TLS-verified SMTP authentication check passed without sending email; it does not prove report API acceptance or inbox receipt. Remaining operating gates are a controlled user-owned opt-in/provider-acceptance/inbox/opt-out test and actual hosted scheduled execution. No real report emails have been sent during verification.
 
 Official references: [Resend send API](https://resend.com/docs/api-reference/emails/send-email), [Resend idempotency window](https://resend.com/docs/dashboard/emails/idempotency-keys), [Supabase Auth user model](https://github.com/supabase/auth/blob/master/internal/models/user.go).
