@@ -1,11 +1,11 @@
-import { MaintainFlowBrand } from "@/components/maintainflow/brand";
-
 export default function AppLoading() {
   return (
     <main className="min-h-screen bg-[#FAFAFA]" aria-busy="true">
       <header className="border-b bg-background">
         <div className="flex min-h-16 items-center px-4 md:px-6">
-          <MaintainFlowBrand />
+          <span className="text-base font-semibold tracking-tight">
+            MaintainCode Ads
+          </span>
         </div>
       </header>
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 md:px-6 lg:grid-cols-[20rem_1fr] lg:py-8">
@@ -25,7 +25,7 @@ export default function AppLoading() {
           <div className="h-64 animate-pulse rounded-xl border bg-background" />
         </div>
       </div>
-      <p className="sr-only">Loading the MaintainFlow workspace.</p>
+      <p className="sr-only">Loading the MaintainCode Ads workspace.</p>
     </main>
   );
 }

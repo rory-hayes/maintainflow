@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-09-07",
+  "domain": "https://maintainflow.io",
+  "auditedRevision": "e86c4fddcb32eb075e9c23b461e630a543b5b38e",
+  "scope": "One verified disposable owner, one normal trial workspace and a controlled HTTPS loopback form using the actual production tracker, collector, Auth and database. Synthetic tagged traffic does not prove paid advertising, CRM field delivery, billing or external customer value.",
+  "authentication": {
+    "observedOn": "2026-09-07",
+    "domain": "https://maintainflow.io",
+    "supabaseProject": "mvzspyhwoqzcygekridy",
+    "workspace": "60c9d668-78b0-4f33-bc1b-e7c1c80631fd",
+    "identity": "one verified disposable owner approved by the user",
+    "checks": {
+      "signupTermsExplicitlyApproved": true,
+      "signupSubmittedThroughBrowser": true,
+      "confirmationInboxDelivery": {
+        "at": "2026-09-07T13:24:51Z",
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass"
+      },
+      "confirmationLinkAccepted": true,
+      "confirmationQueryRemoved": true,
+      "createdNormalTrialWorkspaceThroughUi": true,
+      "workspaceAndSessionPersistOnReload": true,
+      "signOutClearedProtectedWorkspaceView": true,
+      "backNavigationAfterSignOutDidNotExposeWorkspace": true,
+      "passwordRecoveryInboxDelivery": {
+        "at": "2026-09-07T13:38:09Z",
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass"
+      },
+      "recoveryLinkAndPasswordUpdateThroughUi": true,
+      "oldPasswordRejectedOnceAfterRecovery": true,
+      "newPasswordAccepted": true,
+      "reusedRecoveryLinkRejected": true,
+      "sessionCookie": {
+        "httpOnly": true,
+        "secure": true,
+        "sameSite": "Lax",
+        "domain": "maintainflow.io",
+        "path": "/"
+      },
+      "workspaceExportReconciled": true,
+      "channelCsvReconciled": true
+    },
+    "notProved": [
+      "Two unrelated authenticated user identities",
+      "JWT refresh after actual token expiry",
+      "Real CRM or advertiser data",
+      "Actual payment lifecycle",
+      "Agency plan selection"
+    ],
+    "secretsIncluded": false
+  },
+  "visitor": {
+    "startedAt": "2026-09-07T13:36:57.767Z",
+    "completedAt": "2026-09-07T13:37:00.225Z",
+    "ok": true,
+    "checks": [
+      "Actual production tracker loads cross-origin; before required consent business submission succeeds with zero collector requests, fields or attribution storage",
+      "Browser-local 503 leaves business form working; queued ID, original timestamp and evidence survive direct navigation and renewed consent; actual production retry returns202",
+      "Exact original production replay was accepted with the same ID; authenticated UI and downloaded workspace subsequently proved one persisted production record.",
+      "Withdrawal clears tracker fields/evidence/queue; local business submit still succeeds without another collector request",
+      "Diagnostic confirmed through actual production collector; repeated successful callbacks create no extra request; only two distinct synthetic submission IDs sent; no visible form values or Auth credentials collected"
+    ],
+    "siteId": "b63a8bb3-ab98-49d3-8c1a-a652bee5dd5b",
+    "workspaceId": "60c9d668-78b0-4f33-bc1b-e7c1c80631fd",
+    "fixtureOrigin": "https://127.0.0.1:3443",
+    "productionOrigin": "https://maintainflow.io",
+    "certificateException": "Only generated fixture certificate SPKI; ignoreHTTPSErrors false; separate temporary profile; no Auth state",
+    "productionSubmissionId": "5c4a79a2-f55d-417c-8f5e-56d836d43a5a",
+    "diagnosticSubmissionId": "7413b442-e145-42ad-88e0-1cf51a007345",
+    "browserErrors": [],
+    "proofBoundary": "Actual production tracker and collector, persisted counts and UI exports were verified with controlled traffic. Paused-loader revocation and independent form success passed. Website deletion, HubSpot/provider delivery and payments remain unproved.",
+    "revocation": {
+      "at": "2026-09-07T14:05:00.808Z",
+      "loaderStatus": 200,
+      "businessFormSucceeds": true,
+      "extraCaptures": 0
+    },
+    "cleanup": {
+      "at": "2026-09-07T14:06:03.265853+00:00",
+      "browserProfileRemoved": true,
+      "httpsPortNoListener": true,
+      "remainingFixtureCertificateDirectories": 0,
+      "evidenceAndScreenshotsPreserved": true
+    }
+  },
+  "export": {
+    "observedAt": "2026-09-07T13:57:59.293059+00:00",
+    "sha256": "f4b349d303cf0596c492fa89e4fd0c4bf086b47652307dca76fe83f41244c7a3",
+    "workspace": "60c9d668-78b0-4f33-bc1b-e7c1c80631fd",
+    "site": "b63a8bb3-ab98-49d3-8c1a-a652bee5dd5b",
+    "submissions": [
+      "5c4a79a2-f55d-417c-8f5e-56d836d43a5a",
+      "7413b442-e145-42ad-88e0-1cf51a007345"
+    ],
+    "confirmedProductionCount": 1,
+    "diagnosticCount": 1,
+    "siteCount": 1,
+    "connectors": 0,
+    "crmVerified": false,
+    "sensitiveExportKeysAbsent": true,
+    "scope": "Actual UI download of owned synthetic workspace. Click reference non-empty masking not exercised here."
+  },
+  "channelCsv": {
+    "sha256": "39ec4fb839379e6fed27fc69754641e4d88ddc005b917879c4511903fc8b8dde",
+    "rows": [
+      {
+        "data_mode": "live",
+        "channel": "ChatGPT Ads",
+        "campaign_id": "synthetic-8a2eac82-9160-4924-8697-60881063c941",
+        "enquiries": "1",
+        "qualified_contacts": "0",
+        "won_deals": "0",
+        "booked_value": "0",
+        "currency": "EUR",
+        "observed_spend": "Unknown",
+        "model": "first",
+        "period": "cohort",
+        "from": "2026-08-09",
+        "to": "2026-09-07"
+      }
+    ],
+    "matchesOverview": true
+  },
+  "retention": {
+    "startedAt": "2026-09-07T13:48:46.647Z",
+    "completedAt": "2026-09-07T13:51:02.525Z",
+    "ok": true,
+    "workspace": "60c9d668-78b0-4f33-bc1b-e7c1c80631fd",
+    "site": "b63a8bb3-ab98-49d3-8c1a-a652bee5dd5b",
+    "capture": {
+      "id": "1a10436b-915c-403b-bfec-79e3f1c1183f",
+      "at": "2026-09-07T13:49:01.084Z",
+      "expiresAt": "2026-09-07T13:50:31.084Z",
+      "test": true,
+      "status": 202
+    },
+    "maintenance": {
+      "status": 200,
+      "body": {
+        "retention": "applied",
+        "providers": [],
+        "notifications": {
+          "status": "complete",
+          "accepted": 0
+        }
+      }
+    },
+    "directSqlDataWrites": false,
+    "globalMaintenanceCalls": 0,
+    "physicalRowsBefore": 3,
+    "physicalRowsAfter": 2,
+    "unchangedBaselineCaptures": 2,
+    "queueAfter": {
+      "organization_id": "60c9d668-78b0-4f33-bc1b-e7c1c80631fd",
+      "last_status": "complete",
+      "last_started_at": "2026-09-07T13:51:02.153Z",
+      "last_finished_at": "2026-09-07T13:51:02.233Z",
+      "next_due_at": "2026-09-08T12:51:02.233Z",
+      "consecutive_failures": 0,
+      "has_lease": false,
+      "lease_until": null
+    }
+  },
+  "reports": {
+    "preflight": {
+      "observedAt": "2026-09-07T14:00:46.951Z",
+      "workspace": "60c9d668-78b0-4f33-bc1b-e7c1c80631fd",
+      "site": "b63a8bb3-ab98-49d3-8c1a-a652bee5dd5b",
+      "connectors": 0,
+      "unchangedBaselineCaptures": 2,
+      "installation": "awaiting_first_capture",
+      "issueCategories": [
+        "installation"
+      ],
+      "reportSubscriptions": 1,
+      "approvedRecipientMatches": true,
+      "currentConfirmedRecipientValid": true,
+      "preferences": {
+        "health": true,
+        "weekly": false
+      },
+      "pending": false,
+      "healthFingerprint": "",
+      "acceptedAt": null,
+      "queue": {
+        "organization_id": "60c9d668-78b0-4f33-bc1b-e7c1c80631fd",
+        "last_status": "complete",
+        "last_started_at": "2026-09-07T13:51:02.153Z",
+        "last_finished_at": "2026-09-07T13:51:02.233Z",
+        "next_due_at": "2026-09-08T12:51:02.233Z",
+        "consecutive_failures": 0,
+        "has_lease": false,
+        "lease_until": null
+      }
+    },
+    "sent": false,
+    "maintenanceRequests": 0,
+    "sendGate": "Automatic approval review requires explicit authorization for this specific report payload and recipient. User question pending.",
+    "preferenceUiOptOutSaved": true,
+    "finalPreferences": {
+      "health": false,
+      "weekly": false
+    },
+    "sendBlocked": {
+      "processStarted": false,
+      "maintenancePostExecuted": false,
+      "reportSent": false,
+      "reason": "Automatic approval review requires explicit user authorization for this report payload and recipient."
+    },
+    "preferencesOff": {
+      "ok": true,
+      "verifiedAt": "2026-09-07T14:06:36.241Z",
+      "priorUiOptInVerified": true,
+      "persistedUiOptOutVerified": true,
+      "noSubscriptions": true,
+      "noPendingReports": true,
+      "after": {
+        "observedAt": "2026-09-07T14:06:35.860Z",
+        "workspace": "60c9d668-78b0-4f33-bc1b-e7c1c80631fd",
+        "site": "b63a8bb3-ab98-49d3-8c1a-a652bee5dd5b",
+        "connectors": 0,
+        "unchangedBaselineCaptures": 2,
+        "installation": "awaiting_first_capture",
+        "paused": false,
+        "issueCategories": [
+          "installation"
+        ],
+        "reportSubscriptions": 0,
+        "approvedRecipientMatches": true,
+        "currentConfirmedRecipientValid": true,
+        "preferences": {
+          "health": false,
+          "weekly": false
+        },
+        "pending": false,
+        "healthFingerprint": null,
+        "acceptedAt": null,
+        "queue": {
+          "organization_id": "60c9d668-78b0-4f33-bc1b-e7c1c80631fd",
+          "last_status": "complete",
+          "last_started_at": "2026-09-07T13:51:02.153Z",
+          "last_finished_at": "2026-09-07T13:51:02.233Z",
+          "next_due_at": "2026-09-08T12:51:02.233Z",
+          "consecutive_failures": 0,
+          "has_lease": false,
+          "lease_until": null
+        }
+      }
+    },
+    "requiresFreshPreflight": true,
+    "persistedOptOutVerified": true,
+    "subscriptionCountAfterOptOut": 0,
+    "pendingReportsAfterOptOut": 0,
+    "siteResumedAfterRevocation": true
+  },
+  "releaseChecks": {
+    "baseRevision": "e86c4fddcb32eb075e9c23b461e630a543b5b38e",
+    "ci": "https://github.com/rory-hayes/maintainflow/actions/runs/34095928243",
+    "codeql": "https://github.com/rory-hayes/maintainflow/actions/runs/34095927767",
+    "applicationTests": 1252,
+    "databaseTests": 85,
+    "currentLoadingCopyFix": {
+      "productionBuild": "pass",
+      "scopedLint": "pass",
+      "diffCheck": "pass",
+      "staticPages": 36
+    }
+  },
+  "remaining": [
+    "Stripe authenticator, four new prices, test checkout/webhook/subscription/portal lifecycle",
+    "Authorized real HubSpot and OpenAI Ads connections and form-to-CRM attribution proof",
+    "Report send, provider acceptance, inbox receipt, received-link opt-out and unchanged-condition suppression",
+    "Actual weekly report after seven days from opt-in",
+    "Actual scheduled cron processing; manual runs advance workspace eligibility",
+    "Two unrelated authenticated identities and actual token-expiry refresh",
+    "Scoped website deletion; paused-loader revocation has passed",
+    "Production backup destination/schedule and hosted restore/Auth continuity",
+    "External customer source-to-CRM value acceptance"
+  ],
+  "handling": {
+    "credentialsIncluded": false,
+    "rawAuthLinksIncluded": false,
+    "recipientEmailIncluded": false,
+    "oldProjectPreserved": true
+  }
+}

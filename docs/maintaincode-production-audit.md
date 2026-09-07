@@ -1,6 +1,24 @@
 # MaintainCode Ads customer and production acceptance audit
 
-**Historical audit:** the 6 September observations below preserve the pre-cutover findings. For the current live deployment, approved configuration and remaining customer acceptance, see [the 7 September release ledger](maintaincode-release-status.md).
+## Current acceptance update — 7 September 2026
+
+The deployed revision tested was `e86c4fddcb32eb075e9c23b461e630a543b5b38e`. These observations supersede the historical pending gates below only for their stated scope. The [release ledger](maintaincode-release-status.md) is the current operating record; this follow-up contains the loading-brand correction and its successful build/lint verification.
+
+| Scope | Direct live evidence | Limit |
+| --- | --- | --- |
+| Owner authentication | Approved signup/Terms, inbox confirmation and recovery with SPF/DKIM/DMARC pass, session/workspace reload, sign-out/back-navigation protection, password update, old-password rejection, new-password acceptance and consumed-link rejection; Secure/HttpOnly/SameSite=Lax cookies | One verified disposable owner; actual token-expiry refresh and unrelated-user permissions remain unproved |
+| Workspace and installed tracker | Normal trial workspace/site persisted; production tracker and collector handled consent, successful HTML callback, navigation after a simulated 503, stable retries, duplicate callbacks and withdrawal | Authorized HTTPS loopback fixture with a browser-local certificate exception; controlled traffic, not paid-ad or CRM/provider proof |
+| Captured evidence and exports | UI, workspace export and channel CSV reconcile one production enquiry, one diagnostic, usage 1/500 and one site; no CRM verification, zero qualified/won/value and Unknown spend | No connectors; non-empty click-reference masking and live scoped deletion not exercised. Paused-tracker revocation passed; the independent form still submitted and temporary visitor resources were cleaned up |
+| Retention and manual maintenance | A naturally expired third diagnostic was physically removed; both original control rows stayed unchanged and the queue completed without failure or a lease | One owner-scoped manual run; no direct SQL data writes, no global call and no actual scheduled-cron observation |
+| Workspace reports | Health-only opt-in, verified-recipient binding and installation-condition preflight passed; no report was sent, with explicit payload/recipient approval pending after automatic review rejected the send | Auth email delivery is separate; provider acceptance/inbox delivery/received-link opt-out and the first weekly delivery after seven days require their own evidence |
+
+Evidence: `/tmp/maintaincode-live-auth-evidence.json`, `/tmp/maintaincode-live-visitor-evidence/evidence.json`, `/tmp/maintaincode-live-export-evidence.json` and `/tmp/maintaincode-owned-retention-evidence.json`. No account alias, password or token URL is included in this record.
+
+Remaining external gates include Stripe MFA/new prices/webhook/test subscription lifecycle, real HubSpot and OpenAI Ads acceptance, actual scheduled execution, report delivery, production/offsite backup and hosted recovery, unrelated-user permissions and an external customer's successful use. Agency selection was not exercised after automatic approval review rejected it as potentially billable; the verified journey used the normal trial.
+
+## Historical audit — 6 September 2026
+
+All following sections preserve earlier observations and their then-open gates; they are not current deployment or acceptance status.
 
 Audit snapshot: 6 September 2026, Europe/Dublin. This is a release working record, not a production-readiness certificate. The user has authorized replacing the MaintainFlow repository and domain with this product. Deployment and provider evidence must be recorded below as it becomes available.
 
