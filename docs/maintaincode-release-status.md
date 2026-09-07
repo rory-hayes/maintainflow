@@ -1,5 +1,21 @@
 # MaintainCode Ads release status — 7 September 2026
 
+## Current recovery and database reuse
+
+At 17:08:53 UTC, the domain returned process health 200 for `282974c415cbe2275c62ab56c176d9c1877f5ed1`, but authenticated database readiness returned 503 and `mvzspyhwoqzcygekridy.supabase.co` did not resolve. The cause is not established. All acceptance below against that project is historical, and an old deployment pointing to it is not an operational rollback.
+
+The owner selected the existing MaintainFlow project `dhbevbimoajwkuzcunwz` in Frankfurt. Its 001–018 checksums and complete application catalog match the release baseline. All 15 application tables, Auth users/identities/sessions and Storage buckets/objects are empty. No table deletion is needed. Captured catalog, roles and ACL metadata were reconstructed and restored locally; this is empty-schema recovery evidence, not a hosted backup or Auth continuity guarantee.
+
+The separate guarded upgrade applies only pending migrations and retires the legacy bypass role atomically. Rehearsal found that Supabase's preserved RLS helper blocks website insertion after migration026. Forward migration027 adds explicit server-only site lookup and workspace-scoped mutation policies; existing001–026 bytes are unchanged. Readiness now requires these policies, and the hosted verifier exercises both allowed own-workspace writes and rejected cross-workspace writes.
+
+The reused project's SMTP sender, confirmation/recovery templates, Site URL and `https://maintainflow.io/auth/**` redirect are saved. The target certificate matches the trusted CA. The private runtime candidate uses the dashboard's Frankfurt pooler; credentials remain outside Git. Future Vercel functions are configured for `fra1`, with other resource settings preserved. Hosted schema execution, runtime LOGIN/TLS verification, production environment switch and fresh deployment acceptance are pending in this commit.
+
+Current code verification passed: `npm run verify` (1,261 tests across 145 files, lint, TypeScript, contract/configuration checks and production build), plus the separate 27-migration/85-test database suite. The [empty-legacy rehearsal](evidence/2026-09-07-empty-legacy-upgrade.json) passed 18 stages, including full DDL/ledger/role rollback after an injected late failure and 14 actual runtime checks over owned local transport.
+
+Fresh normal signup and report acceptance must use the approved base email and new workspace/site identities. No report email has been sent. Stripe MFA/test billing, actual HubSpot and OpenAI Ads handoff, scheduled maintenance, unrelated-user acceptance and production backup/hosted restore remain open.
+
+## Historical acceptance before the backend became unavailable
+
 This is an evidence ledger, not a claim that every customer/provider journey is accepted.
 
 Current acceptance was exercised on live revision `e86c4fddcb32eb075e9c23b461e630a543b5b38e`. This follow-up corrects the shared loading fallback to MaintainCode Ads. Its production build, scoped lint and diff checks passed; no behavior change was introduced.

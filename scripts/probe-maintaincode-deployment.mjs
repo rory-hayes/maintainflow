@@ -79,7 +79,7 @@ export async function probeMaintainCodeDeployment(config, fetcher = fetch) {
     ready.revision !== config.revision ||
     ready.checks?.runtimeRole !== true ||
     ready.checks?.tables !== 6 ||
-    ready.checks?.isolationPolicies !== 6 ||
+    ready.checks?.isolationPolicies !== 10 ||
     !ready.checks?.maintenanceQueue
   )
     throw new Error(

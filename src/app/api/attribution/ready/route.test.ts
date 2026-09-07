@@ -22,12 +22,12 @@ const tableNames = [
 ];
 const tables = tableNames.map((relname) => ({
   relname,
-  rls_active: relname !== "maintaincode_sites",
+  rls_active: true,
   can_read: true,
   can_insert: true,
   can_update: true,
   can_delete: true,
-  relrowsecurity: relname !== "maintaincode_sites",
+  relrowsecurity: true,
   relforcerowsecurity: relname.startsWith("maintaincode_"),
 }));
 function success() {
@@ -44,7 +44,7 @@ function success() {
     ])
     .mockResolvedValueOnce(tables)
     .mockResolvedValueOnce(
-      Array.from({ length: 6 }, (_, n) => ({ policyname: `policy${n}` })),
+      Array.from({ length: 10 }, (_, n) => ({ policyname: `policy${n}` })),
     )
     .mockResolvedValueOnce([{ count: 1 }])
     .mockResolvedValueOnce([
@@ -114,6 +114,19 @@ describe("attribution deployment readiness", () => {
       .mockResolvedValueOnce([{ name: "maintaincode_app" }])
       .mockResolvedValueOnce(tables)
       .mockResolvedValueOnce([]);
+    expect((await GET(request())).status).toBe(503);
+  });
+  it.each(["relrowsecurity", "rls_active"])("rejects a site registry without active row security: %s", async (field) => {
+    query
+      .mockResolvedValueOnce([{ name: "maintaincode_app" }])
+      .mockResolvedValueOnce(tables.map((row) => row.relname === "maintaincode_sites" ? { ...row, [field]: false } : row));
+    expect((await GET(request())).status).toBe(503);
+  });
+  it("rejects the old policy set that leaves Supabase website creation blocked", async () => {
+    query
+      .mockResolvedValueOnce([{ name: "maintaincode_app" }])
+      .mockResolvedValueOnce(tables)
+      .mockResolvedValueOnce(Array.from({ length: 6 }, (_, n) => ({ policyname: `policy${n}` })));
     expect((await GET(request())).status).toBe(503);
   });
 });

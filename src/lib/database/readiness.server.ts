@@ -302,7 +302,7 @@ const runtimeTablePrivileges = new Map<
   ["maintaincode_workspaces", { select: false, insert: false, update: false, delete: false }],
   ["maintaincode_credentials", { select: false, insert: false, update: false, delete: false }],
   ["maintaincode_maintenance_queue", { select: false, insert: false, update: false, delete: false }],
-  ["maintaincode_sites", { select: false, insert: false, update: false, delete: false, requireRls: false }],
+  ["maintaincode_sites", { select: false, insert: false, update: false, delete: false }],
 ]);
 
 export type DatabaseMigrationReadiness = {
@@ -383,6 +383,10 @@ export async function verifyRuntimeDatabaseRole(
                     ('maintainflow_organization_memberships', 'maintaincode_member_read', 'r'),
                     ('maintainflow_organization_memberships', 'maintaincode_member_create', 'a'),
                     ('maintaincode_maintenance_queue', 'maintaincode_maintenance_runtime', '*')
+                    ,('maintaincode_sites', 'maintaincode_site_registry_read', 'r')
+                    ,('maintaincode_sites', 'maintaincode_site_registry_insert', 'a')
+                    ,('maintaincode_sites', 'maintaincode_site_registry_update', 'w')
+                    ,('maintaincode_sites', 'maintaincode_site_registry_delete', 'd')
                   )
                   and policy.polroles = array[
                     (select oid from pg_catalog.pg_roles where rolname = 'maintaincode_app')

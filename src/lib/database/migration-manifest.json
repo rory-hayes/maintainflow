@@ -102,5 +102,9 @@
   {
     "name": "026_maintaincode_notification_recipient.sql",
     "checksumSha256": "ea5d9270acac163eccc293d89d4497c89b3d51e2c8a76023791a65ff2753ff6e"
+  },
+  {
+    "name": "027_maintaincode_site_registry_rls.sql",
+    "checksumSha256": "78705d7e2d6a6bf864c24d54541e68b297960c2a9a1e29494c23a12aa33b9a2a"
   }
 ]
