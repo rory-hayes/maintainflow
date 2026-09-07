@@ -156,3 +156,100 @@ it("does not apply an earlier workspace save after selecting another client", as
   );
   expect(container.textContent).not.toContain("Workspace updated.");
 });
+
+function expectNoWorkspaceAccess() {
+  expect(container.textContent).not.toContain("owner access");
+  expect(container.textContent).not.toContain("Customer workspace");
+  expect(container.querySelector('option[value="new"]')).toBeNull();
+  expect(button("Create workspace")).toBeUndefined();
+}
+
+it("shows a signed-out shell after the live workspace endpoint rejects access", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () =>
+    Response.json({ error: "Sign in to open your workspace." }, { status: 401 }),
+  ));
+  await act(async () => root.render(<AttributionApp initialLive />));
+  expectNoWorkspaceAccess();
+  expect(container.textContent).toContain("Signed out");
+  expect(container.textContent).toContain("No workspace loaded");
+  expect(container.querySelector('option[value="sample"]')).not.toBeNull();
+  await select("sample");
+  expect(container.textContent).toContain("Sample workspace");
+  expect(container.textContent).toContain("Example data only");
+});
+
+it("does not invent workspace access while an authenticated list is loading or failed", async () => {
+  let finish!: (value: Response) => void;
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => {
+    finish = resolve;
+  })));
+  await act(async () => root.render(<AttributionApp initialLive signedIn />));
+  expectNoWorkspaceAccess();
+  expect(container.textContent).toContain("Checking workspace access…");
+  await act(async () => finish(Response.json({ error: "Workspace unavailable." }, { status: 503 })));
+  expectNoWorkspaceAccess();
+  expect(container.textContent).toContain("Workspace access unverified");
+});
+
+it("waits for the selected workspace before displaying its actual membership", async () => {
+  let finish!: (value: Response) => void;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+    url === "/api/attribution/workspaces"
+      ? list()
+      : new Promise<Response>((resolve) => { finish = resolve; }),
+  ));
+  await act(async () => root.render(<AttributionApp initialLive signedIn />));
+  expectNoWorkspaceAccess();
+  const live = emptyWorkspace("client-one", "First client", "live");
+  await act(async () => finish(Response.json({ state: live, role: "analyst" })));
+  expect(container.textContent).toContain("analyst access");
+  expect(container.textContent).toContain("Customer workspace");
+  expect(container.textContent).not.toContain("owner access");
+  expect(container.querySelector('option[value="new"]')).not.toBeNull();
+});
+
+it("does not show membership or client creation after a selected workspace fails", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+    url === "/api/attribution/workspaces"
+      ? list()
+      : Response.json({ error: "Workspace unavailable." }, { status: 403 }),
+  ));
+  await act(async () => root.render(<AttributionApp initialLive signedIn />));
+  expectNoWorkspaceAccess();
+  expect(container.textContent).toContain("Workspace access unverified");
+});
+
+it("keeps the verified list available to recover from a failed workspace selection", async () => {
+  let finishFirst!: (value: Response) => void;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url === "/api/attribution/workspaces") return list();
+    if (url.endsWith("client-one")) {
+      return new Promise<Response>((resolve) => { finishFirst = resolve; });
+    }
+    return Response.json({
+      state: emptyWorkspace("client-two", "Second client", "live"),
+      role: "admin",
+    });
+  }));
+  await act(async () => root.render(<AttributionApp initialLive signedIn />));
+  expectNoWorkspaceAccess();
+  expect(container.querySelector('option[value="client-two"]')).not.toBeNull();
+  await act(async () => finishFirst(Response.json({ error: "First client unavailable." }, { status: 403 })));
+  expectNoWorkspaceAccess();
+  expect(container.querySelector('option[value="client-two"]')).not.toBeNull();
+  await select("client-two");
+  expect(container.textContent).toContain("admin access");
+  expect(container.textContent).toContain("Customer workspace");
+  expect(container.textContent).not.toContain("First client unavailable.");
+  expect(new URL(location.href).searchParams.get("workspace")).toBe("client-two");
+  expect(container.querySelector<HTMLSelectElement>('select[aria-label="Workspace"]')!.value).toBe("client-two");
+});
+
+it("allows a verified new customer to create their first workspace without claiming a role", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ workspaces: [] })));
+  await act(async () => root.render(<AttributionApp initialLive signedIn />));
+  expect(button("Create workspace")).toBeDefined();
+  expect(container.querySelector('option[value="new"]')).not.toBeNull();
+  expect(container.textContent).not.toContain("owner access");
+  expect(container.textContent).not.toContain("Customer workspace");
+});

@@ -80,8 +80,13 @@ export function AttributionApp({
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [mobile, setMobile] = useState(false),
-    [role, setRole] = useState("owner"),
+    [role, setRole] = useState(""),
+    [listLoaded, setListLoaded] = useState(false),
+    [accessLoaded, setAccessLoaded] = useState(false),
     [creating, setCreating] = useState(false);
+  const workspaceListLoaded = listLoaded && (local || signedIn);
+  const workspaceAccessLoaded = accessLoaded && (local || signedIn);
+  const hasWorkspaceAccess = workspaceAccessLoaded && Boolean(w.id && role);
 
   function closeNavigation() {
     setMobile(false);
@@ -111,6 +116,8 @@ export function AttributionApp({
   const selectWorkspace = useCallback(async (id: string) => {
     const request = ++requestVersion.current;
     setLoading(true);
+    setAccessLoaded(false);
+    setRole("");
     setError("");
     try {
       const r = await fetch(`/api/attribution/workspaces/${id}`);
@@ -123,6 +130,7 @@ export function AttributionApp({
       url.searchParams.set("mode", "live");
       history.replaceState(null, "", url);
       setRole(data.role);
+      setAccessLoaded(true);
       setCreating(false);
       setLead(null);
     } catch (e) {
@@ -135,6 +143,10 @@ export function AttributionApp({
   const openLive = useCallback(async () => {
     const request = ++requestVersion.current;
     setLoading(true);
+    setListLoaded(false);
+    setAccessLoaded(false);
+    setRole("");
+    setCreating(false);
     setError("");
     setW(
       emptyWorkspace(
@@ -149,6 +161,8 @@ export function AttributionApp({
       if (!r.ok) throw new Error(data.error);
       if (request !== requestVersion.current) return;
       setWorkspaces(data.workspaces);
+      setListLoaded(true);
+      setAccessLoaded(true);
       if (data.workspaces.length) {
         const requested = new URL(location.href).searchParams.get("workspace");
         await selectWorkspace(
@@ -269,7 +283,13 @@ export function AttributionApp({
           <Building2 />
           <select
             aria-label="Workspace"
-            value={w.mode === "sample" ? "sample" : w.id}
+            value={
+              w.mode === "sample"
+                ? "sample"
+                : workspaceAccessLoaded
+                  ? w.id
+                  : ""
+            }
             onChange={(e) => {
               if (e.target.value === "new") {
                 requestVersion.current++;
@@ -283,15 +303,24 @@ export function AttributionApp({
             }}
           >
             <option value="sample">Acme Studio · sample</option>
-            {!w.id && w.mode !== "sample" && (
-              <option value="">Your workspace</option>
-            )}
-            {workspaces.map((ws) => (
-              <option key={ws.id} value={ws.id}>
-                {ws.name}
+            {w.mode !== "sample" && (!w.id || !workspaceAccessLoaded) && (
+              <option value="">
+                {loading
+                  ? "Loading workspace…"
+                  : !local && !signedIn
+                    ? "Sign in to continue"
+                    : error
+                      ? "Workspace unavailable"
+                      : "Choose a workspace"}
               </option>
-            ))}
-            {w.mode !== "sample" && (
+            )}
+            {workspaceListLoaded &&
+              workspaces.map((ws) => (
+                <option key={ws.id} value={ws.id}>
+                  {ws.name}
+                </option>
+              ))}
+            {w.mode !== "sample" && workspaceAccessLoaded && (
               <option value="new">+ New client workspace</option>
             )}
           </select>
@@ -314,15 +343,27 @@ export function AttributionApp({
         <div className="mc-sidebar-bottom">
           <div>
             <Users />
-            {w.mode === "sample" ? "Sample workspace" : `${role} access`}
+            {w.mode === "sample"
+              ? "Sample workspace"
+              : hasWorkspaceAccess
+                ? `${role} access`
+                : loading
+                  ? "Checking workspace access…"
+                  : !local && !signedIn
+                    ? "Signed out"
+                    : workspaceAccessLoaded
+                      ? "No workspace selected"
+                      : "Workspace access unverified"}
           </div>
           <div>
             <Info />
             {w.mode === "sample"
               ? "Example data only"
-              : w.mode === "local"
-                ? "Isolated local data"
-                : "Customer workspace"}
+              : !hasWorkspaceAccess
+                ? "No workspace loaded"
+                : w.mode === "local"
+                  ? "Isolated local data"
+                  : "Customer workspace"}
           </div>
           {signedIn ? (
             <CustomerSignOut />
@@ -391,7 +432,7 @@ export function AttributionApp({
           aria-busy={loading}
           className={loading ? "mc-busy" : ""}
         >
-          {creating ? (
+          {creating && workspaceAccessLoaded ? (
             <NewWorkspace onCreate={create} />
           ) : !w.id && w.mode !== "sample" ? (
             <div className="mc-onboarding">

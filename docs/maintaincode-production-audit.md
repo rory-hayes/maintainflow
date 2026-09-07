@@ -1,8 +1,10 @@
 # MaintainCode Ads customer and production acceptance audit
 
+**Historical audit:** the 6 September observations below preserve the pre-cutover findings. For the current live deployment, approved configuration and remaining customer acceptance, see [the 7 September release ledger](maintaincode-release-status.md).
+
 Audit snapshot: 6 September 2026, Europe/Dublin. This is a release working record, not a production-readiness certificate. The user has authorized replacing the MaintainFlow repository and domain with this product. Deployment and provider evidence must be recorded below as it becomes available.
 
-## Current judgment
+## Judgment at the initial audit
 
 The application demonstrates the intended source-to-CRM reporting product. Sample reporting, evidence drill-down, filters, responsive navigation and diagnostics are functional locally. The new Supabase project's 25 migrations and hosted runtime-role verification have passed, including tenant persistence, encryption and maintenance queue isolation. The replacement branch is published in PR #11; `main` and `https://maintainflow.io` still serve the old product. The first paying-customer journey is not yet proved: production authentication, persistent onboarding, destination CRM delivery, real Ads costs and Stripe test subscription administration need end-to-end evidence on the domain after deployment.
 

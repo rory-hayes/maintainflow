@@ -48,3 +48,11 @@ Local retention validation passed 53 tests across five targeted files, including
 3. Verify migration checksums, tenant isolation, restored record counts, credential decryptability and application readiness. Apply expired-record cleanup and any deletion requests made after the backup before re-enabling ingestion or sync. Record measured restore time and actual recovery point, then remove the isolated fixture under the approved cleanup procedure.
 
 All three steps remain pending. No tested recovery copy or complete account-deletion proof is claimed.
+
+## Local synthetic recovery proof — 7 September 2026
+
+An owned PostgreSQL 17.10 drill used the current working tree matching release `da088249a320f489ea378c6bf2eadeab5385dd1d`. All 463 source/migration/configuration files compared byte-for-byte with that release; the old source checkout HEAD `2f2970a` was not the implementation version tested. Comparison manifest SHA-256: `4ffa3a28b2cad816d36db2ef683328332f18ecce75351400b4d3aefd2c341397`. The comparison and unchanged file times support continuity; the bundle hash was not captured at original execution.
+
+Two fresh temporary loopback clusters were used. The actual 26-migration loader and runtime store created two actors/tenants, two sites, six submissions and four encrypted credentials. A custom-format database dump and roles-only dump excluding role passwords were restored into the second cluster. Exact counts/row hashes across 24 public tables, the migration ledger, effective roles/ACLs/RLS/functions, cross-tenant read/write/delete denial, all four credential decryptions, failure with missing/wrong keyrings or wrong tenant binding, and post-restore writes/site registration passed. Notification validation without an Auth schema failed closed. Both clusters and dumps were cleaned up.
+
+Evidence: `/tmp/maintaincode-local-recovery-evidence.json`, `/tmp/maintaincode-local-recovery.log`, `/tmp/maintaincode-recovery-release-comparison.json`; reproducible drill: `/tmp/maintaincode-local-recovery-drill.mjs`. This tiny synthetic local test establishes the checked application recovery procedure. It does not establish off-site production backups, role-password/Supabase Auth continuity, a production recovery point or recovery-time objective. No hosted data was exported or restored, and no plan/storage purchase occurred.
