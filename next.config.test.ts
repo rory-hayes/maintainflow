@@ -52,6 +52,22 @@ describe("canonical production host", () => {
 });
 
 describe("MaintainCode release surfaces", () => {
+  it("preserves the unsubscribe origin-only referrer and restrictive form policy after global headers", async () => {
+    const response = await configuredResponse(
+      "https://ads.example.test/notifications/unsubscribe?workspace=example&token=synthetic",
+    );
+    expect(response.headers.get("referrer-policy")).toBe("strict-origin");
+    expect(response.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    );
+    const app = await configuredResponse("https://ads.example.test/app");
+    expect(app.headers.get("referrer-policy")).toBe(
+      "strict-origin-when-cross-origin",
+    );
+    expect(app.headers.get("content-security-policy")).not.toContain(
+      "default-src 'none'",
+    );
+  });
   it.each(["/mc-tracker.js", "/t/4f3c61a1-260a-4b4e-a801-b6b3e75d8f81"])(
     "allows cross-origin tracker loading at %s while retaining general security headers",
     async (path) => {

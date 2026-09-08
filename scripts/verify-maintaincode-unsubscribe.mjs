@@ -21,6 +21,10 @@ export async function verifyUnsubscribeNativeForm(browser, appOrigin) {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("referrer-policy"), "strict-origin");
   assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(
+    response.headers.get("content-security-policy"),
+    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  );
   const html = await response.text();
   const headers = Object.fromEntries(response.headers);
   delete headers["content-length"];

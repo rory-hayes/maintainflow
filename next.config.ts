@@ -56,6 +56,17 @@ const nextConfig: NextConfig = {
         headers: [...securityHeaders],
       },
       {
+        source: "/notifications/unsubscribe",
+        headers: [
+          { key: "Referrer-Policy", value: "strict-origin" },
+          {
+            key: "Content-Security-Policy",
+            value:
+              "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+          },
+        ],
+      },
+      {
         source: "/mc-tracker.js",
         headers: [
           { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
