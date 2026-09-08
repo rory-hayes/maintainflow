@@ -81,6 +81,8 @@ The app provides channel and campaign funnels, lead details, attribution timelin
 Use these reporting rules:
 
 - Show lead count, qualified leads, opportunities, won deals and booked deal value with their exact definitions.
+- Opportunities count distinct attributed CRM deals across all stages and currencies. Acquisition-cohort dates follow the selected attribution touch; calendar-period dates use the CRM close date, including planned close dates on open deals, and exclude deals without that date. This is not a newly-created-opportunity or open-pipeline count. Include the definition in downloaded reports as well as the UI.
+- Apply the selected reporting currency to won deals and booked value. Overview always uses acquisition-cohort reporting; a calendar-period filter selected in Campaigns must not persist as a hidden Overview filter.
 - Label CRM deal amounts as booked revenue. Show collected revenue only after a verified billing/payment integration is implemented.
 - Separate acquisition-cohort reporting from calendar-period sales reporting. Do not silently divide this month's revenue from old leads by this month's ad spend.
 - Store timestamps consistently and report using the selected account timezone.
