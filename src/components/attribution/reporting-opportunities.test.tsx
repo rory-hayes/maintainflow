@@ -90,11 +90,13 @@ async function exportCSV() {
     reader.onerror = reject;
     reader.readAsText(exported!);
   });
-  // These controlled sample cells contain no embedded commas or line breaks.
+  // Every exported cell is quoted; sample cells contain no line breaks.
   return text
     .split("\n")
     .map((line) =>
-      line.split(",").map((cell) => cell.slice(1, -1).replaceAll('""', '"')),
+      [...line.matchAll(/"(?:[^"]|"")*"/g)].map(([cell]) =>
+        cell.slice(1, -1).replaceAll('""', '"'),
+      ),
     );
 }
 
@@ -159,6 +161,7 @@ it("keeps UI and CSV opportunity counts aligned across currency, period and mode
     "enquiries",
     "qualified_contacts",
     "opportunities",
+    "opportunity_definition",
     "won_deals",
     "booked_value",
     "currency",
@@ -178,6 +181,10 @@ it("keeps UI and CSV opportunity counts aligned across currency, period and mode
         at(row, "currency") === "USD" &&
         at(row, "model") === "latest" &&
         at(row, "period") === "sales" &&
+        at(row, "opportunity_definition").includes(
+          "across all stages and currencies",
+        ) &&
+        at(row, "opportunity_definition").includes("CRM close date") &&
         at(row, "won_deals") === "0" &&
         at(row, "booked_value") === "0",
     ),
@@ -192,7 +199,11 @@ it("keeps UI and CSV opportunity counts aligned across currency, period and mode
   const [overviewHeaders, ...overviewRows] = await exportCSV();
   expect(
     overviewRows.every(
-      (row) => row[overviewHeaders.indexOf("period")] === "cohort",
+      (row) =>
+        row[overviewHeaders.indexOf("period")] === "cohort" &&
+        row[overviewHeaders.indexOf("opportunity_definition")].includes(
+          "Acquisition cohort uses",
+        ),
     ),
   ).toBe(true);
   expect(

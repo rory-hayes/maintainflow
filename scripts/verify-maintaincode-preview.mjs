@@ -83,12 +83,21 @@ try {
   const [headers, ...rows] = Buffer.concat(chunks)
     .toString("utf8")
     .split("\n")
-    .map((line) => line.split(",").map((cell) => cell.slice(1, -1)));
+    .map((line) =>
+      [...line.matchAll(/"(?:[^"]|"")*"/g)].map(([cell]) =>
+        cell.slice(1, -1).replaceAll('""', '"'),
+      ),
+    );
   const opportunityIndex = headers.indexOf("opportunities");
   expect(opportunityIndex).toBeGreaterThan(-1);
   expect(
     rows.reduce((sum, row) => sum + Number(row[opportunityIndex]), 0),
   ).toBe(17);
+  expect(
+    rows.every((row) =>
+      row[headers.indexOf("opportunity_definition")].includes("CRM close date"),
+    ),
+  ).toBe(true);
   console.log("Export:", exported.suggestedFilename(), "17 opportunities");
   await page.getByRole("button", { name: "Overview", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
