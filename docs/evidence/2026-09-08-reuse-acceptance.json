@@ -1,8 +1,16 @@
 {
-  "observedAt": "2026-09-08T20:47:26Z",
+  "observedAt": "2026-09-08T21:39:11.977720+00:00",
+  "status": "dated_acceptance_snapshot_with_listed_external_gates",
   "origin": "https://maintainflow.io",
-  "testedRevision": "28ecfd3988638c28f6778277b19a7977fa165e98",
+  "testedRevision": "a1dcb1e525c6ce8cae7651a260b72199dd8b4f88",
   "projectRef": "dhbevbimoajwkuzcunwz",
+  "deployment": {
+    "id": "dpl_D7ZfymUFfu2neKSqrp2Q1pF8eYUL",
+    "region": "fra1",
+    "apexAndWwwAssigned": true,
+    "publicProbeAt": "2026-09-08T21:30:57.688Z",
+    "usedVercelProtectionBypass": false
+  },
   "database": {
     "migrations": 27,
     "hostedRuntimeChecks": 14,
@@ -15,6 +23,20 @@
       "maintenanceQueue": true,
       "notificationRecipientValidator": true
     }
+  },
+  "verification": {
+    "ci": "https://github.com/rory-hayes/maintainflow/actions/runs/34280804668",
+    "codeql": "https://github.com/rory-hayes/maintainflow/actions/runs/34280804156",
+    "allFourJobsPassed": true,
+    "applicationTests": 1262,
+    "applicationTestFiles": 145,
+    "postgresqlTests": 85,
+    "postgresqlTestFiles": 8,
+    "repeatedSubsetsExcluded": true,
+    "reviewedTreeMatches": true,
+    "productionDependencyAdvisories": 0,
+    "testedTree": "3a807cdc4d4386a58c05c163d3cfc181fbf0f7ab",
+    "reviewedHead": "c30895fe9476f55f6582591f51887efc9c3263f7"
   },
   "authentication": {
     "normalSignup": true,
@@ -31,52 +53,257 @@
     "normalUiCreated": true,
     "plan": "starter",
     "billingStatus": "trialing",
-    "savedSites": 1,
     "httpsFixtureOnly": true,
-    "reloaded": true
+    "reloaded": true,
+    "initialSavedSites": 1,
+    "currentSites": 0,
+    "currentCaptures": 0,
+    "currentProductionUsage": 0,
+    "ownerAccountAndEmptyWorkspaceRetained": true
   },
   "healthReport": {
     "normalUiConsentSaved": true,
-    "approvedBaseRecipient": true,
+    "approvedConfirmedRecipient": true,
+    "currentRecipientValidatorPassed": true,
     "weeklyEnabled": false,
-    "initialAccepted": 1,
+    "sendRevision": "28ecfd3988638c28f6778277b19a7977fa165e98",
+    "accepted": 1,
     "gmailReceived": true,
+    "receivedAt": "2026-09-08T20:40:30+00:00",
     "spf": true,
     "dkim": true,
     "dmarc": true,
-    "unchangedAccepted": 0,
+    "unchangedRetryAccepted": 0,
+    "recipientAddressOmitted": true,
+    "aggregateInstallationHealthOnly": true,
+    "completedPhase": "complete",
+    "maintenanceRequests": 3,
     "maintenanceScope": "one owned workspace",
     "globalMaintenanceCalls": 0,
-    "unsubscribeGetPreservesSubscription": true,
-    "nativeUnsubscribeOrigin": "null",
-    "nativeUnsubscribeStatus": 400,
-    "unsubscribeFixDeploymentRetest": "pending"
+    "directSqlDataWrites": false
   },
-  "renderedAudit": {
-    "viewports": [
-      "1440x1000",
-      "390x844"
-    ],
-    "pages": 16,
+  "unsubscribe": {
+    "testedRevision": "f7f10299c68e24ba79263afdf471ac367e5e2ca2",
+    "actualReceivedLink": true,
+    "GETInert": true,
+    "nativePOSTStatus": 200,
+    "nativeOriginMatches": true,
+    "refererOriginOnly": true,
+    "headersRewritten": false,
+    "browserCompletedAt": "2026-09-08T21:10:06.449Z",
+    "independentDatabaseCheckAt": "2026-09-08T21:10:26.545Z",
+    "subscriptions": 0,
+    "pendingReports": 0,
+    "healthEnabled": false,
+    "weeklyEnabled": false,
+    "preferenceOffMaintenanceAccepted": 0,
+    "preferenceOffMaintenanceCompletedAt": "2026-09-08T21:10:42.801Z"
+  },
+  "publicAudit": {
+    "testedRevision": "a1dcb1e525c6ce8cae7651a260b72199dd8b4f88",
+    "completedAt": "2026-09-08T21:31:30.721Z",
+    "passingFunctionalCheckGroups": 17,
+    "allPassed": true,
+    "pageExceptions": 0,
+    "unexpectedHttpErrors": 0,
+    "expected401AuthGatesRecorded": true,
+    "navigationAbortsRecorded": true,
+    "scope": "Public/sample/keyboard/auth entry; not populated signed-in accessibility certification"
+  },
+  "populatedAccessibility": {
+    "testedRevision": "a1dcb1e525c6ce8cae7651a260b72199dd8b4f88",
+    "populatedPages": 16,
+    "detailPages": 2,
+    "keyboardScrollRegionsPassed": 3,
+    "automatedViolationGroups": 0,
+    "detailAutomatedViolationGroups": 0,
     "documentOverflowPages": 0,
-    "browserErrors": 0,
-    "unexpectedApiErrors": 0,
-    "automatedViolationGroups": 17,
-    "confirmedIssues": [
-      "supporting text contrast",
-      "mobile table keyboard access",
-      "native unsubscribe form rejected"
+    "detailDocumentOverflowPages": 0,
+    "correctedSelectors": [
+      ".mc-axis",
+      ".mc-app dt"
     ],
-    "fixDeploymentRetest": "pending"
+    "contrastOnWhite": 5.034,
+    "fixDeployed": true,
+    "populatedCompletedAt": "2026-09-08T21:31:21.702Z",
+    "detailCompletedAt": "2026-09-08T21:31:45.525Z",
+    "desktopOverviewAndMobileDetailVisuallyReviewed": true,
+    "method": "isolated deterministic Chromium after three CUA timeouts",
+    "physicalDeviceProof": false,
+    "fullWcagCertification": false
+  },
+  "visitor": {
+    "testedRevision": "f7f10299c68e24ba79263afdf471ac367e5e2ca2",
+    "completedAt": "2026-09-08T21:11:46.018Z",
+    "realTrackerAndCollector": true,
+    "ownedHTTPSLoopbackFixture": true,
+    "authStateImported": false,
+    "productionTLSVerificationEnabled": true,
+    "fixtureCertificateExceptionOnly": true,
+    "consentGating": true,
+    "offlineAnd503RecoveryAcrossNavigation": true,
+    "exactIdReplay": true,
+    "withdrawal": true,
+    "diagnosticAndDuplicateCallbacks": true,
+    "distinctSyntheticIds": 2,
+    "realCollectorStatus": 202,
+    "persistedCountsVerified": true,
+    "uiExportReconciliation": "passed",
+    "selectedSiteDeletion": "passed in later a1dcb1e phase",
+    "paidClickOrCRMProof": false,
+    "visitorHelperInitiallyDeferredPersistence": true,
+    "reconciliationRevision": "f7f10299c68e24ba79263afdf471ac367e5e2ca2",
+    "reconciliationCompletedAt": "2026-09-08T21:14:26.018Z",
+    "confirmedProductionCaptures": 1,
+    "confirmedDiagnosticCaptures": 1,
+    "productionUsage": 1,
+    "trialQuota": 500,
+    "crmVerified": false,
+    "spend": "Unknown",
+    "reconciliationSqlWrites": false,
+    "reconciliationPosts": 0
+  },
+  "historicalBoundary": {
+    "earlierProject": "mvzspyhwoqzcygekridy",
+    "unavailabilityObservedAt": "2026-09-07T17:08:53Z",
+    "earlierEvidenceNotTransferredToCurrentBackend": true
   },
   "unverified": [
-    "new-backend tracker capture and exports",
+    "password-change authorization and completion",
+    "actual token-expiry refresh",
+    "two unrelated authenticated identities",
     "real HubSpot field/outcome delivery",
     "real OpenAI Ads sync",
     "Stripe test lifecycle",
     "actual scheduled execution",
     "first weekly delivery after seven days",
     "production backup and hosted Auth restore",
-    "external customer value"
-  ]
+    "external customer value",
+    "current-backend physical cleanup of naturally expired records"
+  ],
+  "sourceArtifacts": [
+    {
+      "file": "maintaincode-public-domain-f7f1029-probe-result.json",
+      "sha256": "c401e597585d04192cbcfb8f6e62563833863c85bca9965a0a3a2e21a60ab91c"
+    },
+    {
+      "file": "maintaincode-reuse-report-evidence.json",
+      "sha256": "1eb0cef25c8ce5ee8af51f0031889e8fd4a8266852b5b1319a44117c203c0083"
+    },
+    {
+      "file": "maintaincode-reuse-report-email-evidence.json",
+      "sha256": "abdaa7a79c14f3e02708ec21279c32f33acd404eac008730f8349051937e8277"
+    },
+    {
+      "file": "maintaincode-reuse-unsubscribe-fixed-evidence/76fe5210-5438-4bb5-a090-ff2a64ed5064.json",
+      "sha256": "b8cca2084de21603a605c5b7c4be9aa65c5f441684dc1b7bad2df49ca36707d2"
+    },
+    {
+      "file": "maintaincode-reuse-public-audit-1788901787792/report.json",
+      "sha256": "783f42af3f10bf51e159106fdd1a75c3f9913e319ff1d128fc1b8fe6d1ee1d6b"
+    },
+    {
+      "file": "maintaincode-reuse-visitor-evidence/evidence.json",
+      "sha256": "37ce811ac3bd3b5906ed0b60f02a0062a18d90030a3e907af2cf0932a5240841"
+    },
+    {
+      "file": "maintaincode-f7f1029-ci-evidence.json",
+      "sha256": "c44bacba6da5f69fb7699cc05b15c382848baeae4746e44b890a0c42ee318ae9"
+    },
+    {
+      "file": "maintaincode-reuse-export-cleanup-evidence/ea3c7da9-d103-46a9-92b4-b7ef237a81f4.json",
+      "sha256": "8f61a3b529ceda9eb420f8bd4a0f6b0fcd72c36aff8ecf8798ebe6e0273b8de1"
+    },
+    {
+      "file": "maintaincode-reuse-product-readonly-evidence/4d397848-aed7-42fc-99c9-1e454d1a6915.json",
+      "sha256": "e3926d0ac13260fed0baa78b55b57e27cfa1d2b8ffb7e731230d2ac0befea26e"
+    },
+    {
+      "file": "maintaincode-reuse-lead-detail-evidence/8337e1cc-f75e-4578-ab32-dce9ca4954e7.json",
+      "sha256": "670b7b0311748789032278eb04a2460f55e5602030df4f6a1ff3001633e4deff"
+    },
+    {
+      "file": "maintaincode-populated-contrast-proof-20260908.json",
+      "sha256": "d771bbdf1df28d1992e450c834fe22c7a6ed638f54e23e0cdcd6c55f487b3934"
+    },
+    {
+      "file": "maintaincode-a1dcb1e-ci-evidence.json",
+      "sha256": "ea74a9c636304f3667bcafaee210b4577a50e5f291a086000b8925b384af17cf"
+    },
+    {
+      "file": "maintaincode-public-domain-a1dcb1e-probe-result.json",
+      "sha256": "4ad0174727dc0bbd6cde6a8be5f4fe3b5c14542d3924bdec0e2aee40fd1e0cc7"
+    },
+    {
+      "file": "maintaincode-reuse-public-audit-1788903073081/report.json",
+      "sha256": "86434c2f078956e48c67e422f8b0870e95ac275fa3cbb3927c811cc3ac5834f5"
+    },
+    {
+      "file": "maintaincode-reuse-product-readonly-evidence/491de681-3f07-4676-b6eb-f8554b5e152f.json",
+      "sha256": "bd7d7603c4566b27c63cee8ddc586dc5b78a09fcd30a0d4700a16ecce22ce1ba"
+    },
+    {
+      "file": "maintaincode-reuse-lead-detail-evidence/449f8db4-f456-4ee5-a34c-6afd677098e9.json",
+      "sha256": "8d42dfc465c5caaf4c00c3f36c77f3bf5b1018e5676b30f8ee8e866546fd85e9"
+    },
+    {
+      "file": "maintaincode-reuse-export-cleanup-evidence/00300816-0f20-404e-914e-6f714282b1ed.json",
+      "sha256": "f6dae7fa73131dcf54725a6d77c9b6acb9eeebc9766437cc2ae7bc815e9ca5b0"
+    },
+    {
+      "file": "maintaincode-reuse-postdelete-revocation-evidence/e2a4ad96-d4a8-4117-b897-fb3971c61e5e.json",
+      "sha256": "0bfef568d1b7aca754733b075b8165db503b22c69b39ec3409c1c8d61b57b3b1"
+    },
+    {
+      "file": "maintaincode-reuse-fixture-cleanup-evidence.json",
+      "sha256": "1282eabee13319d3b03730d7f2a972bc7fd00b0a57f091c5d193d9a003fe53e3"
+    }
+  ],
+  "privateCredentialsIncluded": false,
+  "capabilityTokensIncluded": false,
+  "revisionPolicy": "Later documentation-only revisions require verified app-source equivalence and a fresh public-domain probe; earlier phase revisions remain unchanged.",
+  "siteDeletion": {
+    "testedRevision": "a1dcb1e525c6ce8cae7651a260b72199dd8b4f88",
+    "completedAt": "2026-09-08T21:32:14.006Z",
+    "normalUiPosts": 1,
+    "directSqlWrites": false,
+    "reloadVerified": true,
+    "exportSites": 0,
+    "exportCaptures": 0,
+    "csvRows": 0,
+    "productionUsage": 0,
+    "quota": 500,
+    "accountAndEmptyWorkspaceRetained": true
+  },
+  "postDeletionRevocation": {
+    "testedRevision": "a1dcb1e525c6ce8cae7651a260b72199dd8b4f88",
+    "completedAt": "2026-09-08T21:34:29.866Z",
+    "independentUnauthenticatedGetStatus": 503,
+    "independentGetInertBodyVerified": true,
+    "browserStatus": 503,
+    "browserBodyAvailable": false,
+    "browserTrackerConfigurationStateFieldsStorageAbsent": true,
+    "businessFormStatus": 200,
+    "businessFormPosts": 1,
+    "collectorAttempts": 0,
+    "earlierUnsuccessfulHelperAttempts": 2,
+    "earlierAttemptsBusinessPosts": 0,
+    "earlierAttemptsCollectorPosts": 0
+  },
+  "fixtureCleanup": {
+    "verifiedAt": "2026-09-08T21:35:33.955622+00:00",
+    "phaseRevision": "a1dcb1e525c6ce8cae7651a260b72199dd8b4f88",
+    "originalVisitorExited": true,
+    "originalVisitorProfileRemoved": true,
+    "postDeleteVisitorClosed": true,
+    "fixtureServerExited": true,
+    "fixturePortClosed": true,
+    "fixtureBindingRemoved": true,
+    "ownerAuthProfileRetainedForPendingPasswordDecision": true,
+    "testSiteDeleted": true,
+    "afterDeleteSites": 0,
+    "afterDeleteCaptures": 0,
+    "afterDeleteProductionUsage": 0,
+    "workspaceAccountRetained": true
+  }
 }
