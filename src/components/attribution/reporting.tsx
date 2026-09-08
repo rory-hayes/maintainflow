@@ -46,7 +46,7 @@ export function Reporting({
   const [evidenceChannel, setEvidenceChannel] = useState<string | null>(null);
   const options: ReportOptions = {
     model,
-    period,
+    period: campaigns ? period : "cohort",
     currency,
     from: localDate(
       new Date(reportNow - (days - 1) * 86400000).toISOString(),
@@ -60,11 +60,17 @@ export function Reporting({
     (a, r) => ({
       leads: a.leads + r.submissions.length,
       qualified: a.qualified + r.qualified.length,
+      opportunities: a.opportunities + r.deals.length,
       won: a.won + r.won.length,
       booked: a.booked + r.booked,
     }),
-    { leads: 0, qualified: 0, won: 0, booked: 0 },
+    { leads: 0, qualified: 0, opportunities: 0, won: 0, booked: 0 },
   );
+  const opportunityDefinition =
+    "Opportunities are distinct attributed CRM deals across all stages and currencies. " +
+    (options.period === "cohort"
+      ? "Acquisition cohort uses the selected first-touch or last-non-direct acquisition date."
+      : "Calendar-period sales uses the CRM close date, which can be planned for open deals; deals without a close date are excluded.");
   const known = w.submissions.filter(
     (s) =>
       s.status === "confirmed" &&
@@ -104,6 +110,7 @@ export function Reporting({
           "campaign_id",
           "enquiries",
           "qualified_contacts",
+          "opportunities",
           "won_deals",
           "booked_value",
           "currency",
@@ -119,12 +126,13 @@ export function Reporting({
           r.campaignId,
           r.submissions.length,
           r.qualified.length,
+          r.deals.length,
           r.won.length,
           r.booked,
           currency,
           r.spend ?? "Unknown",
           model,
-          period,
+          options.period,
           options.from,
           options.to,
         ]),
@@ -236,6 +244,7 @@ export function Reporting({
         {[
           ["Enquiries", totals.leads],
           ["Qualified leads", totals.qualified],
+          ["Opportunities", totals.opportunities],
           ["Won deals", totals.won],
           ["Booked deal value", money(totals.booked, currency)],
         ].map(([label, value]) => (
@@ -248,6 +257,14 @@ export function Reporting({
           </button>
         ))}
       </div>
+      <details className="mc-report-definition">
+        <summary>How opportunities are counted</summary>
+        <p>
+          {opportunityDefinition} Won deals and booked value use the selected
+          currency. These are attributed deals, not a count of newly created
+          opportunities or open pipeline alone.
+        </p>
+      </details>
       <div className="mc-chart-layout">
         <section className="mc-panel mc-chart">
           <h2>Enquiries by channel</h2>
@@ -343,7 +360,9 @@ export function Reporting({
           className="mc-table-scroll"
           role="region"
           aria-label={
-            campaigns ? "Campaign performance table" : "Channel performance table"
+            campaigns
+              ? "Campaign performance table"
+              : "Channel performance table"
           }
           tabIndex={0}
         >
@@ -353,6 +372,7 @@ export function Reporting({
                 <th>{campaigns ? "Campaign / channel" : "Channel"}</th>
                 <th>Enquiries</th>
                 <th>Qualified</th>
+                <th>Opportunities</th>
                 <th>Won deals</th>
                 <th>Booked value</th>
                 <th>Observed spend</th>
@@ -373,6 +393,7 @@ export function Reporting({
                   </td>
                   <td>{r.submissions.length}</td>
                   <td>{r.qualified.length}</td>
+                  <td>{r.deals.length}</td>
                   <td>{r.won.length}</td>
                   <td>
                     {money(r.booked, currency)}
@@ -419,6 +440,7 @@ export function Reporting({
             {model === "first" ? "first touch" : "last non-direct"} ·{" "}
             {options.from} to {options.to} · {currency}
           </p>
+          <p>{opportunityDefinition}</p>
           {result.rows
             .filter(
               (r) => evidenceChannel === "all" || r.channel === evidenceChannel,
@@ -429,7 +451,8 @@ export function Reporting({
                 <p>
                   {r.submissions.length} confirmed production submissions ·{" "}
                   {r.qualified.length} distinct qualified contacts ·{" "}
-                  {r.won.length} won deals
+                  {r.deals.length} distinct opportunities · {r.won.length} won
+                  deals
                 </p>
                 <details open>
                   <summary>Contributing submissions</summary>

@@ -11,6 +11,12 @@ try {
   await expect(
     page.getByRole("button", { name: "Enquiries 128", exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Opportunities 25", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Won deals 12", exact: true }),
+  ).toBeVisible();
   await page.screenshot({ path: "/tmp/maintaincode-desktop-verified.png" });
   await page
     .getByRole("button", { name: "Enquiries 128", exact: true })
@@ -57,13 +63,44 @@ try {
   await expect(
     page.getByRole("button", { name: "Booked deal value US$0", exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Opportunities 17", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByText("How opportunities are counted", { exact: true })
+    .click();
+  await expect(
+    page.getByText(/deals without a close date are excluded/).first(),
+  ).toBeVisible();
   const download = page.waitForEvent("download");
   await page
     .getByRole("button", { name: "Export report", exact: true })
     .click();
-  console.log("Export:", (await download).suggestedFilename());
+  const exported = await download;
+  const stream = await exported.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  const [headers, ...rows] = Buffer.concat(chunks)
+    .toString("utf8")
+    .split("\n")
+    .map((line) => line.split(",").map((cell) => cell.slice(1, -1)));
+  const opportunityIndex = headers.indexOf("opportunities");
+  expect(opportunityIndex).toBeGreaterThan(-1);
+  expect(
+    rows.reduce((sum, row) => sum + Number(row[opportunityIndex]), 0),
+  ).toBe(17);
+  console.log("Export:", exported.suggestedFilename(), "17 opportunities");
   await page.getByRole("button", { name: "Overview", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    page.getByRole("button", { name: "Opportunities 25", exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  await page.screenshot({
+    path: "/tmp/maintaincode-mobile-opportunities-verified.png",
+  });
   await expect(
     page.getByRole("button", { name: "Toggle navigation" }),
   ).toBeVisible();

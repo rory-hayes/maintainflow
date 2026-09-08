@@ -29,6 +29,7 @@ export function sampleWorkspace(): Workspace {
       medium: "cpc",
       count: 48,
       qualified: 18,
+      opportunities: 9,
       won: 5,
       spend: 2400,
     },
@@ -38,6 +39,7 @@ export function sampleWorkspace(): Workspace {
       medium: "paid_social",
       count: 32,
       qualified: 9,
+      opportunities: 5,
       won: 2,
       spend: 1600,
     },
@@ -47,6 +49,7 @@ export function sampleWorkspace(): Workspace {
       medium: "paid_ai",
       count: 16,
       qualified: 7,
+      opportunities: 5,
       won: 3,
       spend: 800,
     },
@@ -56,6 +59,7 @@ export function sampleWorkspace(): Workspace {
       medium: "organic",
       count: 20,
       qualified: 6,
+      opportunities: 4,
       won: 2,
     },
     {
@@ -64,6 +68,7 @@ export function sampleWorkspace(): Workspace {
       medium: "referral",
       count: 12,
       qualified: 2,
+      opportunities: 2,
       won: 0,
     },
   ];
@@ -116,18 +121,28 @@ export function sampleWorkspace(): Workspace {
         submissions: [id],
         updatedAt: at,
       });
-      if (i < group.won)
+      if (i < group.opportunities) {
+        const stage =
+          i < group.won
+            ? "closedwon"
+            : i === group.opportunities - 1
+              ? "closedlost"
+              : "open";
         w.deals.push({
           id: `deal-${n}`,
           contacts: [contactId],
           primaryContactId: contactId,
-          stage: "closedwon",
+          stage,
           amount: 3200,
           currency: "EUR",
-          closedAt: new Date(Date.parse(at) + 86400000).toISOString(),
+          closedAt:
+            stage === "open"
+              ? null
+              : new Date(Date.parse(at) + 86400000).toISOString(),
           updatedAt: at,
-          history: [{ at, stage: "closedwon", amount: 3200 }],
+          history: [{ at, stage, amount: 3200 }],
         });
+      }
     }
   for (const [g, group] of groups.entries())
     if (group.spend !== undefined)

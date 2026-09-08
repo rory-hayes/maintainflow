@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { sampleWorkspace } from "./sample";
 import {
   advanceEvidence,
   captureTouch,
@@ -305,13 +306,14 @@ describe("CRM identities and reporting", () => {
     expect(usage(w, now)).toBe(0);
     expect(report(w, options).rows).toEqual([]);
   });
-  it("counts shared deals once and removes revenue on reopening", () => {
-    const { w } = fixture();
+  it("counts distinct shared opportunities across submissions and retains them on reopening or loss", () => {
+    const { w, s } = fixture();
+    upsertSubmission(w, { ...s, id: "s2" });
     const contacts = [
       {
         id: "c1",
         stage: "customer",
-        submissions: ["s1"],
+        submissions: ["s1", "s2"],
         updatedAt: now.toISOString(),
       },
       {
@@ -331,12 +333,39 @@ describe("CRM identities and reporting", () => {
       closedAt: now.toISOString(),
       updatedAt: now.toISOString(),
     };
-    reconcileCRM(w, contacts, [deal, deal]);
-    expect(w.deals).toHaveLength(1);
-    expect(report(w, options).rows[0].booked).toBe(5000);
-    reconcileCRM(w, contacts, [{ ...deal, stage: "reopened" }]);
-    expect(report(w, options).rows[0].booked).toBe(0);
+    const open = { ...deal, id: "d2", stage: "open", closedAt: null };
+    reconcileCRM(w, contacts, [deal, deal, open]);
+    expect(w.deals).toHaveLength(2);
+    expect(report(w, options).rows[0]).toMatchObject({
+      submissions: ["s1", "s2"],
+      qualified: ["c1"],
+      deals: ["d1", "d2"],
+      won: ["d1"],
+      booked: 5000,
+    });
+    reconcileCRM(w, contacts, [
+      { ...deal, stage: "reopened", closedAt: null },
+      open,
+    ]);
+    expect(report(w, options).rows[0]).toMatchObject({
+      deals: ["d1", "d2"],
+      won: [],
+      booked: 0,
+    });
+    expect(
+      report(w, { ...options, period: "sales" }).rows.flatMap((r) => r.deals),
+    ).toEqual([]);
     expect(w.deals[0].history).toHaveLength(2);
+    reconcileCRM(w, contacts, [{ ...deal, stage: "closedlost" }, open]);
+    expect(report(w, options).rows[0]).toMatchObject({
+      deals: ["d1", "d2"],
+      won: [],
+      booked: 0,
+    });
+    expect(
+      report(w, { ...options, period: "sales" }).rows.flatMap((r) => r.deals),
+    ).toEqual(["d1"]);
+    expect(w.deals[0].history).toHaveLength(3);
   });
   it("leaves ambiguous contacts and absent primary contacts unattributed", () => {
     const { w } = fixture();
@@ -398,11 +427,173 @@ describe("CRM identities and reporting", () => {
       ],
     );
     expect(report(w, options).rows).toHaveLength(0);
-    expect(report(w, { ...options, period: "sales" }).rows[0].booked).toBe(0);
+    expect(report(w, { ...options, period: "sales" }).rows[0]).toMatchObject({
+      deals: ["d"],
+      won: [],
+      booked: 0,
+    });
     expect(
-      report(w, { ...options, period: "sales", currency: "USD" }).rows[0]
-        .booked,
-    ).toBe(300);
+      report(w, { ...options, period: "sales", currency: "USD" }).rows[0],
+    ).toMatchObject({ deals: ["d"], won: ["d"], booked: 300 });
+  });
+  it("includes all opportunity stages and currencies in the cohort, independent of the revenue currency", () => {
+    const { w, s } = fixture();
+    const contact = {
+      id: "c",
+      stage: "customer",
+      submissions: [s.id],
+      updatedAt: now.toISOString(),
+    };
+    reconcileCRM(
+      w,
+      [contact],
+      [
+        { id: "eur-won", stage: "closedwon", currency: "EUR", amount: 200 },
+        { id: "usd-won", stage: "closedwon", currency: "USD", amount: 300 },
+        { id: "gbp-open", stage: "open", currency: "GBP", amount: null },
+        { id: "usd-lost", stage: "closedlost", currency: "USD", amount: 400 },
+      ].map((deal) => ({
+        ...deal,
+        contacts: [contact.id],
+        primaryContactId: contact.id,
+        closedAt: deal.stage === "open" ? null : now.toISOString(),
+        updatedAt: now.toISOString(),
+      })),
+    );
+    for (const [currency, won, booked] of [
+      ["EUR", ["eur-won"], 200],
+      ["USD", ["usd-won"], 300],
+      ["GBP", [], 0],
+    ] as const)
+      expect(report(w, { ...options, currency }).rows[0]).toMatchObject({
+        deals: ["eur-won", "usd-won", "gbp-open", "usd-lost"],
+        won,
+        booked,
+      });
+  });
+  it("scopes opportunities by selected touch for cohorts and existing CRM close dates for calendar sales", () => {
+    const { w, s } = fixture();
+    s.evidence = advanceEvidence(
+      advanceEvidence(
+        null,
+        captureTouch(
+          "https://example.com/?utm_source=google&utm_medium=cpc&utm_id=campaign-a",
+          "",
+          new Date("2026-08-31T12:00:00Z"),
+        ),
+      ),
+      captureTouch(
+        "https://example.com/?utm_source=newsletter&utm_medium=email&utm_id=campaign-b",
+        "",
+        new Date("2026-09-01T12:00:00Z"),
+      ),
+    );
+    reconcileCRM(
+      w,
+      [{ id: "c", stage: "lead", submissions: [s.id], updatedAt: s.at }],
+      [
+        { id: "closed", stage: "closedlost", closedAt: "2026-09-08T12:00:00Z" },
+        { id: "open", stage: "open", closedAt: null },
+      ].map((deal) => ({
+        ...deal,
+        contacts: ["c"],
+        primaryContactId: "c",
+        amount: 100,
+        currency: "EUR",
+        updatedAt: "2026-09-08T12:00:00Z",
+      })),
+    );
+    expect(report(w, options).rows.flatMap((r) => r.deals)).toEqual([]);
+    expect(report(w, { ...options, model: "latest" }).rows[0]).toMatchObject({
+      channel: "Email",
+      deals: ["closed", "open"],
+    });
+    const sales = {
+      ...options,
+      period: "sales" as const,
+      from: "2026-09-08",
+      to: "2026-09-08",
+    };
+    expect(
+      report(w, { ...sales, campaignId: "campaign-a" }).rows[0],
+    ).toMatchObject({
+      channel: "Paid search",
+      deals: ["closed"],
+    });
+    expect(
+      report(w, { ...sales, model: "latest", campaignId: "campaign-a" }).rows,
+    ).toEqual([]);
+    expect(
+      report(w, { ...sales, model: "latest", campaignId: "campaign-b" })
+        .rows[0],
+    ).toMatchObject({ channel: "Email", deals: ["closed"] });
+    expect(
+      report(w, { ...sales, from: "2026-09-09", to: "2026-09-30" }).rows,
+    ).toEqual([]);
+  });
+  it("does not attribute opportunities from diagnostic or unconfirmed-only evidence", () => {
+    const { w, s } = fixture();
+    s.contactId = "production-contact";
+    w.submissions.push(
+      { ...s, id: "diagnostic", contactId: "test-contact", test: true },
+      {
+        ...s,
+        id: "attempt",
+        contactId: "attempt-contact",
+        status: "attempted",
+      },
+    );
+    w.deals = w.submissions.map((submission) => ({
+      id: `deal-${submission.id}`,
+      contacts: [submission.contactId!],
+      primaryContactId: submission.contactId,
+      stage: "open",
+      amount: null,
+      currency: "EUR",
+      closedAt: null,
+      updatedAt: now.toISOString(),
+      history: [],
+    }));
+    const result = report(w, options);
+    expect(result.rows.flatMap((r) => r.deals)).toEqual(["deal-s1"]);
+    expect(result.unattributed).toEqual(["deal-diagnostic", "deal-attempt"]);
+  });
+  it("demonstrates open and lost sample opportunities without changing established headline totals", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    try {
+      const w = sampleWorkspace();
+      const rows = report(w, { ...options, from: "2026-08-01" }).rows;
+      expect(
+        Object.fromEntries(rows.map((r) => [r.channel, r.deals.length])),
+      ).toEqual({
+        "Paid search": 9,
+        "Paid social": 5,
+        "ChatGPT Ads": 5,
+        "Organic search": 4,
+        Referral: 2,
+      });
+      expect(rows.flatMap((r) => r.submissions)).toHaveLength(128);
+      expect(rows.flatMap((r) => r.qualified)).toHaveLength(42);
+      expect(rows.flatMap((r) => r.deals)).toHaveLength(25);
+      expect(rows.flatMap((r) => r.won)).toHaveLength(12);
+      expect(rows.reduce((sum, r) => sum + r.booked, 0)).toBe(38400);
+      const open = w.deals.filter((d) => d.stage === "open");
+      const lost = w.deals.filter((d) => d.stage === "closedlost");
+      expect(open).toHaveLength(8);
+      expect(open.every((d) => d.closedAt === null)).toBe(true);
+      expect(lost).toHaveLength(5);
+      expect(lost.every((d) => d.closedAt !== null)).toBe(true);
+      expect(
+        report(w, {
+          ...options,
+          from: "2026-08-01",
+          period: "sales",
+        }).rows.flatMap((r) => r.deals),
+      ).toHaveLength(17);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("keeps missing spend and unsupported ratios unavailable", () => {
     const { w } = fixture();
