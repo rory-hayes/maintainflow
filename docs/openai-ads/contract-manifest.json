@@ -2,13 +2,14 @@
   "manifestVersion": 1,
   "source": {
     "url": "https://developers.openai.com/ads/openapi.json",
-    "retrievedAt": "2026-09-06",
-    "sha256": "c8b8fa50544f9c5b02f65de6f2f23de9d7f1c494e2a10cf6b3881bf037f528ce",
+    "retrievedAt": "2026-09-08",
+    "sha256": "7b9f898546fe9d245b3190136d74c16f21cc322a25458c3151144f4811ce9294",
     "reviewNotes": [
       "The published document still identifies as 2.3.0 but now contains 73 operations. Fifteen previously listed operations are absent and remain unavailable in MaintainCode.",
       "OpenAI-Ad-Account is absent from all operation parameters and there are no component parameter references to resolve. Account-scoped bearer authentication is documented; optional legacy shared/OAuth transport is not the MaintainCode onboarding path.",
       "The account response no longer lists optional negative_keywords. Its required metadata and the four attribution inventory/insights response contracts remain present.",
-      "The current Insights guide uses time_granularity=daily, campaign aggregation, repeated fields[] and time_ranges[] JSON Unix-second ranges."
+      "The current Insights guide uses time_granularity=daily, campaign aggregation, repeated fields[] and time_ranges[] JSON Unix-second ranges.",
+      "The 2026-09-08 full document comparison against SHA-256 c8b8fa50544f9c5b02f65de6f2f23de9d7f1c494e2a10cf6b3881bf037f528ce found exactly one change: GET /geo_lookup/search summary changed from 'Search DMA and standard region codes for advertiser geo targeting.' to 'Search Market locations and standard region codes for advertiser geo targeting.' All other values, including request/response schemas, security, webhooks and extension metadata, are unchanged."
     ]
   },
   "expected": {
