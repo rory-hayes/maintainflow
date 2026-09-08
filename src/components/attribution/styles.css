@@ -417,6 +417,10 @@
 .mc-table-scroll {
   overflow-x: auto;
 }
+.mc-table-scroll:focus-visible {
+  outline: 2px solid var(--mc-green);
+  outline-offset: -2px;
+}
 .mc-app table {
   width: 100%;
   border-collapse: collapse;
@@ -470,7 +474,7 @@
   gap: 8px;
   padding: 9px 19px;
   font-size: 11px;
-  color: #747d77;
+  color: var(--mc-muted);
 }
 .mc-footnote svg {
   width: 15px;
@@ -478,10 +482,10 @@
 }
 .mc-small {
   font-size: 11px !important;
-  color: #78847c !important;
+  color: var(--mc-muted) !important;
 }
 .mc-muted {
-  color: #7e8881;
+  color: var(--mc-muted);
 }
 .mc-table-empty {
   padding: 20px;
@@ -685,7 +689,7 @@
   flex-wrap: wrap;
   margin: 22px 0;
   font-size: 11px;
-  color: #718077;
+  color: var(--mc-muted);
 }
 .mc-code {
   display: flex;

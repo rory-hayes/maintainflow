@@ -551,19 +551,23 @@ describe("safe email opt-out", () => {
     );
     expect(await page.text()).toContain('method="post"');
     expect(state.notifications).toHaveLength(1);
-    expect(page.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(page.headers.get("Referrer-Policy")).toBe("strict-origin");
+    expect(page.headers.get("Cache-Control")).toBe("no-store");
+    expect(page.headers.get("Content-Security-Policy")).toContain(
+      "form-action 'self'",
+    );
     await unsubscribeNotifications(id, "0".repeat(64));
     expect(state.notifications).toHaveLength(1);
-    const post = (origin: string) =>
+    const post = (origin?: string) =>
       new Request("https://maintainflow.io/notifications/unsubscribe", {
         method: "POST",
-        headers: { origin },
+        headers: origin === undefined ? {} : { origin },
         body: new URLSearchParams({ workspace: id, token }).toString(),
       });
-    expect((await unsubscribePOST(post("https://elsewhere.test"))).status).toBe(
-      400,
-    );
-    expect(state.notifications).toHaveLength(1);
+    for (const origin of [undefined, "null", "https://elsewhere.test"]) {
+      expect((await unsubscribePOST(post(origin))).status).toBe(400);
+      expect(state.notifications).toHaveLength(1);
+    }
     expect(
       (await unsubscribePOST(post("https://maintainflow.io"))).status,
     ).toBe(200);

@@ -89,10 +89,12 @@ export function Setup({
           </div>
         ))}
       </section>
-      <p className="mc-small">
-        Sample completion indicators describe example data only. Real CRM
-        arrival requires an authorized account.
-      </p>
+      {w.mode === "sample" && (
+        <p className="mc-small">
+          Sample completion indicators describe example data only. Real CRM
+          arrival requires an authorized account.
+        </p>
+      )}
       {w.mode !== "sample" && (
         <button className="mc-link" onClick={() => act({ action: "purge" })}>
           Apply retention to expired records
@@ -821,7 +823,7 @@ export function Settings({ w, act }: { w: Workspace; act: Act }) {
         <p className="mc-small">
           {w.mode === "sample"
             ? "Billing is unavailable in sample mode."
-            : "Checkout requires configured Stripe prices and an enabled billing connection. Development does not activate real charges."}
+            : "If checkout or subscription management is unavailable, contact support for help."}
         </p>
       </section>
       <section className="mc-panel mc-detail">

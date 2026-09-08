@@ -1,10 +1,12 @@
 import { chromium } from "playwright";
 import { expect } from "@playwright/test";
+import { verifyUnsubscribeNativeForm } from "./verify-maintaincode-unsubscribe.mjs";
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1536, height: 1024 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 try {
+  await verifyUnsubscribeNativeForm(browser, "http://127.0.0.1:3217");
   await page.goto("http://127.0.0.1:3217/app");
   await expect(
     page.getByRole("button", { name: "Enquiries 128", exact: true }),

@@ -1,0 +1,82 @@
+{
+  "observedAt": "2026-09-08T20:47:26Z",
+  "origin": "https://maintainflow.io",
+  "testedRevision": "28ecfd3988638c28f6778277b19a7977fa165e98",
+  "projectRef": "dhbevbimoajwkuzcunwz",
+  "database": {
+    "migrations": 27,
+    "hostedRuntimeChecks": 14,
+    "tablesDeleted": 0,
+    "privateCredentialsIncluded": false,
+    "publicReadiness": {
+      "runtimeRole": true,
+      "tables": 6,
+      "isolationPolicies": 10,
+      "maintenanceQueue": true,
+      "notificationRecipientValidator": true
+    }
+  },
+  "authentication": {
+    "normalSignup": true,
+    "gmailConfirmationReceived": true,
+    "confirmationAuthenticatedSession": true,
+    "sessionReopened": true,
+    "normalSignOut": true,
+    "gmailRecoveryReceived": true,
+    "receivedRecoveryFormOpened": true,
+    "passwordChange": "pending separate user instruction",
+    "unrelatedIdentityAcceptance": false
+  },
+  "workspace": {
+    "normalUiCreated": true,
+    "plan": "starter",
+    "billingStatus": "trialing",
+    "savedSites": 1,
+    "httpsFixtureOnly": true,
+    "reloaded": true
+  },
+  "healthReport": {
+    "normalUiConsentSaved": true,
+    "approvedBaseRecipient": true,
+    "weeklyEnabled": false,
+    "initialAccepted": 1,
+    "gmailReceived": true,
+    "spf": true,
+    "dkim": true,
+    "dmarc": true,
+    "unchangedAccepted": 0,
+    "maintenanceScope": "one owned workspace",
+    "globalMaintenanceCalls": 0,
+    "unsubscribeGetPreservesSubscription": true,
+    "nativeUnsubscribeOrigin": "null",
+    "nativeUnsubscribeStatus": 400,
+    "unsubscribeFixDeploymentRetest": "pending"
+  },
+  "renderedAudit": {
+    "viewports": [
+      "1440x1000",
+      "390x844"
+    ],
+    "pages": 16,
+    "documentOverflowPages": 0,
+    "browserErrors": 0,
+    "unexpectedApiErrors": 0,
+    "automatedViolationGroups": 17,
+    "confirmedIssues": [
+      "supporting text contrast",
+      "mobile table keyboard access",
+      "native unsubscribe form rejected"
+    ],
+    "fixDeploymentRetest": "pending"
+  },
+  "unverified": [
+    "new-backend tracker capture and exports",
+    "real HubSpot field/outcome delivery",
+    "real OpenAI Ads sync",
+    "Stripe test lifecycle",
+    "actual scheduled execution",
+    "first weekly delivery after seven days",
+    "production backup and hosted Auth restore",
+    "external customer value"
+  ]
+}
