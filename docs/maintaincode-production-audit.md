@@ -1,5 +1,7 @@
 # MaintainCode Ads customer and production acceptance audit
 
+> Backend status changed after these observations. The prior `mvzspyhwoqzcygekridy` project became unavailable; consult the [current release ledger](maintaincode-release-status.md) for the owner-approved reuse of `dhbevbimoajwkuzcunwz`. Earlier inbox and application acceptance remains historical until repeated against the reused backend.
+
 ## Current acceptance update — 7 September 2026
 
 The deployed revision tested was `e86c4fddcb32eb075e9c23b461e630a543b5b38e`. These observations supersede the historical pending gates below only for their stated scope. The [release ledger](maintaincode-release-status.md) is the current operating record; this follow-up contains the loading-brand correction and its successful build/lint verification.

@@ -54,10 +54,8 @@ export async function GET(request: Request) {
           (row.relname.startsWith("maintaincode_") &&
             row.relname !== "maintaincode_maintenance_queue" &&
             (!row.can_update || !row.can_delete)) ||
-          (!["maintaincode_sites", "maintaincode_maintenance_queue"].includes(
-            row.relname,
-          ) &&
-            (!row.relrowsecurity || (!local && !row.rls_active))) ||
+          !row.relrowsecurity ||
+          (!local && !row.rls_active) ||
           (["maintaincode_workspaces", "maintaincode_credentials"].includes(
             row.relname,
           ) &&
@@ -66,8 +64,8 @@ export async function GET(request: Request) {
     )
       throw new Error("schema_or_grants");
     const policies =
-      await sql`select policyname from pg_policies where schemaname='public' and policyname in ('maintaincode_workspace_isolation','maintaincode_credential_isolation','maintaincode_member_read','maintaincode_member_create','maintaincode_organization_read','maintaincode_organization_create')`;
-    if (policies.length !== 6) throw new Error("isolation_policies");
+      await sql`select policyname from pg_policies where schemaname='public' and policyname in ('maintaincode_workspace_isolation','maintaincode_credential_isolation','maintaincode_member_read','maintaincode_member_create','maintaincode_organization_read','maintaincode_organization_create','maintaincode_site_registry_read','maintaincode_site_registry_insert','maintaincode_site_registry_update','maintaincode_site_registry_delete')`;
+    if (policies.length !== 10) throw new Error("isolation_policies");
     const [registration] =
       await sql`select count(*)::int as count from pg_trigger where tgname='maintaincode_workspace_maintenance_registration' and tgrelid='public.maintaincode_workspaces'::regclass and tgenabled='O' and not tgisinternal`;
     if (registration?.count !== 1) throw new Error("maintenance_registration");
@@ -90,7 +88,7 @@ export async function GET(request: Request) {
         checks: {
           runtimeRole: true,
           tables: 6,
-          isolationPolicies: 6,
+          isolationPolicies: 10,
           maintenanceQueue: true,
           notificationRecipientValidator: true,
         },
@@ -106,7 +104,7 @@ export async function GET(request: Request) {
         service: "maintaincode-ads",
         revision: revision ?? "unknown",
         error:
-          "Check build revision, migrations 023–026, dedicated runtime role, isolation policies, table grants and the restricted email-recipient validator.",
+          "Check build revision, migrations 023–027, dedicated runtime role, isolation policies, table grants and the restricted email-recipient validator.",
       },
       { status: 503, headers },
     );

@@ -33,7 +33,7 @@ function responses(overrides = {}) {
             checks: {
               runtimeRole: true,
               tables: 6,
-              isolationPolicies: 6,
+              isolationPolicies: 10,
               maintenanceQueue: true,
             },
           })

@@ -216,6 +216,28 @@ try {
   }
   check("restricted runtime role and verified TLS connection");
 
+  const [siteRegistry] = await sql`select relrowsecurity as enabled,
+    row_security_active(oid) as active from pg_class
+    where oid='public.maintaincode_sites'::regclass`;
+  assert.deepEqual(siteRegistry, { enabled: true, active: true },
+    "The dedicated runtime must use active site registry row security.");
+  const sitePolicies = await sql`select policyname,cmd,roles::text[] as roles
+    from pg_policies where schemaname='public' and tablename='maintaincode_sites'
+    order by policyname`;
+  assert.deepEqual([...sitePolicies], [
+    { policyname: "maintaincode_site_registry_delete", cmd: "DELETE", roles: ["maintaincode_app"] },
+    { policyname: "maintaincode_site_registry_insert", cmd: "INSERT", roles: ["maintaincode_app"] },
+    { policyname: "maintaincode_site_registry_read", cmd: "SELECT", roles: ["maintaincode_app"] },
+    { policyname: "maintaincode_site_registry_update", cmd: "UPDATE", roles: ["maintaincode_app"] },
+  ], "The site registry must retain its four dedicated runtime policies.");
+  const siteApiAccess = await sql`select rolname,
+    has_table_privilege(oid,'public.maintaincode_sites','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') as table_access,
+    has_any_column_privilege(oid,'public.maintaincode_sites','SELECT,INSERT,UPDATE,REFERENCES') as column_access
+    from pg_roles where rolname in ('anon','authenticated','service_role','maintainflow_app')`;
+  assert(siteApiAccess.every((role) => !role.table_access && !role.column_access),
+    "Data API and retired legacy roles must not access the site registry.");
+  check("site registry row security, dedicated policies and server-only grants");
+
   const run = randomUUID();
   const fixtures = ["a", "b"].map((suffix) => {
     const id = randomUUID();
@@ -288,6 +310,35 @@ try {
         );
       }
       check("actor membership discovery and tenant-scoped workspace reads");
+
+      // Trackers must resolve public site metadata before choosing a workspace.
+      // This read permission must never permit unscoped or cross-workspace writes.
+      await tx`select set_config('maintaincode.organization_id','',true)`;
+      const registry = await tx`select id,organization_id,origin from public.maintaincode_sites
+        where id in (${a.siteId},${b.siteId}) order by id`;
+      assert.equal(registry.length, 2, "Public tracker lookup must work without tenant context.");
+      await assert.rejects(tx.savepoint(async (sp) => {
+        await sp`insert into public.maintaincode_sites(id,organization_id,origin)
+          values(${randomUUID()},${a.id},${a.state.sites[0].origin})`;
+      }), { code: "42501" });
+      await setContext(tx, b);
+      assert.equal((await tx`update public.maintaincode_sites set origin='https://changed.invalid'
+        where id=${a.siteId} returning id`).length, 0);
+      assert.equal((await tx`delete from public.maintaincode_sites where id=${a.siteId} returning id`).length, 0);
+      await assert.rejects(tx.savepoint(async (sp) => {
+        await sp`insert into public.maintaincode_sites(id,organization_id,origin)
+          values(${randomUUID()},${a.id},${a.state.sites[0].origin})`;
+      }), { code: "42501" });
+      await assert.rejects(tx.savepoint(async (sp) => {
+        await sp`update public.maintaincode_sites set organization_id=${a.id} where id=${b.siteId}`;
+      }), { code: "42501" });
+      assert.equal((await tx`update public.maintaincode_sites set origin=${b.state.sites[0].origin}
+        where id=${b.siteId} returning id`).length, 1, "An owner context must still update its own site.");
+      const temporarySite = randomUUID();
+      await tx`insert into public.maintaincode_sites(id,organization_id,origin)
+        values(${temporarySite},${b.id},${b.state.sites[0].origin})`;
+      assert.equal((await tx`delete from public.maintaincode_sites where id=${temporarySite} returning id`).length, 1);
+      check("public tracker lookup, own site writes and rejected unscoped/cross-workspace registry mutations");
 
       await setContext(tx, a);
       const item = {

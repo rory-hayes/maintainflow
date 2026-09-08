@@ -222,7 +222,7 @@ function healthyPrivileges() {
   const tables = [...runtimeReadableTables, "maintaincode_workspaces", "maintaincode_credentials", "maintaincode_maintenance_queue", "maintaincode_sites"];
   return tables.map((table_name) => ({
     table_name,
-    row_security_enabled: table_name !== "maintaincode_sites",
+    row_security_enabled: true,
     can_select: runtimeReadableTables.includes(table_name),
     can_insert: runtimeInsertableTables.has(table_name),
     can_update: runtimeUpdatableTables.has(table_name),
