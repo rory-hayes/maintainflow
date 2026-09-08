@@ -1,18 +1,38 @@
-# MaintainCode Ads release status — 7 September 2026
+# MaintainCode Ads release status — 8 September 2026
 
-## Current recovery and database reuse
+## Current deployment and database
 
-At 17:08:53 UTC, the domain returned process health 200 for `282974c415cbe2275c62ab56c176d9c1877f5ed1`, but authenticated database readiness returned 503 and `mvzspyhwoqzcygekridy.supabase.co` did not resolve. The cause is not established. All acceptance below against that project is historical, and an old deployment pointing to it is not an operational rollback.
+The replacement is live at `https://maintainflow.io`, using the owner-selected existing Supabase project `dhbevbimoajwkuzcunwz` in Frankfurt. No tables were deleted. The empty 001–018 baseline was upgraded through migration027; all 27 migration records, restricted runtime permissions, site registry isolation and maintenance/recipient checks passed on the actual verified-TLS pooler connection. The former bypass role is retired. Unrelated projects were preserved.
 
-The owner selected the existing MaintainFlow project `dhbevbimoajwkuzcunwz` in Frankfurt. Its 001–018 checksums and complete application catalog match the release baseline. All 15 application tables, Auth users/identities/sessions and Storage buckets/objects are empty. No table deletion is needed. Captured catalog, roles and ACL metadata were reconstructed and restored locally; this is empty-schema recovery evidence, not a hosted backup or Auth continuity guarantee.
+The three explicitly approved production environment replacements are saved. Read-back verified all 23 settings, production-only, with the two public Auth values matching the reused project. The database credential remains sensitive and server-side. The public domain probe at 20:30:52 UTC verified exact revision `28ecfd3988638c28f6778277b19a7977fa165e98`, authenticated readiness, app/tracker routes, retired legacy APIs and the www redirect. Deployment `dpl_JBbiUeL7fhwgFFC837ho3oE3ui1V` is READY in `fra1`.
 
-The separate guarded upgrade applies only pending migrations and retires the legacy bypass role atomically. Rehearsal found that Supabase's preserved RLS helper blocks website insertion after migration026. Forward migration027 adds explicit server-only site lookup and workspace-scoped mutation policies; existing001–026 bytes are unchanged. Readiness now requires these policies, and the hosted verifier exercises both allowed own-workspace writes and rejected cross-workspace writes.
+That main revision passed [CI](https://github.com/rory-hayes/maintainflow/actions/runs/34275021619) and [CodeQL](https://github.com/rory-hayes/maintainflow/actions/runs/34275020803): 1,261 application tests and 85 PostgreSQL tests, plus live contract, sample/persistent browser, load and container/readiness checks. The contract refresh was independently compared across the complete document: one endpoint-summary wording change, with all 73 operations and executable schemas unchanged.
 
-The reused project's SMTP sender, confirmation/recovery templates, Site URL and `https://maintainflow.io/auth/**` redirect are saved. The target certificate matches the trusted CA. The private runtime candidate uses the dashboard's Frankfurt pooler; credentials remain outside Git. Future Vercel functions are configured for `fra1`, with other resource settings preserved. Hosted schema execution, runtime LOGIN/TLS verification, production environment switch and fresh deployment acceptance are pending in this commit.
+## Fresh customer acceptance on the reused backend
 
-Current code verification passed: `npm run verify` (1,261 tests across 145 files, lint, TypeScript, contract/configuration checks and production build), plus the separate 27-migration/85-test database suite. The [empty-legacy rehearsal](evidence/2026-09-07-empty-legacy-upgrade.json) passed 18 stages, including full DDL/ledger/role rollback after an injected late failure and 14 actual runtime checks over owned local transport.
+| Journey | Direct evidence | Remaining boundary |
+| --- | --- | --- |
+| Signup and confirmation | Normal signup/Terms, actual base-address Gmail confirmation with SPF/DKIM/DMARC pass, received-link confirmation and authenticated session after reopening browser | One authorized owner; unrelated-user acceptance and actual token-expiry refresh remain open |
+| Sign-out and recovery | Normal sign-out, recovery request and actual recovery email with SPF/DKIM/DMARC pass; received link opens the password-update form | Final password submission awaits the separately requested user instruction; old/new-password checks are pending |
+| Workspace and website | Normal Starter trial creation, one owned HTTPS HTML fixture site, owner access and persistence across reload | Controlled acceptance workspace; no paid plan or external customer installation |
+| Health report | Health-only consent saved for the exact approved base address; current recipient validated; one workspace-scoped run accepted one report; actual Gmail receipt passed SPF/DKIM/DMARC | Manual execution only; weekly delivery needs its genuine seven-day interval |
+| Duplicate suppression | Repeating the unchanged workspace-scoped check accepted zero additional emails | No global maintenance call or provider sync |
+| Received unsubscribe link | GET rendered confirmation and left the subscription active; native form POST reproduced HTTP400 because `no-referrer` makes its Origin null | This change fixes the header while preserving strict origin checks; deployed same-link opt-out retest is required |
+| Desktop/mobile app | All eight tabs at 1440×1000 and 390×844 loaded with no page overflow, JavaScript exceptions or failed app requests; mobile close returned keyboard focus | Automated audit is not physical-device or full accessibility certification |
 
-Fresh normal signup and report acceptance must use the approved base email and new workspace/site identities. No report email has been sent. Stripe MFA/test billing, actual HubSpot and OpenAI Ads handoff, scheduled maintenance, unrelated-user acceptance and production backup/hosted restore remain open.
+The rendered audit found low-contrast supporting text and three mobile table regions without keyboard access. This change strengthens text contrast, names/focuses scroll regions and corrects customer-facing billing/sample copy. The unsubscribe fix uses an origin-only referrer policy so its token-bearing URL is not forwarded, while a normal same-origin form retains its browser Origin. Code checks and a fresh deployed retest remain separate evidence.
+
+Detailed sanitized evidence is in the local `/tmp/maintaincode-reuse-*` acceptance artifacts. The [production audit](maintaincode-production-audit.md) preserves earlier findings; its older mvz observations do not establish current dhbe acceptance. Tracker capture, export reconciliation and selected-site deletion on this backend are still in progress.
+
+## Remaining external gates
+
+- Real authorized HubSpot form-field delivery and lifecycle/deal reconciliation; real OpenAI Ads inventory/cost sync. Controlled tags and schema checks do not prove either provider.
+- Stripe access, new prices/webhook and test checkout, entitlement and portal lifecycle. No charge or paid subscription has been created.
+- Actual scheduled maintenance and first weekly report; manual processing does not establish cron execution.
+- Password-change completion, token-expiry refresh and two unrelated authenticated identities exercising access boundaries.
+- Production backup destination/retention, tested hosted restore/Auth continuity and external customer value. Local rollback/recovery drills are narrower evidence.
+
+Pro with Micro compute is the recommended starting Supabase configuration, approximately US$25/month for one active project in a Pro organization. Additional active projects add compute cost; no upgrade or add-on was purchased. Current target billing/backup history still needs direct dashboard confirmation. See [Supabase pricing](https://supabase.com/pricing), [compute billing](https://supabase.com/docs/guides/platform/manage-your-usage/compute) and [backup limits](https://supabase.com/docs/guides/platform/backups). Keep unrelated projects out of any plan/resource change.
 
 ## Historical acceptance before the backend became unavailable
 

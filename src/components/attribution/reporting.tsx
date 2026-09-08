@@ -339,7 +339,14 @@ export function Reporting({
             · {w.timezone}
           </p>
         </div>
-        <div className="mc-table-scroll">
+        <div
+          className="mc-table-scroll"
+          role="region"
+          aria-label={
+            campaigns ? "Campaign performance table" : "Channel performance table"
+          }
+          tabIndex={0}
+        >
           <table>
             <thead>
               <tr>
@@ -735,7 +742,12 @@ export function Leads({
           {rows.length} records · {w.timezone}
         </span>
       </div>
-      <div className="mc-panel mc-table-scroll">
+      <div
+        className="mc-panel mc-table-scroll"
+        role="region"
+        aria-label="Leads table"
+        tabIndex={0}
+      >
         <table>
           <thead>
             <tr>

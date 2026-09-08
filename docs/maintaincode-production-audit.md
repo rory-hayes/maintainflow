@@ -1,6 +1,6 @@
 # MaintainCode Ads customer and production acceptance audit
 
-> Backend status changed after these observations. The prior `mvzspyhwoqzcygekridy` project became unavailable; consult the [current release ledger](maintaincode-release-status.md) for the owner-approved reuse of `dhbevbimoajwkuzcunwz`. Earlier inbox and application acceptance remains historical until repeated against the reused backend.
+> Current acceptance is recorded in the [8 September release ledger](maintaincode-release-status.md): the reused backend is connected, fresh signup/workspace/report delivery are proved, and the live audit identified unsubscribe and accessibility fixes. The following 7 September and earlier observations are historical and do not close current remaining gates.
 
 ## Current acceptance update — 7 September 2026
 
