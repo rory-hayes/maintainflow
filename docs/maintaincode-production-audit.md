@@ -1,6 +1,22 @@
-# MaintainCode Ads customer and production acceptance audit
+# MaintainCode Ads production audit
 
-> Current acceptance is recorded in the [8 September release ledger](maintaincode-release-status.md): the reused backend is connected, fresh signup/workspace/report delivery are proved, and the live audit identified unsubscribe and accessibility fixes. The following 7 September and earlier observations are historical and do not close current remaining gates.
+> Current evidence is on the reused Frankfurt backend `dhbevbimoajwkuzcunwz`. The 7 September and earlier sections below remain historical; their mvz observations do not establish current acceptance after that backend became unavailable.
+
+## Current acceptance update — 8 September 2026
+
+The domain was verified at revision `a1dcb1e525c6ce8cae7651a260b72199dd8b4f88` on 8 September at 21:30:57 UTC, without a Vercel protection bypass. Its exact-main CI and CodeQL pass, with 1,262 application tests and 85 PostgreSQL tests; public readiness confirms six tables, ten isolation policies, the restricted runtime, queue and recipient validator. The [release ledger](maintaincode-release-status.md) and [portable acceptance record](evidence/2026-09-08-reuse-acceptance.json) provide the current boundaries.
+
+The authorized owner's normal signup, confirmation, session reopening, sign-out, recovery email and trial workspace/site creation passed on the reused backend. Password-update submission remains pending authorization. One genuine installation-health condition produced one approved aggregate report, delivered to the verified recipient's Gmail with SPF/DKIM/DMARC pass. The unchanged retry produced no duplicate.
+
+The actual received unsubscribe link first exposed a native-form Origin failure. The deployed strict-origin header and exact-route CSP fix passed the real email-link retry: GET 200, native POST 200, no header rewriting, origin-only Referer, zero persisted subscriptions/pending reports and zero sends from the subsequent preference-off maintenance request. Across report acceptance there were three scoped manual requests, one accepted email, no global maintenance calls and no direct SQL data writes.
+
+All 17 public functional check groups passed on `a1dcb1e`. The populated 16-page audit and two lead-detail pages report zero automated accessibility violation groups and zero overflow; all three table regions pass keyboard checks. Both final text colors now reach 5.03:1 on white, with desktop overview and mobile lead-detail visual review. Isolated deterministic Chromium was used after three CUA timeouts; no physical-device or complete WCAG claim is made.
+
+Controlled visitor traffic on `f7f1029` passed through the real tracker/collector with consent, offline retry, duplicate-ID and withdrawal behavior. Authenticated lead details and actual JSON/CSV exports reconcile one production enquiry, one diagnostic, usage 1/500, no CRM verification and Unknown spend. On `a1dcb1e`, one exact-site UI deletion persisted across reload; exports show zero sites/captures and usage 0/500. The independent unauthenticated loader GET verified its inert 503 body. The browser could not read the 503 script body, but had no tracker state/fields/storage and its independent business form completed one local 200 POST with zero collector attempts. These are separate observations. Earlier failed helper attempts are retained, with zero business or collector posts, and excluded from passing acceptance.
+
+Visitor browsers/profile and fixture resources were removed; the owner account, empty trial workspace and owner profile remain for the pending password decision. Phase-specific report delivery remains dated to `28ecfd3`, actual unsubscribe to `f7f1029`, and final accessibility/deletion to `a1dcb1e`. Later documentation-only commits do not invalidate these dated tests; verify unchanged app sources and run a fresh domain probe.
+
+Real HubSpot/OpenAI Ads delivery, Stripe test billing, scheduled execution, weekly delivery, backup/hosted restore, current-backend natural-expiry cleanup, unrelated identities and an external customer's successful source-to-CRM journey remain open. The evidence proves the stated app flows; it does not establish commercial readiness.
 
 ## Current acceptance update — 7 September 2026
 
