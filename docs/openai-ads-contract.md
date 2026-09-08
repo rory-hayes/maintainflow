@@ -4,10 +4,17 @@ The MaintainCode attribution read contract was reviewed on 6 September 2026 agai
 the [published OpenAPI document](https://developers.openai.com/ads/openapi.json),
 the [authentication guide](https://developers.openai.com/ads/api-reference/authentication)
 and the [Insights guide](https://developers.openai.com/ads/api-reference/insights).
-The document still identifies as `2.3.0`, but its reviewed SHA-256 is now
-`c8b8fa50544f9c5b02f65de6f2f23de9d7f1c494e2a10cf6b3881bf037f528ce` and it has
+The complete OpenAPI document was compared again on 8 September 2026. It still
+identifies as `2.3.0`, and its reviewed SHA-256 is now
+`7b9f898546fe9d245b3190136d74c16f21cc322a25458c3151144f4811ce9294`. It has
 73 operations. Fifteen previously listed operations are absent; the manifest
 records those removals without enabling any replacement capability.
+
+The only change since 6 September is the `GET /geo_lookup/search` summary:
+“Search DMA and standard region codes for advertiser geo targeting.” became
+“Search Market locations and standard region codes for advertiser geo targeting.”
+All other values, including request/response schemas, security, webhooks and
+extension metadata, are identical. No adapter change was needed.
 
 MaintainCode uses only `GET /ad_account`, `GET /campaigns`, `GET /ad_groups`,
 `GET /ads` and `GET /ad_account/insights`. Their operation IDs, read scopes,
