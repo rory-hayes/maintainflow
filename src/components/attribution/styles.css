@@ -340,7 +340,7 @@
 .mc-axis {
   display: flex;
   justify-content: space-between;
-  color: #7a857e;
+  color: var(--mc-muted);
   font-size: 10px;
   margin-top: 7px;
 }
@@ -582,7 +582,7 @@
   overflow-wrap: anywhere;
 }
 .mc-app dt {
-  color: #7c877f;
+  color: var(--mc-muted);
   margin-top: 10px;
 }
 .mc-app dd {
