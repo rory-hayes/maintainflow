@@ -6,12 +6,14 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/attribution/store.server", () => state);
 import { GET } from "./route";
+import { emptyWorkspace } from "@/lib/attribution/model";
 const id = "4f3c61a1-260a-4b4e-a801-b6b3e75d8f81";
 beforeEach(() => {
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("MAINTAINCODE_APP_ORIGIN", "https://maintainflow.io/");
   state.siteOwner.mockResolvedValue({ organizationId: "workspace" });
   state.readWorkspace.mockResolvedValue({
+    ...emptyWorkspace("workspace", "Test"),
     sites: [
       {
         id,

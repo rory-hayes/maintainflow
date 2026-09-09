@@ -35,6 +35,7 @@ describe("HubSpot read-only adapter", () => {
       syncHubspot(
         emptyWorkspace("w", "Test"),
         "test-token",
+        "123",
         AbortSignal.abort(),
       ),
     ).rejects.toThrow();
@@ -52,6 +53,7 @@ describe("HubSpot read-only adapter", () => {
     const result = syncHubspot(
       emptyWorkspace("w", "Test"),
       "test-token",
+      "123",
       controller.signal,
     );
     const assertion = expect(result).rejects.toThrow();
@@ -84,6 +86,8 @@ describe("HubSpot read-only adapter", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.includes("/access-token-info"))
+          return Response.json({ hubId: 123 });
         paths.push(url);
         if (url.includes("/properties/"))
           return Response.json({ name: w.submissionProperty });
@@ -107,7 +111,7 @@ describe("HubSpot read-only adapter", () => {
         });
       }),
     );
-    const result = await syncHubspot(w, "test-token");
+    const result = await syncHubspot(w, "test-token", "123");
     const query = new URL(
       paths.find((url) => url.includes("/objects/contacts"))!,
     ).searchParams;
@@ -132,6 +136,8 @@ describe("HubSpot read-only adapter", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.includes("/access-token-info"))
+          return Response.json({ hubId: 123 });
         if (url.includes("/properties/"))
           return Response.json({ name: "mc_submission_id" });
         if (url.includes("/objects/contacts"))
@@ -148,7 +154,7 @@ describe("HubSpot read-only adapter", () => {
       }),
     );
     await expect(
-      syncHubspot(emptyWorkspace("w", "Test"), "test-token"),
+      syncHubspot(emptyWorkspace("w", "Test"), "test-token", "123"),
     ).rejects.toThrow("invalid close date");
   });
   it("retains submission property history and asks for no personal contact fields", async () => {
@@ -156,6 +162,8 @@ describe("HubSpot read-only adapter", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, options: RequestInit) => {
+        if (url.includes("/access-token-info"))
+          return Response.json({ hubId: 123 });
         paths.push(url);
         expect(options.method ?? "GET").toBe("GET");
         if (url.includes("/properties/"))
@@ -196,7 +204,11 @@ describe("HubSpot read-only adapter", () => {
         });
       }),
     );
-    const result = await syncHubspot(emptyWorkspace("w", "Test"), "test-token");
+    const result = await syncHubspot(
+      emptyWorkspace("w", "Test"),
+      "test-token",
+      "123",
+    );
     expect(result.contacts[0].submissions).toEqual(["second", "first"]);
     expect(result.deals[0].amount).toBe(100.25);
     expect(result.deals[0].contacts).toEqual(["c1", "c2"]);
@@ -210,20 +222,25 @@ describe("HubSpot read-only adapter", () => {
       ),
     );
     await expect(
-      syncHubspot(emptyWorkspace("w", "Test"), "secret-token"),
+      syncHubspot(emptyWorkspace("w", "Test"), "secret-token", "123"),
     ).rejects.toThrow("permissions");
   });
   it("discards repeated pagination instead of accepting partial CRM data", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) =>
-        url.includes("/properties/")
-          ? Response.json({ name: "mc_submission_id" })
-          : Response.json({ results: [], paging: { next: { after: "same" } } }),
+        url.includes("/access-token-info")
+          ? Response.json({ hubId: 123 })
+          : url.includes("/properties/")
+            ? Response.json({ name: "mc_submission_id" })
+            : Response.json({
+                results: [],
+                paging: { next: { after: "same" } },
+              }),
       ),
     );
     await expect(
-      syncHubspot(emptyWorkspace("w", "Test"), "test-token"),
+      syncHubspot(emptyWorkspace("w", "Test"), "test-token", "123"),
     ).rejects.toThrow("No partial snapshot");
   });
 });

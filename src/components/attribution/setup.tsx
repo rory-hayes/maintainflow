@@ -302,7 +302,7 @@ export function Websites({ w, act }: { w: Workspace; act: Act }) {
               <p role="status">Copied installation snippet.</p>
             )}
             <h3>2. Connect consent and form success</h3>
-            <pre className="mc-code-block">{`// Run after the tracker loads and consent is granted:\nwindow.MaintainCode?.setConsent(true);\n// On withdrawal:\nwindow.MaintainCode?.setConsent(false);\n${site.adapter === "html" ? '// Only after your existing handler confirms success:\nwindow.MaintainCode?.confirm(document.querySelector("' + site.formSelector + '"));' : "// V4 on-ready and on-submission:success events are handled automatically."}`}</pre>
+            <pre className="mc-code-block">{`// Run after the tracker loads and consent is granted:\nwindow.MaintainCode?.setConsent(true);\n// On withdrawal:\nwindow.MaintainCode?.setConsent(false);\n${site.adapter === "html" ? "// Only after your existing handler confirms success:\nwindow.MaintainCode?.confirm(document.querySelector(" + JSON.stringify(site.formSelector) + "));" : "// V4 on-ready and on-submission:success events are handled automatically."}`}</pre>
             <p>
               The tracker never prevents submission. Standard HTML posts need a
               documented success callback or a later CRM match; a submit attempt
@@ -778,7 +778,7 @@ export function Settings({ w, act }: { w: Workspace; act: Act }) {
         <div className="mc-price-row">
           <div>
             <h3>Business · €49 / month</h3>
-            <p>1 website · 500 monthly submissions</p>
+            <p>1 active website · 500 monthly submissions</p>
             <button
               disabled={w.mode === "sample"}
               onClick={() => billing("checkout", "starter")}
@@ -794,7 +794,7 @@ export function Settings({ w, act }: { w: Workspace; act: Act }) {
           </div>
           <div>
             <h3>Agency · €149 / month</h3>
-            <p>5 websites · 2,500 pooled submissions</p>
+            <p>5 active websites · 2,500 pooled submissions</p>
             <button
               disabled={w.mode === "sample"}
               onClick={() => billing("checkout", "agency")}
@@ -884,7 +884,7 @@ export function NewWorkspace({
         </label>
         <label className="mc-checkbox">
           <input type="checkbox" name="agency" />
-          Agency workspace (five-site plan)
+          Agency workspace (five active websites)
         </label>
         <button className="mc-primary">
           Create workspace

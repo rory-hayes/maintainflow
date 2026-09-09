@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import {
   emptyWorkspace,
+  siteLimitRestriction,
   type Workspace,
   type Submission,
 } from "@/lib/attribution/model";
@@ -87,6 +88,7 @@ export function AttributionApp({
   const workspaceListLoaded = listLoaded && (local || signedIn);
   const workspaceAccessLoaded = accessLoaded && (local || signedIn);
   const hasWorkspaceAccess = workspaceAccessLoaded && Boolean(w.id && role);
+  const siteLimitMessage = hasWorkspaceAccess ? siteLimitRestriction(w) : null;
 
   function closeNavigation() {
     setMobile(false);
@@ -212,6 +214,13 @@ export function AttributionApp({
       if (!r.ok) throw new Error(data.error);
       if (request !== requestVersion.current) return;
       setW(data.state);
+      setWorkspaces((current) =>
+        current.map((workspace) =>
+          workspace.id === data.state.id
+            ? { ...workspace, name: data.state.name }
+            : workspace,
+        ),
+      );
       setNotice("Workspace updated.");
     } catch (e) {
       if (request !== requestVersion.current) return;
@@ -284,11 +293,7 @@ export function AttributionApp({
           <select
             aria-label="Workspace"
             value={
-              w.mode === "sample"
-                ? "sample"
-                : workspaceAccessLoaded
-                  ? w.id
-                  : ""
+              w.mode === "sample" ? "sample" : workspaceAccessLoaded ? w.id : ""
             }
             onChange={(e) => {
               if (e.target.value === "new") {
@@ -420,6 +425,22 @@ export function AttributionApp({
             >
               <X />
             </button>
+          </div>
+        )}
+        {siteLimitMessage && (
+          <div className="mc-alert mc-site-limit" role="alert">
+            <span>
+              New tracking is suspended. {siteLimitMessage} Your saved data is
+              unchanged.
+            </span>
+            <div className="mc-site-limit-actions">
+              <button onClick={() => navigate("Websites & forms")}>
+                Manage active websites
+              </button>
+              <button onClick={() => navigate("Workspace & billing")}>
+                Review plan
+              </button>
+            </div>
           </div>
         )}
         {loading && (

@@ -1,5 +1,6 @@
 import "server-only";
 import Stripe from "stripe";
+import { siteLimitRestriction } from "./model";
 import {
   AttributionError,
   mutateWorkspace,
@@ -61,6 +62,12 @@ export async function billingSession(
     throw new AttributionError(
       409,
       "Manage the existing subscription in the billing portal.",
+    );
+  const siteRestriction = siteLimitRestriction(w, plan);
+  if (siteRestriction)
+    throw new AttributionError(
+      409,
+      `${siteRestriction} No payment was initiated.`,
     );
   const price =
     process.env[`STRIPE_PRICE_${plan.toUpperCase()}_${interval.toUpperCase()}`];
@@ -134,6 +141,8 @@ export async function applySubscription(subscription: Stripe.Subscription) {
         !["active", "trialing"].includes(subscription.status))
     )
       return; // An older subscription event cannot cancel a newer subscription.
+    // Reflect the provider's actual plan without deleting sites or changing the
+    // owner's pause choices. Loader/collector enforce any excess active sites.
     w.billing = {
       ...w.billing,
       status: subscription.status,
