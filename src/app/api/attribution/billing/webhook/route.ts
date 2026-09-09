@@ -1,6 +1,6 @@
 import {
   stripeClient,
-  applySubscription,
+  refreshSubscription,
 } from "@/lib/attribution/billing.server";
 import { AttributionError } from "@/lib/attribution/store.server";
 import { failure } from "@/lib/attribution/http.server";
@@ -28,11 +28,9 @@ export async function POST(request: Request) {
       event.type === "customer.subscription.updated" ||
       event.type === "customer.subscription.deleted"
     ) {
-      // Fetch canonical state on every retry; old events cannot restore stale subscription status.
-      const subscription = await stripe.subscriptions.retrieve(
-        event.data.object.id,
-      );
-      await applySubscription(subscription);
+      const workspaceId = event.data.object.metadata.workspaceId;
+      if (workspaceId)
+        await refreshSubscription(workspaceId, event.data.object.id, stripe);
     }
     return Response.json({ received: true });
   } catch (e) {

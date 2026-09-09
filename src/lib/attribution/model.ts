@@ -167,6 +167,20 @@ export type Workspace = {
     customerId?: string;
     subscriptionId?: string;
     lastEventAt?: number;
+    refreshGeneration?: string;
+    checkout?: {
+      id: string;
+      plan: "starter" | "agency";
+      interval: "month" | "year";
+      priceId: string;
+      customerId?: string;
+      returnUrl: string;
+      requestedAt: number;
+      createStartedAt?: number;
+      sessionId?: string;
+      leaseToken?: string;
+      leaseUntil?: number;
+    };
     trialEndsAt: string;
   };
 };

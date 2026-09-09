@@ -134,6 +134,20 @@ describe("workspace boundary", () => {
   it("redacts click references and billing IDs from exported workspace data", () => {
     const w = emptyWorkspace("w", "Test");
     w.billing.customerId = "cus_private";
+    w.billing.subscriptionId = "sub_private";
+    w.billing.refreshGeneration = "refresh_private";
+    w.billing.checkout = {
+      id: "attempt_private",
+      plan: "starter",
+      interval: "month",
+      priceId: "price_private",
+      customerId: "cus_private",
+      returnUrl: "https://maintainflow.io/app",
+      requestedAt: 1,
+      sessionId: "cs_private",
+      leaseToken: "lease_private",
+      leaseUntil: 2,
+    };
     const evidence = advanceEvidence(
       null,
       captureTouch("https://site.example/?oppref=private-click"),
@@ -150,6 +164,16 @@ describe("workspace boundary", () => {
     const text = JSON.stringify(publicWorkspace(w));
     expect(text).not.toContain("private-click");
     expect(text).not.toContain("cus_private");
+    for (const value of [
+      "sub_private",
+      "refresh_private",
+      "attempt_private",
+      "price_private",
+      "cs_private",
+      "lease_private",
+    ])
+      expect(text).not.toContain(value);
+    expect(w.billing.checkout.id).toBe("attempt_private");
     expect(w.submissions[0].evidence.first.oppref).toBe("private-click");
   });
 });
