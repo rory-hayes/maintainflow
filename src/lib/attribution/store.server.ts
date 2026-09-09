@@ -229,7 +229,13 @@ export function publicWorkspace(w: Workspace) {
   return {
     ...w,
     notifications: undefined,
-    billing: { ...w.billing, customerId: undefined, subscriptionId: undefined },
+    billing: {
+      ...w.billing,
+      customerId: undefined,
+      subscriptionId: undefined,
+      refreshGeneration: undefined,
+      checkout: undefined,
+    },
     submissions: w.submissions.map((s) => ({
       ...s,
       evidence: {

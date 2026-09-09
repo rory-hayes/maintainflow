@@ -2,20 +2,20 @@
 
 ## Current evidence
 
-On 6 September 2026, the available Chrome session reached Stripe's signed-out login page. Starting Google sign-in was rejected by automatic approval review because the specific account/sign-in method had not been authorized. No Stripe CLI configuration or process-level Stripe key was available. No Stripe products, prices, webhook endpoint, customer, payment or subscription were created by this setup attempt. Existing production environment variable names do not establish whether a usable test account is connected.
+On 9 September 2026, the owner signed in to the intended Maintain Flow Stripe account and its test mode was verified. Two dedicated MaintainCode Ads test products and their four prices were created and read back; the legacy catalog was preserved. The approved test credential was verified against the intended account. These setup checks do not establish completed checkout, webhook delivery or subscription lifecycle acceptance.
 
-The browser is left at the Stripe sign-in page for the owner. After signing in, explicitly select the intended Stripe account and its test/sandbox environment. Existing live products, prices and webhook endpoints must remain unchanged.
+Select the intended account and its test/sandbox environment before every setup action. Existing environment variable names alone do not establish test mode or credential ownership. Preserve unrelated products, portals and webhook endpoints.
 
 ## Exact resources
 
 Create two clearly named products in the selected **test** environment, with the following four active, licensed recurring prices. Use EUR with quantity one, interval count one, and no automatic usage overages. These are the proposed amounts displayed and validated by the app, not evidence of paid demand.
 
-| Product                  | Interval |                     Amount | Server setting               |
-| ------------------------ | -------- | -------------------------: | ---------------------------- |
-| MaintainCode Ads Starter | Monthly  |      €49.00 (`4900` cents) | `STRIPE_PRICE_STARTER_MONTH` |
-| MaintainCode Ads Starter | Yearly   |    €490.00 (`49000` cents) | `STRIPE_PRICE_STARTER_YEAR`  |
-| MaintainCode Ads Agency  | Monthly  |    €149.00 (`14900` cents) | `STRIPE_PRICE_AGENCY_MONTH`  |
-| MaintainCode Ads Agency  | Yearly   | €1,490.00 (`149000` cents) | `STRIPE_PRICE_AGENCY_YEAR`   |
+| Product                   | Interval |                     Amount | Server setting               |
+| ------------------------- | -------- | -------------------------: | ---------------------------- |
+| MaintainCode Ads Business | Monthly  |      €49.00 (`4900` cents) | `STRIPE_PRICE_STARTER_MONTH` |
+| MaintainCode Ads Business | Yearly   |    €490.00 (`49000` cents) | `STRIPE_PRICE_STARTER_YEAR`  |
+| MaintainCode Ads Agency   | Monthly  |    €149.00 (`14900` cents) | `STRIPE_PRICE_AGENCY_MONTH`  |
+| MaintainCode Ads Agency   | Yearly   | €1,490.00 (`149000` cents) | `STRIPE_PRICE_AGENCY_YEAR`   |
 
 Prefer metadata identifying `maintaincode_ads`, the plan and `test_acceptance` so these new resources can be distinguished from existing products. Before creating anything, inspect exact names/metadata to avoid duplicate resources from a prior attempt.
 
@@ -26,15 +26,13 @@ Add a **new test webhook endpoint**, leaving previous endpoints intact:
 - Signing secret: save the `whsec_…` issued specifically for this new endpoint as `STRIPE_WEBHOOK_SECRET`.
 - API credential: use the selected account's `sk_test_…` or appropriately scoped `rk_test_…` as `STRIPE_SECRET_KEY`. Never copy a live key into the test setup.
 
-The webhook verifies the raw body signature and retrieves canonical subscription state before changing a workspace. A generic synthetic subscription event with an invented subscription ID cannot prove this flow; Stripe must be able to retrieve the real test subscription. See [Stripe subscription webhooks](https://docs.stripe.com/billing/subscriptions/webhooks).
+The webhook verifies the raw body signature, claims a persisted workspace refresh generation, and retrieves canonical subscription state before changing billing. A superseded overlapping request fails for a fresh Stripe retry rather than overwriting a newer result. A generic synthetic subscription event with an invented subscription ID cannot prove this flow; Stripe must be able to retrieve the real test subscription. See [Stripe subscription webhooks](https://docs.stripe.com/billing/subscriptions/webhooks).
 
-The current app opens Stripe's default customer portal configuration. Inspect the **test** portal before changing it: cancellation and payment-method updates must be enabled for acceptance. If this configuration is shared with other products, preserve its behavior and plan a dedicated MaintainCode portal configuration before introducing broader changes. Actual portal access remains unverified until a test workspace has a Stripe customer. See [Stripe customer portal integration](https://docs.stripe.com/customer-management/integrate-customer-portal).
+Set `MAINTAINCODE_STRIPE_PORTAL_CONFIGURATION_ID` to a dedicated **test** customer portal configuration when the default portal is shared. The app passes this exact configuration to Stripe; omitting it retains Stripe's default selection. Enable cancellation and payment-method updates. If plan changes are enabled, allow only the two current products with all four matching prices. A dedicated configuration preserves the legacy portal's behavior. Actual portal access remains unverified until a test workspace has a Stripe customer. See [Stripe customer portal integration](https://docs.stripe.com/customer-management/integrate-customer-portal).
 
 ## Secure configuration and diagnostic
 
-Store only the six required values in a private local JSON file at `/tmp/maintaincode-stripe-config.json` (file permissions `0600`), using environment variable names as top-level keys. This file should contain the new test key, the new endpoint's signing secret and the four new price IDs. Do not save unrelated Vercel secrets or print this file. Configure those exact keys in the maintainflow Vercel project's production environment for the test acceptance deployment and redeploy.
-
-The setup attempt did **not** create this secret file because no Stripe resources or credentials were obtained. Do not use placeholder IDs to make configuration checks appear green.
+Store the six required values and, when used, the dedicated portal ID in a private local JSON file at `/tmp/maintaincode-stripe-config.json` (file permissions `0600`), using environment variable names as top-level keys. This file should contain the test key, the new endpoint's signing secret and the four new price IDs. Do not save unrelated Vercel secrets or print this file. Configure those exact keys in the maintainflow Vercel project's production environment for the authorized test acceptance deployment and redeploy. Keep a newly prepared webhook disabled until its matching server configuration is deployed. Do not use placeholder IDs to make configuration checks appear green.
 
 ```bash
 # Local shape check: no Stripe requests.
@@ -44,13 +42,17 @@ node scripts/check-maintaincode-billing.mjs --config /tmp/maintaincode-stripe-co
 node scripts/check-maintaincode-billing.mjs --config /tmp/maintaincode-stripe-config.json --remote
 ```
 
-The diagnostic refuses live keys, reads the four exact prices, checks named test products and the exact new webhook, and reports missing portal configuration. It makes no write, creates no checkout, and prints no keys or webhook secret. Remote checks require account, product, price, webhook-endpoint and portal-configuration read permissions; permission errors are a configuration gap, not permission to escalate access silently.
+The diagnostic refuses live keys, reads four distinct exact prices, checks two named test products and the exact new webhook, and validates the selected portal's active test mode, required features and product/price mapping. An explicit portal ID is retrieved directly without falling back to the shared default. It makes no write, creates no checkout, and prints no keys or webhook secret. Remote checks require account, product, price, webhook-endpoint and portal-configuration read permissions; permission errors are a configuration gap, not permission to escalate access silently.
 
 A readable webhook endpoint does not prove that the configured signing secret belongs to it. Only a correctly signed accepted delivery supplies that evidence. Do not treat `ok:true` from the read-only diagnostic as payment completion or customer validation.
 
 ## Acceptance still to run
 
 Use only disposable test-mode workspaces and Stripe's documented test payment methods, with authorization for creating test subscriptions. Never enter real card details or create a live charge during this acceptance run.
+
+Checkout attempts persist an immutable request identity across retries and reuse an open session across clock boundaries. An explicit plan or interval change expires the previous owned session and confirms its current status before replacing it. If payment completed in the meantime, the app reconciles the subscription and directs the customer to the portal. A create request with an unknown outcome retains its original parameters and key; after 23 hours it requires review before another payment can start. These private attempt and refresh fields are excluded from workspace responses and exports.
+
+After successful test payments, cancel all test subscriptions and close unused sessions. Cancellation retains the workspace's Stripe identifiers and does not restore its original no-customer trial; use a separate billing acceptance workspace when that original workspace must remain unchanged.
 
 1. Verify each of the four plan buttons creates hosted Checkout with the exact EUR amount/interval and returns to the correct workspace/domain. Cancel the checkout and verify no paid entitlement is granted.
 2. Complete an authorized test subscription. Verify the actual signed subscription event receives a 2xx response, the exact workspace becomes active, the plan matches, and another workspace is unchanged.

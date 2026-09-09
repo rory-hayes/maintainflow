@@ -12,13 +12,16 @@ const state = vi.hoisted(() => ({
   workspace: null as unknown as Workspace,
   price: vi.fn(),
   checkout: vi.fn(),
+  retrieve: vi.fn(),
   portal: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("stripe", () => ({
   default: class {
     prices = { retrieve: state.price };
-    checkout = { sessions: { create: state.checkout } };
+    checkout = {
+      sessions: { create: state.checkout, retrieve: state.retrieve },
+    };
     billingPortal = { sessions: { create: state.portal } };
   },
 }));
@@ -41,8 +44,9 @@ vi.mock("./store.server", () => ({
   readWorkspace: async () => structuredClone(state.workspace),
   mutateWorkspace: async (_id: string, change: (w: Workspace) => void) => {
     const next = structuredClone(state.workspace);
-    change(next);
+    const result = change(next);
     state.workspace = next;
+    return result;
   },
 }));
 vi.mock("./sync.server", () => ({ syncWorkspaceProvider: vi.fn() }));
@@ -67,9 +71,18 @@ beforeEach(() => {
     unit_amount: 4900,
     recurring: { interval: "month", interval_count: 1 },
   });
-  state.checkout.mockResolvedValue({
+  state.checkout.mockImplementation(async (params) => ({
+    id: "cs_entitlement_test",
+    mode: "subscription",
+    status: "open",
+    client_reference_id: params.client_reference_id,
+    metadata: params.metadata,
+    customer: params.customer ?? null,
     url: "https://checkout.stripe.test/mock",
-  });
+  }));
+  state.retrieve.mockImplementation(
+    async () => state.checkout.mock.results[0].value,
+  );
   state.workspace = emptyWorkspace(workspaceId, "Agency client");
   state.workspace.billing.plan = "agency";
   state.workspace.sites = [siteId, extraSiteId].map((id) => ({
