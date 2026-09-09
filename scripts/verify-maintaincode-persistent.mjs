@@ -425,7 +425,7 @@ try {
     page.getByRole("heading", { name: "Give your marketing a clear trail." }),
   ).toBeVisible();
   await page.getByLabel("Workspace name", { exact: true }).fill(name);
-  await page.getByLabel("Agency workspace (five-site plan)").check();
+  await page.getByLabel("Agency workspace (five active websites)").check();
   const createdResponse = page.waitForResponse(
     (response) =>
       response.url() === `${appOrigin}/api/attribution/workspaces` &&
