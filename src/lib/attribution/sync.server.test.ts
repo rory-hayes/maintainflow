@@ -45,7 +45,7 @@ vi.mock("./connectors.server", () => ({
 }));
 import { syncWorkspaceProvider } from "./sync.server";
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   fixture.state = emptyWorkspace("workspace", "Test");
   fixture.state.connectors = [
     {
@@ -61,6 +61,119 @@ beforeEach(() => {
   fixture.sync.mockResolvedValue({ contacts: [], deals: [] });
 });
 describe("connector recovery and ordering", () => {
+  it.each([false, true])(
+    "allows a corrected account after a failed first connection (disconnected=%s)",
+    async (disconnected) => {
+      fixture.state.connectors = [];
+      fixture.openai.mockRejectedValueOnce(new Error("Account does not match"));
+      const connect = (accountId: string) =>
+        syncWorkspaceProvider("workspace", {
+          action: "connect",
+          provider: "openai",
+          accountId,
+          token: "synthetic-token",
+        });
+      await expect(connect("mistyped-account")).rejects.toThrow(
+        "Account does not match",
+      );
+      expect(fixture.state.connectors[0].syncedAt).toBeUndefined();
+      if (disconnected) {
+        fixture.state.connectors[0].status = "revoked";
+        fixture.state.connectors[0].operationId = undefined;
+      }
+      fixture.openai.mockResolvedValueOnce({
+        account: { id: "correct-account", timezone: "UTC" },
+        inventory: {
+          accountId: "correct-account",
+          campaigns: [],
+          groups: [],
+          ads: [],
+        },
+        costs: [],
+        costWindow: { from: "2026-09-01", to: "2026-09-02" },
+        coverage: "complete day",
+      });
+      await expect(connect("correct-account")).resolves.toBeUndefined();
+      expect(fixture.state.connectors[0]).toMatchObject({
+        accountId: "correct-account",
+        status: "connected",
+      });
+      expect(fixture.openai).toHaveBeenCalledTimes(2);
+    },
+  );
+  it.each(["error", "revoked"] as const)(
+    "keeps a previously verified account pinned when %s",
+    async (status) => {
+      fixture.state.connectors[0].status = status;
+      await expect(
+        syncWorkspaceProvider("workspace", {
+          action: "connect",
+          provider: "hubspot",
+          token: "synthetic-token",
+          accountId: "other-portal",
+        }),
+      ).rejects.toThrow("separate workspace");
+      expect(fixture.sync).not.toHaveBeenCalled();
+    },
+  );
+  it("does not replace an account with retained CRM history even if its success timestamp is absent", async () => {
+    fixture.state.connectors[0].status = "error";
+    delete fixture.state.connectors[0].syncedAt;
+    fixture.state.contacts = [
+      {
+        id: "existing-contact",
+        stage: "lead",
+        submissions: [],
+        updatedAt: "2026-09-01T00:00:00Z",
+      },
+    ];
+    await expect(
+      syncWorkspaceProvider("workspace", {
+        action: "connect",
+        provider: "hubspot",
+        token: "synthetic-token",
+        accountId: "other-portal",
+      }),
+    ).rejects.toThrow("separate workspace");
+    expect(fixture.sync).not.toHaveBeenCalled();
+  });
+  it.each(["inventory", "native costs"])(
+    "does not replace an account with retained %s without a success timestamp",
+    async (history) => {
+      fixture.state.connectors = [
+        { provider: "openai", accountId: "original-account", status: "error" },
+      ];
+      if (history === "inventory")
+        fixture.state.adInventory = {
+          accountId: "original-account",
+          campaigns: [],
+          groups: [],
+          ads: [],
+        };
+      else
+        fixture.state.costs = [
+          {
+            id: "cost",
+            source: "openai",
+            campaignId: "campaign",
+            campaign: "Campaign",
+            channel: "ChatGPT Ads",
+            currency: "EUR",
+            date: "2026-09-01",
+            amount: 1,
+          },
+        ];
+      await expect(
+        syncWorkspaceProvider("workspace", {
+          action: "connect",
+          provider: "openai",
+          token: "synthetic-token",
+          accountId: "other-account",
+        }),
+      ).rejects.toThrow("separate workspace");
+      expect(fixture.openai).not.toHaveBeenCalled();
+    },
+  );
   it("preserves last success on provider failure", async () => {
     fixture.sync.mockRejectedValueOnce(new Error("Provider unavailable"));
     await expect(
@@ -247,6 +360,78 @@ describe("CRM installation verification", () => {
       });
       expect(Boolean(fixture.state.submissions[0].crmVerifiedAt)).toBe(true);
       expect(Boolean(fixture.state.sites[0].verifiedAt)).toBe(matchingFields);
+      if (matchingFields) {
+        // A later successful read can prove that the formerly working handoff
+        // no longer matches. The site-level badge must reflect that result.
+        fixture.sync.mockResolvedValueOnce({
+          contacts: [
+            {
+              id: "contact",
+              stage: "lead",
+              submissions: ["test-submission"],
+              currentSubmissions: ["test-submission"],
+              fieldValues: {},
+              updatedAt: now.toISOString(),
+            },
+          ],
+          deals: [],
+        });
+        await syncWorkspaceProvider("workspace", {
+          action: "sync",
+          provider: "hubspot",
+        });
+        expect(
+          fixture.state.submissions[0].crmFieldsVerifiedAt,
+        ).toBeUndefined();
+        expect(fixture.state.submissions[0].crmFieldDiagnostics?.status).toBe(
+          "missing",
+        );
+        expect(fixture.state.sites[0].verifiedAt).toBeUndefined();
+        // Re-verify, then remove the contact altogether in the next completed
+        // snapshot. Losing the identity match must also revoke the site badge.
+        fixture.sync.mockResolvedValueOnce({
+          contacts: [
+            {
+              id: "contact",
+              stage: "lead",
+              submissions: ["test-submission"],
+              currentSubmissions: ["test-submission"],
+              fieldValues: Object.fromEntries(
+                Object.entries(defaultMapping).map(([key, property]) => [
+                  property,
+                  fields[key as keyof typeof fields] ?? "",
+                ]),
+              ),
+              updatedAt: now.toISOString(),
+            },
+          ],
+          deals: [],
+        });
+        await syncWorkspaceProvider("workspace", {
+          action: "sync",
+          provider: "hubspot",
+        });
+        expect(fixture.state.sites[0].verifiedAt).toBeDefined();
+        fixture.sync.mockRejectedValueOnce(
+          new Error("Provider temporarily unavailable"),
+        );
+        await expect(
+          syncWorkspaceProvider("workspace", {
+            action: "sync",
+            provider: "hubspot",
+          }),
+        ).rejects.toThrow();
+        expect(fixture.state.sites[0].verifiedAt).toBeDefined();
+        fixture.sync.mockResolvedValueOnce({ contacts: [], deals: [] });
+        await syncWorkspaceProvider("workspace", {
+          action: "sync",
+          provider: "hubspot",
+        });
+        expect(
+          fixture.state.submissions[0].crmFieldsVerifiedAt,
+        ).toBeUndefined();
+        expect(fixture.state.sites[0].verifiedAt).toBeUndefined();
+      }
     },
   );
 });

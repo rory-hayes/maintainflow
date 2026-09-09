@@ -4,6 +4,7 @@ import {
   upsertSubmission,
   captureAllowance,
   normalizeEvidence,
+  siteLimitRestriction,
 } from "@/lib/attribution/model";
 import {
   AttributionError,
@@ -58,6 +59,12 @@ export async function POST(request: Request) {
       const site = w.sites.find((s) => s.id === data.siteId);
       if (!site || site.paused)
         throw new AttributionError(409, "Tracking is paused.");
+      const siteRestriction = siteLimitRestriction(w);
+      if (
+        siteRestriction &&
+        !w.submissions.some((s) => s.id === data.id && s.siteId === data.siteId)
+      )
+        throw new AttributionError(409, siteRestriction);
       if (
         w.submissions.length >= 10000 &&
         !w.submissions.some((s) => s.id === data.id)

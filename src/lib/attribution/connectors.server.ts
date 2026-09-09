@@ -49,11 +49,17 @@ async function hubspot<T>(
   token: string,
   schema: z.ZodType<T>,
   signal?: AbortSignal,
+  tokenInfoBody?: { tokenKey: string },
 ): Promise<T> {
   for (let attempt = 0; attempt < 3; attempt++) {
     signal?.throwIfAborted();
     const response = await fetch(`https://api.hubapi.com${path}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      method: tokenInfoBody ? "POST" : "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(tokenInfoBody ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(tokenInfoBody ? { body: JSON.stringify(tokenInfoBody) } : {}),
       signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(12000)])
         : AbortSignal.timeout(12000),
@@ -84,7 +90,14 @@ async function hubspot<T>(
         502,
         "HubSpot response exceeds the supported size.",
       );
-    return schema.parse(JSON.parse(body));
+    try {
+      return schema.parse(JSON.parse(body));
+    } catch {
+      throw new AttributionError(
+        502,
+        "HubSpot returned an invalid response. Last successful data is preserved; retry the sync.",
+      );
+    }
   }
   throw new AttributionError(502, "HubSpot rate limit reached. Retry later.");
 }
@@ -125,8 +138,42 @@ async function listHubspot(
 export async function syncHubspot(
   w: Workspace,
   token: string,
+  expectedAccountId: string,
   signal?: AbortSignal,
 ) {
+  signal?.throwIfAborted();
+  if (
+    typeof expectedAccountId !== "string" ||
+    !/^[1-9]\d*$/.test(expectedAccountId) ||
+    !Number.isSafeInteger(Number(expectedAccountId))
+  )
+    throw new AttributionError(
+      400,
+      "Enter the numeric HubSpot account ID before connecting or syncing.",
+    );
+  // HubSpot documents this read-only token inspection as a POST. Never put the
+  // token in a URL, and verify its actual portal before reading any CRM data.
+  const tokenInfo = await hubspot(
+    "/oauth/v2/private-apps/get/access-token-info",
+    token,
+    z.unknown(),
+    signal,
+    { tokenKey: token },
+  );
+  const identity = z
+    .object({ hubId: z.number().int().positive().safe() })
+    .safeParse(tokenInfo);
+  if (!identity.success)
+    throw new AttributionError(
+      502,
+      "HubSpot account identity could not be verified. No CRM data was read.",
+    );
+  if (String(identity.data.hubId) !== expectedAccountId)
+    throw new AttributionError(
+      409,
+      "The token belongs to a different HubSpot account. Check the account ID and private app token; previous data is preserved.",
+    );
+  signal?.throwIfAborted();
   // Required custom property must exist. This connector never creates or overwrites CRM properties.
   await hubspot(
     `/crm/v3/properties/contacts/${encodeURIComponent(w.submissionProperty)}`,

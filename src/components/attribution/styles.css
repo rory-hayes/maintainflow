@@ -863,6 +863,16 @@
 .mc-success-notice button {
   font-size: 11px;
 }
+.mc-site-limit {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.mc-site-limit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .mc-loading {
   position: fixed;
   top: 10px;

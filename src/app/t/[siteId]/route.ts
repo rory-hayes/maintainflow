@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { applicationOrigin } from "@/lib/application-origin.server";
 import { readWorkspace, siteOwner } from "@/lib/attribution/store.server";
+import { siteLimitRestriction } from "@/lib/attribution/model";
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ siteId: string }> },
@@ -11,10 +12,11 @@ export async function GET(
     const owner = await siteOwner(siteId);
     const state = await readWorkspace(owner.organizationId);
     const site = state.sites.find((s) => s.id === siteId);
-    if (!site || site.paused)
+    if (!site || site.paused || siteLimitRestriction(state))
       return new Response("/* Tracking paused. */", {
         headers: {
           "Content-Type": "application/javascript",
+          "Cache-Control": "no-store",
           "Cross-Origin-Resource-Policy": "cross-origin",
         },
       });

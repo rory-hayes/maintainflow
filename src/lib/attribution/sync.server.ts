@@ -32,10 +32,21 @@ export async function syncWorkspaceProvider(
   const observed = w.connectors.find((c) => c.provider === provider);
   if (input.action === "sync" && (!observed || observed.status === "revoked"))
     throw new AttributionError(409, "Reconnect this provider before syncing.");
+  const hasProviderHistory =
+    provider === "hubspot"
+      ? w.contacts.length > 0 || w.deals.length > 0
+      : Boolean(w.adInventory) ||
+        w.costs.some((cost) => cost.source === "openai");
+  const canCorrectAccount =
+    observed &&
+    ["error", "revoked"].includes(observed.status) &&
+    !observed.syncedAt &&
+    !hasProviderHistory;
   if (
     input.action === "connect" &&
     observed &&
-    observed.accountId !== input.accountId
+    observed.accountId !== input.accountId &&
+    !canCorrectAccount
   )
     throw new AttributionError(
       409,
@@ -53,8 +64,13 @@ export async function syncWorkspaceProvider(
         409,
         "A newer connector action replaced this sync. Refresh and retry.",
       );
-    if (current) current.operationId = operationId;
-    else
+    if (current) {
+      current.operationId = operationId;
+      // An unsuccessful first verification has no client history to protect.
+      // Record its corrected input while keeping the existing operation fence.
+      if (input.action === "connect" && canCorrectAccount)
+        current.accountId = input.accountId;
+    } else
       state.connectors.push({
         provider,
         accountId: accountId!,
@@ -70,7 +86,7 @@ export async function syncWorkspaceProvider(
   };
   try {
     if (provider === "hubspot") {
-      const snapshot = await syncHubspot(w, token, signal);
+      const snapshot = await syncHubspot(w, token, accountId!, signal);
       signal?.throwIfAborted();
       await mutateWorkspace(
         id,
@@ -94,6 +110,7 @@ export async function syncWorkspaceProvider(
               )
             )
               site.verifiedAt = new Date().toISOString();
+            else delete site.verifiedAt;
         },
         change,
       );

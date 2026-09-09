@@ -14,6 +14,8 @@ import {
   usage,
   pruneExpired,
   workspaceRetentionDays,
+  planSiteLimit,
+  activeSiteCount,
 } from "@/lib/attribution/model";
 import { syncWorkspaceProvider } from "@/lib/attribution/sync.server";
 import { failure, jsonBody } from "@/lib/attribution/http.server";
@@ -147,13 +149,10 @@ export async function POST(request: Request, context: Context) {
               404,
               "Website not found in this workspace.",
             );
-          if (
-            !existing &&
-            w.sites.length >= (w.billing.plan === "agency" ? 5 : 1)
-          )
+          if (!existing && activeSiteCount(w) >= planSiteLimit(w.billing.plan))
             throw new AttributionError(
               409,
-              "Website limit reached for this plan.",
+              "Active website limit reached. Pause another website before adding one, or review your plan in Workspace & billing.",
             );
           const fields = input.mapping ?? defaultMapping;
           if (
@@ -185,6 +184,15 @@ export async function POST(request: Request, context: Context) {
         if (input.action === "pause") {
           const site = w.sites.find((s) => s.id === input.siteId);
           if (!site) throw new AttributionError(404, "Website not found.");
+          if (
+            site.paused &&
+            !input.paused &&
+            activeSiteCount(w) >= planSiteLimit(w.billing.plan)
+          )
+            throw new AttributionError(
+              409,
+              `Active website limit reached. Pause another website before resuming this one${w.billing.plan === "starter" ? ", or choose Agency in Workspace & billing" : ""}.`,
+            );
           site.paused = input.paused;
         }
         if (input.action === "costs") {

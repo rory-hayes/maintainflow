@@ -746,6 +746,24 @@ export function pruneExpired(w: Workspace, now = Date.now()) {
     ),
   );
 }
+export function planSiteLimit(plan: Workspace["billing"]["plan"]): number {
+  return plan === "agency" ? 5 : 1;
+}
+
+export function activeSiteCount(w: Workspace): number {
+  return w.sites.filter((site) => !site.paused).length;
+}
+
+export function siteLimitRestriction(
+  w: Workspace,
+  plan = w.billing.plan,
+): string | null {
+  const limit = planSiteLimit(plan);
+  const active = activeSiteCount(w);
+  if (active <= limit) return null;
+  return `This plan supports ${limit} active website${limit === 1 ? "" : "s"}; ${active} are active. Pause extra websites in Websites & forms${plan === "starter" ? " or choose Agency in Workspace & billing" : ""}.`;
+}
+
 export function captureAllowance(
   w: Workspace,
   id: string,
