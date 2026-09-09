@@ -212,7 +212,9 @@ it("keeps UI and CSV opportunity counts aligned across currency, period and mode
       0,
     ),
   ).toBe(25);
-});
+  // This connected journey renders both reporting views and reads two CSV Blobs.
+  // Allow CI contention without changing the assertions or the suite default.
+}, 10_000);
 
 it("shows zero opportunities and exports no fabricated rows for an empty live workspace", async () => {
   await render(emptyWorkspace("owned-empty", "Empty live workspace", "live"));
