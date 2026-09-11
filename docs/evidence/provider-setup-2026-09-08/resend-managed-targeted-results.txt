@@ -1,0 +1,25 @@
+✔ Stripe raw signature rejects mutation, stale timestamps, and all live credentials/events (163.9855ms)
+✔ entitlements require the mapped exact recurring price and ignore plan metadata (0.292667ms)
+✔ signed provider HTTP endpoints persist exactly once and preserve raw signature validation (18.100375ms)
+✔ an old Stripe event reconciles current subscription state and cannot restore stale access (6.575417ms)
+✔ inbound routing uses matched provider envelopes and verified receiving MX only (23.699167ms)
+✔ managed route creation persists its local provider reference and rechecks the received probe (12.636667ms)
+✔ retrieved inbound body and attachments survive replay without duplicate documents or usage (794.598917ms)
+✔ Sheets uses RAW exact ranges; retry does not append or coerce identifiers/formulas (0.799167ms)
+✔ concurrent Sheets reservations deduplicate approval IDs and isolate workspaces (11.695334ms)
+✔ Google OAuth states are hashed, tied to the user, expiring, single-use, and invalidated on disconnect (18.76025ms)
+✔ managed probe configuration accepts only a complete dedicated one-label Resend inbox challenge (3.156291ms)
+✔ a managed inbox probe must match ID, exact recipient, subject and plain-text nonce together (4.426833ms)
+✔ managed status retrieves its exact probe without a custom domain ID or MX lookup (1.341166ms)
+✔ managed status requires explicit enablement, complete credentials, valid proof settings and a valid mode before lookup (0.277833ms)
+✔ a changed probe or API credential cannot inherit a cached successful managed verification (0.527084ms)
+✔ managed lookup failures stay blocked and never expose provider error details (0.472042ms)
+✔ custom receiving still uses the exact domain ID, enabled receiving and verified MX (0.294041ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2415.922208

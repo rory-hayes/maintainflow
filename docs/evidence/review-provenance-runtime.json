@@ -1,0 +1,39 @@
+{
+  "checkedAt": "2026-09-07T09:22:12.443Z",
+  "web": {
+    "status": 200
+  },
+  "api": {
+    "status": 200,
+    "health": {
+      "status": "ok",
+      "name": "Folio",
+      "environment": "local",
+      "limits": {
+        "maxBytes": 10485760,
+        "maxPages": 30
+      }
+    }
+  },
+  "presets": {
+    "status": 200,
+    "aiConfigured": true
+  },
+  "configuredNamesOnly": {
+    "OPENAI_API_KEY": true,
+    "STRIPE_SECRET_KEY": false,
+    "STRIPE_WEBHOOK_SECRET": false,
+    "STRIPE_PRICE_STANDARD": false,
+    "STRIPE_PRICE_TEAM": false,
+    "RESEND_API_KEY": false,
+    "RESEND_WEBHOOK_SECRET": false,
+    "RESEND_DOMAIN_ID": false,
+    "RESEND_INBOUND_DOMAIN": false,
+    "GOOGLE_CLIENT_ID": false,
+    "GOOGLE_CLIENT_SECRET": false,
+    "GOOGLE_REDIRECT_URI": false
+  },
+  "resendInboundEnabled": false,
+  "worker": "Restarted after 160-test suite; durable-worker startup observed; no pending local jobs before restart",
+  "browser": "Mac lock revalidated; source-disclosure checks and temporary viewport reset await unlock; AI parser creation/full workflow also awaits explicit approval"
+}

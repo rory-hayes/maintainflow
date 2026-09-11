@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "documents": [
+    {
+      "documentId": "e4549183-90f7-43d0-8721-99c090333b94",
+      "filename": "synthetic-receipt-sample.txt",
+      "runId": "1c7dee7c-3090-41c5-b602-e1c127f8b157",
+      "revision": 1,
+      "approvalId": "34c55d7d-8f76-43fe-bfac-66f8a59df800",
+      "correctionId": "e9c67d86-3a41-4acc-910e-36dd7cd3f21d",
+      "values": {
+        "date": "2026-09-03",
+        "total": 12.8,
+        "currency": "EUR",
+        "merchant": "Willow Coffee QA"
+      }
+    }
+  ]
+}

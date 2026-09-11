@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "documents": [
+    {
+      "documentId": "4574440a-e50e-49ac-af8b-1f9b6f7ac033",
+      "filename": "synthetic-invoice-sample.txt",
+      "runId": "d0f092e0-123b-44b4-83e6-8c7bbc40eb35",
+      "revision": 4,
+      "approvalId": "cb835a3a-2df2-4b69-a1b8-9901c6d1ac03",
+      "correctionId": "f2c03943-75a4-415d-bea9-15ff699fdab1",
+      "values": {
+        "tax": 103.5,
+        "total": 553.5,
+        "currency": "EUR",
+        "subtotal": 450,
+        "supplier": "Juniper Studio — accounts",
+        "line_items": [
+          {
+            "amount": 300,
+            "quantity": 2,
+            "unit_price": 150,
+            "description": "Design review — final"
+          },
+          {
+            "amount": 150,
+            "quantity": 1,
+            "unit_price": 150,
+            "description": "Document setup"
+          }
+        ],
+        "invoice_date": "2026-08-28",
+        "invoice_number": "INV-00127"
+      }
+    }
+  ]
+}

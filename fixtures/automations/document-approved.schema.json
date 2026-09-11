@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Folio approved document event",
+  "type": "object",
+  "required": ["event", "id", "document", "runId", "revision", "correctionId", "approvedAt", "values"],
+  "properties": {
+    "event": {"type": "string", "enum": ["document.approved"]},
+    "id": {"type": "string", "format": "uuid"},
+    "document": {
+      "type": "object",
+      "required": ["id", "name", "parserId"],
+      "properties": {
+        "id": {"type": "string", "format": "uuid"},
+        "name": {"type": "string"},
+        "parserId": {"type": "string", "format": "uuid"}
+      },
+      "additionalProperties": true
+    },
+    "runId": {"type": "string", "format": "uuid"},
+    "revision": {"type": "integer", "minimum": 0},
+    "correctionId": {"type": ["string", "null"], "format": "uuid"},
+    "approvedAt": {"type": "string", "format": "date-time"},
+    "values": {"type": "object", "additionalProperties": true}
+  },
+  "additionalProperties": true
+}

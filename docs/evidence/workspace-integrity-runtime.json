@@ -1,0 +1,33 @@
+{
+  "recordedAt": "2026-09-07T17:33:01.314Z",
+  "checks": [
+    {
+      "url": "http://127.0.0.1:5178/",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:4318/api/health",
+      "status": 200
+    },
+    {
+      "url": "http://127.0.0.1:4318/api/presets",
+      "status": 200
+    }
+  ],
+  "configuration": {
+    "OPENAI_API_KEY": true,
+    "STRIPE_SECRET_KEY": false,
+    "STRIPE_WEBHOOK_SECRET": false,
+    "STRIPE_PRICE_STANDARD": false,
+    "STRIPE_PRICE_TEAM": false,
+    "RESEND_API_KEY": false,
+    "RESEND_WEBHOOK_SECRET": false,
+    "RESEND_DOMAIN_ID": false,
+    "RESEND_INBOUND_DOMAIN": false,
+    "GOOGLE_CLIENT_ID": false,
+    "GOOGLE_CLIENT_SECRET": false,
+    "GOOGLE_REDIRECT_URI": false,
+    "RESEND_INBOUND_ENABLED": false
+  },
+  "workerStartupObserved": true
+}

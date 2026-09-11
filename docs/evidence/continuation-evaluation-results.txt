@@ -1,0 +1,21 @@
+# Synthetic extraction evaluation
+
+Generated 2026-09-06T22:05:27.168Z. Actual fixture bytes were decoded using the shipped source adapters and extracted using saved field-label rules. No AI provider was invoked.
+
+Configured labelled layouts: **54/54 leaf values correct**. All readable layouts including the intentionally unconfigured freeform example: **54/58**. These counts include expected missing values; see per-fixture missing counts. This small synthetic set does not establish performance on customer documents.
+
+| Fixture | State | Correct / expected leaf values |
+|---|---|---|
+| Two-page native PDF with continuing line items | extracted | 23 / 23 |
+| German decimal and day-first dates | extracted | 11 / 11 |
+| Missing required data remains missing | needs_review | 4 / 4 |
+| Email text with independent contact layout | extracted | 4 / 4 |
+| CSV with labelled rows and quoted values | extracted | 4 / 4 |
+| XLSX labelled receipt | extracted | 4 / 4 |
+| DOCX labelled receipt | extracted | 4 / 4 |
+| Unconfigured freeform layout | needs_review | 0 / 4 |
+| Image scan requires provider | requires_provider | 0 / 4 |
+| Malformed PDF rejection | rejected | — / — |
+
+Scans require a configured OCR/AI provider. A freeform layout does not silently become a successful rule extraction; missing fields produce review issues. The malformed file is rejected. Source JSON includes every discrepancy and validation issue.
+

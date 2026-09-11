@@ -1,0 +1,117 @@
+name: maintainflow-documents
+
+x-app: &app
+  image: maintainflow-documents:${MAINTAINFLOW_IMAGE_TAG:-local}
+  build:
+    context: .
+    args:
+      MAINTAINFLOW_BUILD_SHA: ${MAINTAINFLOW_BUILD_SHA:-unrecorded}
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 128
+  mem_limit: 1g
+  cpus: 1.0
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=256m,mode=1777
+  networks: [backend]
+  environment: &app-environment
+    NODE_ENV: production
+    HOST: 0.0.0.0
+    PORT: "4318"
+    APP_ORIGIN: ${APP_ORIGIN:?Set the public HTTPS application origin}
+    STORAGE_DIR: /var/lib/maintainflow/files
+    DATABASE_ADMIN_URL: postgresql://folio_admin:${FOLIO_DB_ADMIN_PASSWORD:?Set a URL-safe database administrator password}@database:5432/folio
+    DATABASE_URL: postgresql://folio_app:${FOLIO_DB_APP_PASSWORD:?Set a distinct URL-safe application database password}@database:5432/folio
+    INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:?Set one stable base64-encoded 32-byte integration key}
+    FOLIO_BILLING_MOCK: "false"
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    RESEND_API_KEY: ${RESEND_API_KEY:-}
+    RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:-}
+    RESEND_INBOUND_ENABLED: ${RESEND_INBOUND_ENABLED:-false}
+    RESEND_RECEIVING_MODE: ${RESEND_RECEIVING_MODE:-custom}
+    RESEND_INBOUND_DOMAIN: ${RESEND_INBOUND_DOMAIN:-}
+    RESEND_DOMAIN_ID: ${RESEND_DOMAIN_ID:-}
+    RESEND_MANAGED_PROBE_EMAIL_ID: ${RESEND_MANAGED_PROBE_EMAIL_ID:-}
+    RESEND_MANAGED_PROBE_RECIPIENT: ${RESEND_MANAGED_PROBE_RECIPIENT:-}
+    RESEND_MANAGED_PROBE_NONCE: ${RESEND_MANAGED_PROBE_NONCE:-}
+    GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+    STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+    STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    STRIPE_PRICE_STANDARD: ${STRIPE_PRICE_STANDARD:-}
+    STRIPE_PRICE_TEAM: ${STRIPE_PRICE_TEAM:-}
+
+services:
+  database:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: folio
+      POSTGRES_USER: folio_admin
+      POSTGRES_PASSWORD: ${FOLIO_DB_ADMIN_PASSWORD:?Set a URL-safe database administrator password}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+      FOLIO_DB_APP_PASSWORD: ${FOLIO_DB_APP_PASSWORD:?Set a distinct URL-safe application database password}
+    volumes:
+      - database:/var/lib/postgresql/data
+      - ./deploy/postgres-init.sh:/docker-entrypoint-initdb.d/01-folio.sh:ro
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U folio_admin -d folio"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 1g
+    pids_limit: 128
+
+  migrate:
+    <<: *app
+    command: [node, --import, tsx, scripts/migrate.ts]
+    restart: "no"
+    depends_on:
+      database:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+
+  api:
+    <<: *app
+    restart: unless-stopped
+    ports:
+      # Keep the raw HTTP service private. Put an HTTPS reverse proxy in front.
+      - "127.0.0.1:${MAINTAINFLOW_HTTP_PORT:-4318}:4318"
+    volumes:
+      - originals:/var/lib/maintainflow/files
+    depends_on:
+      database:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 45s
+
+  worker:
+    <<: *app
+    command: [node, --import, tsx, server/worker.ts]
+    restart: unless-stopped
+    volumes:
+      - originals:/var/lib/maintainflow/files
+    depends_on:
+      database:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 120s
+    # No misleading API health probe on the worker. Queue/heartbeat monitoring
+    # still needs operational configuration and an acceptance test.
+    healthcheck:
+      disable: true
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  database:
+  originals:

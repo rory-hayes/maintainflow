@@ -1,0 +1,11 @@
+{
+  "recordedAt": "2026-09-07T17:16:05.163694+00:00",
+  "sourceFingerprint": "d58b8bbac1a945458f955b204da5499273de6ef12531636d809ca11f27f736c4",
+  "sourceFiles": 185,
+  "unchangedDuringVerification": true,
+  "changedFromProvenance": [
+    "src/features/documents/review.css"
+  ],
+  "tests": "ai-browser-tests-run.json",
+  "build": "ai-browser-build-run.json"
+}

@@ -1,0 +1,13 @@
+{
+  "synthetic": true,
+  "preset": "receipt",
+  "locale": "de-DE",
+  "timezone": "Europe/Berlin",
+  "expectedValues": {
+    "merchant": "Linden Küche",
+    "date": "2026-09-17",
+    "currency": "EUR",
+    "total": 1234.56
+  },
+  "note": "Date-only value retains the written calendar date. No timezone conversion is claimed."
+}

@@ -1,0 +1,172 @@
+{
+  "synthetic": true,
+  "seed": "folio-heldout-v1",
+  "fixtures": [
+    {
+      "name": "Two-page native PDF with continuing line items",
+      "filename": "invoice-multipage.pdf",
+      "useCase": "invoice",
+      "locale": "en-IE",
+      "expected": {
+        "invoice_number": "INV-00601",
+        "supplier": "Fern Office Supplies",
+        "invoice_date": "2026-07-15",
+        "currency": "EUR",
+        "subtotal": 780,
+        "tax": 179.4,
+        "total": 959.4,
+        "line_items": [
+          {
+            "description": "Folders",
+            "quantity": 20,
+            "unit_price": 9,
+            "amount": 180
+          },
+          {
+            "description": "Notebooks",
+            "quantity": 30,
+            "unit_price": 10,
+            "amount": 300
+          },
+          {
+            "description": "Desk pads",
+            "quantity": 10,
+            "unit_price": 15,
+            "amount": 150
+          },
+          {
+            "description": "Pens",
+            "quantity": 50,
+            "unit_price": 3,
+            "amount": 150
+          }
+        ]
+      },
+      "category": "supported",
+      "pageCount": 2
+    },
+    {
+      "name": "German decimal and day-first dates",
+      "filename": "invoice-de.txt",
+      "useCase": "invoice",
+      "locale": "de-DE",
+      "expected": {
+        "invoice_number": "0000307",
+        "supplier": "Linde Büro",
+        "invoice_date": "2026-08-31",
+        "currency": "EUR",
+        "subtotal": 1234.5,
+        "tax": 234.56,
+        "total": 1469.06,
+        "line_items": [
+          {
+            "description": "Papier",
+            "quantity": 10,
+            "unit_price": 123.45,
+            "amount": 1234.5
+          }
+        ]
+      },
+      "category": "supported"
+    },
+    {
+      "name": "Missing required data remains missing",
+      "filename": "receipt-missing.txt",
+      "useCase": "receipt",
+      "locale": "en-IE",
+      "expected": {
+        "merchant": "Hazel Books",
+        "date": null,
+        "currency": "EUR",
+        "total": null
+      },
+      "category": "supported"
+    },
+    {
+      "name": "Email text with independent contact layout",
+      "filename": "lead.eml",
+      "useCase": "leads",
+      "locale": "en-IE",
+      "expected": {
+        "name": "Taylor Quinn",
+        "email": "taylor@example.test",
+        "company": "Cedar Labs",
+        "message": "Please process our weekly requests."
+      },
+      "category": "supported"
+    },
+    {
+      "name": "CSV with labelled rows and quoted values",
+      "filename": "receipt.csv",
+      "useCase": "receipt",
+      "locale": "en-US",
+      "expected": {
+        "merchant": "Maple, Supplies",
+        "date": "2026-08-19",
+        "currency": "USD",
+        "total": 39.95
+      },
+      "category": "supported"
+    },
+    {
+      "name": "XLSX labelled receipt",
+      "filename": "receipt.xlsx",
+      "useCase": "receipt",
+      "locale": "en-IE",
+      "expected": {
+        "merchant": "Ash Workshop",
+        "date": "2026-08-21",
+        "currency": "EUR",
+        "total": 75.2
+      },
+      "category": "supported"
+    },
+    {
+      "name": "DOCX labelled receipt",
+      "filename": "receipt.docx",
+      "useCase": "receipt",
+      "locale": "en-IE",
+      "expected": {
+        "merchant": "Rowan Kitchen",
+        "date": "2026-08-23",
+        "currency": "GBP",
+        "total": 21.4
+      },
+      "category": "supported"
+    },
+    {
+      "name": "Unconfigured freeform layout",
+      "filename": "freeform-receipt.txt",
+      "useCase": "receipt",
+      "locale": "en-IE",
+      "expected": {
+        "merchant": "Oak Market",
+        "date": "2026-08-24",
+        "currency": "EUR",
+        "total": 16.9
+      },
+      "category": "unconfigured-layout"
+    },
+    {
+      "name": "Image scan requires provider",
+      "filename": "receipt-scan.png",
+      "useCase": "receipt",
+      "locale": "en-IE",
+      "expected": {
+        "merchant": "Birch Bakery",
+        "date": "2026-08-25",
+        "currency": "EUR",
+        "total": 18.6
+      },
+      "category": "scan"
+    },
+    {
+      "name": "Malformed PDF rejection",
+      "filename": "malformed.pdf",
+      "useCase": "receipt",
+      "locale": "en-IE",
+      "expected": {},
+      "category": "malformed"
+    }
+  ]
+}

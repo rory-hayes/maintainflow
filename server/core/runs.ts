@@ -1,0 +1,4 @@
+import type {PoolClient} from 'pg';
+import {notFound,camel} from './db.js';
+export async function resolveRun(c:PoolClient,runId:string){const run=(await c.query('select r.*,s.schema,s.version schema_version from extraction_runs r join schema_versions s on s.id=r.schema_version_id where r.id=$1',[runId])).rows[0];if(!run)notFound('Extraction run not found');const corrections=(await c.query('select * from corrections where run_id=$1 order by created_at desc,id desc',[runId])).rows;const approvals=(await c.query('select * from approvals where run_id=$1 order by created_at desc,id desc',[runId])).rows;const current=corrections[0];return {...run,effectiveValues:current?.values||run.normalized_values,effectiveRevision:current?`correction:${current.id}`:`run:${run.id}`,corrections,approvals};}
+export function publicRun(run:any){return {...camel(run),corrections:run.corrections.map(camel),approvals:run.approvals.map(camel)};}

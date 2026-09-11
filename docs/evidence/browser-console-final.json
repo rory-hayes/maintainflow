@@ -1,0 +1,11 @@
+{
+  "recorded_at": "2026-09-06T21:38:58.524794+00:00",
+  "surface": "Folio in-app browser, local127.0.0.1:5178",
+  "after": "Final DOCX upload, extraction, approval and reload",
+  "requested_levels": [
+    "error",
+    "warn"
+  ],
+  "entries": [],
+  "scope": "Browser log tool result. No claim about production logs, real external providers or every network request."
+}

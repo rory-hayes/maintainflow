@@ -1,0 +1,99 @@
+{
+  "recordedAt": "2026-09-07T17:16:19.579642+00:00",
+  "authorization": "User explicitly approved after unlocking the Mac: unlocked and use create",
+  "scope": "Owned synthetic Northstar Studio QA workspace on localhost. Actual browser create, upload, native AI worker processing, source comparison, approval, JSON download and persisted reload.",
+  "parserId": "93b86395-d048-46a9-9f0a-bdf1cf85b610",
+  "documentId": "336b6eb6-8711-4433-afea-9e177bc8aea3",
+  "runId": "2a371ebe-dc87-4105-bf2f-f92122ccd640",
+  "approvalId": "fff66561-22d0-4329-a5f9-457e1c217ea2",
+  "revision": 0,
+  "correctionId": null,
+  "expectedValues": {
+    "merchant": "Birch Bakery",
+    "date": "2026-08-25",
+    "currency": "EUR",
+    "total": 18.6
+  },
+  "downloadValuesMatch": true,
+  "download": {
+    "file": "approved-ai-receipt.json",
+    "bytes": 455,
+    "sha256": "31922323562ed82feaa9c679c20ea7081c95c5f841bd1389cbc3ffc8682f949f",
+    "browserFilename": "folio-export (3).json"
+  },
+  "original": {
+    "filename": "receipt-scan.png",
+    "sha256": "056fbccce65791dde2f3edcfd5b3fef4dc7d544ff6193f80855a8030332d6af0",
+    "rawTotal": "18.60"
+  },
+  "runUi": {
+    "model": "gpt-5.4-mini-2026-03-17",
+    "prompt": "folio-openai-extraction-v2",
+    "inputTokens": 1021,
+    "outputTokens": 180,
+    "displayedEstimatedUsd": "0.001576",
+    "visualSourceWarningRetained": true
+  },
+  "usageUi": {
+    "pages": 39,
+    "allowance": 1000,
+    "documents": 8,
+    "needsReview": 3,
+    "failed": 1,
+    "displayedEstimatedUsd": "0.0016"
+  },
+  "lifecycleNewestFirst": [
+    "Export completed",
+    "Export started",
+    "Approved",
+    "Ready for review",
+    "Processing",
+    "Queued",
+    "Received"
+  ],
+  "persistedAfterReload": true,
+  "sourceDisclosure": {
+    "documentId": "3baa3f63-f844-44a0-8ef7-61629c3f0772",
+    "originalRows": 4,
+    "tableLevelQuotes": 4,
+    "leafMissingQuoteLabels": true,
+    "temporaryDescriptionEditLeftSourceTextUnchanged": true,
+    "temporaryEditRestoredWithoutSave": true,
+    "spaceTogglesDisclosure": true,
+    "tabReachesSource": true,
+    "enterActivatesSource": true,
+    "desktopPageTwoNavigation": true,
+    "mobilePageOneAndTwoNavigation": true,
+    "mobileSwitchesToDocumentTab": true,
+    "mobileBeforeRootWidth": 422,
+    "mobileAfterRootWidth": 390,
+    "mobileViewport": [
+      390,
+      844
+    ],
+    "minimumSourceButtonHeight": 44,
+    "desktopViewport": [
+      1280,
+      720
+    ],
+    "nestedObjectAndRowStructuralChanges": "Covered by controlled component tests; no new browser fixture of every recursive depth"
+  },
+  "browserWarningsAndErrorsAtFinalRead": [],
+  "temporaryViewportReset": true,
+  "limitations": [
+    "One synthetic AI browser receipt does not establish general extraction accuracy.",
+    "Model cost is a successful-run estimate, not provider billing reconciliation.",
+    "Resend, Sheets, Stripe test accounts and production deployment remain separate unverified gates."
+  ],
+  "persistedAfterServiceRestart": true,
+  "afterRestartEvidence": [
+    "ai-browser-after-restart.txt",
+    "ai-browser-after-restart.png"
+  ],
+  "finalViewport": {
+    "width": 1280,
+    "height": 720,
+    "documentWidth": 1280
+  },
+  "verification": "ai-browser-final-integrity.json"
+}

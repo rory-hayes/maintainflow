@@ -1,0 +1,5 @@
+SYNTHETIC BROWSER PAGINATION FIXTURE
+Merchant: Pagination QA 24
+Date: 2026-09-06
+Currency: EUR
+Total: 24.00

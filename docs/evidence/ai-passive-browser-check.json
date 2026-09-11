@@ -1,0 +1,23 @@
+{
+  "recordedAt": "2026-09-07T09:07:39.447242+00:00",
+  "screenshots": [
+    {
+      "file": "ai-onboarding-mobile-pending.png",
+      "width": 390,
+      "height": 844,
+      "sha256": "bf7438d7ef07490b4076e1eab4cbea8b87bba4a7ac4041f595a322b7a2efb085",
+      "scope": "Prepared unsaved AI receipt parser form, configured AI option; document/body width 390px"
+    },
+    {
+      "file": "ai-usage-desktop-readonly.png",
+      "width": 1280,
+      "height": 720,
+      "sha256": "63cffda9ca41c98be6efc42980610577411e19ae313e8709cd827dc7a0a3c329",
+      "scope": "Existing workspace usage labels and successful-run model-cost limitations; document/body width 1280px"
+    }
+  ],
+  "mutations": "No parser creation, upload, correction, approval, export or provider call in these checks. A separate read-only Usage tab was opened so the pending form remained intact.",
+  "browserBlock": "CUA inventory reported that the Mac was locked and automatic unlock failed. No further CUA operations attempted afterward.",
+  "remaining": "Unlock Mac; inspect new nested/table source disclosures and reset temporary viewport; explicit approval still required for rejected AI parser creation and its full workflow.",
+  "uiScope": "These screenshots precede the new nested/table source disclosures and do not verify those disclosures."
+}

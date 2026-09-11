@@ -1,0 +1,56 @@
+.settings-tab-content { padding-top: 10px; }
+.settings-section-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
+.settings-section-heading h2 { margin-bottom: 8px; }
+.settings-section-heading p { font-size: 13px; margin: 0; }
+.settings-section-heading > svg { color: var(--color-action, #5c69c4); margin-top: 4px; }
+.settings-information { display: flex; align-items: flex-start; gap: 15px; padding: 17px 0; }
+.settings-information p { margin: 0; font-size: 13px; line-height: 1.65; max-width: 690px; }
+.settings-bottom-note { margin-top: 18px; line-height: 1.7; }
+.settings-bottom-link { display: inline-block; margin-top: 25px; }
+.settings-callout { padding: 18px 20px; border: 1px solid var(--color-line); border-radius: 8px; background: var(--color-soft); font-size: 13px; line-height: 1.75; color: var(--color-muted); margin: 22px 0; }
+.settings-callout > strong { color: var(--color-ink); display: block; margin-bottom: 5px; }
+.settings-callout p { margin: 5px 0 0; }
+.settings-inline-link { display: flex; align-items: center; justify-content: space-between; gap: 25px; }
+.settings-inline-link strong { color: var(--color-ink); }
+.settings-input-unit { display: flex; align-items: center; gap: 12px; }
+.settings-input-unit input { width: 155px; }
+.settings-input-unit span { color: var(--color-muted); }
+.settings-checkbox-row { display: flex; align-items: flex-start; gap: 13px; padding-block: 20px; cursor: pointer; border-block: 1px solid var(--color-line); margin-top: 20px; }
+.settings-checkbox-row input { margin-top: 3px; }
+.settings-checkbox-row strong { font-weight: 550; font-size: 14px; }
+.settings-checkbox-row small { display: block; font-size: 12px; color: var(--color-muted); margin-top: 7px; }
+.settings-password-form { max-width: 550px; }
+.settings-subsection { margin-top: 36px; }
+.settings-subsection > h2, .settings-subsection > h3 { margin-bottom: 14px; }
+.settings-secret-reveal { padding: 20px; margin: 21px 0; border: 1px solid var(--color-line); border-radius: 9px; }
+.settings-secret-reveal > p { margin: 7px 0 0; }
+.settings-secret-reveal .key-reveal { user-select: all; overflow-wrap: anywhere; }
+.settings-scope-picker { padding: 16px; border: 1px solid var(--color-line); border-radius: 8px; margin: 0 0 22px; }
+.settings-scope-picker legend { padding-inline: 7px; color: var(--color-muted); font-size: 12px; }
+.settings-scope-picker label { display: flex; align-items: center; gap: 10px; font-size: 13px; margin: 10px 0; cursor: pointer; }
+.settings-scope-list { display: flex; flex-wrap: wrap; gap: 5px; max-width: 300px; }
+.settings-scope-list code { background: var(--color-soft); border-radius: 4px; padding: 3px 5px; font-size: 10px; white-space: nowrap; }
+.settings-key-prefix { display: block; color: var(--color-muted); font-size: 11px; margin-top: 4px; }
+.members-table { min-width: 560px; }
+.members-table select { font-size: 12px; padding: 7px 10px; min-width: 110px; }
+.api-keys-table { min-width: 675px; }
+.usage-detail-rail { display: grid; grid-template-columns: repeat(4, 1fr); padding: 19px 0 22px; border-block: 1px solid var(--color-line); gap: 24px; }
+.usage-detail-rail > div { display: flex; flex-direction: column; gap: 6px; }
+.usage-detail-rail strong { font-size: 28px; letter-spacing: -1px; line-height: 1.2; font-variant-numeric: tabular-nums; font-weight: 600; }
+.usage-detail-rail span { font-size: 12px; color: var(--color-muted); }
+.usage-ledger-table { min-width: 560px; }
+.settings-empty { text-align: center; padding: 48px 24px; border-block: 1px solid var(--color-line); }
+.settings-empty p { font-size: 13px; }
+.billing-panel { max-width: 1150px; }
+.billing-panel .plan-columns { margin-top: 20px; }
+.billing-panel .plan-columns p { font-size: 12px; }
+@media(max-width:760px) {
+  .settings-section-heading { flex-wrap: wrap; gap: 16px; }
+  .settings-information { flex-direction: column; gap: 11px; }
+  .settings-inline-link { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .settings-callout, .settings-secret-reveal { padding: 16px; }
+  .usage-detail-rail { grid-template-columns: 1fr 1fr; gap: 25px; }
+  .usage-detail-rail strong { font-size: 25px; }
+  .settings-password-form { max-width: none; }
+  .settings-secret-reveal .actions { align-items: stretch; }
+}

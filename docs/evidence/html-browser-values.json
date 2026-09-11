@@ -1,0 +1,11 @@
+{
+  "issues": "1 check from extractionDate is required.Current values are validated again when you approve.",
+  "source": "Merchant | Total\nCedar & Pine | 18.60\n\nCurrency: EUR",
+  "url": "http://127.0.0.1:5178/app/documents/7aac2995-706e-4ea6-89b0-0bcb35a83db5",
+  "values": {
+    "Currency": "EUR",
+    "Date": "",
+    "Merchant": "Cedar & Pine",
+    "Total": "18.6"
+  }
+}

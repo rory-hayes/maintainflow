@@ -1,0 +1,116 @@
+
+> folio-document-workspace@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 1988 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                                0.62 kB │ gzip:   0.38 kB
+dist/assets/inter-vietnamese-400-normal-DMkecbls.woff2         4.97 kB
+dist/assets/inter-vietnamese-600-normal-Cc8MFFhd.woff2         5.10 kB
+dist/assets/inter-vietnamese-700-normal-DlLaEgI2.woff2         5.10 kB
+dist/assets/inter-vietnamese-500-normal-DOriooB6.woff2         5.11 kB
+dist/assets/inter-vietnamese-800-normal-Cm7tD1pz.woff2         5.17 kB
+dist/assets/inter-greek-ext-400-normal-DGGRlc-M.woff2          5.26 kB
+dist/assets/inter-greek-ext-500-normal-C4iEst2y.woff2          5.42 kB
+dist/assets/inter-greek-ext-600-normal-DRtmH8MT.woff2          5.43 kB
+dist/assets/inter-greek-ext-700-normal-qfdV9bQt.woff2          5.44 kB
+dist/assets/inter-greek-ext-800-normal-B--PVpEC.woff2          5.54 kB
+dist/assets/inter-vietnamese-400-normal-Bbgyi5SW.woff          6.50 kB
+dist/assets/inter-vietnamese-500-normal-mJboJaSs.woff          6.59 kB
+dist/assets/inter-vietnamese-700-normal-BZaoP0fm.woff          6.63 kB
+dist/assets/inter-vietnamese-600-normal-BuLX-rYi.woff          6.64 kB
+dist/assets/inter-vietnamese-800-normal-DDlpr_Ee.woff          6.64 kB
+dist/assets/inter-greek-ext-400-normal-KugGGMne.woff           7.06 kB
+dist/assets/inter-greek-ext-500-normal-2j5mBUwD.woff           7.19 kB
+dist/assets/inter-greek-ext-800-normal-DUe57HfS.woff           7.20 kB
+dist/assets/inter-greek-ext-600-normal-B8X0CLgF.woff           7.21 kB
+dist/assets/inter-greek-ext-700-normal-BoQ6DsYi.woff           7.21 kB
+dist/assets/inter-cyrillic-400-normal-obahsSVq.woff2           7.71 kB
+dist/assets/inter-greek-400-normal-B4URO6DV.woff2              7.77 kB
+dist/assets/inter-greek-800-normal-CLIouy3y.woff2              7.89 kB
+dist/assets/inter-cyrillic-500-normal-BasfLYem.woff2           7.90 kB
+dist/assets/inter-cyrillic-700-normal-CjBOestx.woff2           7.90 kB
+dist/assets/inter-greek-500-normal-BIZE56-Y.woff2              7.92 kB
+dist/assets/inter-greek-700-normal-C3JjAnD8.woff2              7.92 kB
+dist/assets/inter-greek-600-normal-plRanbMR.woff2              7.94 kB
+dist/assets/inter-cyrillic-600-normal-CWCymEST.woff2           7.97 kB
+dist/assets/inter-cyrillic-800-normal-C7MGvYyJ.woff2           7.99 kB
+dist/assets/inter-cyrillic-400-normal-HOLc17fK.woff            9.78 kB
+dist/assets/inter-cyrillic-700-normal-DrXBdSj3.woff            9.91 kB
+dist/assets/inter-greek-400-normal-q2sYcFCs.woff               9.92 kB
+dist/assets/inter-cyrillic-600-normal-4D_pXhcN.woff            9.93 kB
+dist/assets/inter-cyrillic-500-normal-CxZf_p3X.woff            9.94 kB
+dist/assets/inter-cyrillic-800-normal-CCHyn08d.woff            9.94 kB
+dist/assets/inter-greek-800-normal-BU00tryP.woff               9.96 kB
+dist/assets/inter-greek-500-normal-Xzm54t5V.woff               9.98 kB
+dist/assets/inter-greek-700-normal-BUv2fZ6O.woff               9.98 kB
+dist/assets/inter-greek-600-normal-BZpKdvQh.woff              10.03 kB
+dist/assets/inter-cyrillic-ext-400-normal-BQZuk6qB.woff2      10.23 kB
+dist/assets/inter-cyrillic-ext-500-normal-B0yAr1jD.woff2      10.43 kB
+dist/assets/inter-cyrillic-ext-800-normal-BZOjs1Xv.woff2      10.44 kB
+dist/assets/inter-cyrillic-ext-600-normal-Dfes3d0z.woff2      10.48 kB
+dist/assets/inter-cyrillic-ext-700-normal-BjwYoWNd.woff2      10.49 kB
+dist/assets/inter-cyrillic-ext-400-normal-DQukG94-.woff       13.33 kB
+dist/assets/inter-cyrillic-ext-700-normal-LO58E6JB.woff       13.40 kB
+dist/assets/inter-cyrillic-ext-500-normal-BmqWE9Dz.woff       13.45 kB
+dist/assets/inter-cyrillic-ext-600-normal-Bcila6Z-.woff       13.46 kB
+dist/assets/inter-cyrillic-ext-800-normal-Ca-gJeZY.woff       13.47 kB
+dist/assets/caveat-latin-ext-500-normal-jKqJW7bC.woff2        19.59 kB
+dist/assets/inter-latin-400-normal-C38fXH4l.woff2             23.66 kB
+dist/assets/inter-latin-500-normal-Cerq10X2.woff2             24.27 kB
+dist/assets/inter-latin-700-normal-Yt3aPRUw.woff2             24.35 kB
+dist/assets/inter-latin-800-normal-BYj_oED-.woff2             24.40 kB
+dist/assets/inter-latin-600-normal-LgqL8muc.woff2             24.45 kB
+dist/assets/caveat-latin-ext-500-normal-wUUXxlbS.woff         25.09 kB
+dist/assets/caveat-cyrillic-ext-500-normal-DcrB4vVx.woff2     25.63 kB
+dist/assets/inter-latin-400-normal-CyCys3Eg.woff              30.69 kB
+dist/assets/caveat-cyrillic-ext-500-normal-DqTXtm5N.woff      30.91 kB
+dist/assets/inter-latin-600-normal-CiBQ2DWP.woff              31.26 kB
+dist/assets/inter-latin-500-normal-BL9OpVg8.woff              31.28 kB
+dist/assets/inter-latin-800-normal-D1mf63XC.woff              31.29 kB
+dist/assets/inter-latin-700-normal-BLAVimhd.woff              31.32 kB
+dist/assets/inter-latin-ext-400-normal-C1nco2VV.woff2         35.00 kB
+dist/assets/inter-latin-ext-500-normal-CV4jyFjo.woff2         36.02 kB
+dist/assets/inter-latin-ext-800-normal-DZJjya6U.woff2         36.12 kB
+dist/assets/inter-latin-ext-700-normal-Ca8adRJv.woff2         36.24 kB
+dist/assets/inter-latin-ext-600-normal-D2bJ5OIk.woff2         36.26 kB
+dist/assets/caveat-cyrillic-500-normal-DpMZbbjM.woff2         45.46 kB
+dist/assets/inter-latin-ext-400-normal-77YHD8bZ.woff          47.56 kB
+dist/assets/inter-latin-ext-500-normal-BxGbmqWO.woff          48.49 kB
+dist/assets/inter-latin-ext-800-normal-BOMpwxm3.woff          48.59 kB
+dist/assets/inter-latin-ext-700-normal-TidjK2hL.woff          48.63 kB
+dist/assets/inter-latin-ext-600-normal-CIVaiw4L.woff          48.66 kB
+dist/assets/caveat-latin-500-normal-B9SDL8cy.woff2            50.90 kB
+dist/assets/caveat-cyrillic-500-normal-DLSfp5IU.woff          53.43 kB
+dist/assets/caveat-latin-500-normal-Do9veZfZ.woff             62.36 kB
+dist/assets/pdf.worker.min-Dswkl-cV.mjs                    1,265.41 kB
+dist/assets/ExportDialog-BlTjj09X.css                          1.15 kB │ gzip:   0.45 kB
+dist/assets/Integrations-B7BdaBuQ.css                          1.30 kB │ gzip:   0.52 kB
+dist/assets/Parsers-XLp9ffQh.css                               2.90 kB │ gzip:   0.90 kB
+dist/assets/settings-Djfcue0B.css                              3.82 kB │ gzip:   1.10 kB
+dist/assets/Review-BBP8DWEQ.css                                9.16 kB │ gzip:   2.27 kB
+dist/assets/index-wAj-11Nk.css                                67.72 kB │ gzip:  12.83 kB
+dist/assets/pdf.worker.min-zC6nfbxG.js                         0.11 kB │ gzip:   0.12 kB │ map:     0.26 kB
+dist/assets/rotate-cw-fKii7YvU.js                              0.23 kB │ gzip:   0.21 kB │ map:     0.88 kB
+dist/assets/mail-l_gIy3V2.js                                   0.24 kB │ gzip:   0.22 kB │ map:     0.93 kB
+dist/assets/copy-UpmAXWOI.js                                   0.26 kB │ gzip:   0.23 kB │ map:     0.96 kB
+dist/assets/settings-Dqx1i7fg.js                               0.28 kB │ gzip:   0.23 kB │ map:     1.01 kB
+dist/assets/trash-CimR_d_H.js                                  0.35 kB │ gzip:   0.24 kB │ map:     1.18 kB
+dist/assets/Invite-CMeQifAc.js                                 0.94 kB │ gzip:   0.57 kB │ map:     2.13 kB
+dist/assets/Usage-BVCPEr4q.js                                  4.04 kB │ gzip:   1.55 kB │ map:     8.02 kB
+dist/assets/BillingPanel-CTXCoeyy.js                           4.61 kB │ gzip:   1.88 kB │ map:     9.83 kB
+dist/assets/Onboarding-DAcK8tXi.js                             6.88 kB │ gzip:   2.74 kB │ map:    14.27 kB
+dist/assets/ExportDialog-BmcwU9I7.js                           9.60 kB │ gzip:   3.59 kB │ map:    25.24 kB
+dist/assets/Documents-Bc9VfnQE.js                             10.61 kB │ gzip:   3.96 kB │ map:    25.97 kB
+dist/assets/Parsers-bYNqEmnb.js                               16.85 kB │ gzip:   5.50 kB │ map:    41.11 kB
+dist/assets/Integrations-BT2kEqoa.js                          20.25 kB │ gzip:   5.85 kB │ map:    45.29 kB
+dist/assets/Help-UiNhr9fl.js                                  20.74 kB │ gzip:   6.75 kB │ map:    33.05 kB
+dist/assets/Settings-fZo24ria.js                              21.00 kB │ gzip:   5.81 kB │ map:    48.40 kB
+dist/assets/Review-7OWdINdG.js                                22.69 kB │ gzip:   7.00 kB │ map:    48.89 kB
+dist/assets/index-yND71_Sd.js                                355.12 kB │ gzip: 110.65 kB │ map: 1,695.76 kB
+dist/assets/pdf-DtCuOcYn.js                                  430.97 kB │ gzip: 129.07 kB │ map: 1,376.17 kB
+
+✓ built in 594ms

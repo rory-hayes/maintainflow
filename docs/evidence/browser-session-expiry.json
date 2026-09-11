@@ -1,0 +1,20 @@
+{
+  "recordedAt": "2026-09-06T22:22:30.269Z",
+  "sessionId": "5669400a-d3fa-4741-86a2-93223a892ce6",
+  "workspaceId": "fdc65291-c949-44be-b511-6dba73b1e44b",
+  "action": "Expire the single verified active synthetic QA browser session",
+  "before": {
+    "documents": 5,
+    "jobs": 7,
+    "extraction_runs": 6,
+    "approvals": 4,
+    "usage_ledger": 35
+  },
+  "after": {
+    "documents": 5,
+    "jobs": 7,
+    "extraction_runs": 6,
+    "approvals": 4,
+    "usage_ledger": 35
+  }
+}

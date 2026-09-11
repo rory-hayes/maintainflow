@@ -1,0 +1,80 @@
+- link "Skip to content":
+  - /url: "#main"
+- complementary "Workspace navigation":
+  - link "Folio":
+    - /url: /
+  - generic: Workspace
+  - combobox "Workspace":
+    - option "MaintainFlow Release QA" [selected]
+    - option "+ New workspace"
+  - navigation "Workspace pages":
+    - link "Documents":
+      - /url: /app
+      - text: Documents
+    - link "Parsers":
+      - /url: /app/parsers
+      - text: Parsers
+    - link "Integrations":
+      - /url: /app/integrations
+      - text: Integrations
+    - link "Usage" [active]:
+      - /url: /app/usage
+      - text: Usage
+    - link "Settings":
+      - /url: /app/settings
+      - text: Settings
+  - link "Help & documentation":
+    - /url: /help
+    - text: Help & documentation
+  - generic: R
+  - strong: Release Browser QA
+  - generic: owner · Local workspace
+  - button "Sign out":
+- banner:
+  - generic: Workspace
+  - generic: /
+  - generic: Usage
+  - button "Processing notifications, 1 unread":
+    - generic: "1"
+  - generic: R
+- main:
+  - heading "Usage & billing" [level=1]
+  - paragraph: See your workspace allowance, recorded usage and billing setup.
+  - tablist "Sections":
+    - tab "Usage" [selected]
+    - tab "Billing"
+  - region "1 / 50 pages this month":
+    - paragraph: Explore
+    - heading "1 / 50 pages this month" [level=2]:
+      - text: "1"
+      - generic: / 50 pages this month
+    - meter "Monthly page allowance used"
+    - paragraph: 49 pages remaining · 1 concurrent processing jobs · Up to 1 active parsers
+  - strong: "1"
+  - generic: Documents stored
+  - strong: "0"
+  - generic: Needs review
+  - strong: "0"
+  - generic: Failed documents
+  - strong: $0.0009
+  - generic: Estimated model cost
+  - paragraph: Estimates cover recorded successful runs and are separate from your page allowance. Charges for failed or canceled attempts may not be included. This is not a reconciliation of the provider’s bill.
+  - strong: How usage is counted
+  - paragraph: Each accepted page or spreadsheet sheet counts once on upload. Manual reprocessing counts again. Automatic worker retries and detected duplicates do not count again. DOCX/text/email count as one document page.
+  - heading "Usage ledger" [level=2]
+  - paragraph: The latest 50 usage events, including earlier months.
+  - table:
+    - rowgroup:
+      - row "Event Document Pages Time":
+        - columnheader "Event"
+        - columnheader "Document"
+        - columnheader "Pages"
+        - columnheader "Time"
+    - rowgroup:
+      - row "Document upload e4549183 1 11 Sept 2026, 09:10":
+        - cell "Document upload"
+        - cell "e4549183":
+          - link "e4549183":
+            - /url: /app/documents/e4549183-90f7-43d0-8721-99c090333b94
+        - cell "1"
+        - cell "11 Sept 2026, 09:10"

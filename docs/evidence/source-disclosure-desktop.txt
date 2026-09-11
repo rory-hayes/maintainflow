@@ -1,0 +1,242 @@
+- link "Skip to content":
+  - /url: "#main"
+- complementary "Workspace navigation":
+  - link "Folio":
+    - /url: /
+  - generic: Workspace
+  - combobox "Workspace":
+    - option "Northstar Studio QA" [selected]
+    - option "+ New workspace"
+  - navigation "Workspace pages":
+    - link "Documents":
+      - /url: /app
+      - text: Documents
+    - link "Parsers":
+      - /url: /app/parsers
+      - text: Parsers
+    - link "Integrations":
+      - /url: /app/integrations
+      - text: Integrations
+    - link "Usage":
+      - /url: /app/usage
+      - text: Usage
+    - link "Settings":
+      - /url: /app/settings
+      - text: Settings
+  - link "Help & documentation":
+    - /url: /help
+    - text: Help & documentation
+  - generic: A
+  - strong: Alex Morgan
+  - generic: owner · Local workspace
+  - button "Sign out":
+- banner:
+  - generic: Workspace
+  - generic: /
+  - generic: Documents
+  - button "Processing notifications, 5 unread":
+    - generic: "5"
+  - generic: A
+- main:
+  - link "Documents":
+    - /url: /app/parsers/1757af9d-5282-4405-9ccc-e47619ce65a6
+    - generic: Documents
+  - generic: invoice-multipage.pdf
+  - button "Reprocess":
+    - text: Reprocess
+  - combobox "Extraction run":
+    - option "Run 1" [selected]
+  - button "Export" [disabled]:
+    - text: Export
+  - heading "Document review" [level=1]
+  - link "Supplier invoice intake":
+    - /url: /app/parsers/1757af9d-5282-4405-9ccc-e47619ce65a6
+  - generic: · Schema v2
+  - generic: Needs review
+  - region "Original document":
+    - button "Previous page":
+    - generic: Page 2 of 2
+    - button "Next page" [disabled]:
+    - button "Zoom out":
+    - generic: 100%
+    - button "Zoom in":
+    - img "Original PDF, page 2"
+    - button "Download original":
+      - text: Download original
+  - region "Extracted data":
+    - tablist "Review result":
+      - tab "Fields"
+      - tab "Line items" [selected]
+      - tab "History"
+    - strong: 1 check from extraction
+    - paragraph: No saved template matched. Field-label anchors were used.
+    - text: Current values are validated again when you approve.
+    - heading "Line items *" [level=3]
+    - table "Line items":
+      - caption: Line items
+      - rowgroup:
+        - row "Description * Quantity * Unit price * Amount * Actions":
+          - columnheader "Description *"
+          - columnheader "Quantity *"
+          - columnheader "Unit price *"
+          - columnheader "Amount *"
+          - columnheader "Actions":
+            - generic: Actions
+      - rowgroup:
+        - row "Folders 20 9 180 Remove Line items row 1":
+          - cell "Folders":
+            - textbox "Line items row 1, Description":
+              - /placeholder: Not found
+              - text: Folders
+          - cell "20":
+            - textbox "Line items row 1, Quantity":
+              - /placeholder: Not found
+              - text: "20"
+          - cell "9":
+            - textbox "Line items row 1, Unit price":
+              - /placeholder: Not found
+              - text: "9"
+          - cell "180":
+            - textbox "Line items row 1, Amount":
+              - /placeholder: Not found
+              - text: "180"
+          - cell "Remove Line items row 1":
+            - button "Remove Line items row 1":
+        - row "Notebooks 30 10 300 Remove Line items row 2":
+          - cell "Notebooks":
+            - textbox "Line items row 2, Description":
+              - /placeholder: Not found
+              - text: Notebooks
+          - cell "30":
+            - textbox "Line items row 2, Quantity":
+              - /placeholder: Not found
+              - text: "30"
+          - cell "10":
+            - textbox "Line items row 2, Unit price":
+              - /placeholder: Not found
+              - text: "10"
+          - cell "300":
+            - textbox "Line items row 2, Amount":
+              - /placeholder: Not found
+              - text: "300"
+          - cell "Remove Line items row 2":
+            - button "Remove Line items row 2":
+        - row "Desk pads 10 15 150 Remove Line items row 3":
+          - cell "Desk pads":
+            - textbox "Line items row 3, Description":
+              - /placeholder: Not found
+              - text: Desk pads
+          - cell "10":
+            - textbox "Line items row 3, Quantity":
+              - /placeholder: Not found
+              - text: "10"
+          - cell "15":
+            - textbox "Line items row 3, Unit price":
+              - /placeholder: Not found
+              - text: "15"
+          - cell "150":
+            - textbox "Line items row 3, Amount":
+              - /placeholder: Not found
+              - text: "150"
+          - cell "Remove Line items row 3":
+            - button "Remove Line items row 3":
+        - row "Pens 50 3 150 Remove Line items row 4":
+          - cell "Pens":
+            - textbox "Line items row 4, Description":
+              - /placeholder: Not found
+              - text: Pens
+          - cell "50":
+            - textbox "Line items row 4, Quantity":
+              - /placeholder: Not found
+              - text: "50"
+          - cell "3":
+            - textbox "Line items row 4, Unit price":
+              - /placeholder: Not found
+              - text: "3"
+          - cell "150":
+            - textbox "Line items row 4, Amount":
+              - /placeholder: Not found
+              - text: "150"
+          - cell "Remove Line items row 4":
+            - button "Remove Line items row 4":
+    - button "Add row":
+      - text: Add row
+    - generic "Original extraction sources · Line items":
+      - text: Original extraction sources
+      - generic: · Line items
+    - paragraph: These values and row numbers belong to this extraction run. Your corrections do not change this source record.
+    - list:
+      - strong: Line items
+      - paragraph: Table-level source quotes
+      - 'button "Source · Page 1: Folders | 20 | 9.00 | 180.00"':
+        - generic: "Source · Page 1:"
+        - text: Folders | 20 | 9.00 | 180.00
+      - 'button "Source · Page 1: Notebooks | 30 | 10.00 | 300.00"':
+        - generic: "Source · Page 1:"
+        - text: Notebooks | 30 | 10.00 | 300.00
+      - 'button "Source · Page 2: Desk pads | 10 | 15.00 | 150.00" [active]':
+        - generic: "Source · Page 2:"
+        - text: Desk pads | 10 | 15.00 | 150.00
+      - 'button "Source · Page 2: Pens | 50 | 3.00 | 150.00"':
+        - generic: "Source · Page 2:"
+        - text: Pens | 50 | 3.00 | 150.00
+      - list:
+        - paragraph: Original row 1
+        - list:
+          - strong: Description
+          - paragraph: "Extracted: Folders"
+          - paragraph: No source quote recorded.
+          - strong: Quantity
+          - paragraph: "Extracted: 20"
+          - paragraph: No source quote recorded.
+          - strong: Unit price
+          - paragraph: "Extracted: 9.00"
+          - paragraph: No source quote recorded.
+          - strong: Amount
+          - paragraph: "Extracted: 180.00"
+          - paragraph: No source quote recorded.
+        - paragraph: Original row 2
+        - list:
+          - strong: Description
+          - paragraph: "Extracted: Notebooks"
+          - paragraph: No source quote recorded.
+          - strong: Quantity
+          - paragraph: "Extracted: 30"
+          - paragraph: No source quote recorded.
+          - strong: Unit price
+          - paragraph: "Extracted: 10.00"
+          - paragraph: No source quote recorded.
+          - strong: Amount
+          - paragraph: "Extracted: 300.00"
+          - paragraph: No source quote recorded.
+        - paragraph: Original row 3
+        - list:
+          - strong: Description
+          - paragraph: "Extracted: Desk pads"
+          - paragraph: No source quote recorded.
+          - strong: Quantity
+          - paragraph: "Extracted: 10"
+          - paragraph: No source quote recorded.
+          - strong: Unit price
+          - paragraph: "Extracted: 15.00"
+          - paragraph: No source quote recorded.
+          - strong: Amount
+          - paragraph: "Extracted: 150.00"
+          - paragraph: No source quote recorded.
+        - paragraph: Original row 4
+        - list:
+          - strong: Description
+          - paragraph: "Extracted: Pens"
+          - paragraph: No source quote recorded.
+          - strong: Quantity
+          - paragraph: "Extracted: 50"
+          - paragraph: No source quote recorded.
+          - strong: Unit price
+          - paragraph: "Extracted: 3.00"
+          - paragraph: No source quote recorded.
+          - strong: Amount
+          - paragraph: "Extracted: 150.00"
+          - paragraph: No source quote recorded.
+    - generic: Extracted values · Review before export
+    - button "Save correction" [disabled]
+    - button "Approve & export"

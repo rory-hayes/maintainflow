@@ -1,0 +1,45 @@
+{
+  "recordedAt": "2026-09-07T08:30:01.014Z",
+  "sourceFingerprint": "8d8b81756ef5e2bd79182997d956feb104cc21936c66f84d339390ec95c6f207",
+  "sourceFiles": 180,
+  "manifestSha256": "5419e67443754d4eccb7d481f9a0edd4c01f3b334a8c831eb70586bfbb344811",
+  "runnerSha256": "18e0e7a2ffa7f038d1944b9c886b985299cfd36447d3ad7a3d7acfb4009f4d8f",
+  "fixtures": [
+    {
+      "id": "two-page-native-invoice",
+      "filename": "bracken-blue-invoice.pdf",
+      "sha256": "35771ddd87852c10c69b8c54d444a4433bc159cb1617edccdd48f5c2d430f24b"
+    },
+    {
+      "id": "french-image-receipt",
+      "filename": "lucioles-receipt.png",
+      "sha256": "17e781489e1e55245c35faa6262c4c261e12a92d82425aefb147da6d1d4aed2d"
+    },
+    {
+      "id": "image-pdf-absent-date",
+      "filename": "moss-lantern-undated.pdf",
+      "sha256": "3e2d0847642fe86b38cb7750db460297d355b31a9adfa1fd9ffddfe6632664fc"
+    },
+    {
+      "id": "narrative-lead-email",
+      "filename": "studio-enquiry.eml",
+      "sha256": "2cecd1445e3f55dd79edaaa1ca27396029fc526d7e32432d2cc919a9501412fe"
+    },
+    {
+      "id": "english-freeform-receipt",
+      "filename": "harbour-freeform-receipt.txt",
+      "sha256": "dc890fa7b648eb2e7e096cbf376e272825535c7e0e2643c02f9aaca464154973"
+    },
+    {
+      "id": "malformed-pdf",
+      "filename": "broken-receipt.pdf",
+      "sha256": "fa064794c5403565bf94f69659f5f37e140faa2a73161bea9230dfb1da62d6d5"
+    },
+    {
+      "id": "french-image-receipt-duplicate",
+      "filename": "lucioles-receipt-copy.png",
+      "sha256": "17e781489e1e55245c35faa6262c4c261e12a92d82425aefb147da6d1d4aed2d"
+    }
+  ],
+  "policy": "Fixtures and expected values authored independently after the extractor was frozen, without reading extraction implementation, existing fixtures or reports. No code or prompt changes between cases. First-pass results retained, including failures. Small synthetic acceptance set, not customer accuracy evidence."
+}

@@ -1,0 +1,12 @@
+{
+  "recordedAt": "2026-09-09T11:00:09.326Z",
+  "url": "http://127.0.0.1:5178/app/usage",
+  "plan": "Team (local mock)",
+  "usedPages": 39,
+  "pageAllowance": 5000,
+  "documents": 8,
+  "concurrentJobs": 4,
+  "parserAllowance": 50,
+  "consoleWarningsAndErrors": [],
+  "scope": "Read-only persistence check after confirmed stopped services were restarted. No new extraction or billing mutation."
+}

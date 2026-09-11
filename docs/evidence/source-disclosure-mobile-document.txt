@@ -1,0 +1,39 @@
+- link "Skip to content":
+  - /url: "#main"
+- option "Northstar Studio QA" [selected]
+- option "+ New workspace"
+- banner:
+  - button "Open navigation":
+  - generic: Workspace
+  - generic: /
+  - generic: Documents
+  - button "Processing notifications, 5 unread":
+    - generic: "5"
+  - generic: A
+- main:
+  - link "Documents":
+    - /url: /app/parsers/1757af9d-5282-4405-9ccc-e47619ce65a6
+    - generic: Documents
+  - generic: invoice-multipage.pdf
+  - button "Reprocess"
+  - combobox "Extraction run":
+    - option "Run 1" [selected]
+  - button "Export" [disabled]
+  - heading "Document review" [level=1]
+  - link "Supplier invoice intake":
+    - /url: /app/parsers/1757af9d-5282-4405-9ccc-e47619ce65a6
+  - generic: · Schema v2
+  - generic: Needs review
+  - tablist "Sections":
+    - tab "Fields"
+    - tab "Document" [selected]
+  - region "Original document":
+    - button "Previous page" [disabled]:
+    - generic: Page 1 of 2
+    - button "Next page":
+    - button "Zoom out":
+    - generic: 100%
+    - button "Zoom in":
+    - img "Original PDF, page 1"
+    - button "Download original":
+      - text: Download original

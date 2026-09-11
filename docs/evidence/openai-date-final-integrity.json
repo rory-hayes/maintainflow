@@ -1,0 +1,13 @@
+{
+  "recordedAt": "2026-09-07T08:35:32.901292+00:00",
+  "sourceFingerprint": "a06ef665f30164235af58eae98f8c43286a3f7d19098e0534eb87009842d418c",
+  "fileCount": 180,
+  "unchangedSinceBefore": true,
+  "changedFiles": [],
+  "testsRun": "docs/evidence/openai-date-tests-run.json",
+  "buildRun": "docs/evidence/openai-date-build-run.json",
+  "promptVersion": "folio-openai-extraction-v2",
+  "heldoutFirstPass": "docs/evidence/openai-heldout-evaluation-2026-09-07T08-30-01-014Z.json",
+  "regressionReplay": "docs/evidence/openai-date-regression-evaluation-2026-09-07T08-34-10-311Z.json",
+  "browserAIWorkflow": "Pending explicit approval after automatic approval review rejected parser creation"
+}

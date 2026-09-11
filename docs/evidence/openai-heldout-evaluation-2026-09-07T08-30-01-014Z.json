@@ -1,0 +1,787 @@
+{
+  "startedAt": "2026-09-07T08:30:01.014Z",
+  "finishedAt": "2026-09-07T08:30:26.269Z",
+  "model": "gpt-5.4-mini-2026-03-17",
+  "promptVersion": "folio-openai-extraction-v1",
+  "recordedAt": "2026-09-07T08:30:01.014Z",
+  "sourceFingerprint": "8d8b81756ef5e2bd79182997d956feb104cc21936c66f84d339390ec95c6f207",
+  "sourceFiles": 180,
+  "manifestSha256": "5419e67443754d4eccb7d481f9a0edd4c01f3b334a8c831eb70586bfbb344811",
+  "runnerSha256": "18e0e7a2ffa7f038d1944b9c886b985299cfd36447d3ad7a3d7acfb4009f4d8f",
+  "fixtures": [
+    {
+      "id": "two-page-native-invoice",
+      "filename": "bracken-blue-invoice.pdf",
+      "sha256": "35771ddd87852c10c69b8c54d444a4433bc159cb1617edccdd48f5c2d430f24b"
+    },
+    {
+      "id": "french-image-receipt",
+      "filename": "lucioles-receipt.png",
+      "sha256": "17e781489e1e55245c35faa6262c4c261e12a92d82425aefb147da6d1d4aed2d"
+    },
+    {
+      "id": "image-pdf-absent-date",
+      "filename": "moss-lantern-undated.pdf",
+      "sha256": "3e2d0847642fe86b38cb7750db460297d355b31a9adfa1fd9ffddfe6632664fc"
+    },
+    {
+      "id": "narrative-lead-email",
+      "filename": "studio-enquiry.eml",
+      "sha256": "2cecd1445e3f55dd79edaaa1ca27396029fc526d7e32432d2cc919a9501412fe"
+    },
+    {
+      "id": "english-freeform-receipt",
+      "filename": "harbour-freeform-receipt.txt",
+      "sha256": "dc890fa7b648eb2e7e096cbf376e272825535c7e0e2643c02f9aaca464154973"
+    },
+    {
+      "id": "malformed-pdf",
+      "filename": "broken-receipt.pdf",
+      "sha256": "fa064794c5403565bf94f69659f5f37e140faa2a73161bea9230dfb1da62d6d5"
+    },
+    {
+      "id": "french-image-receipt-duplicate",
+      "filename": "lucioles-receipt-copy.png",
+      "sha256": "17e781489e1e55245c35faa6262c4c261e12a92d82425aefb147da6d1d4aed2d"
+    }
+  ],
+  "policy": "Fixtures and expected values authored independently after the extractor was frozen, without reading extraction implementation, existing fixtures or reports. No code or prompt changes between cases. First-pass results retained, including failures. Small synthetic acceptance set, not customer accuracy evidence.",
+  "actualProviderCalls": 6,
+  "correct": 49,
+  "total": 51,
+  "estimatedSuccessfulCallCostUsd": 0.015099749999999999,
+  "sourceUnchangedAfter": true,
+  "duplicateScope": "The duplicate is a byte-identical independent model input. Both calls are intentional and may be billed. This checks extraction consistency, not intake deduplication; intake deduplication is covered by separate local tests.",
+  "results": [
+    {
+      "id": "two-page-native-invoice",
+      "filename": "bracken-blue-invoice.pdf",
+      "sha256": "35771ddd87852c10c69b8c54d444a4433bc159cb1617edccdd48f5c2d430f24b",
+      "state": "needs_review",
+      "elapsedMs": 9758,
+      "pages": 2,
+      "fieldsExpected": 31,
+      "fieldsCorrect": 31,
+      "mismatches": [],
+      "unexpectedFields": [],
+      "rawValues": {
+        "invoice_number": "BBw-260901-73",
+        "supplier": "Bracken & Blue Workshop",
+        "invoice_date": "September 1, 2026",
+        "currency": "GBP",
+        "subtotal": "GBP 301.00",
+        "tax": "GBP 60.20",
+        "total": "GBP 361.20",
+        "line_items": [
+          {
+            "description": "Ceramic carafes",
+            "quantity": "4",
+            "unit_price": "28.50",
+            "amount": "114.00"
+          },
+          {
+            "description": "Felt coasters",
+            "quantity": "18",
+            "unit_price": "3.20",
+            "amount": "57.60"
+          },
+          {
+            "description": "Linen table runners",
+            "quantity": "3",
+            "unit_price": "22.00",
+            "amount": "66.00"
+          },
+          {
+            "description": "Brass napkin rings",
+            "quantity": "12",
+            "unit_price": "2.75",
+            "amount": "33.00"
+          },
+          {
+            "description": "Protective packaging",
+            "quantity": "1",
+            "unit_price": "12.00",
+            "amount": "12.00"
+          },
+          {
+            "description": "Courier delivery",
+            "quantity": "1",
+            "unit_price": "18.40",
+            "amount": "18.40"
+          }
+        ]
+      },
+      "normalizedValues": {
+        "invoice_number": "BBw-260901-73",
+        "supplier": "Bracken & Blue Workshop",
+        "invoice_date": "2026-09-01",
+        "currency": "GBP",
+        "subtotal": 301,
+        "tax": 60.2,
+        "total": 361.2,
+        "line_items": [
+          {
+            "description": "Ceramic carafes",
+            "quantity": 4,
+            "unit_price": 28.5,
+            "amount": 114
+          },
+          {
+            "description": "Felt coasters",
+            "quantity": 18,
+            "unit_price": 3.2,
+            "amount": 57.6
+          },
+          {
+            "description": "Linen table runners",
+            "quantity": 3,
+            "unit_price": 22,
+            "amount": 66
+          },
+          {
+            "description": "Brass napkin rings",
+            "quantity": 12,
+            "unit_price": 2.75,
+            "amount": 33
+          },
+          {
+            "description": "Protective packaging",
+            "quantity": 1,
+            "unit_price": 12,
+            "amount": 12
+          },
+          {
+            "description": "Courier delivery",
+            "quantity": 1,
+            "unit_price": 18.4,
+            "amount": 18.4
+          }
+        ]
+      },
+      "evidence": {
+        "invoice_number": [
+          {
+            "page": 1,
+            "text": "Invoice number BBw-260901-73",
+            "source": "matched-text"
+          }
+        ],
+        "supplier": [
+          {
+            "page": 1,
+            "text": "Bracken & Blue Workshop",
+            "source": "matched-text"
+          }
+        ],
+        "invoice_date": [
+          {
+            "page": 1,
+            "text": "Invoice date September 1, 2026",
+            "source": "matched-text"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "Currency GBP",
+            "source": "matched-text"
+          }
+        ],
+        "subtotal": [
+          {
+            "page": 2,
+            "text": "Subtotal GBP 301.00",
+            "source": "matched-text"
+          }
+        ],
+        "tax": [
+          {
+            "page": 2,
+            "text": "Tax (20%) GBP 60.20",
+            "source": "matched-text"
+          }
+        ],
+        "total": [
+          {
+            "page": 2,
+            "text": "TOTAL DUE GBP 361.20",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].description": [
+          {
+            "page": 1,
+            "text": "Ceramic carafes",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].quantity": [
+          {
+            "page": 1,
+            "text": "4",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].unit_price": [
+          {
+            "page": 1,
+            "text": "28.50",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].amount": [
+          {
+            "page": 1,
+            "text": "114.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[1].description": [
+          {
+            "page": 1,
+            "text": "Felt coasters",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[1].quantity": [
+          {
+            "page": 1,
+            "text": "18",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[1].unit_price": [
+          {
+            "page": 1,
+            "text": "3.20",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[1].amount": [
+          {
+            "page": 1,
+            "text": "57.60",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[2].description": [
+          {
+            "page": 1,
+            "text": "Linen table runners",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[2].quantity": [
+          {
+            "page": 1,
+            "text": "3",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[2].unit_price": [
+          {
+            "page": 1,
+            "text": "22.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[2].amount": [
+          {
+            "page": 1,
+            "text": "66.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[3].description": [
+          {
+            "page": 2,
+            "text": "Brass napkin rings",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[3].quantity": [
+          {
+            "page": 2,
+            "text": "12",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[3].unit_price": [
+          {
+            "page": 2,
+            "text": "2.75",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[3].amount": [
+          {
+            "page": 2,
+            "text": "33.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[4].description": [
+          {
+            "page": 2,
+            "text": "Protective packaging",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[4].quantity": [
+          {
+            "page": 2,
+            "text": "1",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[4].unit_price": [
+          {
+            "page": 2,
+            "text": "12.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[4].amount": [
+          {
+            "page": 2,
+            "text": "12.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[5].description": [
+          {
+            "page": 2,
+            "text": "Courier delivery",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[5].quantity": [
+          {
+            "page": 2,
+            "text": "1",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[5].unit_price": [
+          {
+            "page": 2,
+            "text": "18.40",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[5].amount": [
+          {
+            "page": 2,
+            "text": "18.40",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 1290,
+        "cachedInputTokens": 0,
+        "outputTokens": 972,
+        "reasoningTokens": 162,
+        "totalTokens": 2262,
+        "responseId": "resp_0acf07381abb8455016a9e760d49b887d2bf7fd353c3ad7b1b",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.0053415
+    },
+    {
+      "id": "french-image-receipt",
+      "filename": "lucioles-receipt.png",
+      "sha256": "17e781489e1e55245c35faa6262c4c261e12a92d82425aefb147da6d1d4aed2d",
+      "state": "needs_review",
+      "elapsedMs": 3185,
+      "pages": 1,
+      "fieldsExpected": 4,
+      "fieldsCorrect": 3,
+      "mismatches": [
+        {
+          "field": "date",
+          "expected": "2026-09-02",
+          "actual": "2 septembre 2026 à 10:43"
+        }
+      ],
+      "unexpectedFields": [],
+      "rawValues": {
+        "merchant": "Épicerie des Lucioles",
+        "date": "2 septembre 2026 à 10:43",
+        "currency": "EUR",
+        "total": "42,70 EUR"
+      },
+      "normalizedValues": {
+        "merchant": "Épicerie des Lucioles",
+        "date": "2 septembre 2026 à 10:43",
+        "currency": "EUR",
+        "total": 42.7
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "Épicerie des Lucioles",
+            "source": "model-visual"
+          }
+        ],
+        "date": [
+          {
+            "page": 1,
+            "text": "Achat du 2 septembre 2026 à 10:43",
+            "source": "model-visual"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "TOTAL À PAYER 42,70 EUR",
+            "source": "model-visual"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "TOTAL À PAYER 42,70 EUR",
+            "source": "model-visual"
+          }
+        ]
+      },
+      "issues": [
+        {
+          "field": "date",
+          "code": "date",
+          "message": "Date must be a valid ISO date (YYYY-MM-DD)."
+        },
+        {
+          "field": "_source",
+          "code": "visual_evidence",
+          "message": "AI-read source quotes are not independently verified against native text. Check the original image before approval."
+        }
+      ],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 1451,
+        "cachedInputTokens": 0,
+        "outputTokens": 254,
+        "reasoningTokens": 113,
+        "totalTokens": 1705,
+        "responseId": "resp_095316a5eb068182016a9e761535e487d29c120825a22016c8",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00223125
+    },
+    {
+      "id": "image-pdf-absent-date",
+      "filename": "moss-lantern-undated.pdf",
+      "sha256": "3e2d0847642fe86b38cb7750db460297d355b31a9adfa1fd9ffddfe6632664fc",
+      "state": "needs_review",
+      "elapsedMs": 4373,
+      "pages": 1,
+      "fieldsExpected": 4,
+      "fieldsCorrect": 4,
+      "mismatches": [],
+      "unexpectedFields": [],
+      "rawValues": {
+        "merchant": "Moss Lantern Books",
+        "date": null,
+        "currency": "EUR",
+        "total": "EUR 27.50"
+      },
+      "normalizedValues": {
+        "merchant": "Moss Lantern Books",
+        "date": null,
+        "currency": "EUR",
+        "total": 27.5
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "Moss Lantern Books",
+            "source": "model-visual"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "TOTAL PAID EUR 27.50",
+            "source": "model-visual"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "TOTAL PAID EUR 27.50",
+            "source": "model-visual"
+          }
+        ],
+        "date": [
+          {
+            "page": 1,
+            "text": "Transaction date: not recorded",
+            "source": "model-visual"
+          }
+        ]
+      },
+      "issues": [
+        {
+          "field": "date",
+          "code": "required",
+          "message": "Date is required."
+        },
+        {
+          "field": "_source",
+          "code": "visual_evidence",
+          "message": "AI-read source quotes are not independently verified against native text. Check the original image before approval."
+        }
+      ],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 2014,
+        "cachedInputTokens": 0,
+        "outputTokens": 249,
+        "reasoningTokens": 135,
+        "totalTokens": 2263,
+        "responseId": "resp_00a4ff8cad0129f8016a9e76190fc487d28504630510aaeb1e",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.002631
+    },
+    {
+      "id": "narrative-lead-email",
+      "filename": "studio-enquiry.eml",
+      "sha256": "2cecd1445e3f55dd79edaaa1ca27396029fc526d7e32432d2cc919a9501412fe",
+      "state": "needs_review",
+      "elapsedMs": 2375,
+      "pages": 1,
+      "fieldsExpected": 4,
+      "fieldsCorrect": 4,
+      "mismatches": [],
+      "unexpectedFields": [],
+      "rawValues": {
+        "name": "Nina Calder",
+        "email": "Nina.Calder@example.com",
+        "company": "Little Heron Ceramics",
+        "message": "We are opening a second ceramics studio and need a booking system that can keep the two workshop calendars separate. Could you send a written outline of your team plan and whether attendees can move their own reservations?\n\nOur first classes begin in November. I can share our current spreadsheet by email; a reply with pricing and setup steps would be ideal."
+      },
+      "normalizedValues": {
+        "name": "Nina Calder",
+        "email": "Nina.Calder@example.com",
+        "company": "Little Heron Ceramics",
+        "message": "We are opening a second ceramics studio and need a booking system that can keep the two workshop calendars separate. Could you send a written outline of your team plan and whether attendees can move their own reservations?\n\nOur first classes begin in November. I can share our current spreadsheet by email; a reply with pricing and setup steps would be ideal."
+      },
+      "evidence": {
+        "name": [
+          {
+            "page": 1,
+            "text": "Nina Calder",
+            "source": "matched-text"
+          }
+        ],
+        "email": [
+          {
+            "page": 1,
+            "text": "Nina.Calder@example.com",
+            "source": "matched-text"
+          }
+        ],
+        "company": [
+          {
+            "page": 1,
+            "text": "Little Heron Ceramics",
+            "source": "matched-text"
+          }
+        ],
+        "message": [
+          {
+            "page": 1,
+            "text": "We are opening a second ceramics studio and need a booking system that can keep the two workshop calendars separate. Could you send a written outline of your team plan and whether attendees can move their own reservations?",
+            "source": "matched-text"
+          },
+          {
+            "page": 1,
+            "text": "Our first classes begin in November. I can share our current spreadsheet by email; a reply with pricing and setup steps would be ideal.",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 528,
+        "cachedInputTokens": 0,
+        "outputTokens": 279,
+        "reasoningTokens": 27,
+        "totalTokens": 807,
+        "responseId": "resp_072a430efe9c2154016a9e761cbf3087d2abda8e059bebb82d",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.0016515
+    },
+    {
+      "id": "english-freeform-receipt",
+      "filename": "harbour-freeform-receipt.txt",
+      "sha256": "dc890fa7b648eb2e7e096cbf376e272825535c7e0e2643c02f9aaca464154973",
+      "state": "needs_review",
+      "elapsedMs": 1525,
+      "pages": 1,
+      "fieldsExpected": 4,
+      "fieldsCorrect": 4,
+      "mismatches": [],
+      "unexpectedFields": [],
+      "rawValues": {
+        "merchant": "Harbour Kettle Kitchen",
+        "date": "September 4, 2026",
+        "currency": "GBP",
+        "total": "GBP 27.65"
+      },
+      "normalizedValues": {
+        "merchant": "Harbour Kettle Kitchen",
+        "date": "2026-09-04",
+        "currency": "GBP",
+        "total": 27.65
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "Harbour Kettle Kitchen",
+            "source": "matched-text"
+          }
+        ],
+        "date": [
+          {
+            "page": 1,
+            "text": "On September 4, 2026",
+            "source": "matched-text"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "paid GBP 27.65",
+            "source": "matched-text"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "GBP 27.65",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 481,
+        "cachedInputTokens": 0,
+        "outputTokens": 138,
+        "reasoningTokens": 18,
+        "totalTokens": 619,
+        "responseId": "resp_0722ca7e60f54fe4016a9e761efc6487d2b5de66ccc47792f8",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00098175
+    },
+    {
+      "id": "malformed-pdf",
+      "filename": "broken-receipt.pdf",
+      "sha256": "fa064794c5403565bf94f69659f5f37e140faa2a73161bea9230dfb1da62d6d5",
+      "state": "rejected",
+      "reason": "The PDF is malformed, encrypted, or cannot be read",
+      "elapsedMs": 846
+    },
+    {
+      "id": "french-image-receipt-duplicate",
+      "filename": "lucioles-receipt-copy.png",
+      "duplicateOf": "french-image-receipt",
+      "sha256": "17e781489e1e55245c35faa6262c4c261e12a92d82425aefb147da6d1d4aed2d",
+      "state": "needs_review",
+      "elapsedMs": 3141,
+      "pages": 1,
+      "fieldsExpected": 4,
+      "fieldsCorrect": 3,
+      "mismatches": [
+        {
+          "field": "date",
+          "expected": "2026-09-02",
+          "actual": "Achat du 2 septembre 2026 à 10:43"
+        }
+      ],
+      "unexpectedFields": [],
+      "rawValues": {
+        "merchant": "Épicerie des Lucioles",
+        "date": "Achat du 2 septembre 2026 à 10:43",
+        "currency": "EUR",
+        "total": "42,70 EUR"
+      },
+      "normalizedValues": {
+        "merchant": "Épicerie des Lucioles",
+        "date": "Achat du 2 septembre 2026 à 10:43",
+        "currency": "EUR",
+        "total": 42.7
+      },
+      "evidence": {},
+      "issues": [
+        {
+          "field": "date",
+          "code": "date",
+          "message": "Date must be a valid ISO date (YYYY-MM-DD)."
+        },
+        {
+          "field": "merchant",
+          "code": "evidence_missing",
+          "message": "No matching source quote was verified for this value. Check the original before approval."
+        },
+        {
+          "field": "date",
+          "code": "evidence_missing",
+          "message": "No matching source quote was verified for this value. Check the original before approval."
+        },
+        {
+          "field": "currency",
+          "code": "evidence_missing",
+          "message": "No matching source quote was verified for this value. Check the original before approval."
+        },
+        {
+          "field": "total",
+          "code": "evidence_missing",
+          "message": "No matching source quote was verified for this value. Check the original before approval."
+        }
+      ],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 1451,
+        "cachedInputTokens": 0,
+        "outputTokens": 261,
+        "reasoningTokens": 107,
+        "totalTokens": 1712,
+        "responseId": "resp_0a4f646d38b5c58b016a9e76216f6887d2a759d76a06c1e681",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00226275
+    }
+  ]
+}

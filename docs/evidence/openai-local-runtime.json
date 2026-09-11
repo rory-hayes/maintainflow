@@ -1,0 +1,24 @@
+{
+  "checkedAt": "2026-09-07T08:14:53.896Z",
+  "web": {
+    "status": 200
+  },
+  "api": {
+    "status": 200,
+    "health": {
+      "status": "ok",
+      "name": "Folio",
+      "environment": "local",
+      "limits": {
+        "maxBytes": 10485760,
+        "maxPages": 30
+      }
+    }
+  },
+  "presets": {
+    "status": 200,
+    "aiConfigured": true
+  },
+  "worker": "Restarted after tests; durable worker startup observed, queue contained no pending jobs before startup",
+  "browserAIWorkflow": "Pending explicit approval"
+}

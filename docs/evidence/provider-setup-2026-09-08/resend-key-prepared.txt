@@ -1,0 +1,29 @@
+Browser tab: 1284963142, Title: "API keys · Resend", URL: "https://resend.com/api-keys?new=true".
+0 AXWebArea API keys · Resend, URL: resend.com/api-keys?new=true
+	1 container
+		55 container Notifications alt+T
+		56 container Add API Key
+			57 heading Add API Key, Value: 2, ID: base-ui-_r_8b_
+				58 text Add API Key
+			59 container
+				60 text Name
+				61 text field (settable) Name, Value: Folio local inbound development, ID: name
+				62 text Permission
+				63 image base-ui-_r_8d_
+				64 combo box (collapsed) Value: Full access, ID: base-ui-_r_8e_, Secondary Actions: Expand
+					65 text Full access
+				66 text Domain
+				67 combo box (disabled, collapsed) Value: All domains, ID: base-ui-_r_8i_, Secondary Actions: Expand
+					68 text All domains
+					69 image
+				70 button Add ⌘ ↩︎
+					71 text Add
+					80 text ⌘
+					81 text ↩︎
+				72 button Cancel Esc
+					73 text Cancel
+					74 text Esc
+			75 button Close dialog
+				76 image
+
+The focused UI element is 64 combo box (collapsed) Value: Full access, ID: base-ui-_r_8e_, Secondary Actions: Expand

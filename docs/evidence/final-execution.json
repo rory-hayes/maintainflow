@@ -1,0 +1,25 @@
+{
+  "testStartedAt": "2026-09-06T21:35:32.800014+00:00",
+  "testCommand": "npm test",
+  "testOutput": "docs/evidence/final-test-results.txt",
+  "testFinishedAt": "2026-09-06T21:35:42.733150+00:00",
+  "testExitCode": 0,
+  "evaluationStartedAt": "2026-09-06T21:34:31.084311+00:00",
+  "evaluationCommand": "node --import tsx scripts/evaluate.ts",
+  "evaluationOutput": "docs/evidence/final-evaluation-results.txt",
+  "evaluationFinishedAt": "2026-09-06T21:34:34.647347+00:00",
+  "evaluationExitCode": 0,
+  "preEvaluationTest": {
+    "testStartedAt": "2026-09-06T21:33:35.482086+00:00",
+    "testCommand": "npm test",
+    "testOutput": "docs/evidence/pre-evaluation-63-tests.txt",
+    "testFinishedAt": "2026-09-06T21:33:45.480308+00:00",
+    "testExitCode": 0
+  },
+  "testSourceFingerprint": "7acc735a5ddbd73002bbd06ab15443082a3423c95a0c637357c2f81f7b83fd4c",
+  "buildStartedAt": "2026-09-06T21:36:55.380700+00:00",
+  "buildCommand": "npm run build",
+  "buildOutput": "docs/evidence/final-build-results.txt",
+  "buildFinishedAt": "2026-09-06T21:36:57.301671+00:00",
+  "buildExitCode": 0
+}

@@ -1,0 +1,16 @@
+{
+  "source": [
+    "Source · Page 1: Name: Morgan Vale",
+    "Source · Page 1: Email: morgan@example.test",
+    "Source · Page 1: Company: Willow Research",
+    "Source · Page 1: Message: Please process our weekly enquiries.\nKeep the original reference numbers.\nSend a summary after review."
+  ],
+  "url": "http://127.0.0.1:5178/app/documents/46439fb9-7a2e-4973-b239-43dcad3ac8ac",
+  "values": {
+    "Company": "Willow Research",
+    "Email": "",
+    "Message": "Please process our weekly enquiries.\nKeep the original reference numbers.\nSend a summary after review.",
+    "Name": "Morgan Vale"
+  },
+  "observationNote": "Email was confirmed visually as morgan@example.test in review-multiline.png; the DOM capture returned an empty input value despite the rendered text. Message newlines and Company were captured directly."
+}

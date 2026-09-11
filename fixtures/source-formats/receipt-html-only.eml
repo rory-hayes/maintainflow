@@ -1,0 +1,12 @@
+From: sender@example.test
+To: intake@example.test
+Subject: Owned HTML-only receipt fixture
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+<html><body>
+<h2>Merchant: <a href="https://example.test/owned-fixture">Cedar and Pine Office Supplies and Workspace Furnishings Trading Company Limited</a></h2>
+<table><tr><th>Merchant</th><th>Total</th></tr><tr><td>Cedar &amp; Pine</td><td>18.60</td></tr></table>
+<p>Currency: EUR</p>
+</body></html>

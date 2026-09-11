@@ -1,0 +1,250 @@
+- main:
+  - button "Skip to content"
+  - generic "Header":
+    - navigation "Breadcrumbs":
+      - list:
+        - link "Products":
+          - /url: /acct_1SLliwF3c6inFQxp/test/products
+    - heading "MaintainFlow Documents — Team Active" [level=1]:
+      - generic: MaintainFlow Documents — Team
+      - generic: Active
+    - generic "Header description":
+      - text: €79.00
+      - generic: •
+      - text: Per month
+    - button "Edit product"
+    - button:
+  - main:
+    - generic: Pricing
+    - button:
+    - table:
+      - rowgroup:
+        - row "Price Description Subscriptions Created":
+          - columnheader "Price":
+            - button "Price":
+              - generic: Price
+          - columnheader:
+            - button
+          - columnheader "Description":
+            - button "Description":
+              - generic: Description
+          - columnheader "Subscriptions":
+            - button "Subscriptions":
+              - generic: Subscriptions
+          - columnheader "Created":
+            - button "Created":
+              - generic: Created
+          - columnheader
+      - rowgroup:
+        - row "€79.00 Per month Default — 0 active 11 Sept Row actions":
+          - cell "€79.00 Per month":
+            - link "€79.00 Per month":
+              - /url: /acct_1SLliwF3c6inFQxp/test/prices/price_1UEPQmF3c6inFQxpHyB4df3d
+              - text: €79.00
+              - text: Per month
+          - cell "Default":
+            - link "Default":
+              - /url: /acct_1SLliwF3c6inFQxp/test/prices/price_1UEPQmF3c6inFQxpHyB4df3d
+              - generic: Default
+          - cell "—":
+            - link "—":
+              - /url: /acct_1SLliwF3c6inFQxp/test/prices/price_1UEPQmF3c6inFQxpHyB4df3d
+              - generic: —
+          - cell "0 active":
+            - link "0 active":
+              - /url: /acct_1SLliwF3c6inFQxp/test/prices/price_1UEPQmF3c6inFQxpHyB4df3d
+              - generic: 0 active
+          - cell "11 Sept":
+            - link "11 Sept":
+              - /url: /acct_1SLliwF3c6inFQxp/test/prices/price_1UEPQmF3c6inFQxpHyB4df3d
+              - generic: 11 Sept
+          - cell "Row actions":
+            - button "Row actions":
+              - img "Row actions"
+    - generic: Trials
+    - generic: Preview
+    - button:
+    - generic: No trials
+    - generic: Cross-sells
+    - text: Suggest a related product for customers to add to their order, right in Checkout.
+    - link "Learn more":
+      - /url: https://docs.stripe.com/payments/checkout/cross-sells
+    - generic: Cross-sells to
+    - textbox "Find a product…"
+    - generic: Features
+    - generic: No features
+    - text: Features define customer entitlements for this product.
+    - link "View docs":
+      - /url: https://docs.stripe.com/billing/entitlements
+    - generic: Logs
+    - table:
+      - rowgroup:
+        - row "POST /v1/products/prod_VEtDSaklZSdevv 200 OK 11/09/2026, 09:03:32":
+          - cell "POST /v1/products/prod_VEtDSaklZSdevv":
+            - button "POST /v1/products/prod_VEtDSaklZSdevv":
+              - generic: POST /v1/products/prod_VEtDSaklZSdevv
+          - cell "200 OK":
+            - button "200 OK":
+              - generic: 200 OK
+          - cell "11/09/2026, 09:03:32":
+            - button "11/09/2026, 09:03:32":
+              - generic: 11/09/2026, 09:03:32
+        - row "POST /v1/prices 200 OK 11/09/2026, 09:03:32":
+          - cell "POST /v1/prices":
+            - button "POST /v1/prices":
+              - generic: POST /v1/prices
+          - cell "200 OK":
+            - button "200 OK":
+              - generic: 200 OK
+          - cell "11/09/2026, 09:03:32":
+            - button "11/09/2026, 09:03:32":
+              - generic: 11/09/2026, 09:03:32
+        - row "POST /v1/products 200 OK 11/09/2026, 09:03:31":
+          - cell "POST /v1/products":
+            - button "POST /v1/products":
+              - generic: POST /v1/products
+          - cell "200 OK":
+            - button "200 OK":
+              - generic: 200 OK
+          - cell "11/09/2026, 09:03:31":
+            - button "11/09/2026, 09:03:31":
+              - generic: 11/09/2026, 09:03:31
+    - generic: Events
+    - table:
+      - rowgroup:
+        - row "A product with ID prod_VEtDSaklZSdevv was updated 11/09/2026, 09:03:32":
+          - cell "A product with ID prod_VEtDSaklZSdevv was updated":
+            - button "A product with ID prod_VEtDSaklZSdevv was updated":
+              - generic: A product with ID prod_VEtDSaklZSdevv was updated
+          - cell:
+            - button
+          - cell "11/09/2026, 09:03:32":
+            - button "11/09/2026, 09:03:32":
+              - generic: 11/09/2026, 09:03:32
+        - row "A new price called price_1UEPQmF3c6inFQxpHyB4df3d was created 11/09/2026, 09:03:32":
+          - cell "A new price called price_1UEPQmF3c6inFQxpHyB4df3d was created":
+            - button "A new price called price_1UEPQmF3c6inFQxpHyB4df3d was created":
+              - generic: A new price called price_1UEPQmF3c6inFQxpHyB4df3d was created
+          - cell:
+            - button
+          - cell "11/09/2026, 09:03:32":
+            - button "11/09/2026, 09:03:32":
+              - generic: 11/09/2026, 09:03:32
+        - row "A new plan called price_1UEPQmF3c6inFQxpHyB4df3d was created 11/09/2026, 09:03:32":
+          - cell "A new plan called price_1UEPQmF3c6inFQxpHyB4df3d was created":
+            - button "A new plan called price_1UEPQmF3c6inFQxpHyB4df3d was created":
+              - generic: A new plan called price_1UEPQmF3c6inFQxpHyB4df3d was created
+          - cell:
+            - button
+          - cell "11/09/2026, 09:03:32":
+            - button "11/09/2026, 09:03:32":
+              - generic: 11/09/2026, 09:03:32
+        - row "A product with ID prod_VEtDSaklZSdevv was created 11/09/2026, 09:03:31":
+          - cell "A product with ID prod_VEtDSaklZSdevv was created":
+            - button "A product with ID prod_VEtDSaklZSdevv was created":
+              - generic: A product with ID prod_VEtDSaklZSdevv was created
+          - cell:
+            - button
+          - cell "11/09/2026, 09:03:31":
+            - button "11/09/2026, 09:03:31":
+              - generic: 11/09/2026, 09:03:31
+    - generic: Insights
+    - generic: MRR
+    - text: €0.00
+    - generic: As of 11 Sept
+    - generic: Details
+    - button:
+    - generic: Product ID
+    - button "Copy to clipboard, prod_VEtDSaklZSdevv":
+      - generic: prod_VEtDSaklZSdevv
+    - generic: Product category
+    - text: "Preset: General - Electronically Supplied Services"
+    - generic: txcd_10000000
+    - generic: Managed Payments
+    - text: Needs info
+    - generic: Marketing feature list
+    - generic: —
+    - generic: Description
+    - generic: "Document extraction workspace: 5,000 pages per month, 50 parsers, and 4 concurrent extraction jobs. CSV, Excel and JSON exports. Monthly subscription."
+    - generic: Attributes
+    - generic: —
+    - button "View more":
+      - text: View more
+    - generic: Metadata
+    - button:
+    - text: No metadata
+- paragraph: Navigated to Product catalogue – Maintain Flow – Stripe [Test]
+- generic: Sandbox
+- button:
+- generic: You are testing in a sandbox. No real transactions will be processed.
+- iframe
+- button "Account options and switcher, current account is Test mode (Maintain Flow)":
+  - generic: M
+  - generic: Test mode
+  - generic: Maintain Flow
+- navigation:
+  - region "Core navigation links":
+    - list "Core navigation links":
+      - link "Home":
+        - /url: /acct_1SLliwF3c6inFQxp/test/dashboard
+        - generic: Home
+      - link "Balances":
+        - /url: /acct_1SLliwF3c6inFQxp/test/balance/overview
+        - generic: Balances
+      - link "Transactions":
+        - /url: /acct_1SLliwF3c6inFQxp/test/payments
+        - generic: Transactions
+      - link "Customers":
+        - /url: /acct_1SLliwF3c6inFQxp/test/customers
+        - generic: Customers
+      - link "Product catalogue":
+        - /url: /acct_1SLliwF3c6inFQxp/test/products?status=active&listId=active
+        - generic: Product catalogue
+  - region "Shortcuts":
+    - text: Shortcuts
+    - button "Manage shortcuts":
+    - list "Shortcuts":
+      - link "Subscriptions":
+        - /url: /acct_1SLliwF3c6inFQxp/test/subscriptions?status=active
+        - generic: Subscriptions
+      - button "Unpin Subscriptions"
+  - region "Products":
+    - generic: Products
+    - list "Products":
+      - button "Payments":
+        - generic: Payments
+      - button "Billing":
+        - generic: Billing
+      - button "Reporting":
+        - generic: Reporting
+      - button "Apps":
+        - generic: Apps
+      - button "More":
+        - generic: More
+  - region "Developer links":
+    - list "Developer links"
+- button "Toggle navigation menu" [expanded]
+- search:
+  - generic: Search
+  - combobox "Search"
+  - generic: /
+- button "Apps":
+- button "Help":
+- button "Notifications":
+- link "Settings":
+  - /url: /acct_1SLliwF3c6inFQxp/test/settings
+- button "Create":
+- button "Show Workbench":
+  - button "Developers":
+    - generic: Developers
+  - button "Inspect":
+    - generic: prod_VEtDSaklZSdevv
+  - button "Health":
+  - button "API activity":
+  - button "Event deliveries":
+  - button "Open Workbench"
+- link "Payouts pausedA required task is overdue. Complete it to enable payouts for your account. View task":
+  - /url: /acct_1SLliwF3c6inFQxp/test/account/status
+  - generic: Payouts pausedA required task is overdue. Complete it to enable payouts for your account.
+  - generic: View task
+- iframe

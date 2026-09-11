@@ -1,0 +1,20 @@
+import {lazy,Suspense} from 'react';
+import {Routes,Route,Link} from 'react-router-dom';
+import {Loading} from './components/ui';
+import AppShell from './components/AppShell';
+import Landing from './features/marketing/Landing';
+import Auth from './features/auth/Auth';
+const Documents=lazy(()=>import('./features/documents/Documents'));
+const Review=lazy(()=>import('./features/documents/Review'));
+const Parsers=lazy(()=>import('./features/parsers/Parsers'));
+const ParserDetail=lazy(()=>import('./features/parsers/Parsers').then(m=>({default:m.ParserDetail})));
+const Onboarding=lazy(()=>import('./features/parsers/Onboarding'));
+const Settings=lazy(()=>import('./features/settings/Settings'));
+const Usage=lazy(()=>import('./features/settings/Usage'));
+const Invite=lazy(()=>import('./features/settings/Invite'));
+const Integrations=lazy(()=>import('./features/integrations/Integrations'));
+const Help=lazy(()=>import('./features/marketing/Help'));
+const ApiDocs=lazy(()=>import('./features/marketing/Help').then(m=>({default:m.ApiDocs})));
+const Privacy=lazy(()=>import('./features/marketing/Help').then(m=>({default:m.Privacy})));
+const Terms=lazy(()=>import('./features/marketing/Help').then(m=>({default:m.Terms})));
+export default function App(){return <Suspense fallback={<Loading/>}><Routes><Route path="/" element={<Landing/>}/><Route path="/sign-in" element={<Auth/>}/><Route path="/sign-up" element={<Auth signUp/>}/><Route path="/help" element={<Help/>}/><Route path="/help/api" element={<ApiDocs/>}/><Route path="/privacy" element={<Privacy/>}/><Route path="/terms" element={<Terms/>}/><Route path="/app" element={<AppShell/>}><Route index element={<Documents/>}/><Route path="parsers" element={<Parsers/>}/><Route path="parsers/new" element={<Onboarding/>}/><Route path="parsers/:id" element={<ParserDetail/>}/><Route path="documents/:id" element={<Review/>}/><Route path="settings" element={<Settings/>}/><Route path="usage" element={<Usage/>}/><Route path="integrations" element={<Integrations/>}/><Route path="invite" element={<Invite/>}/></Route><Route path="*" element={<div className="empty"><h1>This page isn’t here.</h1><p>Return to your workspace or the home page.</p><Link className="button primary" to="/">Go home</Link></div>}/></Routes></Suspense>;}

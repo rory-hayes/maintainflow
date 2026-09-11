@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "documents": [
+    {
+      "documentId": "336b6eb6-8711-4433-afea-9e177bc8aea3",
+      "filename": "receipt-scan.png",
+      "runId": "2a371ebe-dc87-4105-bf2f-f92122ccd640",
+      "revision": 0,
+      "approvalId": "fff66561-22d0-4329-a5f9-457e1c217ea2",
+      "correctionId": null,
+      "values": {
+        "date": "2026-08-25",
+        "total": 18.6,
+        "currency": "EUR",
+        "merchant": "Birch Bakery"
+      }
+    }
+  ]
+}

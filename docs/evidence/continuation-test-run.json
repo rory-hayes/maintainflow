@@ -1,0 +1,8 @@
+{
+  "command": "npm test",
+  "startedAt": "2026-09-06T22:06:18.808394+00:00",
+  "finishedAt": "2026-09-06T22:06:30.009266+00:00",
+  "exitCode": 0,
+  "output": "docs/evidence/continuation-test-results.txt",
+  "sourceFingerprint": "e67237c39dcc349b54d4956cc2b3729050974acfca890871fe092a715036b60a"
+}

@@ -1,0 +1,51 @@
+{
+  "startedAt": "2026-09-11T08:16:21.836Z",
+  "finishedAt": "2026-09-11T08:16:25.408Z",
+  "image": "maintainflow-documents:qa-20260911",
+  "scope": "Local Docker image and isolated container primitives; no database, external providers, Compose orchestration or hosted deployment",
+  "checks": [
+    {
+      "name": "image identity",
+      "passed": true,
+      "exitCode": 0,
+      "stdout": "sha256:8ae3f985e7fb6873e5f4b61a5669e3dbc26f5465086263433e0d61fc7549523a",
+      "stderr": ""
+    },
+    {
+      "name": "temporary private originals volume",
+      "passed": true,
+      "exitCode": 0,
+      "stdout": "maintainflow-documents-qa-b1b848f71ba2",
+      "stderr": ""
+    },
+    {
+      "name": "production missing encryption key rejected",
+      "passed": true,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "/app/server/integrations/secrets.ts:17\n  if (process.env.NODE_ENV === 'production') throw new Error('INTEGRATION_ENCRYPTION_KEY is required in production.');\n                                                   ^\n\nError: INTEGRATION_ENCRYPTION_KEY is required in production.\n    at encryptionKey (/app/server/integrations/secrets.ts:17:52)\n    at <anonymous> (/app/server/integrations/secrets.ts:31:44)\n    at ModuleJob.run (node:internal/modules/esm/module_job:413:25)\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:660:26)\n    at async file:///app/[eval1]:1:1\n\nNode.js v24.13.0"
+    },
+    {
+      "name": "production invalid encryption key rejected",
+      "passed": true,
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "/app/server/integrations/secrets.ts:12\n      throw new Error('Integration encryption key must be a base64-encoded 32-byte value.');\n            ^\n\nError: Integration encryption key must be a base64-encoded 32-byte value.\n    at encryptionKey (/app/server/integrations/secrets.ts:12:13)\n    at <anonymous> (/app/server/integrations/secrets.ts:31:44)\n    at ModuleJob.run (node:internal/modules/esm/module_job:413:25)\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:660:26)\n    at async file:///app/[eval1]:1:1\n\nNode.js v24.13.0"
+    },
+    {
+      "name": "non-root private storage and decoder execution",
+      "passed": true,
+      "exitCode": 0,
+      "stdout": "{\"uid\":1000,\"secretRoundTrip\":true,\"privateOriginalWriteReadDelete\":true,\"sourceTextDecoder\":true,\"sourceImageDecoder\":true,\"localSecretsExcluded\":true,\"productionApiLiveness\":true,\"frontendServed\":true}",
+      "stderr": ""
+    },
+    {
+      "name": "temporary volume cleanup",
+      "passed": true,
+      "exitCode": 0,
+      "stdout": "maintainflow-documents-qa-b1b848f71ba2",
+      "stderr": ""
+    }
+  ],
+  "passed": true
+}

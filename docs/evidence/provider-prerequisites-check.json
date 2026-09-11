@@ -1,0 +1,34 @@
+{
+  "checkedAt": "2026-09-07T17:35:03.646Z",
+  "goalStatusRecordedAt": "2026-09-07T17:36:07.002336+00:00",
+  "goalStatus": "blocked",
+  "openAiConfigured": true,
+  "missingRequiredConfiguration": {
+    "resend": [
+      "RESEND_API_KEY",
+      "RESEND_WEBHOOK_SECRET",
+      "RESEND_DOMAIN_ID",
+      "RESEND_INBOUND_DOMAIN",
+      "RESEND_INBOUND_ENABLED=true"
+    ],
+    "googleSheets": [
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+      "GOOGLE_REDIRECT_URI"
+    ],
+    "stripeTest": [
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "STRIPE_PRICE_STANDARD",
+      "STRIPE_PRICE_TEAM"
+    ]
+  },
+  "userInputPending": "Existing receiving domain/subdomain and Resend account; do not supply secret values in chat.",
+  "sourceFiles": 186,
+  "sourceFingerprint": "a4641915d5042524908c4e98efe14945ac15df13923f27c9307f7733264ed4f0",
+  "changedSinceVerification": [],
+  "testsPassed": 167,
+  "buildExitCode": 0,
+  "localDevSessionObservedRunning": 51090,
+  "limitations": "Provider presence flags and frozen local checks do not prove external account operation. Earlier browser approval and Mac-lock prerequisites are resolved."
+}

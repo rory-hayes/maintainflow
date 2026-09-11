@@ -1,0 +1,15 @@
+{
+  "valuesBeforeApproval": {
+    "url": "http://127.0.0.1:5178/app/documents/b4f22abc-ab4d-4fb8-bf67-05d687cd854e",
+    "values": {
+      "Currency": "EUR",
+      "Date": "2026-09-17",
+      "Merchant": "Linden Küche",
+      "Total": "1234.56"
+    }
+  },
+  "documentWidth": 1280,
+  "history": "FieldsLine itemsHistoryRecent document activityAcross all extraction runs. Export events refer to the approved revision used for that export.Export completed6 Sept 2026, 23:47Export of an approved revision · JSONExport started6 Sept 2026, 23:47Export of an approved revision · JSONApproved6 Sept 2026, 23:47Ready for review6 Sept 2026, 23:46Processing6 Sept 2026, 23:46Queued6 Sept 2026, 23:46Received6 Sept 2026, 23:46Selected run detailsExtraction run6 Sept 2026, 23:46 · text-anchorsModel: deterministic-v2 · Prompt: folio-extraction-v1Document digest: aafd5d38335d74b95e74…Revision approved6 Sept 2026, 23:47View approved values{\n  \"date\": \"2026-09-17\",\n  \"total\": 1234.56,\n  \"currency\": \"EUR\",\n  \"merchant\": \"Linden Küche\"\n}Extracted values · Review before exportSave correctionApprove & export",
+  "url": "http://127.0.0.1:5178/app/documents/b4f22abc-ab4d-4fb8-bf67-05d687cd854e",
+  "viewportWidth": 1280
+}

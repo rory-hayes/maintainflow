@@ -1,0 +1,46 @@
+{
+  "capturedAt": "2026-09-06T22:56:44.712Z",
+  "documentWidth": 390,
+  "events": [
+    {
+      "bottom": -23.1015625,
+      "text": "Export completed6 Sept 2026, 23:47Export of an approved revision · JSON",
+      "top": -121.1015625
+    },
+    {
+      "bottom": 74.8984375,
+      "text": "Export started6 Sept 2026, 23:47Export of an approved revision · JSON",
+      "top": -23.1015625
+    },
+    {
+      "bottom": 150.8984375,
+      "text": "Approved6 Sept 2026, 23:47",
+      "top": 74.8984375
+    },
+    {
+      "bottom": 226.8984375,
+      "text": "Ready for review6 Sept 2026, 23:46",
+      "top": 150.8984375
+    },
+    {
+      "bottom": 302.8984375,
+      "text": "Processing6 Sept 2026, 23:46",
+      "top": 226.8984375
+    },
+    {
+      "bottom": 378.8984375,
+      "text": "Queued6 Sept 2026, 23:46",
+      "top": 302.8984375
+    },
+    {
+      "bottom": 454.8984375,
+      "text": "Received6 Sept 2026, 23:46",
+      "top": 378.8984375
+    }
+  ],
+  "scrollY": 560.5,
+  "viewport": {
+    "height": 844,
+    "width": 390
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "recordedAt": "2026-09-07T09:11:09.186169+00:00",
+  "fileCount": 185,
+  "sourceFingerprint": "f2bd05a30bd9e4c0f891c6b908e197bd8fd54cbc46f9919563be869c10b002f8",
+  "unchangedSinceBefore": true,
+  "testsRun": "docs/evidence/review-provenance-tests-run.json",
+  "buildRun": "docs/evidence/review-provenance-build-run.json",
+  "extractionFilesComparedWithV2Proof": 110,
+  "extractionFilesUnchanged": true,
+  "retainedAIRegression": "docs/evidence/openai-date-regression-evaluation-2026-09-07T08-34-10-311Z.json",
+  "browserAcceptance": "New source disclosures pending Mac unlock; AI parser creation/full workflow also pending explicit approval"
+}

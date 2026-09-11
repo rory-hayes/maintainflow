@@ -1,0 +1,106 @@
+- link "Skip to content":
+  - /url: "#main"
+- complementary "Workspace navigation":
+  - link "Folio":
+    - /url: /
+  - generic: Workspace
+  - combobox "Workspace":
+    - option "MaintainFlow Release QA" [selected]
+    - option "+ New workspace"
+  - navigation "Workspace pages":
+    - link "Documents":
+      - /url: /app
+      - text: Documents
+    - link "Parsers":
+      - /url: /app/parsers
+      - text: Parsers
+    - link "Integrations":
+      - /url: /app/integrations
+      - text: Integrations
+    - link "Usage":
+      - /url: /app/usage
+      - text: Usage
+    - link "Settings":
+      - /url: /app/settings
+      - text: Settings
+  - link "Help & documentation":
+    - /url: /help
+    - text: Help & documentation
+  - generic: R
+  - strong: Release Browser QA
+  - generic: owner · Local workspace
+  - button "Sign out":
+- banner:
+  - generic: Workspace
+  - generic: /
+  - generic: Documents
+  - button "Processing notifications, 1 unread":
+    - generic: "1"
+  - generic: R
+- main:
+  - link "Documents":
+    - /url: /app/parsers/f2db58b6-ae9b-4d83-a64e-32d38399bb8c
+    - generic: Documents
+  - generic: synthetic-receipt-sample.txt
+  - button "Reprocess":
+    - text: Reprocess
+  - combobox "Extraction run":
+    - option "Run 1" [selected]
+  - button "Export" [disabled]:
+    - text: Export
+  - heading "Document review" [level=1]
+  - link "Release receipt extraction":
+    - /url: /app/parsers/f2db58b6-ae9b-4d83-a64e-32d38399bb8c
+  - generic: · Schema v1
+  - generic: Needs review
+  - region "Original document":
+    - button "Previous page" [disabled]:
+    - generic: Page 1 of 1
+    - button "Next page" [disabled]:
+    - button "Zoom out":
+    - generic: 100%
+    - button "Zoom in":
+    - generic: ORIGINAL TEXT
+    - generic: "SYNTHETIC SAMPLE — RECEIPT Merchant: Willow Coffee Date: 2026-09-03 Currency: EUR Total: 12.80"
+    - button "Download original":
+      - text: Download original
+  - region "Extracted data":
+    - tablist "Review result":
+      - tab "Fields" [selected]
+      - tab "Line items"
+      - tab "History"
+    - generic: Merchant *
+    - textbox "Merchant":
+      - /placeholder: Not found
+      - text: Willow Coffee
+    - generic: "Original: Willow Coffee"
+    - 'button "Source · Page 1: Merchant: Willow Coffee"':
+      - generic: "Source · Page 1:"
+      - text: "Merchant: Willow Coffee"
+    - generic: Date *
+    - textbox "Date":
+      - /placeholder: Not found
+      - text: 2026-09-03
+    - generic: "Original: 2026-09-03"
+    - 'button "Source · Page 1: Date: 2026-09-03"':
+      - generic: "Source · Page 1:"
+      - text: "Date: 2026-09-03"
+    - generic: Currency *
+    - textbox "Currency":
+      - /placeholder: Not found
+      - text: EUR
+    - generic: "Original: EUR"
+    - 'button "Source · Page 1: Currency: EUR"':
+      - generic: "Source · Page 1:"
+      - text: "Currency: EUR"
+    - generic: Total *
+    - textbox "Total":
+      - /placeholder: Not found
+      - text: "12.8"
+    - generic: "Original: 12.80"
+    - 'button "Source · Page 1: Total: 12.80"':
+      - generic: "Source · Page 1:"
+      - text: "Total: 12.80"
+    - generic: Extracted values · Review before export
+    - button "Save correction" [disabled]
+    - button "Approve & export"

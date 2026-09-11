@@ -1,51 +1,107 @@
-# MaintainCode Ads
+# MaintainFlow document workspace (Folio)
 
-MaintainCode Ads connects marketing-source evidence to form enquiries, CRM qualification and won deals. This code replaces the previous ad-operations product in `rory-hayes/maintainflow`; the user-owned production target is **https://maintainflow.io**.
+An original document-extraction workspace built under the internal project/task name **Parseur**. React/Vite supplies the interface; Fastify, PostgreSQL, and a separate durable worker persist accounts, files, parser schemas, extraction runs, corrections, approvals, and exports. The visual direction is informed by the public IntunePckgr and Parseur references; Folio is not either company.
 
-The product scope and data contract are in [the product brief](docs/maintaincode-ads-product-brief.md). The [implementation guide](docs/maintaincode-ads-implementation.md) covers tracking, HubSpot, attribution rules, billing, retention and the remaining acceptance gates. Legacy ad-operations modules and tests remain as reusable internals; their old guides do not describe this release.
+**11 September migration:** this application is replacing the source in `rory-hayes/maintainflow`. The previous code is preserved on `backup/pre-folio-2026-09-11`. The checked-in Vercel deployment hold preserves the existing site until the stateful backend is accepted. See [production readiness and rollout plan](docs/PRODUCTION-READINESS-2026-09-11.md). Repository replacement is separate from domain cutover.
 
-## Local development
+**Prior verified local scope (8 September):** real local authentication, deterministic text-anchor extraction and schema-constrained OpenAI extraction for native text, PDFs and images. Secure OpenAI setup is complete. The browser has now created **AI receipt QA**, uploaded a synthetic image, reviewed the actual worker result, approved it and downloaded matching JSON; reload preserves the approval and all seven lifecycle entries. [AI browser acceptance](docs/AI-BROWSER-ACCEPTANCE.md) records the exact result. That source passed **184/184 tests** and the build; the September 11 report records the replacement source verification. [Provider setup](docs/PROVIDER-SETUP.md) records nine new billing-mock tests and eight managed-inbox tests, with real provider acceptance kept separate. Parser restoration now shares creation’s active-capacity lock/check, and membership/invitation changes record atomic audit events; [workspace integrity](docs/WORKSPACE-INTEGRITY.md) records seven added regressions. Prior source-disclosure desktop/mobile navigation and keyboard checks remain preserved. An independently authored held-out set measured **49/51 expected values**, exposing date text that included adjacent wording/time. Prompt v2 narrows date selection; the unchanged set then measured **51/51 in a regression replay**. The original failure and earlier 74/74 regression remain preserved in [AI extraction evidence](docs/AI-EXTRACTION.md). These small synthetic results do not establish general accuracy. At the user’s request, billing now uses an explicitly labelled local mock; its browser selection/change/cancel/reload workflow passed and real Stripe verification is deferred. Resend account access is confirmed, but receiving setup and Google Sheets OAuth/delivery remain incomplete. There is no production deployment, managed authentication, cloud storage or customer-use evidence. See [verification](docs/VERIFICATION.md) and [remaining gates](docs/RELEASE-GATES.md).
 
-```bash
+## Run locally
+
+The current bootstrap targets this macOS machine: Node.js/npm and PostgreSQL 17 command-line tools at `/opt/homebrew/bin` are installed. Other operating systems need a compatible PostgreSQL instance and the connection variables below; the bundled `local-db.mjs` is not a portable installer. The observed Node runtime during testing was 26.5.0.
+
+```sh
+cd /Users/rory/Documents/Ideation/parseur
 npm ci
-npm run dev -- --hostname 127.0.0.1 --port 3217
+npm run setup
+npm run dev
 ```
 
-Open `http://127.0.0.1:3217/app`. The labelled sample workspace needs no account. Real workspace creation requires authentication and PostgreSQL. The optional `MAINTAINCODE_LOCAL_TEST=1` development identity applies only to loopback development, never to a deployed build. Use it only with a disposable local database.
+Open **http://127.0.0.1:5178**. Vite proxies `/api` to **http://127.0.0.1:4318**. `npm run dev` starts the Vite frontend, Fastify API, and durable worker together. Keep all three running for the upload-to-result workflow. Use `127.0.0.1` consistently because the default allowed application origin is exact.
 
-## Deployment configuration
+`npm run setup` starts a private local PostgreSQL database and applies numbered migrations. The database uses `.local/socket/.s.PGSQL.55432`; TCP is disabled. Its local trust authentication is restricted by a private Unix-socket directory and is a local-development choice. Records live in `.local/pg`; uploaded originals live in `.local/files`; the development encryption key lives in `.local/secrets`. These paths and `.env*` are ignored by Git. Preserve them if you want to keep the workspace; do not delete `.local/` as a routine restart.
 
-Copy `.env.example` into the deployment secret manager, supplying actual values. Do not commit an environment file. This release uses a **new Supabase project** for authentication and PostgreSQL, while retaining the existing user-owned domain and GitHub repository.
+Stop the development processes with Ctrl-C. The database remains available until `npm run db:stop`. On restart, run `npm run setup` and `npm run dev` again. A normal app refresh or worker restart does not clear jobs, documents, or approved revisions.
 
-- Set `MAINTAINCODE_APP_ORIGIN=https://maintainflow.io`, plus the new project's public Supabase URL and publishable key at build time and runtime. Never use a Supabase secret/service-role key as a public key.
-- Enable public self-service admission. Configure the Supabase site URL and allowed auth redirects for the actual domain. Successful sign-up, email delivery, sign-in, recovery and sign-out need browser proof.
-- Apply all migrations in `src/lib/database/migration-manifest.json` using a separate database administrator. Enable LOGIN/password on the `maintaincode_app` role created by migration 024 and grant database CONNECT. The runtime connection uses this role, never `postgres`, `service_role` or the legacy bypass-RLS role.
-- Configure exactly one `sslmode=verify-full` parameter and the new project's authentic database root CA. On Supabase's pooler, the username is typically project-qualified (`maintaincode_app.PROJECT_REFERENCE`). Keep the credential keyring and independent readiness/maintenance secrets on the server.
-- Configure HubSpot and OpenAI credentials inside the relevant workspace. They are encrypted server-side. Provider availability is separate from database readiness. Leave advertiser write and conversion-submit flags disabled.
-- Configure Stripe test prices and signed webhooks before testing billing. Pricing, payment completion and cancellation remain unverified until exercised against the actual Stripe test account.
+## First complete workflow
 
-`npm run check:production-config` validates required settings without contacting providers. `npm run build` builds the tracker and Next.js artifact. `npm start` additionally checks that public auth settings match the browser build. The Docker entrypoint performs the same check. Vercel runs the new deployment gate before building; legacy ad-operations schedules have been removed.
+1. Register a local account and name the workspace. There is no shared seeded account or password.
+2. Create a parser using Invoice, Purchase order, Receipt, Lead email, or Custom. Choose **Text-anchor rules** for saved labelled layouts, or **AI extraction** when the runtime reports it configured. AI sends document content to the configured OpenAI project.
+3. Use the parser's synthetic sample, or upload a document supported by the selected mode. The sample enters the real intake, private storage, usage ledger, and worker; it does not insert a fabricated result.
+4. Review the source beside the extracted fields and tables. Compare AI-read image quotes with the original; they are not independently verified native text. Missing/invalid values remain reviewable. Correct values and resolve validation issues, then approve.
+5. Download the approved revision as CSV, XLSX, or JSON. Reprocessing creates another run and preserves earlier approvals in history.
 
-Vercel schedules a daily GET to `/api/attribution/maintenance` at 02:15 UTC, authenticated with `CRON_SECRET`. Migration 025 registers every workspace in a durable queue. A run processes at most eight workspaces within a 210-second work budget; ten-minute leases prevent overlapping claims, and unfinished backlog remains queued. Retention runs for all workspaces; provider refresh runs only for active subscriptions or unexpired trials. The manual per-workspace POST remains available with the separate maintenance secret. Verify the actual hosted cron registration and execution after deployment; successful manual sync is not scheduled-run proof. See the implementation guide for capacity limits.
+Review now exposes nested and table quotes in an immutable original-source disclosure, retaining original row numbers even when corrected rows are added, removed or reordered. AI-read evidence keeps its label. See [review provenance](docs/REVIEW-PROVENANCE.md).
 
-## Verification
+History records received, queued, processing, review, approval and export activity across runs, with selected-run provenance shown separately. Export attempts retain bounded success/failure details and identify the approved revision used. Earlier documents do not receive fabricated history. See [document lifecycle semantics](docs/DOCUMENT-LIFECYCLE.md) for transaction and recovery limits.
 
-```bash
-npm run verify
-npm run test:db
+The header bell shows real completed/failed processing jobs, with personal read status. Workspace administrators can enable or hide the inbox in Settings; no notification emails are sent. Configured retention removes aged originals and local derived copies, deferring active jobs. [Notification and retention semantics](docs/NOTIFICATIONS-RETENTION.md) document the exact deletion boundary and passing local/browser checks.
+
+`npm run fixtures` generates ten original synthetic files and a manifest under `fixtures/generated`. They include a two-page invoice with continuing line items, German number/date formatting, missing values, lead email, CSV/XLSX/DOCX receipts, an unconfigured freeform layout, a scan, and a malformed PDF. Match the parser preset and locale in `fixtures/generated/manifest.json`; these inputs exercise different schema workflows. The freeform and scan examples demonstrate rules-mode limits; separate real AI measurements retain their raw values, evidence warnings and expected missing fields. Small synthetic results do not establish general accuracy.
+
+## Formats and metering
+
+PDF native text, TXT, EML body text, CSV, XLSX worksheet content, DOCX text, and HTML-to-text intake are implemented. AI mode sends original PDFs and PNG/JPEG images to the configured OpenAI provider and other formats as decoded text. Rules mode still reports an actionable failure for documents without readable text; an unconfigured AI job also fails explicitly. EML upload processes the email body; inbound-provider attachments use the separate Resend path.
+
+HTML conversion preserves long values, heading case and flat table boundaries while omitting script/style content and appended link URLs. HTML-only EML uses the same converter; an actual plain-text alternative takes precedence. These are tested text-conversion behaviors, not a promise to reproduce arbitrary HTML layouts. Incomplete Office containers are rejected. AI CSV normalization decodes only exact quoted source-cell tokens, preserving raw output and evidence; malformed, ambiguous or over-limit inputs remain unchanged. See [AI extraction limits](docs/AI-EXTRACTION.md).
+
+Limits are 10 MiB per file, 20 files per batch, 30 PDF pages, 40 megapixels per image, and 30 XLSX sheets with at most 10,000 rows/200 columns per sheet. Office container expansion is limited to 40 MiB/2,000 entries. Encrypted/malformed PDFs and unsupported formats are rejected. DOCX/text/email count as one extraction page; each spreadsheet sheet counts as one page, not one row.
+
+Decoding runs in a bounded subprocess with a scrubbed environment, 30-second deadline and per-process concurrency of two. Durable reservations and cursor-based maintenance recover interrupted original writes. The subprocess is not an OS sandbox; exact controls and deployment limits are in [DECODER-RECOVERY.md](docs/DECODER-RECOVERY.md).
+
+Each accepted unique upload reserves its pages once. Automatic retries and duplicate content in the same parser do not reserve local pages again. OpenAI retries may incur provider charges; recorded model cost estimates successful responses only and is not billing reconciliation. Explicit reprocessing reserves those pages again. New accounts and additional workspaces use **Explore**: 50 pages/month, one active parser, and one concurrent job. Existing workspace entitlements are preserved. The public Explore/Standard/Team prices and limits in `shared/plans.ts` are configurable launch assumptions; viewing a pricing CTA does not activate a plan or billing.
+
+## Configuration
+
+The server reads `.env.local` and `.env` from the project directory. Keep server secrets out of client code, Vite-prefixed variables, source control, logs, and browser storage.
+
+| Variable | Default / purpose |
+| --- | --- |
+| `APP_ORIGIN` | `http://127.0.0.1:5178`; exact browser origin and trusted provider return URLs |
+| `PORT`, `HOST` | API `4318`, loopback `127.0.0.1` |
+| `STORAGE_DIR` | `.local/files`; private original-object adapter |
+| `DATABASE_ADMIN_URL` | Optional server migration/worker administrator connection URL |
+| `DATABASE_URL` | Optional restricted application connection URL; must not bypass RLS |
+| `PGHOST`, `PGPORT`, `PGDATABASE` | Local fallback `.local/socket`, `55432`, `folio` |
+| `PGADMINUSER`, `PGUSER` | Local fallback `folio_admin`, `folio_app` |
+| `INTEGRATION_ENCRYPTION_KEY` | Production-required base64 32-byte AES-GCM key; local private file fallback in development |
+| `OPENAI_API_KEY` | Server-only OpenAI credential; current local setup was completed through the approved secure flow |
+| `FOLIO_BILLING_MOCK` | Literal `true` opts into local billing simulation; disabled when `NODE_ENV=production` |
+| `LOG_LEVEL` | `warn` |
+
+Resend custom-domain and managed-inbox settings, Google OAuth configuration, and the separate deferred Stripe test adapter are documented in [PROVIDERS.md](docs/PROVIDERS.md). The user-requested billing mock changes real local plan limits without Stripe calls or payment; the UI identifies its simulated state. Missing receiving/OAuth prerequisites keep those connections blocked, with no fabricated usable inbox or spreadsheet-sync success. OpenAI uses the fixed `gpt-5.4-mini-2026-03-17` snapshot through explicit API/worker entrypoint initialization. Importing the application for tests does not enable it. [AI-EXTRACTION.md](docs/AI-EXTRACTION.md) records its provenance, cost and evidence contracts.
+
+The public API currently uses `/api`, not `/api/v1`. `/help/api` documents scoped bearer keys, asynchronous upload, job status, results, approved exports, signed webhooks, and automation bridges. `/api/health` reports the API process; it is not an end-to-end queue, storage, provider, or production-readiness check.
+
+## Verification and build commands
+
+```sh
+npm run typecheck
+npm test
+node --import tsx scripts/evaluate.ts
+npm run build
 ```
 
-CI runs application/unit/provider-contract checks, a sample browser journey against a production build, and a production-container smoke against disposable TLS PostgreSQL. The sample browser checks do not prove authenticated or persistent user workflows. The PostgreSQL test command has its own disposable-database requirements documented in [database integration](docs/database-integration.md).
+The automated test suite uses controlled provider fixtures; it does not run the real OpenAI evaluator. Use a running migrated local database for tests. Keep test files serial because they share the local jobs table, and stop the development worker while the controlled tests own fixture jobs. For an individual suite without the `tsx` CLI's IPC listener: `node --import tsx --test --test-concurrency=1 tests/providers.test.ts`. A restricted execution environment may need permission to connect to the local Unix socket.
 
-After deploying an exact committed revision:
+`npm run build` checks TypeScript and emits the frontend to `dist`. `npm start` runs the production-configured API/static server only; it does **not** start a worker, provision a database, configure TLS, or establish a production deployment. A production runtime also needs a separately supervised worker, explicit origin/storage/database/secrets, auth recovery and verification decisions, migrations, backups, and the release checks below. No public deployment is implied by these commands.
 
-```bash
-MAINTAINCODE_PROBE_ORIGIN=https://maintainflow.io \
-MAINTAINCODE_EXPECTED_BUILD_SHA=FULL_DEPLOYED_COMMIT_SHA \
-MAINTAINFLOW_READINESS_PROBE_SECRET=SERVER_PROBE_SECRET \
-npm run probe:deployment
-```
+## Project guide
 
-Supply the probe secret through a secret manager or an already exported environment variable instead of shell history. `/api/health` identifies process liveness and the immutable compiled revision. The protected `/api/attribution/ready` separately verifies the runtime role, table privileges and required isolation policies; neither route contacts CRM, Ads or Stripe. The probe refuses stale revisions, redirects while handling a secret and local-only readiness as hosted proof. The manual hosted-smoke workflow runs the same read-only checks on maintainflow.io.
+| Path | Purpose |
+| --- | --- |
+| `BUILD-BRIEF.md` | Preserved user scope and acceptance requirements |
+| `src/features`, `src/components`, `src/styles` | Feature screens, shared controls, and design tokens |
+| `server/core`, `server/integrations` | Auth/intake/rules/AI/review/operations and provider/export adapters |
+| `shared`, `migrations` | Types, presets, configurable plans, and database migrations |
+| `tests`, `scripts`, `fixtures` | Local fixtures, functional checks, bootstrap and measured evaluation |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Runtime, persistence, isolation, and provider boundaries |
+| [PARITY-MATRIX.md](docs/PARITY-MATRIX.md) | 47 referenced capabilities with current implementation/evidence status |
+| [REFERENCE-WORKFLOWS.md](docs/REFERENCE-WORKFLOWS.md) | Public source screenshots/video observations and inferred screens |
+| [AI-EXTRACTION.md](docs/AI-EXTRACTION.md) | Implemented OpenAI contract, synthetic live results and remaining AI verification |
+| [VERIFICATION.md](docs/VERIFICATION.md) | Current test/evaluation evidence and browser QA ledger |
+| [AI-BROWSER-ACCEPTANCE.md](docs/AI-BROWSER-ACCEPTANCE.md) | Real AI image intake, review, approved JSON, persisted lifecycle and usage |
+| [WORKSPACE-INTEGRITY.md](docs/WORKSPACE-INTEGRITY.md) | Transactional parser capacity and membership audit guarantees |
+| [RELEASE-GATES.md](docs/RELEASE-GATES.md) | Concrete remaining work and external unblocks |
 
-Release acceptance additionally requires the live-domain new-user journey, two populated workspaces with isolation checks, actual form-to-HubSpot delivery, provider sync, Stripe test lifecycle, scheduled maintenance and retention/deletion behavior. No build, screenshot or health check substitutes for those results.
+Current [verification](docs/evidence/provider-setup-2026-09-08/verification.json) records **184 passing tests**, a successful TypeScript/Vite build and **191 source files**, fingerprint `a1b67de414f66a5724ead433ff286f28620a77014a8f41f0f331cebef9de99e0`, unchanged during verification on 8 September 2026. [Provider setup](docs/PROVIDER-SETUP.md) records the exact times, local billing mock, managed-inbox contract and outstanding account approvals. The [167-test workspace checkpoint](docs/WORKSPACE-INTEGRITY.md), earlier 160-test records, [AI browser acceptance](docs/AI-BROWSER-ACCEPTANCE.md), [source-disclosure browser proof](docs/REVIEW-PROVENANCE.md) and model evaluations retain their original dates and scope. Resend/Sheets delivery, deployment and customer use remain unverified; real Stripe testing is deferred by the user.

@@ -1,0 +1,44 @@
+{
+  "checkedAt": "2026-09-11T08:15:01.948Z",
+  "url": "http://127.0.0.1:5178/app/usage",
+  "title": "Folio — Documents, beautifully structured",
+  "scope": "fresh local account through Chrome, synthetic receipt, real OpenAI worker",
+  "checks": {
+    "registration": true,
+    "parserCreation": true,
+    "aiExtraction": true,
+    "sourceComparison": true,
+    "correction": true,
+    "approval": true,
+    "jsonDownloadVerifiedOnDisk": true,
+    "reloadPersistence": true,
+    "history": true,
+    "exploreLimits": true
+  },
+  "desktop": {
+    "height": 745,
+    "scrollWidth": 1512,
+    "width": 1512
+  },
+  "mobile": {
+    "height": 844,
+    "scrollWidth": 390,
+    "width": 390
+  },
+  "console": [],
+  "limitations": [
+    "Chrome fileChooser.setFiles denied by extension setting; built-in synthetic sample used for browser intake",
+    "Download event observer timed out, but saved browser file was found and contents verified",
+    "Production domain and hosted providers not exercised"
+  ],
+  "documentId": "e4549183-90f7-43d0-8721-99c090333b94",
+  "parserId": "f2db58b6-ae9b-4d83-a64e-32d38399bb8c",
+  "ai": {
+    "engine": "openai",
+    "model": "gpt-5.4-mini-2026-03-17",
+    "inputTokens": 486,
+    "outputTokens": 123,
+    "estimatedCostUsd": 0.000918
+  },
+  "jsonSha256": "c296f0b5c8b71efda41be7fdc542e7924d36a3eca33a82f66b938a0fb20b782f"
+}

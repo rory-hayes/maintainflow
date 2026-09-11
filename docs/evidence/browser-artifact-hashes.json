@@ -1,0 +1,31 @@
+{
+  "recorded_at": "2026-09-06T21:36:04.729917+00:00",
+  "scope": "Retained actual browser downloads and approved snapshot copies. Earlier byte comparisons are in browser-downloads.json. The evaluation generator later refreshed binary fixture metadata; browser-original-invoice.pdf preserves the actual originally uploaded/downloaded PDF bytes.",
+  "files": [
+    {
+      "file": "approved-sample.csv",
+      "bytes": 417,
+      "sha256": "9c7a7a0451477cc6a4b77aa082f14c46214f941005145e1f0a04f8bd85d31eef"
+    },
+    {
+      "file": "approved-sample.xlsx",
+      "bytes": 6932,
+      "sha256": "ae6647f8f8206e86f3970e40950ac1c0f93749643d44a5ba55137cc838dd566b"
+    },
+    {
+      "file": "approved-sample.json",
+      "bytes": 962,
+      "sha256": "3d329a52d8d0945b875ca1e2dc207d31e064998c3b75345847fd8200151e5dda"
+    },
+    {
+      "file": "approved-sample-mapped.csv",
+      "bytes": 83,
+      "sha256": "e764a34a9f663f324fcdafaf14b7db5e4c627e343de816e4d1199c4396cc9a0f"
+    },
+    {
+      "file": "browser-original-invoice.pdf",
+      "bytes": 1698,
+      "sha256": "b481c8ec0bd169aa4af8b90349bfec4ad423b592f6ad754e8e693c2b388858cb"
+    }
+  ]
+}

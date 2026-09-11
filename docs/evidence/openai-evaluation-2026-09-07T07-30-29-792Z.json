@@ -1,0 +1,100 @@
+{
+  "startedAt": "2026-09-07T07:30:29.792Z",
+  "finishedAt": "2026-09-07T07:30:33.082Z",
+  "engine": "openai",
+  "model": "gpt-5.4-mini-2026-03-17",
+  "promptVersion": "folio-openai-extraction-v1",
+  "actualProviderCalls": 1,
+  "correct": 2,
+  "total": 4,
+  "estimatedSuccessfulCallCostUsd": 0.00099825,
+  "description": "Real API calls on owned synthetic fixtures only. Exact-value counts include expected missing fields. All successful results require review; matched quotes do not prove interpretation. Costs estimate successful responses only and are not a billing reconciliation.",
+  "results": [
+    {
+      "name": "Unconfigured freeform layout",
+      "filename": "freeform-receipt.txt",
+      "sha256": "3b0295d3c7bebb95206a363513f7e97d175fa008e4957a20499a8d5d66be5276",
+      "category": "unconfigured-layout",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 3284,
+      "fieldsCorrect": 2,
+      "fieldsExpected": 4,
+      "mismatches": [
+        {
+          "field": "merchant",
+          "expected": "Oak Market",
+          "actual": "OAK MARKET"
+        },
+        {
+          "field": "date",
+          "expected": "2026-08-24",
+          "actual": "24 August 2026"
+        }
+      ],
+      "rawValues": {
+        "merchant": "OAK MARKET",
+        "date": "24 August 2026",
+        "currency": "EUR",
+        "total": "16.90"
+      },
+      "normalizedValues": {
+        "merchant": "OAK MARKET",
+        "date": "24 August 2026",
+        "currency": "EUR",
+        "total": 16.9
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "OAK MARKET",
+            "source": "matched-text"
+          }
+        ],
+        "date": [
+          {
+            "page": 1,
+            "text": "24 August 2026",
+            "source": "matched-text"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "Paid EUR 16.90",
+            "source": "matched-text"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "Paid EUR 16.90",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [
+        {
+          "field": "date",
+          "code": "date",
+          "message": "Date must be a valid ISO date (YYYY-MM-DD)."
+        }
+      ],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 443,
+        "cachedInputTokens": 0,
+        "outputTokens": 148,
+        "reasoningTokens": 38,
+        "totalTokens": 591,
+        "responseId": "resp_0da377e931ab4127016a9e68196f0887d2b82b1f4b4091f2c5",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00099825
+    }
+  ]
+}

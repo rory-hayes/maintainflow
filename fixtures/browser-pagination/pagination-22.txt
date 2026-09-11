@@ -1,0 +1,5 @@
+SYNTHETIC BROWSER PAGINATION FIXTURE
+Merchant: Pagination QA 22
+Date: 2026-09-06
+Currency: EUR
+Total: 22.00

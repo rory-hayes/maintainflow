@@ -1,0 +1,50 @@
+{
+  "recordedAt": "2026-09-08T20:33:55.570Z",
+  "url": "http://127.0.0.1:5178/app/usage",
+  "workspace": "Northstar Studio QA",
+  "mode": "local mock",
+  "browserFlow": [
+    "Standard selected",
+    "Team selected",
+    "Canceled to Explore",
+    "Team restored",
+    "Page reloaded; Team allowance persisted"
+  ],
+  "finalPlan": {
+    "id": "team",
+    "name": "Team (local mock)",
+    "monthlyPages": 5000,
+    "maxParsers": 50,
+    "maxConcurrent": 4
+  },
+  "usageAfterReload": {
+    "pages": 39,
+    "documents": 8
+  },
+  "desktop": {
+    "bodyWidth": 1280,
+    "documentWidth": 1280,
+    "height": 720,
+    "width": 1280
+  },
+  "mobile": {
+    "width": 390,
+    "height": 844,
+    "bodyWidth": 390,
+    "documentWidth": 390,
+    "layoutInspected": true,
+    "mutationTestedAtMobileWidth": false
+  },
+  "temporaryViewportReset": true,
+  "browserWarningsAndErrors": [],
+  "resendBrowser": {
+    "status": "Setup required",
+    "createInboundAddressDisabled": true,
+    "verification": "Managed inbox probe still required"
+  },
+  "googleSheetsBrowser": {
+    "status": "Setup required",
+    "connectDisabled": true
+  },
+  "realStripeVerification": false
+}

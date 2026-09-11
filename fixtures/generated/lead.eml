@@ -1,0 +1,10 @@
+From: sender@example.test
+To: intake@example.test
+Subject: Synthetic lead
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Name: Taylor Quinn
+Email: taylor@example.test
+Company: Cedar Labs
+Message: Please process our weekly requests.

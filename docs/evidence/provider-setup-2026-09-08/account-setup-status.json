@@ -1,0 +1,40 @@
+{
+  "recordedAt": "2026-09-08T20:24:52.230702+00:00",
+  "resend": {
+    "accountAccessVerified": true,
+    "managedDomain": "deubdel.resend.app",
+    "receivedEmailsVisible": 0,
+    "existingCustomDomain": "maintainflow.io",
+    "customDomainSendingVerified": true,
+    "customDomainReceivingEnabled": false,
+    "customDomainSettingsChanged": false,
+    "dedicatedKeyName": "Folio local inbound development",
+    "keyCreated": false,
+    "keyPermissionRequested": "Full access / all domains",
+    "keyApproval": "pending",
+    "inboundEnabled": false,
+    "signedWebhookEndpointConfigured": false,
+    "realIntakeVerified": false,
+    "probeEmail": {
+      "sent": false,
+      "recipient": "folio-probe-9c3900e1f9603a84e2570c0da1810aba@deubdel.resend.app",
+      "purpose": "Synthetic owned Resend managed-inbox verification only",
+      "gmailAccess": "automatic approval review rejected",
+      "statedReason": "Gmail access and sending a probe email were not explicitly authorized by Resend/Sheets account access consent."
+    }
+  },
+  "googleCloud": {
+    "requestedProjectName": "Folio Sheets Development",
+    "projectCreated": false,
+    "creationAttempt": "automatic approval review rejected",
+    "statedReason": "Consent to create a Sheet does not specifically authorize persistent Cloud project creation with quota and potential billing implications.",
+    "specificApproval": "pending",
+    "oauthClientConfigured": false
+  },
+  "stripe": {
+    "requestedMode": "local mock",
+    "configuredMockFlag": true,
+    "actualStripeRequestsForSetup": false,
+    "realStripeVerification": "deferred by user"
+  }
+}

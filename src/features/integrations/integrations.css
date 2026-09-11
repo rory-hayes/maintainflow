@@ -1,0 +1,22 @@
+.workspace-integrations { max-width: 1150px; }
+.workspace-integrations .integration-row h3 { font-size: 18px; }
+.integration-inline-status { display: block; margin: 11px 0 7px; }
+.integration-destination { overflow-wrap: anywhere; word-break: break-word; }
+.integrations-saved-list { border-top: 1px solid var(--color-line); }
+.integration-row-actions { margin-left: 12px; padding-top: 3px; }
+.integration-check { display: flex; align-items: center; gap: 11px; font-size: 13px; margin: 16px 0; }
+.integration-setup-details { margin: 13px 0 20px; font-size: 12px; color: var(--color-muted); }
+.integration-setup-details summary { cursor: pointer; color: var(--color-ink); }
+.integration-setup-details p { margin-top: 11px; max-width: 800px; line-height: 1.7; overflow-wrap: anywhere; }
+.delivery-table { min-width: 720px; }
+.delivery-error { font-size: 11px; color: #a35716; max-width: 310px; margin: 7px 0 0; white-space: normal; }
+.email-routes-table { min-width: 760px; }
+.email-address { display: flex; align-items: center; gap: 10px; max-width: 430px; }
+.email-address code { overflow-wrap: anywhere; font-size: 11px; }
+.email-address .icon-button { flex-shrink: 0; }
+@media(max-width:760px) {
+  .integration-row-actions { margin-left: 57px; padding-top: 0; }
+  .workspace-integrations .integration-row > .button { margin-left: 57px; }
+  .workspace-integrations .integration-copy { min-width: calc(100% - 70px); }
+  .workspace-integrations .integration-row h3 { font-size: 17px; }
+}

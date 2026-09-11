@@ -1,0 +1,161 @@
+{
+  "checkedAt": "2026-09-08T20:15:20.021Z",
+  "status": "native_import_blocked",
+  "title": "Folio \u2014 Receipt exports",
+  "requestedDestination": {
+    "folderId": "1eJQbSdS-NtfR_lOgH6QGSBF0nZBShqye",
+    "folderUrl": "https://drive.google.com/drive/folders/1eJQbSdS-NtfR_lOgH6QGSBF0nZBShqye",
+    "folderTitle": "ChatGPT",
+    "parent": "My Drive root",
+    "shared": false,
+    "permissions": [
+      {
+        "type": "user",
+        "role": "owner"
+      }
+    ]
+  },
+  "localWorkbook": "folio-receipt-exports.xlsx",
+  "localVerification": {
+    "receiptsHeaders": [
+      "Document ID",
+      "Merchant",
+      "Date",
+      "Currency",
+      "Total"
+    ],
+    "receiptsRows2And3Empty": true,
+    "setupNote": "Automatic Folio OAuth sync is not yet connected.",
+    "formulas": 0,
+    "formulaErrors": 0,
+    "renderedAndVisuallyInspectedSheets": [
+      "Receipts",
+      "Setup"
+    ]
+  },
+  "nativeSpreadsheet": {
+    "created": false,
+    "spreadsheetId": null,
+    "url": null,
+    "sheetIds": null
+  },
+  "attempts": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Parameters failed connector schema validation: source_file.mime_type [required]: Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.); source_file.mime_type [required]: Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.)"
+        }
+      ],
+      "structuredContent": {
+        "error": "Parameters failed connector schema validation: source_file.mime_type [required]: Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.); source_file.mime_type [required]: Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.)",
+        "error_code": "INVALID_ARGUMENT",
+        "error_data": {
+          "reason": "INVALID_PARAMETERS",
+          "clamp_errors": [
+            {
+              "path": [
+                "source_file",
+                "mime_type"
+              ],
+              "message": "Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.)",
+              "keyword": "required"
+            },
+            {
+              "path": [
+                "source_file",
+                "mime_type"
+              ],
+              "message": "Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.)",
+              "keyword": "required"
+            }
+          ],
+          "clamp_rewrites": []
+        }
+      },
+      "isError": true
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "text": "Parameters failed connector schema validation: source_file.download_url [required]: Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.); source_file.file_id [required]: Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.); source_file.file_name [required]: Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.); 3 additional validation error(s)"
+        }
+      ],
+      "structuredContent": {
+        "error": "Parameters failed connector schema validation: source_file.download_url [required]: Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.); source_file.file_id [required]: Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.); source_file.file_name [required]: Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.); 3 additional validation error(s)",
+        "error_code": "INVALID_ARGUMENT",
+        "error_data": {
+          "reason": "INVALID_PARAMETERS",
+          "clamp_errors": [
+            {
+              "path": [
+                "source_file",
+                "download_url"
+              ],
+              "message": "Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.)",
+              "keyword": "required"
+            },
+            {
+              "path": [
+                "source_file",
+                "file_id"
+              ],
+              "message": "Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.)",
+              "keyword": "required"
+            },
+            {
+              "path": [
+                "source_file",
+                "file_name"
+              ],
+              "message": "Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.)",
+              "keyword": "required"
+            },
+            {
+              "path": [
+                "source_file",
+                "download_url"
+              ],
+              "message": "Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.)",
+              "keyword": "required"
+            },
+            {
+              "path": [
+                "source_file",
+                "file_id"
+              ],
+              "message": "Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.)",
+              "keyword": "required"
+            },
+            {
+              "path": [
+                "source_file",
+                "file_name"
+              ],
+              "message": "Missing required property (does not match constraints configured by your ChatGPT workspace admin. If the issue persists, instruct the user to contact their workspace admin.)",
+              "keyword": "required"
+            }
+          ],
+          "clamp_rewrites": []
+        }
+      },
+      "isError": true
+    }
+  ],
+  "limitation": "The import tool declares source_file as an absolute local path, but its rewritten uploaded-file reference is missing required mime_type. A structured path+mime_type repair instead failed for required download_url, file_id, file_name. No download URL or file ID was invented.",
+  "automaticFolioSyncVerified": false,
+  "browserImportAttempt": {
+    "attempted": true,
+    "uploaded": false,
+    "error": "fileChooser.setFiles: Not allowed",
+    "documentedFix": "Enable Allow access to file URLs for the ChatGPT Chrome extension",
+    "fixRequested": true
+  },
+  "nativePickerFallback": {
+    "checkedAt": "2026-09-08T20:35:07.234069+00:00",
+    "status": "blocked",
+    "reason": "Mac is locked; automatic unlock could not unlock it",
+    "uploaded": false
+  }
+}

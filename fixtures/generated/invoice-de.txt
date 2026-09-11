@@ -1,0 +1,11 @@
+SYNTHETIC HELD-OUT DOCUMENT
+Invoice number: 0000307
+Supplier: Linde Büro
+Invoice date: 31.08.2026
+Currency: EUR
+Subtotal: 1.234,50
+Tax: 234,56
+Total: 1.469,06
+Line items:
+Description | Quantity | Unit price | Amount
+Papier | 10 | 123,45 | 1.234,50

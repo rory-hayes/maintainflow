@@ -1,0 +1,56 @@
+{
+  "recordedAt": "2026-09-08T20:27:52.262264+00:00",
+  "sourceFingerprint": "a1b67de414f66a5724ead433ff286f28620a77014a8f41f0f331cebef9de99e0",
+  "fileCount": 191,
+  "unchangedDuringVerification": true,
+  "checks": {
+    "tests": {
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "--test",
+        "--test-concurrency=1",
+        "tests/ai-availability-ui.test.ts",
+        "tests/ai-worker.test.ts",
+        "tests/api-workflow.test.ts",
+        "tests/automations.test.ts",
+        "tests/core.test.ts",
+        "tests/csv-values.test.ts",
+        "tests/decoder-reconciliation.test.ts",
+        "tests/defensive-regressions.test.ts",
+        "tests/export-lifecycle.test.ts",
+        "tests/extraction-approval.test.ts",
+        "tests/extraction-sources.test.ts",
+        "tests/extraction.test.ts",
+        "tests/frontend-values.test.ts",
+        "tests/intake-policy.test.ts",
+        "tests/integrations.test.ts",
+        "tests/lifecycle.test.ts",
+        "tests/membership-audit.test.ts",
+        "tests/mock-billing-ui.test.ts",
+        "tests/mock-billing.test.ts",
+        "tests/openai-provider.test.ts",
+        "tests/providers.test.ts",
+        "tests/resend-managed.test.ts",
+        "tests/retention-notifications.test.ts",
+        "tests/run-model-usage-ui.test.ts",
+        "tests/source-formats.test.ts",
+        "tests/written-date.test.ts"
+      ],
+      "startedAt": "2026-09-08T20:27:19.867548+00:00",
+      "finishedAt": "2026-09-08T20:27:50.185332+00:00",
+      "exitCode": 0
+    },
+    "build": {
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "startedAt": "2026-09-08T20:27:50.186090+00:00",
+      "finishedAt": "2026-09-08T20:27:52.235746+00:00",
+      "exitCode": 0
+    }
+  }
+}

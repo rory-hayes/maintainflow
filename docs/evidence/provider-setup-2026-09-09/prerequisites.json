@@ -1,0 +1,37 @@
+{
+  "checkedAt": "2026-09-09T10:58:19.931Z",
+  "previousGoalTurn": "progress: implemented and verified local billing mock and managed Resend support",
+  "sourceFingerprint": "a1b67de414f66a5724ead433ff286f28620a77014a8f41f0f331cebef9de99e0",
+  "filesChecked": 191,
+  "unchanged": true,
+  "changedFiles": [],
+  "priorDevSession": "88449 missing; no API/Vite listeners before restart",
+  "currentDevSession": 35454,
+  "health": {
+    "web": 200,
+    "api": 200,
+    "presets": 200
+  },
+  "configuration": {
+    "mockBilling": true,
+    "resendManaged": true,
+    "resendEnabled": false,
+    "resendApiKeyConfigured": false,
+    "resendWebhookConfigured": false,
+    "googleOAuthConfigured": false,
+    "openAIConfigured": true,
+    "serverEnvironmentMode": "600"
+  },
+  "browser": {
+    "macAccessible": true,
+    "sheetUpload": "fileChooser.setFiles returned Not allowed; no workbook uploaded",
+    "nativePicker": "Menu interaction did not produce a usable file picker; stopped when foreground moved to unrelated tab"
+  },
+  "pendingApprovals": [
+    "Resend Full access key",
+    "Folio Sheets Development project",
+    "Gmail access and one synthetic owned Resend probe email"
+  ],
+  "realSheetsConnectionVerified": false,
+  "realResendIntakeVerified": false
+}

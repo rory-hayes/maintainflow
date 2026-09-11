@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-09-07T17:31:01.968141+00:00",
+  "sourceFingerprint": "a4641915d5042524908c4e98efe14945ac15df13923f27c9307f7733264ed4f0",
+  "sourceFiles": 186,
+  "unchangedDuringVerification": true,
+  "changedFromAiBrowser": [
+    "server/core/parser-routes.ts",
+    "server/core/workspace-routes.ts",
+    "tests/core.test.ts",
+    "tests/membership-audit.test.ts"
+  ],
+  "tests": "workspace-integrity-tests-run.json",
+  "build": "workspace-integrity-build-run.json"
+}

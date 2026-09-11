@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "documents": [
+    {
+      "documentId": "b4f22abc-ab4d-4fb8-bf67-05d687cd854e",
+      "filename": "receipt-de.txt",
+      "runId": "e0e69cf3-72d4-4795-9045-dd8dd4631435",
+      "revision": 0,
+      "approvalId": "52763c3c-c2d6-4736-a62e-c4eb5478d8bd",
+      "correctionId": null,
+      "values": {
+        "date": "2026-09-17",
+        "total": 1234.56,
+        "currency": "EUR",
+        "merchant": "Linden Küche"
+      }
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+
+> folio-document-workspace@0.1.0 test
+> tsx --test --test-concurrency=1 tests/*.test.ts
+
+✔ four automation recipes map actual approved-event fields without identifier coercion (5.153208ms)
+✔ receiver example verifies the sender contract before JSON parsing and preserves replay identity (2.807709ms)
+✔ local authentication creates persistent workspace and HTTP-only session (237.796875ms)
+✔ parser and versioned schema persist; rules capture native evidence and identifiers (80.930541ms)
+✔ duplicate intake and idempotency do not meter twice (6.007375ms)
+✔ tenant isolation is enforced through routes and database RLS (31.319208ms)
+✔ correction and approval create immutable events and reject stale revisions (66.653459ms)
+✔ schema and settings changes do not alter pinned runs; reprocess preserves approval (42.218375ms)
+✔ role restrictions, invitation acceptance and scoped revocable API keys (27.116042ms)
+✔ invalid uploads, scan without provider, and missing values fail honestly (88.082416ms)
+✔ worker lease recovery and retry reuse one usage reservation (13.464542ms)
+✔ saved template matching is explicit and rule anchors work (0.534417ms)
+✔ normalization handles EU decimals, dates, booleans and invalid dates (0.4845ms)
+✔ mutations reject cross-origin browser requests (0.894333ms)
+✔ deletion removes original and tenant-derived runs (10.525958ms)
+✔ atomic quota reservation prevents concurrent overage (14.988125ms)
+✔ automatic transient retries stop at the configured maximum and meter once (16.972625ms)
+✔ workspace concurrency limit holds across simultaneous worker claims (21.175417ms)
+✔ file byte and PDF page limits are enforced before persistence (1127.789667ms)
+✔ owner membership cannot be removed or downgraded (5.72ms)
+✔ duplicate intake records its event binding and rejects changed replay content (60.012042ms)
+✔ failed file removal stays tracked, tenant-scoped and retryable (12.889416ms)
+✔ replayed intake after deletion returns an explicit tombstone response without resurrecting data (5.766541ms)
+✔ text allowed choices validate without inventing a replacement value (8.857583ms)
+✔ normalization preserves ambiguous numeric text for review (24.399375ms)
+✔ review correction saves blanks as missing and preserves explicit zero and false (1.69075ms)
+✔ review normalization reaches nested arrays and objects without changing the editing draft (0.345709ms)
+✔ invalid and non-finite numeric drafts remain visible to server validation (0.297084ms)
+✔ new review rows initialize nested structures and copy explicit defaults independently (0.231833ms)
+✔ default line-item expansion produces scalar nested columns and preserves identifiers (277.303541ms)
+✔ CSV and actual XLSX cells escape formulas, quotes and line breaks (54.073667ms)
+✔ JSON preserves nested values and explicit revision metadata (0.403625ms)
+✔ encrypted integration secrets round-trip and reject corrupted ciphertext (0.88275ms)
+✔ destination policy classifies reserved addresses and validates syntax without network calls (2.257875ms)
+✔ authenticated exports persist byte snapshots and enforce tenant ownership (20.759916ms)
+✔ approved snapshots remain immutable and historical approvals can be explicitly exported (16.971291ms)
+✔ exporting prior approval preserves a newer needs-review document status (4.561417ms)
+✔ approval enqueue is idempotent and preserves numeric correction revision (10.975208ms)
+✔ signed webhook delivery retries and explicit replay keep stable idempotency identity (11.070125ms)
+✔ expired final webhook lease becomes failed instead of remaining in progress (1.364709ms)
+✔ deleting a document removes persisted exports and local delivery payloads (9.524958ms)
+✔ Stripe raw signature rejects mutation, stale timestamps, and all live credentials/events (219.442708ms)
+✔ entitlements require the mapped exact recurring price and ignore plan metadata (0.561417ms)
+✔ signed provider HTTP endpoints persist exactly once and preserve raw signature validation (41.176209ms)
+✔ an old Stripe event reconciles current subscription state and cannot restore stale access (10.929292ms)
+✔ inbound routing uses matched provider envelopes and verified receiving MX only (34.968583ms)
+✔ retrieved inbound body and attachments survive replay without duplicate documents or usage (55.362333ms)
+✔ Sheets uses RAW exact ranges; retry does not append or coerce identifiers/formulas (1.393958ms)
+✔ concurrent Sheets reservations deduplicate approval IDs and isolate workspaces (25.588208ms)
+✔ Google OAuth states are hashed, tied to the user, expiring, single-use, and invalidated on disconnect (48.865125ms)
+ℹ tests 50
+ℹ suites 0
+ℹ pass 50
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6360.287584

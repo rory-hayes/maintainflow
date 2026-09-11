@@ -1,0 +1,96 @@
+- link "Skip to content":
+  - /url: "#main"
+- complementary "Workspace navigation":
+  - link "Folio":
+    - /url: /
+  - generic: Workspace
+  - combobox "Workspace":
+    - option "Northstar Studio QA" [selected]
+    - option "+ New workspace"
+  - navigation "Workspace pages":
+    - link "Documents":
+      - /url: /app
+      - text: Documents
+    - link "Parsers":
+      - /url: /app/parsers
+      - text: Parsers
+    - link "Integrations":
+      - /url: /app/integrations
+      - text: Integrations
+    - link "Usage":
+      - /url: /app/usage
+      - text: Usage
+    - link "Settings":
+      - /url: /app/settings
+      - text: Settings
+  - link "Help & documentation":
+    - /url: /help
+    - text: Help & documentation
+  - generic: A
+  - strong: Alex Morgan
+  - generic: owner · Local workspace
+  - button "Sign out":
+- banner:
+  - generic: Workspace
+  - generic: /
+  - generic: Documents
+  - button "Processing notifications, 5 unread":
+    - generic: "5"
+  - generic: A
+- main:
+  - link "Documents":
+    - /url: /app/parsers/93b86395-d048-46a9-9f0a-bdf1cf85b610
+    - generic: Documents
+  - generic: receipt-scan.png
+  - button "Reprocess":
+    - text: Reprocess
+  - combobox "Extraction run":
+    - option "Run 1" [selected]
+  - button "Export" [disabled]:
+    - text: Export
+  - heading "Document review" [level=1]
+  - link "AI receipt QA":
+    - /url: /app/parsers/93b86395-d048-46a9-9f0a-bdf1cf85b610
+  - generic: · Schema v1
+  - generic: Needs review
+  - region "Original document":
+    - button "Previous page" [disabled]:
+    - generic: Page 1 of 1
+    - button "Next page" [disabled]:
+    - button "Zoom out":
+    - generic: 100%
+    - button "Zoom in":
+    - img "receipt-scan.png"
+    - button "Download original":
+      - text: Download original
+  - region "Extracted data":
+    - tablist "Review result":
+      - tab "Fields"
+      - tab "Line items"
+      - tab "History" [active] [selected]
+    - region "Recent document activity":
+      - heading "Recent document activity" [level=3]
+      - paragraph: Across all extraction runs. Export events refer to the approved revision used for that export.
+      - list:
+        - strong: Ready for review
+        - paragraph:
+          - time: 7 Sept 2026, 18:09
+        - strong: Processing
+        - paragraph:
+          - time: 7 Sept 2026, 18:09
+        - strong: Queued
+        - paragraph:
+          - time: 7 Sept 2026, 18:09
+        - strong: Received
+        - paragraph:
+          - time: 7 Sept 2026, 18:09
+    - heading "Selected run details" [level=3]
+    - strong: Extraction run
+    - paragraph: 7 Sept 2026, 18:09 · openai
+    - paragraph: "Model: gpt-5.4-mini-2026-03-17 · Prompt: folio-openai-extraction-v2"
+    - paragraph: "Input tokens: 1,021 · Output tokens: 180"
+    - paragraph: "Estimated model cost: $0.001576"
+    - paragraph: "Document digest: 056fbccce65791dde2f3…"
+    - generic: Extracted values · Review before export
+    - button "Save correction" [disabled]
+    - button "Approve & export"

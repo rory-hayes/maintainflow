@@ -1,0 +1,114 @@
+- link "Skip to content":
+  - /url: "#main"
+- complementary "Workspace navigation":
+  - link "Folio":
+    - /url: /
+  - generic: Workspace
+  - combobox "Workspace":
+    - option "MaintainFlow Release QA" [selected]
+    - option "+ New workspace"
+  - navigation "Workspace pages":
+    - link "Documents":
+      - /url: /app
+      - text: Documents
+    - link "Parsers":
+      - /url: /app/parsers
+      - text: Parsers
+    - link "Integrations":
+      - /url: /app/integrations
+      - text: Integrations
+    - link "Usage":
+      - /url: /app/usage
+      - text: Usage
+    - link "Settings":
+      - /url: /app/settings
+      - text: Settings
+  - link "Help & documentation":
+    - /url: /help
+    - text: Help & documentation
+  - generic: R
+  - strong: Release Browser QA
+  - generic: owner · Local workspace
+  - button "Sign out":
+- banner:
+  - generic: Workspace
+  - generic: /
+  - generic: Documents
+  - button "Processing notifications, 1 unread":
+    - generic: "1"
+  - generic: R
+- main:
+  - link "Documents":
+    - /url: /app/parsers/f2db58b6-ae9b-4d83-a64e-32d38399bb8c
+    - generic: Documents
+  - generic: synthetic-receipt-sample.txt
+  - button "Reprocess":
+    - text: Reprocess
+  - combobox "Extraction run":
+    - option "Run 1 · Approved" [selected]
+  - button "Export":
+    - text: Export
+  - heading "Document review" [level=1]
+  - link "Release receipt extraction":
+    - /url: /app/parsers/f2db58b6-ae9b-4d83-a64e-32d38399bb8c
+  - generic: · Schema v1
+  - generic: Exported
+  - region "Original document":
+    - button "Previous page" [disabled]:
+    - generic: Page 1 of 1
+    - button "Next page" [disabled]:
+    - button "Zoom out":
+    - generic: 100%
+    - button "Zoom in":
+    - generic: ORIGINAL TEXT
+    - generic: "SYNTHETIC SAMPLE — RECEIPT Merchant: Willow Coffee Date: 2026-09-03 Currency: EUR Total: 12.80"
+    - button "Download original":
+      - text: Download original
+  - region "Extracted data":
+    - tablist "Review result":
+      - tab "Fields"
+      - tab "Line items"
+      - tab "History" [active] [selected]
+    - region "Recent document activity":
+      - heading "Recent document activity" [level=3]
+      - paragraph: Across all extraction runs. Export events refer to the approved revision used for that export.
+      - list:
+        - strong: Export completed
+        - paragraph:
+          - time: 11 Sept 2026, 09:11
+        - paragraph: Export of an approved revision · JSON
+        - strong: Export started
+        - paragraph:
+          - time: 11 Sept 2026, 09:11
+        - paragraph: Export of an approved revision · JSON
+        - strong: Approved
+        - paragraph:
+          - time: 11 Sept 2026, 09:10
+        - strong: Ready for review
+        - paragraph:
+          - time: 11 Sept 2026, 09:10
+        - strong: Processing
+        - paragraph:
+          - time: 11 Sept 2026, 09:10
+        - strong: Queued
+        - paragraph:
+          - time: 11 Sept 2026, 09:10
+        - strong: Received
+        - paragraph:
+          - time: 11 Sept 2026, 09:10
+    - heading "Selected run details" [level=3]
+    - strong: Extraction run
+    - paragraph: 11 Sept 2026, 09:10 · openai
+    - paragraph: "Model: gpt-5.4-mini-2026-03-17 · Prompt: folio-openai-extraction-v2"
+    - paragraph: "Input tokens: 486 · Output tokens: 123"
+    - paragraph: "Estimated model cost: $0.000918"
+    - paragraph: "Document digest: 5a6df1d352ee3352ffde…"
+    - strong: Correction saved
+    - paragraph: 11 Sept 2026, 09:10
+    - generic "View saved values"
+    - strong: Revision approved
+    - paragraph: 11 Sept 2026, 09:10
+    - generic "View approved values"
+    - generic: Saved correction · Review before export
+    - button "Save correction" [disabled]
+    - button "Approve & export"

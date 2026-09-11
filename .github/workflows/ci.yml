@@ -1,140 +1,75 @@
 name: CI
+
 on:
-  pull_request:
   push:
     branches: [main]
+  pull_request:
+  workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
-  application:
-    name: Application, attribution and provider contracts
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Use Node.js 24
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run audit:production
-      - run: npm run verify
-      - run: npm run check:openai-ads-contract
-      - run: npx playwright install --with-deps chromium
-      - name: Verify the sample browser journey in the production build
-        run: |
-          set -euo pipefail
-          npx next start --hostname 127.0.0.1 --port 3217 > "$RUNNER_TEMP/maintaincode-preview.log" 2>&1 &
-          preview_pid=$!
-          trap 'kill "$preview_pid" || true; cat "$RUNNER_TEMP/maintaincode-preview.log"' EXIT
-          ready=false
-          for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:3217/api/health > /dev/null; then ready=true; break; fi
-            sleep 1
-          done
-          test "$ready" = true
-          node scripts/verify-maintaincode-preview.mjs
-      - name: Build the deployable container with public authentication configuration
-        run: |
-          docker build \
-            --build-arg MAINTAINFLOW_BUILD_SHA=${{ github.sha }} \
-            --build-arg MAINTAINCODE_APP_ORIGIN=https://maintainflow.io \
-            --build-arg NEXT_PUBLIC_SUPABASE_URL=https://maintaincode-ci.supabase.co \
-            --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci_fixture \
-            --tag maintaincode-ads:ci .
-      - name: Verify container revision and real PostgreSQL role/schema readiness
-        run: |
-          set -euo pipefail
-          ci_cert_dir="$RUNNER_TEMP/maintaincode-postgres-tls"
-          ci_network="maintaincode-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          cleanup() {
-            docker logs maintaincode-ads-ci || true
-            docker logs maintaincode-postgres-ci || true
-            docker rm --force maintaincode-ads-ci maintaincode-postgres-ci || true
-            docker network rm "$ci_network" || true
-          }
-          trap cleanup EXIT
-          mkdir -p "$ci_cert_dir"
-          openssl req -x509 -newkey rsa:2048 -sha256 -days 1 -nodes -keyout "$ci_cert_dir/ca.key" -out "$ci_cert_dir/ca.crt" -subj '/CN=MaintainCode CI CA'
-          openssl req -newkey rsa:2048 -sha256 -nodes -keyout "$ci_cert_dir/server.key" -out "$ci_cert_dir/server.csr" -subj '/CN=postgres' -addext 'subjectAltName=DNS:postgres,DNS:localhost,IP:127.0.0.1'
-          openssl x509 -req -sha256 -days 1 -in "$ci_cert_dir/server.csr" -CA "$ci_cert_dir/ca.crt" -CAkey "$ci_cert_dir/ca.key" -CAcreateserial -copy_extensions copy -out "$ci_cert_dir/server.crt"
-          postgres_uid="$(docker run --rm postgres:17 id -u postgres)"
-          postgres_gid="$(docker run --rm postgres:17 id -g postgres)"
-          chmod 600 "$ci_cert_dir/server.key"
-          sudo chown "$postgres_uid:$postgres_gid" "$ci_cert_dir/server.key" "$ci_cert_dir/server.crt"
-          docker network create "$ci_network"
-          docker run --detach --name maintaincode-postgres-ci --network "$ci_network" --network-alias postgres --publish 5432:5432 \
-            --env POSTGRES_USER=postgres --env POSTGRES_PASSWORD=ci_admin_fixture --env POSTGRES_DB=postgres \
-            --volume "$ci_cert_dir:/tls:ro" postgres:17 -c ssl=on -c ssl_cert_file=/tls/server.crt -c ssl_key_file=/tls/server.key
-          ready=false
-          for attempt in {1..30}; do
-            if docker exec maintaincode-postgres-ci pg_isready -U postgres -d postgres; then ready=true; break; fi
-            sleep 1
-          done
-          test "$ready" = true
-          NODE_EXTRA_CA_CERTS="$ci_cert_dir/ca.crt" \
-            DATABASE_URL='postgres://postgres:ci_admin_fixture@localhost:5432/postgres?sslmode=verify-full' \
-            MAINTAINFLOW_APPLY_DATABASE_MIGRATIONS=true npm run db:migrate
-          docker exec maintaincode-postgres-ci psql -U postgres -d postgres --no-psqlrc --set ON_ERROR_STOP=1 \
-            --command "alter role maintaincode_app login password 'ci_runtime_fixture'; grant connect on database postgres to maintaincode_app;"
-          ci_database_ca="$(< "$ci_cert_dir/ca.crt")"
-          docker run --detach --name maintaincode-ads-ci --publish 3000:3000 --network "$ci_network" \
-            --env MAINTAINFLOW_BUILD_SHA=0000000000000000000000000000000000000000 \
-            --env MAINTAINCODE_APP_ORIGIN=https://maintainflow.io \
-            --env NEXT_PUBLIC_SUPABASE_URL=https://maintaincode-ci.supabase.co \
-            --env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci_fixture \
-            --env MAINTAINFLOW_ADMISSION_MODE=open --env MAINTAINFLOW_PUBLIC_SIGN_UP_ENABLED=true \
-            --env DATABASE_URL='postgres://maintaincode_app:ci_runtime_fixture@postgres:5432/postgres?sslmode=verify-full' \
-            --env MAINTAINFLOW_DATABASE_CA_CERT="$ci_database_ca" \
-            --env MAINTAINFLOW_READINESS_PROBE_SECRET=pppppppppppppppppppppppppppppppp \
-            --env MAINTAINCODE_MAINTENANCE_SECRET=mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm \
-            --env CRON_SECRET=cccccccccccccccccccccccccccccccc \
-            --env MAINTAINFLOW_ACTIVE_CREDENTIAL_KEY_ID=ci \
-            --env 'MAINTAINFLOW_CREDENTIAL_KEYRING={"ci":"Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M="}' \
-            maintaincode-ads:ci
-          ready=false
-          for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:3000/api/health > /dev/null; then ready=true; break; fi
-            sleep 1
-          done
-          test "$ready" = true
-          MAINTAINCODE_PROBE_ALLOW_LOCAL=true MAINTAINCODE_PROBE_ORIGIN=http://127.0.0.1:3000 \
-            MAINTAINCODE_EXPECTED_BUILD_SHA="$GITHUB_SHA" MAINTAINFLOW_READINESS_PROBE_SECRET=pppppppppppppppppppppppppppppppp \
-            npm run probe:deployment
-  database:
-    name: PostgreSQL integration
-    runs-on: ubuntu-latest
+  test-and-build:
+    name: Test and build
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports: [5432:5432]
+          POSTGRES_USER: folio_admin
+          POSTGRES_PASSWORD: synthetic_ci_admin_only
+          POSTGRES_DB: folio
+        ports:
+          - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-cmd "pg_isready -U folio_admin -d folio"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 12
+    env:
+      NODE_ENV: test
+      APP_ORIGIN: http://127.0.0.1:5178
+      # These credentials exist only in this disposable CI service database.
+      DATABASE_ADMIN_URL: postgresql://folio_admin:synthetic_ci_admin_only@127.0.0.1:5432/folio
+      DATABASE_URL: postgresql://folio_app:synthetic_ci_app_only@127.0.0.1:5432/folio
+      STORAGE_DIR: /tmp/folio-ci-files
+      FOLIO_BILLING_MOCK: 'false'
+      RESEND_INBOUND_ENABLED: 'false'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          node-version: 24
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.13.0'
           cache: npm
-      - run: npm ci
-      - run: npm run test:db
-        env:
-          MAINTAINFLOW_TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-      - name: Verify attribution concurrency and storage limits in an owned disposable database
-        run: node scripts/verify-maintaincode-load.mjs --docker
-      - run: npx playwright install --with-deps chromium
-      - name: Verify persistent onboarding, installed tracking, consent and cleanup
-        run: node scripts/verify-maintaincode-persistent.mjs --docker
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Create restricted application database role
+        run: |
+          node --input-type=module <<'NODE'
+          import pg from 'pg';
+          const admin = new pg.Client({ connectionString: process.env.DATABASE_ADMIN_URL });
+          await admin.connect();
+          try {
+            await admin.query("CREATE ROLE folio_app LOGIN PASSWORD 'synthetic_ci_app_only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS");
+            const { rows: [role] } = await admin.query("SELECT rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolreplication, rolbypassrls FROM pg_roles WHERE rolname = 'folio_app'");
+            if (!role || Object.values(role).some(Boolean)) throw new Error('CI application role is not restricted.');
+          } finally {
+            await admin.end();
+          }
+          NODE
+      - name: Apply database migrations
+        run: npm run db:migrate
+      - name: Run tests with controlled provider fixtures
+        run: npm test
+      - name: Typecheck and build application
+        run: npm run build

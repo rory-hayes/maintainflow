@@ -1,0 +1,17 @@
+From: sender@example.test
+To: intake@example.test
+Subject: Owned alternative receipt fixture
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="owned-format-alternative"
+
+--owned-format-alternative
+Content-Type: text/plain; charset=utf-8
+
+Merchant: Plain Body Preferred
+Currency: EUR
+Total: 7.50
+--owned-format-alternative
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Merchant: Conflicting HTML Body</p><p>Currency: EUR</p><p>Total: 18.60</p></body></html>
+--owned-format-alternative--

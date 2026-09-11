@@ -1,0 +1,170 @@
+{
+  "generatedAt": "2026-09-06T22:43:36.744Z",
+  "engine": "text-anchors / deterministic-v2",
+  "aiProviderVerified": false,
+  "description": "Held-out synthetic native files. Includes a deliberately unsupported freeform layout, a scan and a malformed file. No customer-document or AI accuracy claim.",
+  "supported": {
+    "correct": 54,
+    "total": 54
+  },
+  "allReadableLayouts": {
+    "correct": 54,
+    "total": 58
+  },
+  "results": [
+    {
+      "name": "Two-page native PDF with continuing line items",
+      "category": "supported",
+      "state": "extracted",
+      "pages": 2,
+      "fieldsCorrect": 23,
+      "fieldsExpected": 23,
+      "missingExpected": 0,
+      "issues": [],
+      "mismatches": []
+    },
+    {
+      "name": "German decimal and day-first dates",
+      "category": "supported",
+      "state": "extracted",
+      "pages": 1,
+      "fieldsCorrect": 11,
+      "fieldsExpected": 11,
+      "missingExpected": 0,
+      "issues": [],
+      "mismatches": []
+    },
+    {
+      "name": "Missing required data remains missing",
+      "category": "supported",
+      "state": "needs_review",
+      "pages": 1,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "missingExpected": 2,
+      "issues": [
+        {
+          "field": "date",
+          "code": "required",
+          "message": "Date is required."
+        },
+        {
+          "field": "total",
+          "code": "required",
+          "message": "Total is required."
+        }
+      ],
+      "mismatches": []
+    },
+    {
+      "name": "Email text with independent contact layout",
+      "category": "supported",
+      "state": "extracted",
+      "pages": 1,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "missingExpected": 0,
+      "issues": [],
+      "mismatches": []
+    },
+    {
+      "name": "CSV with labelled rows and quoted values",
+      "category": "supported",
+      "state": "extracted",
+      "pages": 1,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "missingExpected": 0,
+      "issues": [],
+      "mismatches": []
+    },
+    {
+      "name": "XLSX labelled receipt",
+      "category": "supported",
+      "state": "extracted",
+      "pages": 1,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "missingExpected": 0,
+      "issues": [],
+      "mismatches": []
+    },
+    {
+      "name": "DOCX labelled receipt",
+      "category": "supported",
+      "state": "extracted",
+      "pages": 1,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "missingExpected": 0,
+      "issues": [],
+      "mismatches": []
+    },
+    {
+      "name": "Unconfigured freeform layout",
+      "category": "unconfigured-layout",
+      "state": "needs_review",
+      "pages": 1,
+      "fieldsCorrect": 0,
+      "fieldsExpected": 4,
+      "missingExpected": 0,
+      "issues": [
+        {
+          "field": "merchant",
+          "code": "required",
+          "message": "Merchant is required."
+        },
+        {
+          "field": "date",
+          "code": "required",
+          "message": "Date is required."
+        },
+        {
+          "field": "currency",
+          "code": "required",
+          "message": "Currency is required."
+        },
+        {
+          "field": "total",
+          "code": "required",
+          "message": "Total is required."
+        }
+      ],
+      "mismatches": [
+        {
+          "field": "merchant",
+          "expected": "Oak Market",
+          "actual": null
+        },
+        {
+          "field": "date",
+          "expected": "2026-08-24",
+          "actual": null
+        },
+        {
+          "field": "currency",
+          "expected": "EUR",
+          "actual": null
+        },
+        {
+          "field": "total",
+          "expected": 16.9,
+          "actual": null
+        }
+      ]
+    },
+    {
+      "name": "Image scan requires provider",
+      "category": "scan",
+      "state": "requires_provider",
+      "fieldsCorrect": 0,
+      "fieldsExpected": 4
+    },
+    {
+      "name": "Malformed PDF rejection",
+      "category": "malformed",
+      "state": "rejected",
+      "message": "The file does not contain a valid PDF"
+    }
+  ]
+}

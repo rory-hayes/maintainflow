@@ -1,0 +1,3 @@
+Browser tab: 4, Title: "Folio — Documents, beautifully structured", URL: "http://127.0.0.1:5178/app/usage".
+There has been no change in the accessibility tree.
+The focused UI element is 1 AXWebArea Folio — Documents, beautifully structured, URL: 127.0.0.1:5178/app/usage

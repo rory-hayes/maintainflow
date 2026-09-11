@@ -1,0 +1,22 @@
+[
+  {
+    "file": "folio-export.csv",
+    "bytes": 417,
+    "matches_saved_snapshot": true
+  },
+  {
+    "file": "folio-export.xlsx",
+    "bytes": 6932,
+    "matches_saved_snapshot": true
+  },
+  {
+    "file": "folio-export.json",
+    "bytes": 962,
+    "matches_saved_snapshot": true
+  },
+  {
+    "file": "invoice-multipage.pdf",
+    "bytes": 1698,
+    "matches_original_fixture": true
+  }
+]

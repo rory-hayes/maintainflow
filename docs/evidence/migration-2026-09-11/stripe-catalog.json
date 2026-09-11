@@ -1,0 +1,42 @@
+{
+  "verifiedAt": "2026-09-11T08:05:29.641435+00:00",
+  "accountId": "acct_1SLliwF3c6inFQxp",
+  "mode": "test",
+  "livePaymentsEnabled": false,
+  "appBillingMode": "local mock",
+  "plans": [
+    {
+      "id": "explore",
+      "monthlyEur": 0,
+      "monthlyPages": 50,
+      "maxParsers": 1,
+      "maxConcurrent": 1,
+      "stripeProductId": null,
+      "stripePriceId": null
+    },
+    {
+      "id": "standard",
+      "monthlyEur": 29,
+      "monthlyPages": 1000,
+      "maxParsers": 10,
+      "maxConcurrent": 2,
+      "stripeProductId": "prod_VEtCMN5UzvP4kS",
+      "stripePriceId": "price_1UEPPlF3c6inFQxpqeSckzaf"
+    },
+    {
+      "id": "team",
+      "monthlyEur": 79,
+      "monthlyPages": 5000,
+      "maxParsers": 50,
+      "maxConcurrent": 4,
+      "stripeProductId": "prod_VEtDSaklZSdevv",
+      "stripePriceId": "price_1UEPQmF3c6inFQxpHyB4df3d"
+    }
+  ],
+  "verifiedThrough": "Stripe Chrome product detail pages, both prices monthly EUR and zero active subscriptions",
+  "boundaries": [
+    "No live catalog changes or customer subscription changes",
+    "No Checkout, webhook or portal acceptance claimed",
+    "Stripe account shows payouts paused; owner task remains"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "receipts": "{\"kind\":\"table\",\"sheet\":\"Receipts\",\"address\":\"A1:E3\",\"rows\":3,\"cols\":5,\"values\":[[\"Document ID\",\"Merchant\",\"Date\",\"Currency\",\"Total\"],[null,null,null,null,null],[null,null,null,null,null]]}",
+  "setup": "{\"kind\":\"table\",\"sheet\":\"Setup\",\"address\":\"A1:B4\",\"rows\":4,\"cols\":2,\"values\":[[\"Folio receipt exports\",\"Setup\"],[\"Destination\",\"Receipts is reserved for approved Folio exports.\"],[\"Connection\",\"Automatic Folio OAuth sync is not yet connected.\"],[\"Data\",\"No receipt data has been written.\"]]}",
+  "errors": "{\"kind\":\"notice\",\"message\":\"Cell search matched 0 entries.\"}"
+}

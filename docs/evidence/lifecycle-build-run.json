@@ -1,0 +1,7 @@
+{
+  "command": "npm run build",
+  "startedAt": "2026-09-06T22:44:56.418472+00:00",
+  "finishedAt": "2026-09-06T22:44:58.325104+00:00",
+  "exitCode": 0,
+  "output": "docs/evidence/lifecycle-build-results.txt"
+}

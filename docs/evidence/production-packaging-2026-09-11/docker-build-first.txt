@@ -1,0 +1,86 @@
+#0 building with "colima" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.59kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1
+#2 DONE 0.8s
+
+#3 docker-image://docker.io/docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+#3 resolve docker.io/docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32 0.0s done
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/node:24.13.0-bookworm-slim
+#4 DONE 0.7s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 177B done
+#5 DONE 0.0s
+
+#6 [build 1/6] FROM docker.io/library/node:24.13.0-bookworm-slim@sha256:4660b1ca8b28d6d1906fd644abe34b2ed81d15434d26d845ef0aced307cf4b6f
+#6 resolve docker.io/library/node:24.13.0-bookworm-slim@sha256:4660b1ca8b28d6d1906fd644abe34b2ed81d15434d26d845ef0aced307cf4b6f done
+#6 DONE 0.0s
+
+#7 [build 2/6] WORKDIR /app
+#7 CACHED
+
+#8 [internal] load build context
+#8 transferring context: 18.24MB 0.1s done
+#8 DONE 0.1s
+
+#9 [build 3/6] COPY package.json package-lock.json ./
+#9 DONE 0.0s
+
+#10 [build 4/6] RUN npm ci
+#10 1.501 npm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer supported
+#10 1.757 npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+#10 1.936 npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+#10 2.089 npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+#10 2.152 npm warn deprecated fstream@1.0.12: This package is no longer supported.
+#10 3.206 npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+#10 3.328 npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+#10 3.503 npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+#10 7.462 
+#10 7.462 added 359 packages, and audited 360 packages in 7s
+#10 7.462 
+#10 7.462 77 packages are looking for funding
+#10 7.462   run `npm fund` for details
+#10 7.463 
+#10 7.463 found 0 vulnerabilities
+#10 7.465 npm notice
+#10 7.465 npm notice New minor version of npm available! 11.6.2 -> 11.19.1
+#10 7.465 npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.19.1
+#10 7.465 npm notice To update run: npm install -g npm@11.19.1
+#10 7.465 npm notice
+#10 DONE 8.0s
+
+#11 [build 5/6] COPY . .
+#11 DONE 0.2s
+
+#12 [build 6/6] RUN npm run build
+#12 0.184 
+#12 0.184 > folio-document-workspace@0.1.0 build
+#12 0.184 > tsc --noEmit && vite build
+#12 0.184 
+#12 0.962 scripts/release-e2e.ts(124,33): error TS2448: Block-scoped variable 'runId' used before its declaration.
+#12 0.962 scripts/release-e2e.ts(124,33): error TS2454: Variable 'runId' is used before being assigned.
+#12 ERROR: process "/bin/sh -c npm run build" did not complete successfully: exit code: 1
+------
+ > [build 6/6] RUN npm run build:
+0.184 
+0.184 > folio-document-workspace@0.1.0 build
+0.184 > tsc --noEmit && vite build
+0.184 
+0.962 scripts/release-e2e.ts(124,33): error TS2448: Block-scoped variable 'runId' used before its declaration.
+0.962 scripts/release-e2e.ts(124,33): error TS2454: Variable 'runId' is used before being assigned.
+------
+Dockerfile:9
+--------------------
+   7 |     RUN npm ci
+   8 |     COPY . .
+   9 | >>> RUN npm run build
+  10 |     
+  11 |     FROM node:${NODE_VERSION} AS runtime
+--------------------
+ERROR: failed to build: failed to solve: process "/bin/sh -c npm run build" did not complete successfully: exit code: 1

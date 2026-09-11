@@ -1,0 +1,10 @@
+{
+  "recordedAt": "2026-09-07T08:11:42.443485+00:00",
+  "sourceFingerprint": "8d8b81756ef5e2bd79182997d956feb104cc21936c66f84d339390ec95c6f207",
+  "fileCount": 180,
+  "unchangedSinceBefore": true,
+  "testsRun": "docs/evidence/openai-final-tests-run.json",
+  "buildRun": "docs/evidence/openai-final-build-run.json",
+  "liveEvaluation": "docs/evidence/openai-evaluation-2026-09-07T08-05-38-093Z.json",
+  "browserAIWorkflow": "pending explicit approval after automatic approval review rejected parser creation"
+}

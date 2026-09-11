@@ -1,0 +1,26 @@
+{
+  "event": "document.approved",
+  "id": "0b1456d2-5aa6-45e7-a574-7796e2b995c5",
+  "document": {
+    "id": "1da0132b-a8a4-4da5-9572-756a4ab76fbf",
+    "name": "synthetic-automation-invoice.txt",
+    "parserId": "6b931781-3a29-4687-87d7-63811583b2e9"
+  },
+  "runId": "f5231541-0a26-4df8-84a4-c8d03b3d2a80",
+  "revision": 1,
+  "correctionId": "f1e634ef-4d52-471f-a736-a955b0375770",
+  "approvedAt": "2026-09-06T12:00:00.000Z",
+  "values": {
+    "invoice_number": "000127",
+    "supplier": "Cedar Office Studio",
+    "invoice_date": "2026-09-01",
+    "currency": "EUR",
+    "subtotal": 50,
+    "tax": 11.5,
+    "total": 61.5,
+    "line_items": [
+      {"description": "Recycled paper", "quantity": 2, "unit_price": 10, "amount": 20},
+      {"description": "Folders", "quantity": 3, "unit_price": 10, "amount": 30}
+    ]
+  }
+}

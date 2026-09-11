@@ -1,0 +1,11 @@
+{
+  "startedAt": "2026-09-07T17:31:00.278492+00:00",
+  "finishedAt": "2026-09-07T17:31:01.952573+00:00",
+  "command": [
+    "npm",
+    "run",
+    "build"
+  ],
+  "exitCode": 0,
+  "sourceFingerprint": "a4641915d5042524908c4e98efe14945ac15df13923f27c9307f7733264ed4f0"
+}

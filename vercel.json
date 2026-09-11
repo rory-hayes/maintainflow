@@ -1,11 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "node scripts/check-deployment-config.mjs && npm run build",
-  "fluid": true,
-  "crons": [
-    {
-      "path": "/api/attribution/maintenance",
-      "schedule": "15 2 * * *"
-    }
-  ]
+  "framework": null,
+  "installCommand": "npm ci",
+  "ignoreCommand": "node scripts/vercel-release-hold.mjs --ignore",
+  "buildCommand": "node scripts/vercel-release-hold.mjs",
+  "outputDirectory": "dist"
 }

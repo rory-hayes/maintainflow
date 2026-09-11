@@ -1,0 +1,22 @@
+{
+  "documentWidth": 1280,
+  "settings": [
+    {
+      "label": "Extraction mode",
+      "value": "rules"
+    },
+    {
+      "label": "Locale",
+      "value": "de-DE"
+    },
+    {
+      "label": "Timezone",
+      "value": "Europe/Berlin"
+    }
+  ],
+  "url": "http://127.0.0.1:5178/app/parsers/f8f74f1f-79df-43c3-a59b-d56a71b3f588",
+  "viewport": {
+    "height": 720,
+    "width": 1280
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "verifiedAt": "2026-09-11T08:17:06.012407+00:00",
+  "sourceFingerprint": "2ba1993b1a5e3c6582dd224a1ee1d7d0a14a09f24c51a224328f1315486de2f5",
+  "fileCount": 200,
+  "unchangedDuringVerification": true,
+  "runs": [
+    {
+      "command": [
+        "node",
+        "--import",
+        "tsx",
+        "--test",
+        "--test-concurrency=1",
+        "/Users/rory/Documents/Ideation/parseur/tests/ai-availability-ui.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/ai-worker.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/api-workflow.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/automations.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/core.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/csv-values.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/decoder-reconciliation.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/defensive-regressions.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/export-lifecycle.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/extraction-approval.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/extraction-sources.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/extraction.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/frontend-values.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/intake-policy.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/integrations.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/lifecycle.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/membership-audit.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/mock-billing-ui.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/mock-billing.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/openai-provider.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/providers.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/resend-managed.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/retention-notifications.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/run-model-usage-ui.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/signup-plan.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/source-formats.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/static-serving.test.ts",
+        "/Users/rory/Documents/Ideation/parseur/tests/written-date.test.ts"
+      ],
+      "startedAt": "2026-09-11T08:16:35.640608+00:00",
+      "completedAt": "2026-09-11T08:17:04.239363+00:00",
+      "exitCode": 0
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "startedAt": "2026-09-11T08:17:04.240536+00:00",
+      "completedAt": "2026-09-11T08:17:05.990291+00:00",
+      "exitCode": 0
+    }
+  ]
+}

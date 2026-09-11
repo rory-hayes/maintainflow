@@ -1,0 +1,283 @@
+- link "Skip to content":
+  - /url: "#main"
+- complementary "Workspace navigation":
+  - link "Folio":
+    - /url: /
+  - generic: Workspace
+  - combobox "Workspace":
+    - option "Northstar Studio QA" [selected]
+    - option "+ New workspace"
+  - navigation "Workspace pages":
+    - link "Documents":
+      - /url: /app
+      - text: Documents
+    - link "Parsers":
+      - /url: /app/parsers
+      - text: Parsers
+    - link "Integrations":
+      - /url: /app/integrations
+      - text: Integrations
+    - link "Usage" [active]:
+      - /url: /app/usage
+      - text: Usage
+    - link "Settings":
+      - /url: /app/settings
+      - text: Settings
+  - link "Help & documentation":
+    - /url: /help
+    - text: Help & documentation
+  - generic: A
+  - strong: Alex Morgan
+  - generic: owner · Local workspace
+  - button "Sign out":
+- banner:
+  - generic: Workspace
+  - generic: /
+  - generic: Usage
+  - button "Processing notifications, 5 unread":
+    - generic: "5"
+  - generic: A
+- main:
+  - heading "Usage & billing" [level=1]
+  - paragraph: See your allowance, recorded usage and test-mode billing.
+  - tablist "Sections":
+    - tab "Usage" [selected]
+    - tab "Billing"
+  - region "39 / 1,000 pages this month":
+    - paragraph: Local development
+    - heading "39 / 1,000 pages this month" [level=2]:
+      - text: "39"
+      - generic: / 1,000 pages this month
+    - meter "Monthly page allowance used"
+    - paragraph: 961 pages remaining · 2 concurrent processing jobs · Up to 25 active parsers
+  - strong: "8"
+  - generic: Documents stored
+  - strong: "3"
+  - generic: Needs review
+  - strong: "1"
+  - generic: Failed documents
+  - strong: $0.0016
+  - generic: Estimated model cost
+  - paragraph: Estimates cover recorded successful runs and are separate from your page allowance. Charges for failed or canceled attempts may not be included. This is not a reconciliation of the provider’s bill.
+  - strong: How usage is counted
+  - paragraph: Each accepted page or spreadsheet sheet counts once on upload. Manual reprocessing counts again. Automatic worker retries and detected duplicates do not count again. DOCX/text/email count as one document page.
+  - heading "Usage ledger" [level=2]
+  - paragraph: The latest 50 usage events, including earlier months.
+  - table:
+    - rowgroup:
+      - row "Event Document Pages Time":
+        - columnheader "Event"
+        - columnheader "Document"
+        - columnheader "Pages"
+        - columnheader "Time"
+    - rowgroup:
+      - row "Document upload 336b6eb6 1 7 Sept 2026, 18:09":
+        - cell "Document upload"
+        - cell "336b6eb6":
+          - link "336b6eb6":
+            - /url: /app/documents/336b6eb6-8711-4433-afea-9e177bc8aea3
+        - cell "1"
+        - cell "7 Sept 2026, 18:09"
+      - row "Document upload 7aac2995 1 6 Sept 2026, 23:49":
+        - cell "Document upload"
+        - cell "7aac2995":
+          - link "7aac2995":
+            - /url: /app/documents/7aac2995-706e-4ea6-89b0-0bcb35a83db5
+        - cell "1"
+        - cell "6 Sept 2026, 23:49"
+      - row "Document upload b4f22abc 1 6 Sept 2026, 23:46":
+        - cell "Document upload"
+        - cell "b4f22abc":
+          - link "b4f22abc":
+            - /url: /app/documents/b4f22abc-ab4d-4fb8-bf67-05d687cd854e
+        - cell "1"
+        - cell "6 Sept 2026, 23:46"
+      - row "Document upload 46439fb9 1 6 Sept 2026, 23:07":
+        - cell "Document upload"
+        - cell "46439fb9":
+          - link "46439fb9":
+            - /url: /app/documents/46439fb9-7a2e-4973-b239-43dcad3ac8ac
+        - cell "1"
+        - cell "6 Sept 2026, 23:07"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:44":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:44"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:44":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:44"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:44":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:44"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:44":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:44"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:44":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:44"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:44":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:44"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:43":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:43"
+      - row "Document upload 1a20b075 1 6 Sept 2026, 22:37":
+        - cell "Document upload"
+        - cell "1a20b075":
+          - link "1a20b075":
+            - /url: /app/documents/1a20b075-30a1-49ef-88d0-f7931c639310
+        - cell "1"
+        - cell "6 Sept 2026, 22:37"
+      - row "Manual reprocessing Deleted document 1 6 Sept 2026, 22:13":
+        - cell "Manual reprocessing"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:13"
+      - row "Document upload 713c6820 1 6 Sept 2026, 22:13":
+        - cell "Document upload"
+        - cell "713c6820":
+          - link "713c6820":
+            - /url: /app/documents/713c6820-c403-4197-8237-65f3223faa50
+        - cell "1"
+        - cell "6 Sept 2026, 22:13"
+      - row "Document upload Deleted document 1 6 Sept 2026, 22:12":
+        - cell "Document upload"
+        - cell "Deleted document"
+        - cell "1"
+        - cell "6 Sept 2026, 22:12"
+      - row "Manual reprocessing 4574440a 1 6 Sept 2026, 22:10":
+        - cell "Manual reprocessing"
+        - cell "4574440a":
+          - link "4574440a":
+            - /url: /app/documents/4574440a-e50e-49ac-af8b-1f9b6f7ac033
+        - cell "1"
+        - cell "6 Sept 2026, 22:10"
+      - row "Document upload 3baa3f63 2 6 Sept 2026, 21:42":
+        - cell "Document upload"
+        - cell "3baa3f63":
+          - link "3baa3f63":
+            - /url: /app/documents/3baa3f63-f844-44a0-8ef7-61629c3f0772
+        - cell "2"
+        - cell "6 Sept 2026, 21:42"
+      - row "Manual reprocessing 4574440a 1 6 Sept 2026, 21:37":
+        - cell "Manual reprocessing"
+        - cell "4574440a":
+          - link "4574440a":
+            - /url: /app/documents/4574440a-e50e-49ac-af8b-1f9b6f7ac033
+        - cell "1"
+        - cell "6 Sept 2026, 21:37"
+      - row "Document upload 4574440a 1 6 Sept 2026, 21:25":
+        - cell "Document upload"
+        - cell "4574440a":
+          - link "4574440a":
+            - /url: /app/documents/4574440a-e50e-49ac-af8b-1f9b6f7ac033
+        - cell "1"
+        - cell "6 Sept 2026, 21:25"

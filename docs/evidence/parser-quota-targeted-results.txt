@@ -1,0 +1,10 @@
+✔ parser restoration respects active quota without blocking ordinary edits or losing configuration (280.6155ms)
+✔ concurrent parser restores and creation share one remaining active slot (77.834625ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 915.823875

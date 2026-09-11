@@ -1,0 +1,33 @@
+{
+  "synthetic": true,
+  "purpose": "Browser pagination, search, status and page-scoped selection/deletion acceptance",
+  "useCase": "receipt",
+  "files": [
+    "pagination-01.txt",
+    "pagination-02.txt",
+    "pagination-03.txt",
+    "pagination-04.txt",
+    "pagination-05.txt",
+    "pagination-06.txt",
+    "pagination-07.txt",
+    "pagination-08.txt",
+    "pagination-09.txt",
+    "pagination-10.txt",
+    "pagination-11.txt",
+    "pagination-12.txt",
+    "pagination-13.txt",
+    "pagination-14.txt",
+    "pagination-15.txt",
+    "pagination-16.txt",
+    "pagination-17.txt",
+    "pagination-18.txt",
+    "pagination-19.txt",
+    "pagination-20.txt",
+    "pagination-21.txt",
+    "pagination-22.txt",
+    "pagination-23.txt",
+    "pagination-24.txt",
+    "pagination-25.txt",
+    "pagination-26.txt"
+  ]
+}

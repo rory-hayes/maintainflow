@@ -1,0 +1,16 @@
+{
+  "synthetic": true,
+  "preset": "leads",
+  "locale": "en-IE",
+  "expectedValues": {
+    "name": "Morgan Vale",
+    "email": "morgan@example.test",
+    "message": "Please process our weekly enquiries.\nKeep the original reference numbers.\nSend a summary after review.",
+    "company": "Willow Research"
+  },
+  "expectedMessageEvidence": {
+    "page": 1,
+    "text": "Message: Please process our weekly enquiries.\nKeep the original reference numbers.\nSend a summary after review."
+  },
+  "expectedModel": "deterministic-v2"
+}

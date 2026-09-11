@@ -1,0 +1,182 @@
+{
+  "synthetic": true,
+  "authoringIsolation": "Authored using shared/presets.ts, shared/types.ts and package.json only. No extraction implementation, existing fixtures, tests, reports, model calls, APIs or database were inspected or used.",
+  "expectedConvention": "Complete schema values after type normalization: date fields use YYYY-MM-DD; numbers use JSON numbers; absent data is null; string values retain visible source casing and accents. No preset has a transform. Exact email message expectation excludes the standard signature block.",
+  "reproduction": "From repository root: node docs/evidence/heldout-ai-2026-09-07/generate.mjs. Requires installed pdf-lib and sharp. PDF metadata dates and content are fixed; PNG rendering uses the installed system font stack, so bit identity across different font/runtime environments is not guaranteed.",
+  "fixtures": [
+    {
+      "id": "two-page-native-invoice",
+      "filename": "bracken-blue-invoice.pdf",
+      "mimeType": "application/pdf",
+      "locale": "en-GB",
+      "useCase": "invoice",
+      "category": "native_pdf_continued_line_items",
+      "expected": {
+        "invoice_number": "BBw-260901-73",
+        "supplier": "Bracken & Blue Workshop",
+        "invoice_date": "2026-09-01",
+        "currency": "GBP",
+        "subtotal": 301,
+        "tax": 60.2,
+        "total": 361.2,
+        "line_items": [
+          {
+            "description": "Ceramic carafes",
+            "quantity": 4,
+            "unit_price": 28.5,
+            "amount": 114
+          },
+          {
+            "description": "Felt coasters",
+            "quantity": 18,
+            "unit_price": 3.2,
+            "amount": 57.6
+          },
+          {
+            "description": "Linen table runners",
+            "quantity": 3,
+            "unit_price": 22,
+            "amount": 66
+          },
+          {
+            "description": "Brass napkin rings",
+            "quantity": 12,
+            "unit_price": 2.75,
+            "amount": 33
+          },
+          {
+            "description": "Protective packaging",
+            "quantity": 1,
+            "unit_price": 12,
+            "amount": 12
+          },
+          {
+            "description": "Courier delivery",
+            "quantity": 1,
+            "unit_price": 18.4,
+            "amount": 18.4
+          }
+        ]
+      },
+      "expectedOutcome": "needs_review",
+      "notes": "Exactly two native-text pages. The six line items span both pages; the page-1 subtotal and brought-forward amount are not extra items or the invoice subtotal.",
+      "sourceSha256": "35771ddd87852c10c69b8c54d444a4433bc159cb1617edccdd48f5c2d430f24b",
+      "sizeBytes": 5252
+    },
+    {
+      "id": "french-image-receipt",
+      "filename": "lucioles-receipt.png",
+      "mimeType": "image/png",
+      "locale": "fr-FR",
+      "useCase": "receipt",
+      "category": "image_french_decimal_written_date",
+      "expected": {
+        "merchant": "Épicerie des Lucioles",
+        "date": "2026-09-02",
+        "currency": "EUR",
+        "total": 42.7
+      },
+      "expectedOutcome": "needs_review",
+      "notes": "Visible source date: 2 septembre 2026. Visible source total: 42,70 EUR. Preserve merchant accents and casing.",
+      "sourceSha256": "17e781489e1e55245c35faa6262c4c261e12a92d82425aefb147da6d1d4aed2d",
+      "sizeBytes": 67626
+    },
+    {
+      "id": "image-pdf-absent-date",
+      "filename": "moss-lantern-undated.pdf",
+      "mimeType": "application/pdf",
+      "locale": "en-IE",
+      "useCase": "receipt",
+      "category": "image_only_pdf_missing_required_date",
+      "expected": {
+        "merchant": "Moss Lantern Books",
+        "date": null,
+        "currency": "EUR",
+        "total": 27.5
+      },
+      "expectedOutcome": "needs_review",
+      "expectedMissingFields": [
+        "date"
+      ],
+      "notes": "The only page embeds one raster image and has no text layer. The visible source explicitly says the transaction date was not recorded. PDF creation metadata is not a transaction date.",
+      "sourceSha256": "3e2d0847642fe86b38cb7750db460297d355b31a9adfa1fd9ffddfe6632664fc",
+      "sizeBytes": 61096
+    },
+    {
+      "id": "narrative-lead-email",
+      "filename": "studio-enquiry.eml",
+      "mimeType": "message/rfc822",
+      "locale": "en-GB",
+      "useCase": "leads",
+      "category": "narrative_email_multiline_message",
+      "expected": {
+        "name": "Nina Calder",
+        "email": "Nina.Calder@example.com",
+        "company": "Little Heron Ceramics",
+        "message": "We are opening a second ceramics studio and need a booking system that can keep the two workshop calendars separate. Could you send a written outline of your team plan and whether attendees can move their own reservations?\n\nOur first classes begin in November. I can share our current spreadsheet by email; a reply with pricing and setup steps would be ideal."
+      },
+      "expectedOutcome": "needs_review",
+      "notes": "Message is the two request paragraphs before the standard -- signature separator; preserve the paragraph break. Name/email appear in From and signature. Company appears in signature. There is no lowercase transform in the preset, so preserve the email casing.",
+      "sourceSha256": "2cecd1445e3f55dd79edaaa1ca27396029fc526d7e32432d2cc919a9501412fe",
+      "sizeBytes": 720
+    },
+    {
+      "id": "english-freeform-receipt",
+      "filename": "harbour-freeform-receipt.txt",
+      "mimeType": "text/plain",
+      "locale": "en-GB",
+      "useCase": "receipt",
+      "category": "freeform_english_receipt",
+      "expected": {
+        "merchant": "Harbour Kettle Kitchen",
+        "date": "2026-09-04",
+        "currency": "GBP",
+        "total": 27.65
+      },
+      "expectedOutcome": "needs_review",
+      "notes": "Receipt information is expressed as prose with no labelled fields.",
+      "sourceSha256": "dc890fa7b648eb2e7e096cbf376e272825535c7e0e2643c02f9aaca464154973",
+      "sizeBytes": 294
+    },
+    {
+      "id": "malformed-pdf",
+      "filename": "broken-receipt.pdf",
+      "mimeType": "application/pdf",
+      "locale": "en-GB",
+      "useCase": "receipt",
+      "category": "malformed_pdf",
+      "expected": {
+        "merchant": null,
+        "date": null,
+        "currency": null,
+        "total": null
+      },
+      "expectedOutcome": "failed",
+      "notes": "Deliberately truncated PDF object without a usable page tree, closing dictionary, xref, or trailer. No extraction should be fabricated; nulls document the absence of schema values, not a successful extraction expectation.",
+      "sourceSha256": "fa064794c5403565bf94f69659f5f37e140faa2a73161bea9230dfb1da62d6d5",
+      "sizeBytes": 135
+    },
+    {
+      "id": "french-image-receipt-duplicate",
+      "filename": "lucioles-receipt-copy.png",
+      "mimeType": "image/png",
+      "locale": "fr-FR",
+      "useCase": "receipt",
+      "category": "exact_duplicate_identity",
+      "expected": {
+        "merchant": "Épicerie des Lucioles",
+        "date": "2026-09-02",
+        "currency": "EUR",
+        "total": 42.7
+      },
+      "expectedOutcome": "needs_review",
+      "duplicateOf": "french-image-receipt",
+      "notes": "Exact byte copy under a new filename. Repeated extraction assesses identical-input consistency only; actual intake deduplication must be evaluated separately.",
+      "sourceSha256": "17e781489e1e55245c35faa6262c4c261e12a92d82425aefb147da6d1d4aed2d",
+      "sizeBytes": 67626
+    }
+  ],
+  "authoredOn": "2026-09-07",
+  "finalizedAt": "2026-09-07T08:29:20.322939+00:00",
+  "workflowConvention": "Every successful extraction requires review. Outcome metadata corrected before any model evaluation; expected field values and original bytes remain unchanged."
+}

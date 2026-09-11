@@ -1,0 +1,32 @@
+{
+  "capturedAt": "2026-09-07T17:14:06.874Z",
+  "collapsedWithSpace": false,
+  "expandedWithSpace": true,
+  "bodyWidth": 390,
+  "buttons": [
+    {
+      "height": 44,
+      "text": "Source · Page 1: Folders | 20 | 9.00 | 180.00",
+      "width": 246.5390625
+    },
+    {
+      "height": 44,
+      "text": "Source · Page 1: Notebooks | 30 | 10.00 | 300.00",
+      "width": 274.109375
+    },
+    {
+      "height": 44,
+      "text": "Source · Page 2: Desk pads | 10 | 15.00 | 150.00",
+      "width": 268.703125
+    },
+    {
+      "height": 44,
+      "text": "Source · Page 2: Pens | 50 | 3.00 | 150.00",
+      "width": 234.59375
+    }
+  ],
+  "documentWidth": 390,
+  "focused": "Source · Page 1: Notebooks | 30 | 10.00 | 300.00",
+  "height": 844,
+  "width": 390
+}

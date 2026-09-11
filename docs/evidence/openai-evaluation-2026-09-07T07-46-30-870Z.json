@@ -1,0 +1,1130 @@
+{
+  "startedAt": "2026-09-07T07:46:30.870Z",
+  "finishedAt": "2026-09-07T07:46:57.563Z",
+  "engine": "openai",
+  "model": "gpt-5.4-mini-2026-03-17",
+  "promptVersion": "folio-openai-extraction-v1",
+  "actualProviderCalls": 12,
+  "correct": 73,
+  "total": 74,
+  "estimatedSuccessfulCallCostUsd": 0.0171525,
+  "description": "Real API calls on owned synthetic fixtures only. Exact-value counts include expected missing fields. All successful results require review; matched quotes do not prove interpretation. Costs estimate successful responses only and are not a billing reconciliation.",
+  "results": [
+    {
+      "name": "Two-page native PDF with continuing line items",
+      "filename": "invoice-multipage.pdf",
+      "sha256": "26c9aaf4f4594abeedab34eceb3ce5baeb2a46b0308b6a6ce13d21f28bdd868e",
+      "category": "supported",
+      "state": "needs_review",
+      "pages": 2,
+      "elapsedMs": 4325,
+      "fieldsCorrect": 23,
+      "fieldsExpected": 23,
+      "mismatches": [],
+      "rawValues": {
+        "invoice_number": "INV-00601",
+        "supplier": "Fern Office Supplies",
+        "invoice_date": "15/07/2026",
+        "currency": "EUR",
+        "subtotal": "780.00",
+        "tax": "179.40",
+        "total": "959.40",
+        "line_items": [
+          {
+            "description": "Folders",
+            "quantity": "20",
+            "unit_price": "9.00",
+            "amount": "180.00"
+          },
+          {
+            "description": "Notebooks",
+            "quantity": "30",
+            "unit_price": "10.00",
+            "amount": "300.00"
+          },
+          {
+            "description": "Desk pads",
+            "quantity": "10",
+            "unit_price": "15.00",
+            "amount": "150.00"
+          },
+          {
+            "description": "Pens",
+            "quantity": "50",
+            "unit_price": "3.00",
+            "amount": "150.00"
+          }
+        ]
+      },
+      "normalizedValues": {
+        "invoice_number": "INV-00601",
+        "supplier": "Fern Office Supplies",
+        "invoice_date": "2026-07-15",
+        "currency": "EUR",
+        "subtotal": 780,
+        "tax": 179.4,
+        "total": 959.4,
+        "line_items": [
+          {
+            "description": "Folders",
+            "quantity": 20,
+            "unit_price": 9,
+            "amount": 180
+          },
+          {
+            "description": "Notebooks",
+            "quantity": 30,
+            "unit_price": 10,
+            "amount": 300
+          },
+          {
+            "description": "Desk pads",
+            "quantity": 10,
+            "unit_price": 15,
+            "amount": 150
+          },
+          {
+            "description": "Pens",
+            "quantity": 50,
+            "unit_price": 3,
+            "amount": 150
+          }
+        ]
+      },
+      "evidence": {
+        "invoice_number": [
+          {
+            "page": 1,
+            "text": "Invoice number: INV-00601",
+            "source": "matched-text"
+          }
+        ],
+        "supplier": [
+          {
+            "page": 1,
+            "text": "Supplier: Fern Office Supplies",
+            "source": "matched-text"
+          }
+        ],
+        "invoice_date": [
+          {
+            "page": 1,
+            "text": "Invoice date: 15/07/2026",
+            "source": "matched-text"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "Currency: EUR",
+            "source": "matched-text"
+          }
+        ],
+        "subtotal": [
+          {
+            "page": 1,
+            "text": "Subtotal: 780.00",
+            "source": "matched-text"
+          }
+        ],
+        "tax": [
+          {
+            "page": 1,
+            "text": "Tax: 179.40",
+            "source": "matched-text"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "Total: 959.40",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].description": [
+          {
+            "page": 1,
+            "text": "Folders | 20 | 9.00 | 180.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].quantity": [
+          {
+            "page": 1,
+            "text": "Folders | 20 | 9.00 | 180.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].unit_price": [
+          {
+            "page": 1,
+            "text": "Folders | 20 | 9.00 | 180.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].amount": [
+          {
+            "page": 1,
+            "text": "Folders | 20 | 9.00 | 180.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[1].description": [
+          {
+            "page": 1,
+            "text": "Notebooks | 30 | 10.00 | 300.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[1].quantity": [
+          {
+            "page": 1,
+            "text": "Notebooks | 30 | 10.00 | 300.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[1].unit_price": [
+          {
+            "page": 1,
+            "text": "Notebooks | 30 | 10.00 | 300.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[1].amount": [
+          {
+            "page": 1,
+            "text": "Notebooks | 30 | 10.00 | 300.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[2].description": [
+          {
+            "page": 2,
+            "text": "Desk pads | 10 | 15.00 | 150.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[2].quantity": [
+          {
+            "page": 2,
+            "text": "Desk pads | 10 | 15.00 | 150.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[2].unit_price": [
+          {
+            "page": 2,
+            "text": "Desk pads | 10 | 15.00 | 150.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[2].amount": [
+          {
+            "page": 2,
+            "text": "Desk pads | 10 | 15.00 | 150.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[3].description": [
+          {
+            "page": 2,
+            "text": "Pens | 50 | 3.00 | 150.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[3].quantity": [
+          {
+            "page": 2,
+            "text": "Pens | 50 | 3.00 | 150.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[3].unit_price": [
+          {
+            "page": 2,
+            "text": "Pens | 50 | 3.00 | 150.00",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[3].amount": [
+          {
+            "page": 2,
+            "text": "Pens | 50 | 3.00 | 150.00",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 1034,
+        "cachedInputTokens": 0,
+        "outputTokens": 836,
+        "reasoningTokens": 63,
+        "totalTokens": 1870,
+        "responseId": "resp_0a5ba276fa484f14016a9e6bda271887d2bffeea470c7f6b03",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.0045375
+    },
+    {
+      "name": "German decimal and day-first dates",
+      "filename": "invoice-de.txt",
+      "sha256": "9b69e175c9d6d374f1a1fe94ab2a0c8f64ee7a08ae126b521f570031111086c6",
+      "category": "supported",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 3226,
+      "fieldsCorrect": 11,
+      "fieldsExpected": 11,
+      "mismatches": [],
+      "rawValues": {
+        "invoice_number": "0000307",
+        "supplier": "Linde Büro",
+        "invoice_date": "31.08.2026",
+        "currency": "EUR",
+        "subtotal": "1.234,50",
+        "tax": "234,56",
+        "total": "1.469,06",
+        "line_items": [
+          {
+            "description": "Papier",
+            "quantity": "10",
+            "unit_price": "123,45",
+            "amount": "1.234,50"
+          }
+        ]
+      },
+      "normalizedValues": {
+        "invoice_number": "0000307",
+        "supplier": "Linde Büro",
+        "invoice_date": "2026-08-31",
+        "currency": "EUR",
+        "subtotal": 1234.5,
+        "tax": 234.56,
+        "total": 1469.06,
+        "line_items": [
+          {
+            "description": "Papier",
+            "quantity": 10,
+            "unit_price": 123.45,
+            "amount": 1234.5
+          }
+        ]
+      },
+      "evidence": {
+        "invoice_number": [
+          {
+            "page": 1,
+            "text": "Invoice number: 0000307",
+            "source": "matched-text"
+          }
+        ],
+        "supplier": [
+          {
+            "page": 1,
+            "text": "Supplier: Linde Büro",
+            "source": "matched-text"
+          }
+        ],
+        "invoice_date": [
+          {
+            "page": 1,
+            "text": "Invoice date: 31.08.2026",
+            "source": "matched-text"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "Currency: EUR",
+            "source": "matched-text"
+          }
+        ],
+        "subtotal": [
+          {
+            "page": 1,
+            "text": "Subtotal: 1.234,50",
+            "source": "matched-text"
+          }
+        ],
+        "tax": [
+          {
+            "page": 1,
+            "text": "Tax: 234,56",
+            "source": "matched-text"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "Total: 1.469,06",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].description": [
+          {
+            "page": 1,
+            "text": "Papier | 10 | 123,45 | 1.234,50",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].quantity": [
+          {
+            "page": 1,
+            "text": "Papier | 10 | 123,45 | 1.234,50",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].unit_price": [
+          {
+            "page": 1,
+            "text": "Papier | 10 | 123,45 | 1.234,50",
+            "source": "matched-text"
+          }
+        ],
+        "line_items[0].amount": [
+          {
+            "page": 1,
+            "text": "Papier | 10 | 123,45 | 1.234,50",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 772,
+        "cachedInputTokens": 0,
+        "outputTokens": 414,
+        "reasoningTokens": 55,
+        "totalTokens": 1186,
+        "responseId": "resp_0bc8abe1dcc0c050016a9e6bdd854087d2872e963ab936ed2e",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.002442
+    },
+    {
+      "name": "Missing required data remains missing",
+      "filename": "receipt-missing.txt",
+      "sha256": "de0169d1fa6958a131afb3fd10db1d953a8c3b1f647a49031ececb0eb6a5e8dc",
+      "category": "supported",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 1214,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "mismatches": [],
+      "rawValues": {
+        "merchant": "Hazel Books",
+        "date": null,
+        "currency": "EUR",
+        "total": null
+      },
+      "normalizedValues": {
+        "merchant": "Hazel Books",
+        "date": null,
+        "currency": "EUR",
+        "total": null
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "Merchant: Hazel Books",
+            "source": "matched-text"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "Currency: EUR",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [
+        {
+          "field": "date",
+          "code": "required",
+          "message": "Date is required."
+        },
+        {
+          "field": "total",
+          "code": "required",
+          "message": "Total is required."
+        }
+      ],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 435,
+        "cachedInputTokens": 0,
+        "outputTokens": 91,
+        "reasoningTokens": 23,
+        "totalTokens": 526,
+        "responseId": "resp_08a39c88f0d9938f016a9e6be0b25887d29cfe41699759ed6b",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00073575
+    },
+    {
+      "name": "Email text with independent contact layout",
+      "filename": "lead.eml",
+      "sha256": "a32567653f5fe1f27d275390ad77ed0e213f71e867574c438bbb24d68039029a",
+      "category": "supported",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 1390,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "mismatches": [],
+      "rawValues": {
+        "name": "Taylor Quinn",
+        "email": "taylor@example.test",
+        "company": "Cedar Labs",
+        "message": "Please process our weekly requests."
+      },
+      "normalizedValues": {
+        "name": "Taylor Quinn",
+        "email": "taylor@example.test",
+        "company": "Cedar Labs",
+        "message": "Please process our weekly requests."
+      },
+      "evidence": {
+        "name": [
+          {
+            "page": 1,
+            "text": "Name: Taylor Quinn",
+            "source": "matched-text"
+          }
+        ],
+        "email": [
+          {
+            "page": 1,
+            "text": "Email: taylor@example.test",
+            "source": "matched-text"
+          }
+        ],
+        "company": [
+          {
+            "page": 1,
+            "text": "Company: Cedar Labs",
+            "source": "matched-text"
+          }
+        ],
+        "message": [
+          {
+            "page": 1,
+            "text": "Message: Please process our weekly requests.",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 450,
+        "cachedInputTokens": 0,
+        "outputTokens": 126,
+        "reasoningTokens": 12,
+        "totalTokens": 576,
+        "responseId": "resp_0664b25ffd5e0c55016a9e6be2041487d2b90a8298c7105a09",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.0009045
+    },
+    {
+      "name": "CSV with labelled rows and quoted values",
+      "filename": "receipt.csv",
+      "sha256": "d304d91a2a6673e21f62a1161175d2a9a43a22c460e543a0a77ca859e8ed0833",
+      "category": "supported",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 1975,
+      "fieldsCorrect": 3,
+      "fieldsExpected": 4,
+      "mismatches": [
+        {
+          "field": "merchant",
+          "expected": "Maple, Supplies",
+          "actual": "\"Maple, Supplies\""
+        }
+      ],
+      "rawValues": {
+        "merchant": "\"Maple, Supplies\"",
+        "date": "08/19/2026",
+        "currency": "USD",
+        "total": "39.95"
+      },
+      "normalizedValues": {
+        "merchant": "\"Maple, Supplies\"",
+        "date": "2026-08-19",
+        "currency": "USD",
+        "total": 39.95
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "\"Maple, Supplies\"",
+            "source": "matched-text"
+          }
+        ],
+        "date": [
+          {
+            "page": 1,
+            "text": "08/19/2026",
+            "source": "matched-text"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "USD",
+            "source": "matched-text"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "39.95",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 439,
+        "cachedInputTokens": 0,
+        "outputTokens": 210,
+        "reasoningTokens": 100,
+        "totalTokens": 649,
+        "responseId": "resp_06993c2bd7f83b57016a9e6be3543887d280147fc30e740229",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00127425
+    },
+    {
+      "name": "XLSX labelled receipt",
+      "filename": "receipt.xlsx",
+      "sha256": "e3f41fc3daa99b1145f36e2e73451fb9031d44710796f37f667d519bd3631ffe",
+      "category": "supported",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 1740,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "mismatches": [],
+      "rawValues": {
+        "merchant": "Ash Workshop",
+        "date": "2026-08-21",
+        "currency": "EUR",
+        "total": "75.2"
+      },
+      "normalizedValues": {
+        "merchant": "Ash Workshop",
+        "date": "2026-08-21",
+        "currency": "EUR",
+        "total": 75.2
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "Ash Workshop",
+            "source": "matched-text"
+          }
+        ],
+        "date": [
+          {
+            "page": 1,
+            "text": "2026-08-21",
+            "source": "matched-text"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "EUR",
+            "source": "matched-text"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "75.2",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 439,
+        "cachedInputTokens": 0,
+        "outputTokens": 129,
+        "reasoningTokens": 27,
+        "totalTokens": 568,
+        "responseId": "resp_0833aee879ca789f016a9e6be5729c87d2ab79483ca92ee736",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00090975
+    },
+    {
+      "name": "DOCX labelled receipt",
+      "filename": "receipt.docx",
+      "sha256": "77d7e1f5ea1b3ddcc4424586165e58e3a1a48b9a34a1347361d9cf59ae16dc99",
+      "category": "supported",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 2215,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "mismatches": [],
+      "rawValues": {
+        "merchant": "Rowan Kitchen",
+        "date": "2026-08-23",
+        "currency": "GBP",
+        "total": "21.40"
+      },
+      "normalizedValues": {
+        "merchant": "Rowan Kitchen",
+        "date": "2026-08-23",
+        "currency": "GBP",
+        "total": 21.4
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "Merchant: Rowan Kitchen",
+            "source": "matched-text"
+          }
+        ],
+        "date": [
+          {
+            "page": 1,
+            "text": "Date: 2026-08-23",
+            "source": "matched-text"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "Currency: GBP",
+            "source": "matched-text"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "Total: 21.40",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 440,
+        "cachedInputTokens": 0,
+        "outputTokens": 129,
+        "reasoningTokens": 16,
+        "totalTokens": 569,
+        "responseId": "resp_0e233f547d47ba7b016a9e6be7207c87d2b62c3380f3152a17",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.0009105
+    },
+    {
+      "name": "Unconfigured freeform layout",
+      "filename": "freeform-receipt.txt",
+      "sha256": "3b0295d3c7bebb95206a363513f7e97d175fa008e4957a20499a8d5d66be5276",
+      "category": "unconfigured-layout",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 1629,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "mismatches": [],
+      "expectationCorrection": "The actual held-out source is uppercase OAK MARKET. The original benchmark expected Oak Market despite no title-case transform. Preserve source case instead of changing extraction to satisfy that expectation.",
+      "rawValues": {
+        "merchant": "OAK MARKET",
+        "date": "24 August 2026",
+        "currency": "EUR",
+        "total": "16.90"
+      },
+      "normalizedValues": {
+        "merchant": "OAK MARKET",
+        "date": "2026-08-24",
+        "currency": "EUR",
+        "total": 16.9
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "OAK MARKET",
+            "source": "matched-text"
+          }
+        ],
+        "date": [
+          {
+            "page": 1,
+            "text": "24 August 2026",
+            "source": "matched-text"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "EUR",
+            "source": "matched-text"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "Paid EUR 16.90",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 443,
+        "cachedInputTokens": 0,
+        "outputTokens": 126,
+        "reasoningTokens": 21,
+        "totalTokens": 569,
+        "responseId": "resp_0a58e30edececfcf016a9e6be94d1c87d2bf740a3b90800285",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00089925
+    },
+    {
+      "name": "Image scan requires provider",
+      "filename": "receipt-scan.png",
+      "sha256": "056fbccce65791dde2f3edcfd5b3fef4dc7d544ff6193f80855a8030332d6af0",
+      "category": "scan",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 1852,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "mismatches": [],
+      "rawValues": {
+        "merchant": "Birch Bakery",
+        "date": "2026-08-25",
+        "currency": "EUR",
+        "total": "18.60"
+      },
+      "normalizedValues": {
+        "merchant": "Birch Bakery",
+        "date": "2026-08-25",
+        "currency": "EUR",
+        "total": 18.6
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "Merchant: Birch Bakery",
+            "source": "model-visual"
+          }
+        ],
+        "date": [
+          {
+            "page": 1,
+            "text": "Date: 2026-08-25",
+            "source": "model-visual"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "Currency: EUR",
+            "source": "model-visual"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "Total: 18.60",
+            "source": "model-visual"
+          }
+        ]
+      },
+      "issues": [
+        {
+          "field": "_source",
+          "code": "visual_evidence",
+          "message": "AI-read source quotes are not independently verified against native text. Check the original image before approval."
+        }
+      ],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 985,
+        "cachedInputTokens": 0,
+        "outputTokens": 129,
+        "reasoningTokens": 16,
+        "totalTokens": 1114,
+        "responseId": "resp_084a69fd9b506ec3016a9e6beaef2487d2bdabd32ccb33fa86",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00131925
+    },
+    {
+      "name": "Malformed PDF rejection",
+      "filename": "malformed.pdf",
+      "category": "malformed",
+      "state": "rejected",
+      "reason": "The file does not contain a valid PDF",
+      "elapsedMs": 131
+    },
+    {
+      "name": "JPEG receipt with missing date",
+      "filename": "receipt-image.jpg",
+      "sha256": "5a52032dd5e89d804e6fa4d7434c13a835ccffb29c850963c3a489e43a7abcf5",
+      "category": "scan",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 1414,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "mismatches": [],
+      "rawValues": {
+        "merchant": "Cedar Bakery",
+        "date": null,
+        "currency": "EUR",
+        "total": "18.60"
+      },
+      "normalizedValues": {
+        "merchant": "Cedar Bakery",
+        "date": null,
+        "currency": "EUR",
+        "total": 18.6
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "Merchant: Cedar Bakery",
+            "source": "model-visual"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "Currency: EUR",
+            "source": "model-visual"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "Total: 18.60",
+            "source": "model-visual"
+          }
+        ]
+      },
+      "issues": [
+        {
+          "field": "date",
+          "code": "required",
+          "message": "Date is required."
+        },
+        {
+          "field": "_source",
+          "code": "visual_evidence",
+          "message": "AI-read source quotes are not independently verified against native text. Check the original image before approval."
+        }
+      ],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 559,
+        "cachedInputTokens": 0,
+        "outputTokens": 117,
+        "reasoningTokens": 29,
+        "totalTokens": 676,
+        "responseId": "resp_0381b41ab4bbe0c1016a9e6bece66c87d290aa064ebb7873ab",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00094575
+    },
+    {
+      "name": "Image-only PDF with missing date",
+      "filename": "receipt-image-only.pdf",
+      "sha256": "94fa11e4ef296adbb56f5c78395a1a1e0626e7669c09d988e714422b56189279",
+      "category": "scan",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 3780,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "mismatches": [],
+      "rawValues": {
+        "merchant": "Cedar Bakery",
+        "date": null,
+        "currency": "EUR",
+        "total": "18.60"
+      },
+      "normalizedValues": {
+        "merchant": "Cedar Bakery",
+        "date": null,
+        "currency": "EUR",
+        "total": 18.6
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "Merchant: Cedar Bakery",
+            "source": "model-visual"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "Currency: EUR",
+            "source": "model-visual"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "Total: 18.60",
+            "source": "model-visual"
+          }
+        ]
+      },
+      "issues": [
+        {
+          "field": "date",
+          "code": "required",
+          "message": "Date is required."
+        },
+        {
+          "field": "_source",
+          "code": "visual_evidence",
+          "message": "AI-read source quotes are not independently verified against native text. Check the original image before approval."
+        }
+      ],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 1145,
+        "cachedInputTokens": 0,
+        "outputTokens": 106,
+        "reasoningTokens": 18,
+        "totalTokens": 1251,
+        "responseId": "resp_08f10e6a1d843b73016a9e6bef225c87d2a66156a7e3def990",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00133575
+    },
+    {
+      "name": "Document instruction injection remains source data",
+      "filename": "receipt-untrusted.txt",
+      "sha256": "15a41683672a135f0c0ee9cd79eb53ef1781bb9495ee9885becdc28439e2aa22",
+      "category": "untrusted-document",
+      "state": "needs_review",
+      "pages": 1,
+      "elapsedMs": 1776,
+      "fieldsCorrect": 4,
+      "fieldsExpected": 4,
+      "mismatches": [],
+      "rawValues": {
+        "merchant": "Willow Cafe",
+        "date": "01/09/2026",
+        "currency": "EUR",
+        "total": "12.50"
+      },
+      "normalizedValues": {
+        "merchant": "Willow Cafe",
+        "date": "2026-09-01",
+        "currency": "EUR",
+        "total": 12.5
+      },
+      "evidence": {
+        "merchant": [
+          {
+            "page": 1,
+            "text": "Merchant: Willow Cafe",
+            "source": "matched-text"
+          }
+        ],
+        "date": [
+          {
+            "page": 1,
+            "text": "Date: 01/09/2026",
+            "source": "matched-text"
+          }
+        ],
+        "currency": [
+          {
+            "page": 1,
+            "text": "Currency: EUR",
+            "source": "matched-text"
+          }
+        ],
+        "total": [
+          {
+            "page": 1,
+            "text": "Total: 12.50",
+            "source": "matched-text"
+          }
+        ]
+      },
+      "issues": [],
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v1",
+      "tokenUsage": {
+        "inputTokens": 507,
+        "cachedInputTokens": 0,
+        "outputTokens": 124,
+        "reasoningTokens": 11,
+        "totalTokens": 631,
+        "responseId": "resp_0c747706fd6c9624016a9e6bf21bc487d2a3cd620e69a151d0",
+        "pricingBasis": "OpenAI standard USD token rates, 2026-09-07",
+        "estimatedCost": true
+      },
+      "costUsd": 0.00093825
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+- link "Skip to content":
+  - /url: "#main"
+- option "Northstar Studio QA" [selected]
+- option "+ New workspace"
+- banner:
+  - button "Open navigation":
+  - generic: Workspace
+  - generic: /
+  - generic: Documents
+  - button "Processing notifications, 5 unread":
+    - generic: "5"
+  - generic: A
+- main:
+  - link "Documents":
+    - /url: /app/parsers/93b86395-d048-46a9-9f0a-bdf1cf85b610
+    - generic: Documents
+  - generic: receipt-scan.png
+  - button "Reprocess"
+  - combobox "Extraction run":
+    - option "Run 1 · Approved" [selected]
+  - button "Export"
+  - heading "Document review" [level=1]
+  - link "AI receipt QA":
+    - /url: /app/parsers/93b86395-d048-46a9-9f0a-bdf1cf85b610
+  - generic: · Schema v1
+  - generic: Exported
+  - tablist "Sections":
+    - tab "Fields"
+    - tab "Document" [selected]
+  - region "Original document":
+    - button "Previous page" [disabled]:
+    - generic: Page 1 of 1
+    - button "Next page" [disabled]:
+    - button "Zoom out":
+    - generic: 100%
+    - button "Zoom in":
+    - img "receipt-scan.png"
+    - button "Download original":
+      - text: Download original

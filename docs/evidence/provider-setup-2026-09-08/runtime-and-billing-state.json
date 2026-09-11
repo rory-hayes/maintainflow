@@ -1,0 +1,82 @@
+{
+  "recordedAt": "2026-09-08T20:33:02.205Z",
+  "workspaceId": "fdc65291-c949-44be-b511-6dba73b1e44b",
+  "plan": {
+    "id": "team",
+    "name": "Team (local mock)",
+    "maxBytes": 10485760,
+    "maxPages": 30,
+    "maxParsers": 50,
+    "mockStatus": "active",
+    "billingMode": "mock",
+    "monthlyPages": 5000,
+    "maxConcurrent": 4,
+    "mockChangedAt": "2026-09-08T20:30:24.309Z"
+  },
+  "events": [
+    {
+      "action": "billing.mock_plan_changed",
+      "metadata": {
+        "mode": "mock",
+        "plan": "standard",
+        "status": "active",
+        "previousPlan": null
+      },
+      "created_at": "2026-09-08T20:30:05.108Z"
+    },
+    {
+      "action": "billing.mock_plan_changed",
+      "metadata": {
+        "mode": "mock",
+        "plan": "team",
+        "status": "active",
+        "previousPlan": "standard"
+      },
+      "created_at": "2026-09-08T20:30:11.075Z"
+    },
+    {
+      "action": "billing.mock_canceled",
+      "metadata": {
+        "mode": "mock",
+        "plan": "explore",
+        "status": "canceled",
+        "previousPlan": "team"
+      },
+      "created_at": "2026-09-08T20:30:18.783Z"
+    },
+    {
+      "action": "billing.mock_plan_changed",
+      "metadata": {
+        "mode": "mock",
+        "plan": "team",
+        "status": "active",
+        "previousPlan": "explore"
+      },
+      "created_at": "2026-09-08T20:30:24.306Z"
+    }
+  ],
+  "documents": 8,
+  "stripeCounts": {
+    "subscriptions": 0,
+    "checkouts": 0
+  },
+  "health": {
+    "web": 200,
+    "api": 200,
+    "presets": 200
+  },
+  "providerSettings": {
+    "mockBilling": true,
+    "resendMode": "managed",
+    "resendEnabled": false,
+    "resendApiKeyConfigured": false,
+    "googleOAuthConfigured": false,
+    "openAIConfigured": true
+  },
+  "incorrectProbe": {
+    "path": "/api/public/presets",
+    "status": 404,
+    "note": "Diagnostic used a nonexistent path; actual registered presets endpoint is /api/presets."
+  },
+  "healthCheckedAt": "2026-09-08T20:33:22.739Z"
+}

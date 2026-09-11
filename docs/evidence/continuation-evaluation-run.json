@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx scripts/evaluate.ts",
+  "startedAt": "2026-09-06T22:05:23.461654+00:00",
+  "finishedAt": "2026-09-06T22:05:27.177771+00:00",
+  "exitCode": 0,
+  "output": "docs/evidence/continuation-evaluation-results.txt"
+}

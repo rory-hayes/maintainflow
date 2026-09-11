@@ -1,0 +1,19 @@
+(node:63191) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ invitation acceptance records its actual actor, destination and role once without invitation secrets (214.401875ms)
+✔ role changes record previous and resulting roles while denied, missing and unchanged requests create no event (55.140375ms)
+✔ member removal commits its audit with membership, key and session revocation and retains target identity after user deletion (62.551208ms)
+✔ revoking a pending invitation is scoped and recorded once; deleting accepted history does not claim membership revocation (11.174125ms)
+{"level":50,"time":1788802186108,"pid":63191,"hostname":"Rorys-MacBook-Pro.local","reqId":"req-20","errorName":"error","route":"/api/workspace/invitations/accept","msg":"Request failed"}
+{"level":50,"time":1788802186109,"pid":63191,"hostname":"Rorys-MacBook-Pro.local","reqId":"req-21","errorName":"error","route":"/api/workspace/members/:id","msg":"Request failed"}
+{"level":50,"time":1788802186110,"pid":63191,"hostname":"Rorys-MacBook-Pro.local","reqId":"req-22","errorName":"error","route":"/api/workspace/members/:id","msg":"Request failed"}
+{"level":50,"time":1788802186116,"pid":63191,"hostname":"Rorys-MacBook-Pro.local","reqId":"req-25","errorName":"error","route":"/api/workspace/invitations/:id","msg":"Request failed"}
+✔ an audit insert failure rolls back invitation consumption, role changes, removal side effects and revocation (116.726167ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1651.67875

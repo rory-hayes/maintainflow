@@ -1,0 +1,7 @@
+{
+  "command": "npm run build",
+  "startedAt": "2026-09-07T09:09:44.686219+00:00",
+  "finishedAt": "2026-09-07T09:09:46.410534+00:00",
+  "exitCode": 0,
+  "output": "docs/evidence/review-provenance-build-results.txt"
+}

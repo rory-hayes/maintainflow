@@ -1,0 +1,7 @@
+{
+  "command": "node --import tsx scripts/evaluate.ts",
+  "startedAt": "2026-09-06T22:43:33.224013+00:00",
+  "finishedAt": "2026-09-06T22:43:36.754770+00:00",
+  "exitCode": 0,
+  "output": "docs/evidence/lifecycle-evaluation-results.txt"
+}

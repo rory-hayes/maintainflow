@@ -1,0 +1,50 @@
+{
+  "fixtureOnly": true,
+  "eventFile": "document-approved.json",
+  "recipes": [
+    {
+      "platform": "Zapier",
+      "trigger": "Webhooks by Zapier / Catch Raw Hook",
+      "verification": "Verify unchanged raw body and headers before downstream actions, or use an owned verification relay.",
+      "mappings": [
+        {"field": "Approval ID", "sourcePath": "id", "expected": "0b1456d2-5aa6-45e7-a574-7796e2b995c5"},
+        {"field": "Invoice number", "sourcePath": "values.invoice_number", "expected": "000127"},
+        {"field": "Supplier", "sourcePath": "values.supplier", "expected": "Cedar Office Studio"},
+        {"field": "Amount", "sourcePath": "values.total", "expected": 61.5}
+      ]
+    },
+    {
+      "platform": "Make",
+      "trigger": "Webhooks / Custom webhook",
+      "verification": "Enable JSON pass-through and request headers; verify before parsing/mapping or use an owned verification relay.",
+      "mappings": [
+        {"field": "Approval ID", "sourcePath": "id", "expected": "0b1456d2-5aa6-45e7-a574-7796e2b995c5"},
+        {"field": "Invoice", "sourcePath": "values.invoice_number", "expected": "000127"},
+        {"field": "Currency", "sourcePath": "values.currency", "expected": "EUR"},
+        {"field": "First line description", "sourcePath": "values.line_items.0.description", "expected": "Recycled paper"}
+      ]
+    },
+    {
+      "platform": "n8n",
+      "trigger": "Webhook / POST / Raw Body",
+      "verification": "Verify raw bytes and headers with an allowed server-side crypto facility or an owned relay; parse only after verification.",
+      "mappings": [
+        {"field": "Approval ID", "sourcePath": "id", "expressionAfterParsing": "{{ $json.event.id }}", "expected": "0b1456d2-5aa6-45e7-a574-7796e2b995c5"},
+        {"field": "Invoice", "sourcePath": "values.invoice_number", "expressionAfterParsing": "{{ $json.event.values.invoice_number }}", "expected": "000127"},
+        {"field": "Total", "sourcePath": "values.total", "expressionAfterParsing": "{{ $json.event.values.total }}", "expected": 61.5},
+        {"field": "Revision", "sourcePath": "revision", "expressionAfterParsing": "{{ $json.event.revision }}", "expected": 1}
+      ]
+    },
+    {
+      "platform": "Power Automate",
+      "trigger": "When an HTTP request is received / called by a verified Entra-authenticated relay",
+      "verification": "Folio HMAC verification happens in the owned relay; relay supplies the OAuth token required by the flow.",
+      "mappings": [
+        {"field": "Approval ID", "sourcePath": "id", "expression": "triggerBody()?['id']", "expected": "0b1456d2-5aa6-45e7-a574-7796e2b995c5"},
+        {"field": "Invoice", "sourcePath": "values.invoice_number", "expression": "triggerBody()?['values']?['invoice_number']", "expected": "000127"},
+        {"field": "Total", "sourcePath": "values.total", "expression": "triggerBody()?['values']?['total']", "expected": 61.5},
+        {"field": "Parser", "sourcePath": "document.parserId", "expression": "triggerBody()?['document']?['parserId']", "expected": "6b931781-3a29-4687-87d7-63811583b2e9"}
+      ]
+    }
+  ]
+}

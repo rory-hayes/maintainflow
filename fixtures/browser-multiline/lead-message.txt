@@ -1,0 +1,7 @@
+SYNTHETIC MULTILINE LEAD FIXTURE
+Name: Morgan Vale
+Email: morgan@example.test
+Message: Please process our weekly enquiries.
+Keep the original reference numbers.
+Send a summary after review.
+Company: Willow Research

@@ -1,0 +1,61 @@
+{
+  "checkedAt": "2026-09-11T08:02:15.919106+00:00",
+  "repository": "https://github.com/rory-hayes/maintainflow.git",
+  "productionBranch": "main",
+  "beforeRevision": "2ad3baf4aa27a3ac3d3c6a07c80b23b55e706147",
+  "backupBranch": "backup/pre-folio-2026-09-11",
+  "backupRevision": "2ad3baf4aa27a3ac3d3c6a07c80b23b55e706147",
+  "backupPublished": true,
+  "remoteMainUnchanged": true,
+  "sourceCheckout": "/Users/rory/Documents/Ideation/parseur",
+  "replacementCheckout": "/Users/rory/Documents/Ideation/maintainflow-folio-release",
+  "replacementCheckoutClean": true,
+  "replacementCopied": false,
+  "productionPushPerformed": false,
+  "hosting": {
+    "provider": "Vercel",
+    "projectName": "maintainflow",
+    "projectId": "prj_9995IQ0H1GERFJseqQ9bqnOI7b02",
+    "teamId": "team_0TBtz8vO6Cqygx11eRM5tg9D",
+    "domain": "https://maintainflow.io",
+    "currentPublicHealthService": "maintaincode-ads",
+    "currentPublicHealthRevision": "2ad3baf4aa27a3ac3d3c6a07c80b23b55e706147"
+  },
+  "verification": {
+    "remoteRefs": "git ls-remote --heads origin main backup/pre-folio-2026-09-11",
+    "publicHealth": "GET https://maintainflow.io/api/health",
+    "hostingProjectIdentity": "Existing release checkout .vercel/project.json; deployment dashboard must still be refreshed before changing settings"
+  },
+  "databaseChanged": false,
+  "sourceInventorySnapshot": {
+    "candidateFilesBeforeReceipt": 487,
+    "candidateBytesBeforeReceipt": 25223412,
+    "docsFiles": 294,
+    "docsBytes": 22062713,
+    "secretPatternMatches": 0,
+    "matchesToLocalPrivateSecretValues": 0,
+    "sensitivePathsIncluded": 0,
+    "symlinks": 0,
+    "filesOver5MiB": 0,
+    "inventoryMayChangeDuringParallelImplementation": true
+  },
+  "copyExclusions": [
+    ".git/",
+    ".local/",
+    "node_modules/",
+    "dist/",
+    ".env",
+    ".env.* except .env.example",
+    ".vercel/",
+    "coverage/",
+    "test-results/",
+    "*.log",
+    ".DS_Store"
+  ],
+  "notes": [
+    "Remote rollback ref was created before replacement. Ordinary history-preserving replacement commit remains pending.",
+    "Original dirty Maintain Flow and maintaincode-ads checkouts were not changed.",
+    "Do not run unmodified Folio public-schema migrations or broad grants against the existing production database.",
+    "A clean source scan is bounded evidence, not a guarantee that no sensitive material exists. Rerun immediately before staging."
+  ]
+}

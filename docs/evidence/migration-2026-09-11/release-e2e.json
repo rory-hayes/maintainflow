@@ -1,0 +1,531 @@
+{
+  "runId": "be4b43e5-fdfa-42e0-8aaa-609a96127198",
+  "startedAt": "2026-09-11T08:11:46.846Z",
+  "status": "passed",
+  "scope": "local HTTP through separately running API and durable worker",
+  "apiOrigin": "http://127.0.0.1:4318",
+  "webOrigin": "http://127.0.0.1:5178",
+  "billingMode": "local mock",
+  "synthetic": true,
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200,
+      "elapsedMs": 25
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 201,
+      "elapsedMs": 58
+    },
+    {
+      "method": "POST",
+      "path": "/api/parsers",
+      "status": 201,
+      "elapsedMs": 25
+    },
+    {
+      "method": "POST",
+      "path": "/api/parsers/ff043ff1-6951-4b23-b42a-63a666293618/documents",
+      "status": 202,
+      "elapsedMs": 1345
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/8fff91ab-72e0-48f3-8e2d-d74cceb56a3e",
+      "status": 200,
+      "elapsedMs": 6
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/8fff91ab-72e0-48f3-8e2d-d74cceb56a3e",
+      "status": 200,
+      "elapsedMs": 6
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/8fff91ab-72e0-48f3-8e2d-d74cceb56a3e",
+      "status": 200,
+      "elapsedMs": 7
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/8fff91ab-72e0-48f3-8e2d-d74cceb56a3e/original",
+      "status": 200,
+      "elapsedMs": 5
+    },
+    {
+      "method": "POST",
+      "path": "/api/parsers/ff043ff1-6951-4b23-b42a-63a666293618/documents",
+      "status": 202,
+      "elapsedMs": 1254
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/usage",
+      "status": 200,
+      "elapsedMs": 6
+    },
+    {
+      "method": "POST",
+      "path": "/api/runs/45716a6e-3e90-4fa7-ad41-f844c4b85881/corrections",
+      "status": 200,
+      "elapsedMs": 10
+    },
+    {
+      "method": "POST",
+      "path": "/api/runs/45716a6e-3e90-4fa7-ad41-f844c4b85881/approve",
+      "status": 200,
+      "elapsedMs": 10
+    },
+    {
+      "method": "POST",
+      "path": "/api/exports",
+      "status": 200,
+      "elapsedMs": 9
+    },
+    {
+      "method": "GET",
+      "path": "/api/exports/750985cb-dd72-484b-9567-c2fc1cc33187/download",
+      "status": 200,
+      "elapsedMs": 5
+    },
+    {
+      "method": "POST",
+      "path": "/api/exports",
+      "status": 200,
+      "elapsedMs": 40
+    },
+    {
+      "method": "GET",
+      "path": "/api/exports/dcb21028-ff11-490a-a07a-d57ccc98401a/download",
+      "status": 200,
+      "elapsedMs": 12
+    },
+    {
+      "method": "POST",
+      "path": "/api/exports",
+      "status": 200,
+      "elapsedMs": 8
+    },
+    {
+      "method": "GET",
+      "path": "/api/exports/e06c47c7-7bb6-4685-8d75-ed67086a16ff/download",
+      "status": 200,
+      "elapsedMs": 4
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "status": 200,
+      "elapsedMs": 4
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401,
+      "elapsedMs": 3
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200,
+      "elapsedMs": 65
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/8fff91ab-72e0-48f3-8e2d-d74cceb56a3e",
+      "status": 200,
+      "elapsedMs": 5
+    },
+    {
+      "method": "GET",
+      "path": "/api/exports",
+      "status": 200,
+      "elapsedMs": 4
+    },
+    {
+      "method": "GET",
+      "path": "/api/exports/750985cb-dd72-484b-9567-c2fc1cc33187/download",
+      "status": 200,
+      "elapsedMs": 3
+    },
+    {
+      "method": "GET",
+      "path": "/api/exports/dcb21028-ff11-490a-a07a-d57ccc98401a/download",
+      "status": 200,
+      "elapsedMs": 2
+    },
+    {
+      "method": "GET",
+      "path": "/api/exports/e06c47c7-7bb6-4685-8d75-ed67086a16ff/download",
+      "status": 200,
+      "elapsedMs": 4
+    },
+    {
+      "method": "POST",
+      "path": "/api/billing/mock/plan",
+      "status": 200,
+      "elapsedMs": 7
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200,
+      "elapsedMs": 3
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/usage",
+      "status": 200,
+      "elapsedMs": 6
+    },
+    {
+      "method": "POST",
+      "path": "/api/billing/mock/cancel",
+      "status": 200,
+      "elapsedMs": 5
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/usage",
+      "status": 200,
+      "elapsedMs": 4
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/8fff91ab-72e0-48f3-8e2d-d74cceb56a3e",
+      "status": 200,
+      "elapsedMs": 5
+    },
+    {
+      "method": "GET",
+      "path": "/api/parsers",
+      "status": 200,
+      "elapsedMs": 3
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 201,
+      "elapsedMs": 52
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/8fff91ab-72e0-48f3-8e2d-d74cceb56a3e",
+      "status": 404,
+      "elapsedMs": 4
+    },
+    {
+      "method": "GET",
+      "path": "/api/exports/750985cb-dd72-484b-9567-c2fc1cc33187/download",
+      "status": 404,
+      "elapsedMs": 3
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/8fff91ab-72e0-48f3-8e2d-d74cceb56a3e",
+      "status": 403,
+      "elapsedMs": 2
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents",
+      "status": 403,
+      "elapsedMs": 2
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents",
+      "status": 200,
+      "elapsedMs": 4
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401,
+      "elapsedMs": 2
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200,
+      "elapsedMs": 3
+    }
+  ],
+  "checks": [
+    {
+      "name": "local-service-preflight",
+      "status": "passed",
+      "at": "2026-09-11T08:11:46.883Z",
+      "apiStatus": "ok",
+      "environment": "local",
+      "webStatus": 200
+    },
+    {
+      "name": "fresh-registration-and-explore",
+      "status": "passed",
+      "at": "2026-09-11T08:11:46.943Z",
+      "userId": "8e3896e9-5af1-48de-a177-d035e9f1626c",
+      "workspaceId": "0fb37e13-5665-4975-a708-e16785a461ba",
+      "plan": {
+        "id": "explore",
+        "name": "Explore",
+        "maxBytes": 10485760,
+        "maxPages": 30,
+        "maxParsers": 1,
+        "monthlyPages": 50,
+        "maxConcurrent": 1
+      }
+    },
+    {
+      "name": "parser-upload-and-durable-worker",
+      "status": "passed",
+      "at": "2026-09-11T08:11:51.103Z",
+      "parserId": "ff043ff1-6951-4b23-b42a-63a666293618",
+      "documentId": "8fff91ab-72e0-48f3-8e2d-d74cceb56a3e",
+      "jobId": "cf61baab-f0df-45b2-9d62-74a97396281a",
+      "runId": "45716a6e-3e90-4fa7-ad41-f844c4b85881",
+      "engine": "text-anchors",
+      "model": "deterministic-v2",
+      "normalizedValues": {
+        "tax": 179.4,
+        "total": 959.4,
+        "currency": "EUR",
+        "subtotal": 780,
+        "supplier": "Fern Office Supplies",
+        "line_items": [
+          {
+            "amount": 180,
+            "quantity": 20,
+            "unit_price": 9,
+            "description": "Folders"
+          },
+          {
+            "amount": 300,
+            "quantity": 30,
+            "unit_price": 10,
+            "description": "Notebooks"
+          },
+          {
+            "amount": 150,
+            "quantity": 10,
+            "unit_price": 15,
+            "description": "Desk pads"
+          },
+          {
+            "amount": 150,
+            "quantity": 50,
+            "unit_price": 3,
+            "description": "Pens"
+          }
+        ],
+        "invoice_date": "2026-07-15",
+        "invoice_number": "INV-00601"
+      },
+      "elapsedMs": 2789,
+      "originalSha256": "26c9aaf4f4594abeedab34eceb3ce5baeb2a46b0308b6a6ce13d21f28bdd868e",
+      "duplicatePrevented": true,
+      "usagePages": 2
+    },
+    {
+      "name": "correction-approval-and-downloads",
+      "status": "passed",
+      "at": "2026-09-11T08:11:51.241Z",
+      "correctionId": "46f677f9-c118-466e-b938-f3d5e52c983c",
+      "approvalId": "e69eb3eb-b12a-4951-a7bf-a695e9b0d5d0",
+      "immutableNormalizedValues": true,
+      "correctedValues": {
+        "invoice_number": "INV-00601",
+        "supplier": "Fern Office Supplies — reviewed QA",
+        "invoice_date": "2026-07-15",
+        "currency": "EUR",
+        "subtotal": 780,
+        "tax": 179.4,
+        "total": 959.4,
+        "line_items": [
+          {
+            "description": "Folders",
+            "quantity": 20,
+            "unit_price": 9,
+            "amount": 180
+          },
+          {
+            "description": "Notebooks",
+            "quantity": 30,
+            "unit_price": 10,
+            "amount": 300
+          },
+          {
+            "description": "Desk pads",
+            "quantity": 10,
+            "unit_price": 15,
+            "amount": 150
+          },
+          {
+            "description": "Pens",
+            "quantity": 50,
+            "unit_price": 3,
+            "amount": 150
+          }
+        ]
+      },
+      "exports": [
+        {
+          "id": "750985cb-dd72-484b-9567-c2fc1cc33187",
+          "format": "csv",
+          "bytes": 543,
+          "sha256": "da1700dd10a0bbdd0ac4788678850302c4a6b063bc18035c8a247454d5a55734",
+          "approvalId": "e69eb3eb-b12a-4951-a7bf-a695e9b0d5d0",
+          "downloadUrl": "/api/exports/750985cb-dd72-484b-9567-c2fc1cc33187/download"
+        },
+        {
+          "id": "dcb21028-ff11-490a-a07a-d57ccc98401a",
+          "format": "xlsx",
+          "bytes": 6898,
+          "sha256": "63cbbea7e77f9a8c3e4b309743ebb2e29597a9348538f7def202efa20c9409bc",
+          "approvalId": "e69eb3eb-b12a-4951-a7bf-a695e9b0d5d0",
+          "downloadUrl": "/api/exports/dcb21028-ff11-490a-a07a-d57ccc98401a/download"
+        },
+        {
+          "id": "e06c47c7-7bb6-4685-8d75-ed67086a16ff",
+          "format": "json",
+          "bytes": 1242,
+          "sha256": "b7930681a56177868dbc650a75d67a7b49ada8357fddf4cd0b8ddf0d439c2b07",
+          "approvalId": "e69eb3eb-b12a-4951-a7bf-a695e9b0d5d0",
+          "downloadUrl": "/api/exports/e06c47c7-7bb6-4685-8d75-ed67086a16ff/download"
+        }
+      ]
+    },
+    {
+      "name": "signout-login-and-persisted-approval",
+      "status": "passed",
+      "at": "2026-09-11T08:11:51.335Z",
+      "sameUserAndWorkspace": true,
+      "revokedSessionRejected": true,
+      "documentId": "8fff91ab-72e0-48f3-8e2d-d74cceb56a3e",
+      "approvalId": "e69eb3eb-b12a-4951-a7bf-a695e9b0d5d0",
+      "exportSnapshotsUnchanged": true
+    },
+    {
+      "name": "mock-team-upgrade-and-explore-cancellation",
+      "status": "passed",
+      "at": "2026-09-11T08:11:51.369Z",
+      "upgradedPlan": {
+        "id": "team",
+        "name": "Team (local mock)",
+        "monthlyPages": 5000,
+        "maxParsers": 50,
+        "maxConcurrent": 4,
+        "maxBytes": 10485760,
+        "maxPages": 30,
+        "billingMode": "mock",
+        "mockStatus": "active",
+        "mockChangedAt": "2026-09-11T08:11:51.341Z"
+      },
+      "finalPlan": {
+        "id": "explore",
+        "name": "Explore (local mock)",
+        "maxBytes": 10485760,
+        "maxPages": 30,
+        "maxParsers": 1,
+        "mockStatus": "canceled",
+        "billingMode": "mock",
+        "monthlyPages": 50,
+        "maxConcurrent": 1,
+        "mockChangedAt": "2026-09-11T08:11:51.356Z"
+      },
+      "usagePages": 2,
+      "documentsPreserved": 1,
+      "parsersPreserved": 1,
+      "approvalId": "e69eb3eb-b12a-4951-a7bf-a695e9b0d5d0",
+      "realPaymentVerification": false
+    },
+    {
+      "name": "independent-account-isolation",
+      "status": "passed",
+      "at": "2026-09-11T08:11:51.441Z",
+      "outsiderUserId": "811e1656-e66f-4d62-8114-d851ef5dc2d1",
+      "outsiderWorkspaceId": "472c68d9-4dae-44fa-b0ca-0492ee84475a",
+      "ownerDocumentDenied": true,
+      "exportDenied": true,
+      "forgedWorkspaceHeaderDenied": true,
+      "unauthenticatedDenied": true
+    }
+  ],
+  "boundaries": {
+    "productionDeployment": "not tested",
+    "realStripe": "not tested",
+    "outboundEmail": "not attempted",
+    "resendReceiving": "not tested",
+    "googleSheets": "not tested",
+    "aiProvider": "not tested; parser uses text-anchor rules"
+  },
+  "fixture": {
+    "path": "fixtures/generated/invoice-multipage.pdf",
+    "bytes": 1698,
+    "sha256": "26c9aaf4f4594abeedab34eceb3ce5baeb2a46b0308b6a6ce13d21f28bdd868e",
+    "expected": {
+      "invoice_number": "INV-00601",
+      "supplier": "Fern Office Supplies",
+      "invoice_date": "2026-07-15",
+      "currency": "EUR",
+      "subtotal": 780,
+      "tax": 179.4,
+      "total": 959.4,
+      "line_items": [
+        {
+          "description": "Folders",
+          "quantity": 20,
+          "unit_price": 9,
+          "amount": 180
+        },
+        {
+          "description": "Notebooks",
+          "quantity": 30,
+          "unit_price": 10,
+          "amount": 300
+        },
+        {
+          "description": "Desk pads",
+          "quantity": 10,
+          "unit_price": 15,
+          "amount": 150
+        },
+        {
+          "description": "Pens",
+          "quantity": 50,
+          "unit_price": 3,
+          "amount": 150
+        }
+      ]
+    },
+    "pageCount": 2,
+    "reusedRegressionFixture": true
+  },
+  "runnerSha256": "4df7519a41491687cf56f2c6d5440644abbff7ff7c8bf6ffbeacc24677bb45c7",
+  "browserHandoff": {
+    "ownerUserId": "8e3896e9-5af1-48de-a177-d035e9f1626c",
+    "workspaceId": "0fb37e13-5665-4975-a708-e16785a461ba",
+    "parserId": "ff043ff1-6951-4b23-b42a-63a666293618",
+    "documentId": "8fff91ab-72e0-48f3-8e2d-d74cceb56a3e",
+    "documentUrl": "http://127.0.0.1:5178/app/documents/8fff91ab-72e0-48f3-8e2d-d74cceb56a3e",
+    "credentialsPath": ".local/release-e2e-account.json",
+    "credentialMode": "0600",
+    "finalPlan": {
+      "id": "explore",
+      "name": "Explore (local mock)",
+      "maxBytes": 10485760,
+      "maxPages": 30,
+      "maxParsers": 1,
+      "mockStatus": "canceled",
+      "billingMode": "mock",
+      "monthlyPages": 50,
+      "maxConcurrent": 1,
+      "mockChangedAt": "2026-09-11T08:11:51.356Z"
+    }
+  },
+  "completedAt": "2026-09-11T08:11:51.446Z"
+}

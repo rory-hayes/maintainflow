@@ -1,0 +1,20 @@
+{
+  "capturedAt": "2026-09-06T22:56:13.682Z",
+  "bodyWidth": 390,
+  "documentHeight": 1404,
+  "documentWidth": 390,
+  "events": [
+    "Export completed6 Sept 2026, 23:47Export of an approved revision · JSON",
+    "Export started6 Sept 2026, 23:47Export of an approved revision · JSON",
+    "Approved6 Sept 2026, 23:47",
+    "Ready for review6 Sept 2026, 23:46",
+    "Processing6 Sept 2026, 23:46",
+    "Queued6 Sept 2026, 23:46",
+    "Received6 Sept 2026, 23:46"
+  ],
+  "text": "Documents\nreceipt-de.txt\nReprocess\nRun 1 · Approved\nExport\nDocument review\nPagination QA\n· Schema v1\nExported\nFields\nDocument\nFields\nLine items\nHistory\nRecent document activity\n\nAcross all extraction runs. Export events refer to the approved revision used for that export.\n\nExport completed\n\n6 Sept 2026, 23:47\n\nExport of an approved revision · JSON\n\nExport started\n\n6 Sept 2026, 23:47\n\nExport of an approved revision · JSON\n\nApproved\n\n6 Sept 2026, 23:47\n\nReady for review\n\n6 Sept 2026, 23:46\n\nProcessing\n\n6 Sept 2026, 23:46\n\nQueued\n\n6 Sept 2026, 23:46\n\nReceived\n\n6 Sept 2026, 23:46\n\nSelected run details\nExtraction run\n\n6 Sept 2026, 23:46 · text-anchors\n\nModel: deterministic-v2 · Prompt: folio-extraction-v1\n\nDocument digest: aafd5d38335d74b95e74…\n\nRevision approved\n\n6 Sept 2026, 23:47\n\nView approved values\nExtracted values · Review before export\nSave correction\nApprove & export",
+  "viewport": {
+    "height": 844,
+    "width": 390
+  }
+}
