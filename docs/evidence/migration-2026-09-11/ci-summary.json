@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-09-11T08:36:24.551227+00:00",
+  "applicationCommit": "6b531d8ca3e085afc61feae5091af24671444b9b",
+  "runs": [
+    {
+      "id": 34579594523,
+      "name": "CI",
+      "conclusion": "success",
+      "url": "https://github.com/rory-hayes/maintainflow/actions/runs/34579594523"
+    },
+    {
+      "id": 34579594145,
+      "name": "CodeQL",
+      "conclusion": "success",
+      "url": "https://github.com/rory-hayes/maintainflow/actions/runs/34579594145"
+    }
+  ],
+  "scope": "GitHub Ubuntu test/build with isolated PostgreSQL and CodeQL actions/javascript-typescript",
+  "annotation": "Pinned checkout/setup-node v4 actions emitted a Node20 deprecation notice; GitHub executed them on Node24 successfully."
+}
