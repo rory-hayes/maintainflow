@@ -65,7 +65,8 @@ export async function enqueueApprovals() {
     ON CONFLICT(integration_id,event_key) DO NOTHING`);
 }
 
-export async function processOneDelivery(options: {transport?: typeof publicRequest; workspaceId?: string} = {}) {
+export async function processOneDelivery(options: {transport?: typeof publicRequest; workspaceId?: string;signal?:AbortSignal} = {}) {
+  if(options.signal?.aborted)return false;
   await adminPool.query("UPDATE webhook_deliveries SET status='failed',error='The final delivery attempt expired before completion.',lease_until=null,lease_token=null WHERE status='delivering' AND lease_until<now() AND attempts>=5 AND ($1::uuid IS NULL OR workspace_id=$1)",[options.workspaceId||null]);
   const token=randomUUID();
   const found=await adminPool.query(`UPDATE webhook_deliveries SET status='delivering',attempts=attempts+1,lease_token=$1,lease_until=now()+interval '90 seconds'
@@ -75,15 +76,16 @@ export async function processOneDelivery(options: {transport?: typeof publicRequ
   const delivery=found.rows[0];
   if(!delivery)return false;
   try {
+    options.signal?.throwIfAborted();
     const integration=(await adminPool.query('SELECT * FROM integrations WHERE id=$1',[delivery.integration_id])).rows[0];
     if(!integration?.enabled)throw new Error('Integration is disabled.');
     let status:number;
     if(integration.kind==='google_sheets') {
       const {sendGoogleSheets}=await import('./providers.js');
-      status=(await sendGoogleSheets(integration,delivery)).status;
+      status=(await sendGoogleSheets(integration,delivery,{signal:options.signal})).status;
     } else {
       const body=JSON.stringify(delivery.payload), timestamp=String(Math.floor(Date.now()/1000));
-      const response=await (options.transport||publicRequest)(integration.config.url,{body,headers:{'Content-Type':'application/json','User-Agent':'Folio-Webhooks/1.0','X-Folio-Delivery':delivery.id,'X-Folio-Timestamp':timestamp,'X-Folio-Signature':`v1=${signDelivery(decryptSecret(integration.secret_ciphertext),timestamp,body)}`,'Idempotency-Key':delivery.id}});
+      const response=await (options.transport||publicRequest)(integration.config.url,{body,signal:options.signal,headers:{'Content-Type':'application/json','User-Agent':'Folio-Webhooks/1.0','X-Folio-Delivery':delivery.id,'X-Folio-Timestamp':timestamp,'X-Folio-Signature':`v1=${signDelivery(decryptSecret(integration.secret_ciphertext),timestamp,body)}`,'Idempotency-Key':delivery.id}});
       status=response.status;
     }
     if(status<200||status>=300)throw Object.assign(new Error(`Destination returned HTTP ${status}.`),{status});

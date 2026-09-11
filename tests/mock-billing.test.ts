@@ -44,6 +44,8 @@ test('mock billing requires exact explicit opt-in and is unavailable in producti
   assert.equal(mockBillingEnabled({ FOLIO_BILLING_MOCK: '1' }), false);
   assert.equal(mockBillingEnabled({ FOLIO_BILLING_MOCK: 'true', NODE_ENV: 'development' }), true);
   assert.equal(mockBillingEnabled({ FOLIO_BILLING_MOCK: 'true', NODE_ENV: 'production' }), false);
+  assert.equal(mockBillingEnabled({ FOLIO_BILLING_MOCK: 'true', NODE_ENV: 'production', FOLIO_PREVIEW_MODE:'true' }), false);
+  assert.equal(mockBillingEnabled({ FOLIO_BILLING_MOCK: 'true', NODE_ENV: 'production', FOLIO_PREVIEW_MODE:'true', FOLIO_PREVIEW_INVITE_CODE:'owned-preview-fixture-'.repeat(3) }), true);
   const before = await stored();
   for (const mode of ['production', 'disabled']) {
     process.env.NODE_ENV = mode === 'production' ? 'production' : 'test';

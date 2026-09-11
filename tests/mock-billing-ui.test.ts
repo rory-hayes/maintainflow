@@ -23,9 +23,9 @@ function renderBilling(mode: 'mock' | 'test', role = 'owner', failed = false) {
   } finally { client.clear(); globalThis.fetch = fetch; if (storage) Object.defineProperty(globalThis, 'sessionStorage', storage); else Reflect.deleteProperty(globalThis, 'sessionStorage'); }
 }
 
-test('local billing shows mock pricing, current persisted plan and cancellation without suggesting Checkout success', () => {
+test('preview billing shows mock pricing, current persisted plan and cancellation without suggesting Checkout success', () => {
   const html = renderBilling('mock');
-  assert.match(html, /Local mock billing/); assert.match(html, /Mock mode · no payments/);
+  assert.match(html, /Mock billing/); assert.match(html, /Mock mode · no payments/);
   assert.match(html, /Current allowance: Team \(local mock\)/); assert.match(html, /illustrative/);
   assert.match(html, /Use Standard mock plan/); assert.match(html, /Current mock plan: Team/); assert.match(html, /Cancel mock subscription/);
   assert.match(html, /Stripe is not contacted/); assert.match(html, /No payment or real subscription is created/);

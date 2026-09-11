@@ -134,7 +134,7 @@ test('retrieved inbound body and attachments survive replay without duplicate do
  const dependencies={client,download:async()=>{downloads++;return {status:200,bytes:Buffer.from('Invoice number: 00127\nTotal: 55.30\nAttachment fixture')};},intake:addDocument};
  await processResendEvent(`resend:${messageId}`,pointer,dependencies);
  await processResendEvent(`resend:${messageId}`,pointer,dependencies);
- assert.equal(metadataCalls,2);assert.equal(downloads,2); // Content may be fetched again; intake commits once.
+ assert.equal(metadataCalls,1);assert.equal(downloads,1); // Durable intake receipts skip completed work on replay.
  assert.equal((await adminPool.query('select count(*)::int n from documents where parser_id=$1',[parser.id])).rows[0].n,2);
  assert.equal((await adminPool.query('select count(*)::int n from usage_ledger where workspace_id=$1',[account.workspace.id])).rows[0].n,2);
  await assert.rejects(processResendEvent(`resend:${messageId}`,{...pointer,recipients:['spoof@example.test']},dependencies),/envelopes/);
@@ -175,4 +175,24 @@ test('Google OAuth states are hashed, tied to the user, expiring, single-use, an
  assert.equal((await request('POST',`/api/google/${integrationId}/disconnect`,{})).statusCode,200);
  assert.equal((await adminPool.query('select * from oauth_states where integration_id=$1',[integrationId])).rowCount,0);
  assert.equal((await request('GET',`/api/google/callback?state=${encodeURIComponent(finalState)}&error=access_denied`)).statusCode,400);
+});
+
+test('bounded inbound continuation resumes after a committed body without decoding it twice',async()=>{
+ const {WorkBudgetExhausted}=await import('../server/core/work-budget.js');
+ const emailId=randomUUID(),attachmentId=randomUUID(),messageId=`msg_continuation_${suffix}`;
+ const pointer={emailId,recipients:[`continue-${suffix}@example.test`]};await event('resend',messageId,pointer);
+ await adminPool.query('insert into email_routes(workspace_id,parser_id,address,provider_domain_id,created_by,domain_verified_at) values($1,$2,$3,$4,$5,now())',[account.workspace.id,parser.id,pointer.recipients[0],'fixture-domain',account.user.id]);
+ const bytes=Buffer.from(`Invoice number: continuation attachment ${suffix}\nTotal: 63.00`);
+ const email=received({id:emailId,received_for:pointer.recipients,text:`Invoice number: continuation body ${suffix}\nTotal: 61.00`,attachments:[{id:attachmentId,filename:'continue.txt',content_type:'text/plain',content_disposition:'attachment',size:bytes.length}]});
+ const controller=new AbortController();let intakes=0,downloads=0;
+ const client={emails:{receiving:{get:async()=>({data:email,error:null}),attachments:{get:async()=>({data:{download_url:'https://download.example.test/fixture',size:bytes.length},error:null})}}}} as unknown as Resend;
+ const dependencies={client,download:async()=>{downloads++;return {status:200,bytes};},intake:async(...args:Parameters<typeof addDocument>)=>{intakes++;const result=await addDocument(...args);if(intakes===1)controller.abort();return result;}};
+ await assert.rejects(processResendEvent(`resend:${messageId}`,pointer,dependencies,{signal:controller.signal,deadlineAt:Date.now()+210_000}),WorkBudgetExhausted);
+ assert.equal(intakes,1);assert.equal(downloads,0);
+ // New invocation: persisted intake_events, not an in-memory cursor, skips the body.
+ await processResendEvent(`resend:${messageId}`,pointer,dependencies,{deadlineAt:Date.now()+210_000});
+ assert.equal(intakes,2);assert.equal(downloads,1);
+ await processResendEvent(`resend:${messageId}`,pointer,dependencies,{deadlineAt:Date.now()+210_000});
+ assert.equal(intakes,2);assert.equal(downloads,1);
+ assert.equal((await adminPool.query('select count(*)::int n from intake_events where workspace_id=$1 and idempotency_key like $2',[account.workspace.id,`resend:${emailId}:%`])).rows[0].n,2);
 });

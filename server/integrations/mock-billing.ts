@@ -3,11 +3,12 @@ import { z } from 'zod';
 import { PLANS } from '../../shared/plans.js';
 import { admins, requireActor, requireSession } from '../core/auth.js';
 import { config } from '../core/config.js';
+import { previewConfigured,previewEnabled } from '../core/preview.js';
 import { adminPool, audit, badRequest, notFound, transaction, withWorkspace } from '../core/db.js';
 
-/** Explicit local opt-in; production cannot expose a mock entitlement mutation. */
+/** Hosted mocks require a separately configured, invite-only test preview. */
 export function mockBillingEnabled(environment: NodeJS.ProcessEnv = process.env) {
-  return environment.NODE_ENV !== 'production' && environment.FOLIO_BILLING_MOCK === 'true';
+  return environment.FOLIO_BILLING_MOCK === 'true' && (environment.NODE_ENV !== 'production' || previewConfigured(environment));
 }
 
 export function requireRealBilling() {
@@ -19,7 +20,7 @@ export async function mockBillingStatus(workspaceId: string) {
   if (!workspace) notFound('Workspace not found');
   return {
     configured: false, mode: 'mock' as const, verified: false,
-    reason: 'Local mock billing is enabled. Plan changes only update this development workspace. No Stripe requests, payment or subscription verification occur.',
+    reason: 'Mock billing is enabled. Plan changes only update this test workspace. No Stripe requests, payment or real subscription occurs.',
     mockPlan: workspace.plan.billingMode === 'mock' ? { id: workspace.plan.id as string, name: workspace.plan.name as string, status: workspace.plan.mockStatus as 'active' | 'canceled' } : null,
   };
 }
@@ -42,7 +43,7 @@ export async function registerMockBilling(app: FastifyInstance) {
       const status = planId === 'explore' ? 'canceled' : 'active';
       if (workspace.plan.billingMode === 'mock' && workspace.plan.id === planId && workspace.plan.mockStatus === status) return { mode: 'mock', changed: false, plan: workspace.plan };
       const plan = {
-        id: selected.id, name: `${selected.name} (local mock)`, monthlyPages: selected.monthlyPages,
+        id: selected.id, name: `${selected.name} (${previewEnabled()?'preview':'local'} mock)`, monthlyPages: selected.monthlyPages,
         maxParsers: selected.maxParsers, maxConcurrent: selected.maxConcurrent,
         maxBytes: config.maxBytes, maxPages: config.maxPages,
         billingMode: 'mock', mockStatus: status, mockChangedAt: new Date().toISOString(),

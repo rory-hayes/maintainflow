@@ -2,7 +2,7 @@ import {useRef,useState} from 'react';
 import {Upload as UploadIcon} from 'lucide-react';
 import {useNavigate} from 'react-router-dom';
 import {Button,Notice,Field} from '../../components/ui';
-import {api,post,useAction,useData} from '../../lib/api';
+import {post,uploadDocuments,useAction,useData} from '../../lib/api';
 import {useSession} from '../../lib/session';
 import {useAiAvailability} from '../../lib/ai';
 type Parser={id:string;name:string;archived:boolean;mode:'rules'|'ai'};
@@ -18,7 +18,7 @@ export default function Upload({parserId,onComplete,compact=false}:{parserId?:st
     if(files.length>20){action.setError('Choose up to 20 files in one upload.');return;}
     const oversized=Array.from(files).filter(file=>file.size>10*1024*1024);
     if(oversized.length){action.setError(`Each file must be 10 MB or smaller: ${oversized.map(file=>file.name).join(', ')}`);return;}
-    const response=await action.run(async()=>{const form=new FormData();Array.from(files).forEach(file=>form.append('files',file));return api<UploadResult&{results:UploadResult[]}>(`/api/parsers/${activeParser}/documents`,{method:'POST',body:form,headers:{'Idempotency-Key':crypto.randomUUID()}});},'');
+    const response=await action.run(()=>uploadDocuments(activeParser,Array.from(files)),'');
     if(input.current)input.current.value='';
     if(!response)return;
     const results=response.results||[response],accepted=results.filter(result=>result.document),failures=results.filter(result=>result.error),duplicates=accepted.filter(result=>result.duplicate).length;

@@ -1,6 +1,23 @@
 # Deploying the document application
 
-The repository now contains a **container deployment candidate**, not a verified hosted deployment. The current application needs an HTTP server, a continuously supervised worker, PostgreSQL and durable private originals. Publishing `dist` alone does not supply those services.
+The app supports a hosted test preview on Vercel Hobby and Supabase Free, plus the container installation described below. PostgreSQL holds durable jobs and private Supabase Storage holds originals. The hosted worker runs in bounded function invocations; a conditional database scheduler recovers queued work and expired leases.
+
+## Free hosted preview
+
+`npm run build:vercel` packages the Vite UI as static files and Fastify as a separate Node.js 24 function using Vercel's Build Output API. It includes the isolated decoder and its native dependencies. `node scripts/verify-vercel-bundle.mjs` checks the package from an independent temporary directory so missing dependencies cannot fall back to the checkout.
+
+Use the existing `maintainflow` Vercel project and Supabase project `dhbevbimoajwkuzcunwz`. Keep the Vercel team on Hobby and Supabase organization on Free/Nano. This configuration is for invited testing with simulated billing; commercial production requires the planned plan upgrade and production acceptance. [Vercel Hobby](https://vercel.com/docs/plans/hobby), [Supabase pricing](https://supabase.com/pricing).
+
+1. Prepare the separate `folio` schema and restricted runtime roles using [the database setup](SUPABASE-DATABASE.md). Existing legacy tables and Data API configuration are preserved.
+2. Create private `folio-originals` Storage with a 10 MiB limit and `application/octet-stream` MIME allowance. [Storage setup](STORAGE.md) documents direct uploads and lifecycle recovery.
+3. Store database URLs, CA, stable integration encryption key, approved AI key and worker secret in Vercel's server-side production environment. Set `STORAGE_DRIVER=supabase`, `DATABASE_SCHEMA=folio`, `FOLIO_PREVIEW_MODE=true`, `FOLIO_BILLING_MOCK=true` and a private `FOLIO_PREVIEW_INVITE_CODE` of at least 32 characters. Do not expose credentials through client build variables. Email intake stays disabled until receiving is verified.
+4. Deploy with `vercel deploy --prod --skip-domain`. This creates the candidate without assigning the domain. Verify authentication, direct uploads over 4.5 MB, extraction, corrections, approvals, exports and mocked billing on the candidate.
+5. Promote the accepted deployment and configure [the conditional watchdog](HOSTED-WORKER.md) to the stable domain. Verify actual HTTP acceptance and durable queue recovery separately from successful cron execution.
+6. Push the accepted source to `main`. `vercel.json` now builds the complete hosted application; the previous deployment hold is removed. Subsequent successful Git deployments update the connected domain automatically.
+
+The preview requires a private invitation at registration and displays that billing is simulated. No payment or real Stripe subscription is created. Vercel's 300-second function limit is respected by bounded worker drains and recoverable database leases. Original files use direct signed uploads and private reads to preserve the application's 10 MiB allowance. [Function limits](https://vercel.com/docs/functions/limitations).
+
+The prepared HTTP acceptance runner is `scripts/hosted-preview-e2e.ts`. Run `node --import tsx scripts/hosted-preview-e2e.ts --prepare` to validate its private configuration and synthetic fixtures without network requests. After hosted setup, set `HOSTED_E2E_URL` to the exact deployment origin and use `--run`. It checks registration, rules extraction, a valid 6 MiB direct upload, original integrity, correction/approval/export, session persistence, mock plan changes and tenant isolation. It saves private QA credentials under ignored `.local/hosted-preview/` and sanitized receipts under `docs/evidence/free-preview-2026-09-11/`. Browser interaction, real AI, provider integrations and scheduler recovery require separate acceptance.
 
 ## Deployment shape
 
@@ -17,11 +34,11 @@ The image includes the locked Node dependencies, built frontend, server, schemas
 
 Use a maintained Linux container host and an HTTPS reverse proxy. It can serve the complete application at `https://maintainflow.io`, or provide a private-origin backend for Vercel's same-origin `/api/*` proxy while Vercel serves the frontend. Verify the latter proxy preserves cookies, `Origin`, streamed/multipart bodies and the application's 10 MB upload allowance. Do not route the upload through a Vercel Function: its documented 4.5 MB body limit is lower than the application contract. [Vercel function limits](https://vercel.com/docs/functions/limitations).
 
-The existing Vercel project is intentionally held: `vercel.json` uses `scripts/vercel-release-hold.mjs` to cancel automatic Git builds, and a manual static-only build fails with an explanation. Replace that hold only after an accepted backend and routing configuration are ready. A Git push does not establish a new production deployment.
+The container route is an alternative to the hosted preview. It does not require changing the hosted worker or storage configuration unless moving the application to that deployment model.
 
 ## Configure an empty, isolated installation
 
-**Do not point these migrations at the legacy MaintainFlow Supabase database.** They create generic `public` tables and grant the `folio_app` role access to all tables in that schema before applying their explicit restrictions. An existing product database requires a separately designed, reviewed schema-isolation migration. This Compose stack instead starts a dedicated empty database and preserves the legacy backend unchanged.
+This Compose stack starts a dedicated empty database using the default `public` schema. Shared Supabase installations must explicitly use the reviewed `folio` schema setup above; never run the default public-schema migration against the legacy database.
 
 1. Install a supported Docker Engine and Docker Compose v2 on the chosen host. No host or provider plan is provisioned by this repository.
 2. Prepare a private environment file, retaining existing values if one already exists:

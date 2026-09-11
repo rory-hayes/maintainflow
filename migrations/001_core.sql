@@ -1,4 +1,8 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- PostgreSQL 13+ supplies gen_random_uuid in pg_catalog. A shared Supabase
+-- installation must not move/create a global extension for this private schema.
+DO $$ BEGIN
+ IF current_schema()='public' THEN CREATE EXTENSION IF NOT EXISTS pgcrypto; END IF;
+END $$;
 CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text UNIQUE NOT NULL, name text NOT NULL, password_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE workspaces(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text NOT NULL,slug text UNIQUE NOT NULL,settings jsonb NOT NULL DEFAULT '{"retentionDays":90,"notifications":true}',plan jsonb NOT NULL DEFAULT '{"name":"Local development","monthlyPages":1000,"maxConcurrent":2,"maxParsers":25,"maxBytes":10485760,"maxPages":30}',created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE memberships(workspace_id uuid REFERENCES workspaces ON DELETE CASCADE,user_id uuid REFERENCES users ON DELETE CASCADE,role text NOT NULL CHECK(role in('owner','admin','editor','viewer')),created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(workspace_id,user_id));
@@ -27,8 +31,10 @@ CREATE TABLE audit_events(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),workspac
 CREATE INDEX audit_workspace ON audit_events(workspace_id,created_at DESC);
 CREATE TABLE intake_events(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),workspace_id uuid NOT NULL REFERENCES workspaces ON DELETE CASCADE,idempotency_key text NOT NULL,document_id uuid REFERENCES documents ON DELETE SET NULL,created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(workspace_id,idempotency_key));
 DO $$ DECLARE t text; BEGIN FOREACH t IN ARRAY ARRAY['api_keys','invitations','parsers','schema_versions','templates','documents','jobs','extraction_runs','corrections','approvals','usage_ledger','audit_events','intake_events'] LOOP EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY',t); EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY',t); EXECUTE format('CREATE POLICY tenant_scope ON %I USING(workspace_id = nullif(current_setting(''app.workspace_id'',true),'''')::uuid) WITH CHECK(workspace_id = nullif(current_setting(''app.workspace_id'',true),'''')::uuid)',t); END LOOP; END $$;
-GRANT USAGE ON SCHEMA public TO folio_app;
-GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO folio_app;
+DO $$ BEGIN
+ EXECUTE format('GRANT USAGE ON SCHEMA %I TO folio_app',current_schema());
+ EXECUTE format('GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA %I TO folio_app',current_schema());
+END $$;
 REVOKE ALL ON users,sessions,memberships,workspaces FROM folio_app;
 GRANT SELECT ON workspaces TO folio_app;
 ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY;

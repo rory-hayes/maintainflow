@@ -3,6 +3,8 @@ import path from 'node:path';
 import { adminPool, withWorkspace } from './db.js';
 import { config } from './config.js';
 import { deleteStoredFile } from './retention.js';
+import {privateStorage,validateStorageKey} from './storage.js';
+import {reconcileExpiredDirectUploads} from './upload-routes.js';
 
 const uuid = /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i;
 const graceMs = 60 * 60 * 1000;
@@ -17,8 +19,11 @@ async function statOrMissing(filename: string) {
 }
 
 /** Conservative recovery: persisted cursors, UUID originals, one-hour grace and intake locks. */
-export async function reconcileInterruptedIntake(onlyWorkspaceId?: string) {
+export async function reconcileInterruptedIntake(onlyWorkspaceId?: string,options:{signal?:AbortSignal;limit?:number}={}) {
   if (onlyWorkspaceId && !uuid.test(onlyWorkspaceId)) throw new Error('Invalid reconciliation workspace');
+  if(options.signal?.aborted)return {examined:0,queued:0,removed:0,expiredIntentsRemoved:0};
+  if(privateStorage().kind==='supabase')return reconcileRemoteIntake(onlyWorkspaceId,options);
+  const limit=Math.max(1,Math.min(pageSize,options.limit??pageSize));
   const root = path.resolve(config.storageDir);
   const rootStat = await statOrMissing(root);
   if (rootStat && (!rootStat.isDirectory() || rootStat.isSymbolicLink() || await fs.realpath(root) !== root)) {
@@ -33,6 +38,7 @@ export async function reconcileInterruptedIntake(onlyWorkspaceId?: string) {
   )).rows;
   let examined = 0, queued = 0, removed = 0, expiredIntentsRemoved = 0;
   for (const workspace of workspaces) {
+    if(options.signal?.aborted||(options.limit!==undefined&&examined>=options.limit))break;
     const workspaceId = workspace.id as string;
     const workspacePath = path.join(root, workspaceId);
     const deletions = await withWorkspace(workspaceId, async c => {
@@ -49,10 +55,11 @@ export async function reconcileInterruptedIntake(onlyWorkspaceId?: string) {
       const names = directory ? (await fs.readdir(workspacePath, { withFileTypes: true }))
         .filter(file => file.isFile() && !file.isSymbolicLink() && uuid.test(file.name))
         .map(file => file.name).sort() : [];
-      let files = names.filter(name => name > cursor.after_filename).slice(0, pageSize);
-      if (!files.length) files = names.slice(0, pageSize);
+      let files = names.filter(name => name > cursor.after_filename).slice(0, limit);
+      if (!files.length) files = names.slice(0, limit);
       const pending: string[] = [];
       for (const name of files) {
+        if(options.signal?.aborted)break;
         examined++;
         const filename = path.join(workspacePath, name), storageKey = `${workspaceId}/${name}`;
         const stat = await statOrMissing(filename);
@@ -76,12 +83,13 @@ export async function reconcileInterruptedIntake(onlyWorkspaceId?: string) {
       let intents = (await c.query(
         `select * from intake_files where lease_expires_at<now()-interval '1 hour'
          and ($1::uuid is null or id>$1) order by id limit $2 for update`,
-        [cursor.after_intent_id, pageSize],
+        [cursor.after_intent_id, limit],
       )).rows;
       if (!intents.length && cursor.after_intent_id) intents = (await c.query(
-        "select * from intake_files where lease_expires_at<now()-interval '1 hour' order by id limit $1 for update", [pageSize],
+        "select * from intake_files where lease_expires_at<now()-interval '1 hour' order by id limit $1 for update", [limit],
       )).rows;
       for (const intent of intents) {
+        if(options.signal?.aborted)break;
         const parts = String(intent.storage_key).split('/');
         if (parts.length !== 2 || parts[0] !== workspaceId || !uuid.test(parts[1])) continue;
         const referenced = (await c.query('select id from documents where storage_key=$1', [intent.storage_key])).rowCount;
@@ -97,9 +105,37 @@ export async function reconcileInterruptedIntake(onlyWorkspaceId?: string) {
       return pending;
     });
     for (const storageKey of deletions) {
+      if(options.signal?.aborted)break;
       queued++;
       if (await deleteStoredFile(workspaceId, storageKey) === 'complete') removed++;
     }
   }
   return { examined, queued, removed, expiredIntentsRemoved };
+}
+
+/** Every remote write has a committed intent before bytes leave the server. No
+ * whole-bucket enumeration is needed and referenced originals are never removed. */
+async function reconcileRemoteIntake(onlyWorkspaceId:string|undefined,options:{signal?:AbortSignal;limit?:number}){
+  const limit=Math.max(1,Math.min(100,options.limit??20));
+  const workspaces=(await adminPool.query(`select distinct workspace_id from intake_files
+    where lease_expires_at<now()-interval '1 hour' and ($1::uuid is null or workspace_id=$1)
+    order by workspace_id limit 10`,[onlyWorkspaceId??null])).rows;
+  let examined=0,queued=0,expiredIntentsRemoved=0;
+  for(const workspace of workspaces){
+    if(options.signal?.aborted||examined>=limit)break;
+    await withWorkspace(workspace.workspace_id,async c=>{
+      const intents=(await c.query("select * from intake_files where workspace_id=$1 and lease_expires_at<now()-interval '1 hour' order by lease_expires_at,id limit $2 for update skip locked",[workspace.workspace_id,limit-examined])).rows;
+      for(const intent of intents){
+        if(options.signal?.aborted)break;
+        examined++;validateStorageKey(intent.storage_key,workspace.workspace_id);
+        const referenced=(await c.query('select id from documents where storage_key=$1',[intent.storage_key])).rowCount;
+        if(!referenced){await c.query('insert into file_deletions(workspace_id,storage_key) values($1,$2) on conflict(storage_key) do nothing',[workspace.workspace_id,intent.storage_key]);queued++;}
+        await c.query('delete from intake_files where id=$1',[intent.id]);expiredIntentsRemoved++;
+      }
+    });
+  }
+  queued+=await reconcileExpiredDirectUploads(onlyWorkspaceId,{...options,limit});
+  // Network removals run independently through processOneFileDeletion, bounded
+  // by the hosted worker budget; queued state survives any invocation timeout.
+  return {examined,queued,removed:0,expiredIntentsRemoved};
 }

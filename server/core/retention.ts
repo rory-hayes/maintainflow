@@ -1,8 +1,8 @@
 import type { PoolClient } from 'pg';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { adminPool, withWorkspace } from './db.js';
 import { config } from './config.js';
+import { privateStorage, validateStorageKey } from './storage.js';
 
 /** Hold the document lock before removing local derived copies and immutable runs. */
 export async function purgeDocument(c: PoolClient, workspaceId: string, documentId: string) {
@@ -23,15 +23,17 @@ export async function purgeDocument(c: PoolClient, workspaceId: string, document
 export async function deleteStoredFile(
   workspaceId: string,
   storageKey: string,
-  unlink: (filename: string) => Promise<void> = fs.unlink,
+  unlink?: (filename: string) => Promise<void>,
 ): Promise<'complete' | 'pending' | 'failed'> {
   return withWorkspace(workspaceId, async c => {
     const { rows: [entry] } = await c.query('select * from file_deletions where storage_key=$1 for update', [storageKey]);
     if (!entry) return 'complete';
     try {
-      await unlink(path.join(config.storageDir, entry.storage_key));
+      validateStorageKey(entry.storage_key, workspaceId);
+      if (unlink) await unlink(path.join(config.storageDir, entry.storage_key));
+      else await privateStorage().remove(entry.storage_key);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as {statusCode?:number}).statusCode !== 404) {
         const attempts = entry.attempts + 1;
         const status = attempts >= 10 ? 'failed' : 'pending';
         await c.query("update file_deletions set attempts=$2,status=$3,last_error=$4,available_at=now()+($5::int*interval '1 second') where id=$1", [

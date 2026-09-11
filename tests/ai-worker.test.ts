@@ -276,3 +276,46 @@ test('AI image processing receives the preserved original and retains model-visu
   assert.equal(body.runs[0].promptVersion, promptVersion);
   assert.deepEqual((await request('GET', `/api/documents/${item.document.id}/original`)).rawPayload, bytes);
 });
+
+test('a reclaimed lease fences an older overlapping invocation in the same warm process',async()=>{
+  const item=await intake('lease-fence');
+  const pending:Array<{input:ProviderInput;finish:(value:ExtractionResult)=>void}>=[];
+  const entered:Array<()=>void>=[];
+  const firstEntered=new Promise<void>(resolve=>entered.push(resolve));
+  const secondEntered=new Promise<void>(resolve=>entered.push(resolve));
+  setExtractionProvider({configured:()=>true,extract:input=>new Promise<ExtractionResult>(finish=>{pending.push({input,finish});entered[pending.length-1]!();})});
+  const old=processOneCoreJob(item.jobId);await firstEntered;
+  const oldLease=await lease(item.jobId);
+  await adminPool.query("update jobs set lease_until=now()-interval '1 second' where id=$1",[item.jobId]);
+  const current=processOneCoreJob(item.jobId);await secondEntered;
+  assert.notEqual((await lease(item.jobId)).lease_owner,oldLease.lease_owner);
+  pending[0]!.finish({...result(pending[0]!.input),model:'expired-owner-output'});await old;
+  let body=await detail(item.document.id);
+  assert.equal(body.jobs[0].state,'processing');assert.equal(body.runs.length,0);
+  pending[1]!.finish({...result(pending[1]!.input),model:'current-owner-output'});await current;
+  body=await detail(item.document.id);
+  assert.equal(body.jobs[0].state,'completed');assert.equal(body.runs.length,1);
+  assert.equal(body.runs[0].model,'current-owner-output');assert.equal(await usageCount(item.document.id),1);
+});
+
+test('authenticated hosted wake recovers a crashed worker from its expired durable lease',async()=>{
+  const {default:Fastify}=await import('fastify');
+  const {createHostedWorker,registerHostedWorker,workerRoute}=await import('../server/hosted-worker.js');
+  const item=await intake('hosted-recovery','rules');
+  await adminPool.query("update jobs set state='processing',attempts=1,lease_owner=$2,lease_until=now()-interval '1 second' where id=$1",[item.jobId,randomUUID()]);
+  await adminPool.query("update documents set status='processing' where id=$1",[item.document.id]);
+  // The fresh scheduler has no knowledge of the crashed invocation or its token.
+  const wake=createHostedWorker({enqueue:async()=>{},core:budget=>processOneCoreJob(item.jobId,{signal:budget.signal}),provider:async()=>false,delivery:async()=>false,deletion:async()=>false,maintenance:async()=>{}});
+  const endpoint=Fastify();const attached:Promise<unknown>[]=[];
+  const secret='controlled-hosted-recovery-secret-0123456789';
+  registerHostedWorker(endpoint,{secret:()=>secret,waitUntil:work=>attached.push(work),wake});
+  try{
+    const response=await endpoint.inject({method:'POST',url:workerRoute,headers:{authorization:`Bearer ${secret}`},payload:{}});
+    assert.equal(response.statusCode,202);await Promise.all(attached);
+    const body=await detail(item.document.id);
+    assert.equal(body.jobs[0].attempts,2);assert.equal(body.jobs[0].state,'completed');
+    assert.equal(body.runs.length,1);assert.equal(body.document.status,'needs_review');
+    assert.equal(await usageCount(item.document.id),1);
+    await wake();assert.equal((await detail(item.document.id)).runs.length,1);
+  }finally{await endpoint.close();}
+});

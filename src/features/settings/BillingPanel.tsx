@@ -20,7 +20,7 @@ export default function BillingPanel() {
 
   async function changeMockPlan(planId?: string) {
     await action.run(() => post(planId ? '/api/billing/mock/plan' : '/api/billing/mock/cancel', planId ? { planId } : {}),
-      planId ? 'Local mock plan updated. No payment was made.' : 'Mock subscription canceled. Explore limits now apply; existing work is kept.');
+      planId ? 'Mock plan updated. No payment was made.' : 'Mock subscription canceled. Explore limits now apply; existing work is kept.');
   }
 
   if (providers.isPending) return <Loading />;
@@ -29,10 +29,10 @@ export default function BillingPanel() {
   const isMock = stripe.mode === 'mock';
   return (
     <section className="billing-panel">
-      <div className="settings-section-heading"><div><h2>{isMock ? 'Local mock billing' : 'Billing connection'}</h2><p>{isMock ? 'Try plan changes using this development workspace.' : 'Test-mode subscriptions for this workspace.'}</p></div><CreditCard size={26} strokeWidth={1.5} /></div>
+      <div className="settings-section-heading"><div><h2>{isMock ? 'Mock billing' : 'Billing connection'}</h2><p>{isMock ? 'Try plan changes using this development workspace.' : 'Test-mode subscriptions for this workspace.'}</p></div><CreditCard size={26} strokeWidth={1.5} /></div>
       <div className="settings-information">
         {isMock ? <strong>Mock mode · no payments</strong> : <Status value={stripe.configured ? 'configured' : 'setup_required'} />}
-        <p>{isMock ? 'Selections persist and change your local page, parser and processing limits. Stripe is not contacted. No payment or real subscription is created.' : stripe.configured ? 'Stripe test mode is configured. Checkout and subscription state still need end-to-end verification.' : 'Stripe test billing is not configured. The plans below are illustrative; no live charges are enabled.'}</p>
+        <p>{isMock ? 'Selections persist and change your test page, parser and processing limits. Stripe is not contacted. No payment or real subscription is created.' : stripe.configured ? 'Stripe test mode is configured. Checkout and subscription state still need end-to-end verification.' : 'Stripe test billing is not configured. The plans below are illustrative; no live charges are enabled.'}</p>
       </div>
       {isMock ? <div className="settings-callout"><strong>Current allowance: {stripe.mockPlan?.name || session?.workspace.plan.name || 'Loading…'}</strong><p>Changes apply immediately. Downgrades keep existing documents and parsers; new uploads and parser creation follow the selected limits.</p>{stripe.mockPlan?.status === 'canceled' ? <p>The mock subscription is canceled.</p> : null}</div> : null}
       {!isMock && params.get('checkout') === 'returned' ? <div className="settings-callout">You returned from Checkout. The workspace plan updates after the signed subscription event is processed.</div> : null}
@@ -51,7 +51,7 @@ export default function BillingPanel() {
         {isMock ? <Button variant="secondary" disabled={!canManage || action.busy || stripe.mockPlan?.status !== 'active'} onClick={() => void changeMockPlan()}>Cancel mock subscription</Button> : <Button variant="secondary" disabled={!canManage || !stripe.configured || action.busy} onClick={() => void openBilling('/api/billing/portal')}><ExternalLink size={16} /> Open test billing portal</Button>}
       </div>
       {!canManage ? <p className="small muted settings-bottom-note">A workspace owner or administrator can manage billing.</p> : null}
-      <p className="small muted settings-bottom-note">{isMock ? 'Local mock billing is disabled in production. Stripe Checkout, payment methods, invoices and subscription events remain unverified.' : 'A configured provider is separate from a verified checkout. Live payment keys are disabled in this build.'}</p>
+      <p className="small muted settings-bottom-note">{isMock ? 'This preview simulates plan changes. No payments are taken; real billing will be enabled for the production release.' : 'A configured provider is separate from a verified checkout. Live payment keys are disabled in this build.'}</p>
     </section>
   );
 }

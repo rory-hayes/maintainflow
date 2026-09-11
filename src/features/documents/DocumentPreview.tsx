@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {ChevronLeft,ChevronRight,Minus,Plus,Download} from 'lucide-react';
 import {Button,Notice} from '../../components/ui';
-import {workspaceId,downloadFile} from '../../lib/api';
+import {fetchOriginalFile,downloadFile} from '../../lib/api';
 import type {PageText} from '../../../shared/types';
 export default function DocumentPreview({document:doc,page,setPage}:{document:any;page:number;setPage:(n:number)=>void}){
   const [zoom,setZoom]=useState(100),[imageUrl,setImageUrl]=useState(''),[error,setError]=useState('');const canvas=useRef<HTMLCanvasElement>(null);const pages:PageText[]=doc.sourceText||[];
@@ -9,7 +9,7 @@ export default function DocumentPreview({document:doc,page,setPage}:{document:an
     setImageUrl('');setError('');
     if(doc.mimeType!=='application/pdf'&&!doc.mimeType.startsWith('image/'))return;
     let cancelled=false;let objectUrl='';let task:any;const controller=new AbortController();
-    void(async()=>{try{setError('');const response=await fetch(`/api/documents/${doc.id}/original`,{headers:{'X-Workspace-Id':workspaceId()},signal:controller.signal});if(!response.ok)throw new Error('Could not load the original file.');const bytes=await response.arrayBuffer();if(cancelled)return;
+    void(async()=>{try{setError('');const response=await fetchOriginalFile(doc.id,controller.signal);if(!response.ok)throw new Error('Could not load the original file.');const bytes=await response.arrayBuffer();if(cancelled)return;
       if(doc.mimeType==='application/pdf'){
         const pdfjs=await import('pdfjs-dist');const worker=(await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;pdfjs.GlobalWorkerOptions.workerSrc=worker;task=pdfjs.getDocument({data:new Uint8Array(bytes)});const pdf=await task.promise;if(cancelled)return;const pdfPage=await pdf.getPage(page);const viewport=pdfPage.getViewport({scale:1.3});const target=canvas.current;if(!target||cancelled)return;target.width=viewport.width;target.height=viewport.height;await pdfPage.render({canvas:target,viewport}).promise;
       }else{objectUrl=URL.createObjectURL(new Blob([bytes],{type:doc.mimeType}));setImageUrl(objectUrl);}

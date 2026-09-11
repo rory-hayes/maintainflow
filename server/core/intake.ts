@@ -1,18 +1,17 @@
 import {randomUUID,createHash} from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {Actor} from '../../shared/types.js';
 import {withWorkspace,badRequest,notFound,audit,camel} from './db.js';
-import {config} from './config.js';
+import {privateStorage} from './storage.js';
 import {inspectSource} from './source.js';
 import {deleteStoredFile} from './retention.js';
 export async function addDocument(actor:Actor,parserId:string,buffer:Buffer,filename:string,_mimeType?:string,idempotencyKey?:string){
 if(idempotencyKey&&idempotencyKey.length>200)badRequest('Idempotency key is too long');
 const name=path.basename(filename).replace(/[\u0000-\u001f\u007f]/g,'').slice(0,240)||'document.txt';
-const source=await inspectSource(buffer,name);const sha=createHash('sha256').update(buffer).digest('hex');const id=randomUUID(),storageKey=`${actor.workspaceId}/${id}`;const folder=path.join(config.storageDir,actor.workspaceId);const fullPath=path.join(config.storageDir,storageKey);
+const source=await inspectSource(buffer,name);const sha=createHash('sha256').update(buffer).digest('hex');const id=randomUUID(),storageKey=`${actor.workspaceId}/${id}`;
 await withWorkspace(actor.workspaceId,c=>c.query('insert into intake_files(id,workspace_id,storage_key) values($1,$2,$3)',[id,actor.workspaceId,storageKey]));
 const heartbeat=setInterval(()=>{void withWorkspace(actor.workspaceId,c=>c.query("update intake_files set lease_expires_at=now()+interval '5 minutes' where id=$1",[id])).catch(()=>{});},30_000);heartbeat.unref();
-let retained=false,written=false;try{await fs.mkdir(folder,{recursive:true,mode:0o700});await fs.writeFile(fullPath,buffer,{mode:0o600,flag:'wx'});written=true;const result=await withWorkspace(actor.workspaceId,async c=>{
+let retained=false,writeAttempted=false,writeCompleted=false;try{writeAttempted=true;await privateStorage().write(storageKey,buffer);writeCompleted=true;const result=await withWorkspace(actor.workspaceId,async c=>{
 await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[actor.workspaceId]);
 if(!(await c.query('select id from intake_files where id=$1 for update',[id])).rowCount)badRequest('The original write reservation expired. Retry the upload.',409);
 const {rows:parsers}=await c.query('select * from parsers where id=$1 and workspace_id=$2 and archived=false',[parserId,actor.workspaceId]);const parser=parsers[0];if(!parser)notFound('Active parser not found');
@@ -24,5 +23,5 @@ let {rows:[doc]}=await c.query('insert into documents(id,workspace_id,parser_id,
 const templates=(await c.query('select * from templates where parser_id=$1 order by created_at,id',[parserId])).rows;
 const {rows:[job]}=await c.query('insert into jobs(workspace_id,document_id,schema_version_id,config) values($1,$2,$3,$4) returning id',[actor.workspaceId,id,parser.active_schema_id,JSON.stringify({mode:parser.mode,instructions:parser.instructions,locale:parser.locale,timezone:parser.timezone,templates})]);
 doc=(await c.query("update documents set status='queued',updated_at=clock_timestamp() where id=$1 returning *",[id])).rows[0];
-await c.query('insert into usage_ledger(workspace_id,document_id,event,pages,idempotency_key) values($1,$2,$3,$4,$5)',[actor.workspaceId,id,'upload',source.pageCount,`upload:${id}`]);if(idempotencyKey)await c.query('insert into intake_events(workspace_id,idempotency_key,document_id) values($1,$2,$3)',[actor.workspaceId,idempotencyKey,id]);await audit(c,actor.workspaceId,actor.userId,'document.uploaded',id,{parserId,pages:source.pageCount});return {document:camel(doc),duplicate:false,jobId:job.id};});retained=!result.duplicate;return result;}finally{clearInterval(heartbeat);await withWorkspace(actor.workspaceId,async c=>{if(!retained&&written)await c.query('insert into file_deletions(workspace_id,storage_key) values($1,$2) on conflict(storage_key) do nothing',[actor.workspaceId,storageKey]);await c.query('delete from intake_files where id=$1',[id]);});if(!retained&&written)await deleteStoredFile(actor.workspaceId,storageKey);} 
+await c.query('insert into usage_ledger(workspace_id,document_id,event,pages,idempotency_key) values($1,$2,$3,$4,$5)',[actor.workspaceId,id,'upload',source.pageCount,`upload:${id}`]);if(idempotencyKey)await c.query('insert into intake_events(workspace_id,idempotency_key,document_id) values($1,$2,$3)',[actor.workspaceId,idempotencyKey,id]);await audit(c,actor.workspaceId,actor.userId,'document.uploaded',id,{parserId,pages:source.pageCount});return {document:camel(doc),duplicate:false,jobId:job.id};});retained=!result.duplicate;return result;}finally{clearInterval(heartbeat);await withWorkspace(actor.workspaceId,async c=>{if(!retained&&writeAttempted)await c.query("insert into file_deletions(workspace_id,storage_key,available_at) values($1,$2,now()+($3::int*interval '1 second')) on conflict(storage_key) do nothing",[actor.workspaceId,storageKey,!writeCompleted&&privateStorage().kind==='supabase'?300:0]);await c.query('delete from intake_files where id=$1',[id]);});if(!retained&&writeAttempted&&(writeCompleted||privateStorage().kind==='filesystem'))await deleteStoredFile(actor.workspaceId,storageKey);}
 }

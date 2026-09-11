@@ -1,0 +1,95 @@
+{
+  "recordedAt": "2026-09-11T11:06:54.951061+00:00",
+  "scope": "Private storage adapter, signed direct uploads and local regression verification",
+  "environment": "Dedicated disposable local PostgreSQL database folio_storage_tests_20260911; controlled storage responses and in-memory objects; no external provider mutations",
+  "results": [
+    {
+      "suites": [
+        "private-storage",
+        "direct-uploads",
+        "decoder-reconciliation",
+        "intake-policy",
+        "retention-notifications",
+        "api-workflow"
+      ],
+      "tests": 35,
+      "passed": 35,
+      "failed": 0
+    },
+    {
+      "suites": [
+        "defensive-regressions",
+        "lifecycle",
+        "export-lifecycle"
+      ],
+      "tests": 18,
+      "passed": 18,
+      "failed": 0
+    },
+    {
+      "suites": [
+        "private-storage",
+        "direct-uploads"
+      ],
+      "tests": 15,
+      "passed": 15,
+      "failed": 0,
+      "overlap": "14 repeat prior focused coverage; one new capacity-accounting regression"
+    }
+  ],
+  "uniqueFocusedTests": 54,
+  "typecheck": "passed",
+  "postTestChange": "None after the final capacity-accounting test run; prior trailing-space cleanup was behavior neutral.",
+  "fileHashes": [
+    {
+      "path": "server/core/storage.ts",
+      "sha256": "2f25883c30f53f4579588b9d4b9c2a447581c37873e295320bdafcd47712648b"
+    },
+    {
+      "path": "server/core/upload-routes.ts",
+      "sha256": "68ebadd4010b6211cf278ee70395fc101d0a01c6354e9ac87f15d480e2fe15a2"
+    },
+    {
+      "path": "server/core/intake.ts",
+      "sha256": "bc7728c6986826e48c43944e8c6c88bdd1a13eeb1e48af2f27fe064444371228"
+    },
+    {
+      "path": "server/core/retention.ts",
+      "sha256": "608a29a2fcda4c68a03ac2f44880231e0698992921ac6777ed00e961aebb5497"
+    },
+    {
+      "path": "server/core/object-reconciliation.ts",
+      "sha256": "47df92291b1788343ff55b649c69c210754a9c1b904f795a357772e4233f0319"
+    },
+    {
+      "path": "server/core/document-routes.ts",
+      "sha256": "90bca7c0f09643987f8cfb249929ca891ae0c077a3c0f77da2647b0a15faf30b"
+    },
+    {
+      "path": "src/lib/api.ts",
+      "sha256": "a8a49d9667240aa9fff69755d62b11c2d421008688b12a73181bf1f1e83f5d15"
+    },
+    {
+      "path": "src/features/documents/Upload.tsx",
+      "sha256": "91e37a2185b548e2b9cc6bc5482d568bb5d9ab6ff5b40bc3a708a7e3af71efd5"
+    },
+    {
+      "path": "src/features/documents/DocumentPreview.tsx",
+      "sha256": "1164a524cf3a90b87b23bdd2adf69d1bcbd42f24c4a0b9fdb5cc64d3ded37aa6"
+    },
+    {
+      "path": "migrations/019_direct_uploads.sql",
+      "sha256": "ec8276e460bb5936f5f67eddb6cd21e43968541f8b0523855b37af9d4e27c055"
+    },
+    {
+      "path": "tests/private-storage.test.ts",
+      "sha256": "1508c6e0f054abb5387b361924c577db6b30edc295de102cd23abd6c3d5e68fe"
+    },
+    {
+      "path": "tests/direct-uploads.test.ts",
+      "sha256": "d8770693675365254e4fe48f23cd69bd2e7ae8d03b437cb624b14a606abd1409"
+    }
+  ],
+  "externalAcceptance": "Hosted bucket, browser CORS/direct PUT, large original transfer and actual remote cleanup remain to be verified by the release task.",
+  "newTests": 15
+}

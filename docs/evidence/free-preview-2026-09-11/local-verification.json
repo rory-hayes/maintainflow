@@ -1,0 +1,48 @@
+{
+  "scope": "local hosted-preview implementation verification",
+  "tests": {
+    "total": 220,
+    "passed": 220,
+    "failed": 0,
+    "skipped": 0,
+    "log": "tests.txt"
+  },
+  "build": {
+    "passed": true,
+    "functionMiB": 59.6,
+    "runtime": "nodejs24.x",
+    "region": "fra1",
+    "maxDurationSeconds": 300,
+    "log": "build.txt"
+  },
+  "isolatedBundle": {
+    "passed": true,
+    "formats": [
+      "PDF",
+      "PNG",
+      "DOCX",
+      "XLSX",
+      "EML",
+      "TXT",
+      "HTML"
+    ],
+    "api": true,
+    "inviteGuard": true,
+    "log": "bundle-check.txt"
+  },
+  "liveResources": {
+    "vercelPlan": "hobby",
+    "supabasePlan": "free",
+    "supabaseCompute": "nano",
+    "supabaseProject": "dhbevbimoajwkuzcunwz",
+    "legacyDatabaseBytesBefore": 12971155,
+    "legacyPublicExecutableDefiners": 0,
+    "privateBucket": "folio-originals",
+    "bucketPublic": false,
+    "bucketLimitBytes": 10485760,
+    "bucketLimitMiB": 10,
+    "bucketMime": "application/octet-stream"
+  },
+  "hostedApplication": "not yet deployed",
+  "databaseBootstrap": "prepared; pending browser credential confirmation"
+}

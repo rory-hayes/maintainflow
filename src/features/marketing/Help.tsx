@@ -69,7 +69,7 @@ export default function Help() {
       <section id="usage">
         <h2>Usage and duplicates</h2>
         <p>An accepted, unique upload records one usage event for its page count. Identical files sent to the same parser are detected as duplicates. Automatic worker retries reuse the same event. Choosing Reprocess creates a new job and counts the document's pages again.</p>
-        <p>The local development workspace has its own clearly labeled allowance. The prices on the public page are configurable launch assumptions; they do not activate payments or change the local allowance by themselves.</p>
+        <p>Each test workspace has a clearly labeled allowance. Displayed prices are illustrative during the preview; changing a mock plan does not activate payments.</p>
       </section>
       <section id="integrations">
         <h2>Integrations and provider setup</h2>
@@ -79,7 +79,7 @@ export default function Help() {
           <div><dt>Webhooks</dt><dd>Connect a public HTTPS destination, store the signing secret securely, and check delivery history. Failed deliveries retry with the same delivery identity. A manual replay is available to workspace administrators.</dd></div>
           <div><dt>Automation tools</dt><dd>Zapier, Make, n8n and Power Automate can receive data through their webhook or HTTP steps. These are API/webhook recipes, not published Folio marketplace connectors.</dd></div>
           <div><dt>Google Sheets</dt><dd>Requires a configured Google provider and access to the destination spreadsheet. The connection panel reports the actual configuration state.</dd></div>
-          <div><dt>Billing</dt><dd>Checkout and the billing portal require Stripe test-mode configuration. The local build does not activate live charges.</dd></div>
+          <div><dt>Billing</dt><dd>The hosted preview uses mock billing. Plan changes are simulated and do not activate live charges.</dd></div>
         </dl>
         <Link className="marketing-text-link" to="/help/api">Read the API and webhook guide <ArrowRight size={17} /></Link>
       </section>
@@ -170,14 +170,14 @@ export function ApiDocs() {
 export function Privacy() {
   const ai = useAiAvailability();
   return (
-    <GuideLayout title="Privacy & data handling." introduction="What this local development build stores, and what needs to be settled before a public service launches.">
+    <GuideLayout title="Privacy & data handling." introduction="What the development preview stores, and what needs to be settled before the production service launches.">
       <section>
         <h2>Current status</h2>
-        <p>Folio is currently a local development application. This page documents its present implementation; it is not a final privacy notice for a public hosted service.</p>
+        <p>Folio is currently a development preview for testing. This page describes the preview; a final privacy notice will accompany the production release.</p>
       </section>
       <section>
         <h2>Data in your workspace</h2>
-        <p>The application stores account information, workspace membership, parser schemas, uploaded documents, processing results, corrections, approvals, exports, integration configuration, usage and audit events. The local build stores records in its PostgreSQL database and original files in the project's private storage directory.</p>
+        <p>The application stores account information, workspace membership, parser schemas, uploaded documents, processing results, corrections, approvals, exports, integration configuration, usage and audit events. The hosted preview stores records in a separate PostgreSQL schema and original files in private Supabase storage. Local installations use their own database and private file directory.</p>
         <p>Passwords are stored as password hashes. Session tokens and API keys are stored as token hashes. Integration secrets use the server's secret-storage configuration. Workspace roles control access to documents and settings.</p>
       </section>
       <section>
@@ -191,7 +191,7 @@ export function Privacy() {
       </section>
       <section>
         <h2>Before public availability</h2>
-        <p>A public launch requires the operator's identity and contact details, applicable lawful bases, subprocessors, retention periods, data-location decisions and rights-request process to be documented. Those details have not been invented for this local build.</p>
+        <p>A public launch requires the operator's identity and contact details, applicable lawful bases, subprocessors, retention periods, data-location decisions and rights-request process to be documented. Those details will be documented before the production release.</p>
       </section>
     </GuideLayout>
   );
@@ -199,7 +199,7 @@ export function Privacy() {
 
 export function Terms() {
   return (
-    <GuideLayout title="Development preview terms." introduction="The current application is a local build. Public subscription terms have not been activated.">
+    <GuideLayout title="Development preview terms." introduction="The current application is a test preview. Public subscription terms have not been activated.">
       <section>
         <h2>Use the preview with suitable documents</h2>
         <p>The synthetic samples are provided to explore the workflow. Only upload documents you are entitled to process, and review the result before relying on it or sending it to another system.</p>

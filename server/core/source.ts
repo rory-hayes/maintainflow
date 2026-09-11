@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { decoderLimits, decoderError } from './decoder-limits.js';
@@ -11,7 +12,8 @@ const sourceSchema = z.object({
   pages: z.array(z.object({ page: z.number().int().min(1).max(decoderLimits.maxPages), text: z.string() })).max(decoderLimits.maxPages),
   pageCount: z.number().int().min(1).max(decoderLimits.maxPages),
 });
-const childFilename = fileURLToPath(new URL('./decoder-child.ts', import.meta.url));
+const compiledChild = fileURLToPath(new URL('./decoder-child.js', import.meta.url));
+const childFilename = existsSync(compiledChild) ? compiledChild : fileURLToPath(new URL('./decoder-child.ts', import.meta.url));
 const runtimeRoot = fileURLToPath(new URL('../../', import.meta.url));
 let activeDecoders = 0;
 
@@ -19,7 +21,7 @@ let activeDecoders = 0;
 export function decoderLaunchSpec(filename: string) {
   return {
     command: process.execPath,
-    args: [`--max-old-space-size=${decoderLimits.heapMb}`, '--import', 'tsx', childFilename, path.basename(filename)],
+    args: [`--max-old-space-size=${decoderLimits.heapMb}`, ...(childFilename.endsWith('.ts') ? ['--import', 'tsx'] : []), childFilename, path.basename(filename)],
     options: {
       cwd: runtimeRoot,
       env: { NODE_ENV: 'production', TZ: 'UTC', LANG: 'en_US.UTF-8', TSX_DISABLE_CACHE: '1' },

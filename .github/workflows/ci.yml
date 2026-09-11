@@ -71,5 +71,7 @@ jobs:
         run: npm run db:migrate
       - name: Run tests with controlled provider fixtures
         run: npm test
-      - name: Typecheck and build application
-        run: npm run build
+      - name: Typecheck and package the hosted application
+        run: npm run build:vercel
+      - name: Verify the isolated function runtime and document decoders
+        run: node scripts/verify-vercel-bundle.mjs

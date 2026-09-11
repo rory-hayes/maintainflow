@@ -9,6 +9,7 @@ import {PLANS} from '../../shared/plans.js';
 import {requireActor,requireSession,admins,hashToken} from '../core/auth.js';
 import {adminPool,withWorkspace,transaction,audit,badRequest,notFound} from '../core/db.js';
 import {config} from '../core/config.js';
+import {requireWorkBudget,WorkBudgetExhausted,type WorkBudget} from '../core/work-budget.js';
 import {addDocument} from '../core/intake.js';
 import {encryptSecret,decryptSecret} from './secrets.js';
 import {publicRequest} from './network.js';
@@ -113,11 +114,13 @@ export async function reconcileStripeCustomer(pointer:StripePointer,client:Strip
 }
 
 export type ResendDependencies={client:Resend;download:typeof publicRequest;intake:typeof addDocument};
-export async function processResendEvent(eventId:string,pointer:ResendPointer,dependencies?:ResendDependencies){
+export async function processResendEvent(eventId:string,pointer:ResendPointer,dependencies?:ResendDependencies,budget:WorkBudget={}){
+ requireWorkBudget(budget,40_000);
  if(!dependencies&&!(await receivingStatus()).verified)throw new Error('Inbound receiving is disabled or the domain cannot be verified.');
  const client=dependencies?.client||resendClient();
  const download=dependencies?.download||publicRequest;
  const intake=dependencies?.intake||addDocument;
+ requireWorkBudget(budget,20_000);
  const {data:email,error}=await client.emails.receiving.get(pointer.emailId,{html_format:'cid'});
  if(error||!email)throw new Error('Resend could not retrieve the received email content.');
  const recipients=deliveredRecipients(pointer.recipients,email);
@@ -125,10 +128,16 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
  const {rows:routes}=await adminPool.query('select r.*,p.archived from email_routes r join parsers p on p.id=r.parser_id and p.workspace_id=r.workspace_id where r.address=any($1) and r.enabled=true and p.archived=false',[recipients]);
  if(!routes.length)return;
  if(email.attachments.length>20)throw new Error('Inbound emails are limited to 20 attachments.');
- let combinedBytes=Buffer.byteLength(email.text||email.html||'');
+ // Count every attachment on every continuation, including already committed
+ // items, so splitting an email into invocations cannot bypass the aggregate cap.
+ let combinedBytes=Buffer.byteLength(email.text||email.html||'')+email.attachments.filter(a=>a.content_disposition!=='inline').reduce((sum,a)=>sum+a.size,0);
  if(combinedBytes>25*1024*1024)throw new Error('Inbound email content exceeds the 25 MiB aggregate limit.');
  const attachmentCache=new Map<string,Buffer>();
+ // Existing intake receipts are the checkpoint. Never decode completed items again
+ // merely because a bounded function yielded halfway through a larger email.
+ const received=async(workspaceId:string,key:string)=>Boolean((await withWorkspace(workspaceId,c=>c.query('select id from intake_events where workspace_id=$1 and idempotency_key=$2',[workspaceId,key]))).rowCount);
  for(const route of routes){
+  requireWorkBudget(budget,10_000);
   await adminPool.query('insert into provider_event_workspaces(event_id,workspace_id) values($1,$2) on conflict do nothing',[eventId,route.workspace_id]);
   const sender=emailAddress(email.from);
   if(route.allowed_senders.length&&!route.allowed_senders.includes(sender)){
@@ -138,24 +147,32 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
   if(!member)throw new Error('Inbound email requires an active workspace administrator.');
   const actor:Actor={userId:member.user_id,workspaceId:route.workspace_id,role:member.role,authType:'api',scopes:['documents:write']};
   if(route.parse_body){
-   const body=await receivedEmailBody(email,config.maxBytes);
-   await intake(actor,route.parser_id,body,`${email.subject.slice(0,180)||'Received email'}.eml`,'message/rfc822',`resend:${pointer.emailId}:${route.parser_id}:body`);
+   const key=`resend:${pointer.emailId}:${route.parser_id}:body`;
+   if(!await received(route.workspace_id,key)){
+    requireWorkBudget(budget,80_000);
+    const body=await receivedEmailBody(email,config.maxBytes);
+    await intake(actor,route.parser_id,body,`${email.subject.slice(0,180)||'Received email'}.eml`,'message/rfc822',key);
+   }
   }
   if(route.parse_attachments){for(const attachment of email.attachments){
    if(attachment.content_disposition==='inline')continue;
+   const key=`resend:${pointer.emailId}:${route.parser_id}:${attachment.id}`;
+   if(await received(route.workspace_id,key))continue;
    if(attachment.size>config.maxBytes)throw new Error('An email attachment exceeds the document byte limit.');
    let bytes=attachmentCache.get(attachment.id);
    if(!bytes){
+    requireWorkBudget(budget,120_000);
     const result=await client.emails.receiving.attachments.get({emailId:pointer.emailId,id:attachment.id});
     if(result.error||!result.data)throw new Error('Resend could not retrieve attachment metadata.');
     if(result.data.size>config.maxBytes)throw new Error('An email attachment exceeds the document byte limit.');
     const response=await download(result.data.download_url,{method:'GET',maxBytes:config.maxBytes});
     if(response.status<200||response.status>=300)throw Object.assign(new Error('Attachment download failed.'),{status:response.status});
-    bytes=response.bytes;combinedBytes+=bytes.length;
+    bytes=response.bytes;combinedBytes+=Math.max(0,bytes.length-attachment.size);
     if(combinedBytes>25*1024*1024)throw new Error('Inbound email exceeds the 25 MiB aggregate limit.');
     attachmentCache.set(attachment.id,bytes);
    }
-   await intake(actor,route.parser_id,bytes,attachment.filename||`attachment-${attachment.id}.bin`,attachment.content_type,`resend:${pointer.emailId}:${route.parser_id}:${attachment.id}`);
+   requireWorkBudget(budget,80_000);
+   await intake(actor,route.parser_id,bytes,attachment.filename||`attachment-${attachment.id}.bin`,attachment.content_type,key);
   }}
   await withWorkspace(route.workspace_id,async c=>{
    await c.query('update email_routes set last_received_at=now() where id=$1',[route.id]);
@@ -165,7 +182,8 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
 }
 
 /** Called by the root worker. Leases, bounded attempts and persistent errors survive restarts. */
-export async function tickProviders(){
+export async function tickProviders(budget:WorkBudget={}){
+ if(budget.signal?.aborted||(budget.deadlineAt!==undefined&&Date.now()+140_000>=budget.deadlineAt))return false;
  await adminPool.query("update provider_events set status='failed',error='Provider processing lease expired after the final attempt.',lease_until=null,lease_token=null where status='processing' and lease_until<now() and attempts>=5");
  const token=randomUUID();
  const {rows:[event]}=await adminPool.query(`with candidate as (
@@ -178,11 +196,12 @@ export async function tickProviders(){
  heartbeat.unref();
  try{
   if(event.provider==='stripe')await reconcileStripeCustomer(event.payload);
-  else if(event.provider==='resend')await processResendEvent(event.id,event.payload);
+  else if(event.provider==='resend')await processResendEvent(event.id,event.payload,undefined,budget);
   else throw new Error('Unsupported provider event.');
   await adminPool.query("update provider_events set status='completed',error=null,lease_until=null,lease_token=null where id=$1 and lease_token=$2",[event.id,token]);
  }catch(error){
-  await adminPool.query("update provider_events set status=$3,error=$4,next_attempt_at=now()+($5*interval '1 second'),lease_until=null,lease_token=null where id=$1 and lease_token=$2",[event.id,token,event.attempts>=5?'failed':'retry',publicProviderError(event.provider,error),Math.min(3600,30*2**event.attempts)]);
+  const yielded=error instanceof WorkBudgetExhausted;
+  await adminPool.query("update provider_events set status=$3,error=$4,next_attempt_at=now()+($5*interval '1 second'),attempts=greatest(0,attempts-$6),lease_until=null,lease_token=null where id=$1 and lease_token=$2",[event.id,token,!yielded&&event.attempts>=5?'failed':'retry',yielded?error.message:publicProviderError(event.provider,error),yielded?5:Math.min(3600,30*2**event.attempts),yielded?1:0]);
  }finally{clearInterval(heartbeat);}
  return true;
 }
@@ -204,7 +223,8 @@ export async function reserveSheetWrite(integration:Integration,delivery:{id:str
   return {write,integration:stored as Integration};
  });
 }
-export async function sendGoogleSheets(integration:Integration,delivery:{id:string;payload:ApprovalPayload}) {
+export async function sendGoogleSheets(integration:Integration,delivery:{id:string;payload:ApprovalPayload},options:{signal?:AbortSignal}={}) {
+ options.signal?.throwIfAborted();
  const {write,integration:current}=await reserveSheetWrite(integration,delivery);
  if(write.status==='delivered')return {status:200};
  const client=googleClient();
@@ -213,9 +233,10 @@ export async function sendGoogleSheets(integration:Integration,delivery:{id:stri
  try{
   // Refresh explicitly and persist any replacement token before the range write.
   await client.getAccessToken();
+  options.signal?.throwIfAborted();
   const persisted=await withWorkspace(current.workspace_id,c=>c.query('update integrations set secret_ciphertext=$2 where id=$1 and enabled=true and secret_ciphertext=$3',[current.id,encryptSecret(JSON.stringify({...credentials,...client.credentials})),current.secret_ciphertext]));
   if(!persisted.rowCount)throw new Error('Sheets connection changed during delivery. Retry with the current connection.');
-  const result=await writeSheetRange(request=>client.request(request),write);
+  const result=await writeSheetRange(request=>client.request({...request,signal:options.signal}),write);
   await withWorkspace(current.workspace_id,async c=>{
    await c.query("update sheet_writes set status='delivered',delivered_at=now() where integration_id=$1 and event_key=$2",[current.id,write.event_key]);
    await audit(c,current.workspace_id,null,'google_sheets.delivered',current.id,{eventId:write.event_key,range:write.data_range});

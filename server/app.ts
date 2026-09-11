@@ -12,9 +12,12 @@ import {setExtractionProvider} from './core/worker.js';
 import {registerExports} from './integrations/exports.js';
 import {registerIntegrations} from './integrations/webhooks.js';
 import {registerProviders} from './integrations/providers.js';
+import {previewEnabled,validatePreviewConfiguration} from './core/preview.js';
 
 export async function buildApp(){
-  const app=Fastify({logger:{level:process.env.LOG_LEVEL||'warn',redact:['req.headers.authorization','req.headers.cookie','res.headers.set-cookie']},bodyLimit:1024*1024,requestTimeout:60_000,disableRequestLogging:true});
+  validatePreviewConfiguration();
+  // Vercel overwrites x-forwarded-for at its edge; local installs use socket IPs.
+  const app=Fastify({trustProxy:process.env.VERCEL==='1',logger:{level:process.env.LOG_LEVEL||'warn',redact:['req.headers.authorization','req.headers.cookie','res.headers.set-cookie']},bodyLimit:1024*1024,requestTimeout:60_000,disableRequestLogging:true});
   await app.register(cookie);await app.register(multipart,{limits:{fileSize:config.maxBytes,files:20,parts:30}});
   app.addHook('onSend',async(request,reply,payload)=>{
     reply.header('X-Content-Type-Options','nosniff').header('Referrer-Policy','same-origin').header('Permissions-Policy','camera=(), microphone=(), geolocation=()');
@@ -28,7 +31,8 @@ export async function buildApp(){
     if(status>=500)request.log.error({errorName:error instanceof Error?error.name:'Unknown',route:request.routeOptions.url},'Request failed');
     return reply.status(status).send({error:status>=500?'server_error':'request_error',message:status>=500?'The request could not be completed. Check the server status and try again.':error instanceof Error?error.message:'Invalid request.'});
   });
-  app.get('/api/health',async()=>({status:'ok',name:'Folio',environment:config.production?'production':'local',limits:{maxBytes:config.maxBytes,maxPages:config.maxPages}}));
+  app.get('/api/health',async()=>({status:'ok',name:'Folio',environment:previewEnabled()?'preview':config.production?'production':'local',revision:process.env.VERCEL_GIT_COMMIT_SHA||null,limits:{maxBytes:config.maxBytes,maxPages:config.maxPages}}));
+  app.get('/api/config',async()=>({preview:previewEnabled(),inviteRequired:previewEnabled(),hosted:!!process.env.VERCEL}));
   await registerCore(app);await registerExports(app);await registerIntegrations(app);await registerProviders(app);
   const dist=path.resolve('dist');
   if(existsSync(dist)){

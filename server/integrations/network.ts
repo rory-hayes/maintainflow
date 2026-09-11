@@ -33,12 +33,14 @@ export async function validateDestination(raw: string) {
 }
 
 export type PublicRequestOptions = {
-  method?: 'GET' | 'POST'; body?: string; headers?: Record<string, string>; maxBytes?: number;
+  method?: 'GET' | 'POST'; body?: string; headers?: Record<string, string>; maxBytes?: number; signal?:AbortSignal;
 };
 
 /** The validated DNS answer is pinned to the socket; redirects are never followed. */
 export async function publicRequest(raw: string, options: PublicRequestOptions = {}) {
+  options.signal?.throwIfAborted();
   const {url, address, family} = await validateDestination(raw);
+  options.signal?.throwIfAborted();
   return new Promise<{status: number; bytes: Buffer}>((resolve, reject) => {
     const request = https.request(url, {
       method: options.method || 'POST',
@@ -46,6 +48,7 @@ export async function publicRequest(raw: string, options: PublicRequestOptions =
       family,
       lookup: (_hostname, _options, callback) => callback(null, address, family),
       timeout: 15_000,
+      signal: options.signal,
     }, response => {
       const chunks: Buffer[] = [];
       let size = 0;
