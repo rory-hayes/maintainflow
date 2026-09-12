@@ -1,0 +1,146 @@
+{
+  "runId": "da7093ce-8460-4caa-8abc-08844ab2dc5c",
+  "startedAt": "2026-09-12T12:15:50.845Z",
+  "status": "failed",
+  "synthetic": true,
+  "requests": [
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200,
+      "elapsedMs": 196
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/config",
+      "status": 200,
+      "elapsedMs": 67
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 201,
+      "elapsedMs": 240
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/uploads/config",
+      "status": 200,
+      "elapsedMs": 94
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/parsers",
+      "status": 201,
+      "elapsedMs": 143
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/parsers/0a13b3be-0b2d-4e79-b0c1-0cc88642f3e5/uploads",
+      "status": 201,
+      "elapsedMs": 836
+    },
+    {
+      "surface": "private-storage",
+      "method": "OPTIONS",
+      "capability": "signed-upload",
+      "status": 200,
+      "elapsedMs": 80,
+      "cors": {
+        "configuredOriginAllowed": true,
+        "putAllowed": true,
+        "uploadHeadersAllowed": true
+      }
+    },
+    {
+      "surface": "private-storage",
+      "method": "PUT",
+      "capability": "signed-upload",
+      "status": 200,
+      "elapsedMs": 142,
+      "cors": {
+        "configuredOriginAllowed": true
+      }
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/uploads/bfdfe357-4db2-4fe2-9edd-c51338683876/finalize",
+      "status": 202,
+      "elapsedMs": 974
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/uploads/bfdfe357-4db2-4fe2-9edd-c51338683876/finalize",
+      "status": 202,
+      "elapsedMs": 176
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/1274a7eb-f134-4846-b9bc-84990ae8fd67",
+      "status": 200,
+      "elapsedMs": 166
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/1274a7eb-f134-4846-b9bc-84990ae8fd67/original",
+      "status": 302,
+      "elapsedMs": 339
+    }
+  ],
+  "checks": [
+    {
+      "name": "hosted-preview-preflight",
+      "status": "passed",
+      "at": "2026-09-12T12:15:51.493Z",
+      "environment": "preview",
+      "revision": "adfe4bdf6ee6d3f8e2329b8fe23cf1f0d2e59d40",
+      "hosted": true,
+      "inviteRequired": true
+    }
+  ],
+  "scope": "Deployed HTTP acceptance through the application and signed private storage, including configured-origin CORS headers",
+  "boundaries": {
+    "browserUI": "not tested by this HTTP runner",
+    "realStripe": "not tested; mock only",
+    "outboundEmail": "not attempted",
+    "resendReceiving": "not tested",
+    "googleSheets": "not tested",
+    "aiProvider": "not called; rules extraction only",
+    "expiredStagingCleanup": "not tested; requires the capability expiry window"
+  },
+  "targetOrigin": "https://maintainflow-9krgacou8-rorys-projects-accf0d71.vercel.app",
+  "requestOrigin": "https://maintainflow.io",
+  "protectionBypassUsed": true,
+  "runnerSha256": "03a9c818a48b20f131d9f5262fdcf63f7e3f3af56985d6ff08b4aeb5a4e0f954",
+  "fixtures": [
+    {
+      "name": "fixtures/generated/invoice-multipage.pdf",
+      "bytes": 1698,
+      "sha256": "26c9aaf4f4594abeedab34eceb3ce5baeb2a46b0308b6a6ce13d21f28bdd868e",
+      "pageCount": 2
+    },
+    {
+      "name": "generated-in-memory-invoice-with-synthetic-attachment.pdf",
+      "bytes": 6296681,
+      "sha256": "00bc88226af78efe40854f74aac11cddd113f8331e9f930d3f6e2bd349e86fc3",
+      "pageCount": 2,
+      "exceedsVercelBodyLimit": true
+    }
+  ],
+  "deployedRevision": "adfe4bdf6ee6d3f8e2329b8fe23cf1f0d2e59d40",
+  "completedAt": "2026-09-12T12:15:54.725Z",
+  "failure": {
+    "phase": "fresh-owner-and-direct-upload",
+    "message": "Original redirect lacks private cache/referrer controls."
+  }
+}

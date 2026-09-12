@@ -21,7 +21,8 @@ export async function buildApp(){
   const app=Fastify({trustProxy:process.env.VERCEL==='1',logger:{level:process.env.LOG_LEVEL||'warn',redact:['req.headers.authorization','req.headers.cookie','res.headers.set-cookie']},bodyLimit:1024*1024,requestTimeout:60_000,disableRequestLogging:true});
   await app.register(cookie);await app.register(multipart,{limits:{fileSize:config.maxBytes,files:20,parts:30}});
   app.addHook('onSend',async(request,reply,payload)=>{
-    reply.header('X-Content-Type-Options','nosniff').header('Referrer-Policy','same-origin').header('Permissions-Policy','camera=(), microphone=(), geolocation=()');
+    reply.header('X-Content-Type-Options','nosniff').header('Permissions-Policy','camera=(), microphone=(), geolocation=()');
+    if(!reply.hasHeader('Referrer-Policy'))reply.header('Referrer-Policy','same-origin');
     if(request.url.startsWith('/api/'))reply.header('Cache-Control','private, no-store');
     return payload;
   });

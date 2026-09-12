@@ -25,6 +25,13 @@ async function count(table:string){return (await adminPool.query(`select count(*
 before(async()=>{setStorageForTests(storage);app=await buildApp();await app.ready();owner=await signup('owner');other=await signup('foreign');viewer=await signup('viewer');await adminPool.query("update workspaces set plan=jsonb_set(plan,'{monthlyPages}','1000'::jsonb) where id=$1",[owner.workspace.id]);await adminPool.query("insert into memberships(workspace_id,user_id,role) values($1,$2,'viewer')",[owner.workspace.id,viewer.user.id]);await adminPool.query('update sessions set workspace_id=$2 where user_id=$1',[viewer.user.id,owner.workspace.id]);const created=await request('POST','/api/parsers',{name:'Owned direct upload parser',useCase:'custom',mode:'rules'});assert.equal(created.statusCode,201,created.body);parserId=created.json().parser.id;});
 after(async()=>{setStorageForTests(undefined);await app?.close();for(const id of workspaceIds)await adminPool.query('delete from workspaces where id=$1',[id]);for(const id of userIds)await adminPool.query('delete from users where id=$1',[id]);await closeDatabase();});
 
+test('ordinary API responses receive the default referrer policy',async()=>{
+ const response=await app.inject('/api/health');
+ assert.equal(response.statusCode,200);
+ assert.equal(response.headers['referrer-policy'],'same-origin');
+ assert.equal(response.headers['x-content-type-options'],'nosniff');
+});
+
 test('reservation requires an editor, exact tenant/parser, valid bounds and remaining quota',async()=>{
  const input={filename:'owned.txt',size:bytes.length,sha256:sha(bytes)};
  assert.equal((await app.inject({method:'POST',url:`/api/parsers/${parserId}/uploads`,payload:input})).statusCode,401);
@@ -47,7 +54,7 @@ test('finalization creates an immutable original, one job and usage entry; repla
  const staged=await stage();const beforeJobs=await count('jobs'),beforeUsage=await count('usage_ledger');
  const response=await request('POST',`/api/uploads/${staged.id}/finalize`,{});assert.equal(response.statusCode,202,response.body);const result=response.json();assert.equal(result.duplicate,false);assert.notEqual(result.document.storageKey,staged.key);assert.deepEqual(objects.get(result.document.storageKey),bytes);assert.ok(objects.has(staged.key));assert.equal(await count('jobs'),beforeJobs+1);assert.equal(await count('usage_ledger'),beforeUsage+1);
  const readsBefore=reads,writesBefore=writes;const replay=await request('POST',`/api/uploads/${staged.id}/finalize`,{});assert.equal(replay.statusCode,202,replay.body);assert.equal(replay.json().document.id,result.document.id);assert.equal(replay.json().replayed,true);assert.equal(reads,readsBefore);assert.equal(writes,writesBefore);
- const native=await request('GET',`/api/documents/${result.document.id}/original`);assert.equal(native.statusCode,302);assert.match(String(native.headers.location),/https:\/\/storage-fixture.supabase.co\/storage\/v1\/object\/sign/);assert.equal(native.rawPayload.length,0);
+ const native=await request('GET',`/api/documents/${result.document.id}/original`);assert.equal(native.statusCode,302);assert.match(String(native.headers.location),/https:\/\/storage-fixture.supabase.co\/storage\/v1\/object\/sign/);assert.equal(native.rawPayload.length,0);assert.equal(native.headers['referrer-policy'],'no-referrer');assert.equal(native.headers['cache-control'],'private, no-store');
  const location=await request('GET',`/api/documents/${result.document.id}/original-url`);assert.equal(location.statusCode,200);assert.equal(location.json().external,true);
  assert.equal((await request('GET',`/api/documents/${result.document.id}/original-url`,undefined,other)).statusCode,404);
 });

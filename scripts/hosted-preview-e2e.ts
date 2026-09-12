@@ -175,7 +175,8 @@ async function upload(client: Client, parserId: string, bytes: Buffer, filename:
   await (await storageRequest(url, 'PUT', bytes)).body?.cancel();
   const result = await json('/api/uploads/' + uploadId + '/finalize', { method: 'POST', expected: 202, client, body: {} });
   id(result.document.id); id(result.jobId);
-  ensure(!result.duplicate && result.document.sha256 === sha256(bytes) && result.document.byteSize === bytes.length && result.document.pageCount === 2, 'Finalized document does not match the reserved original bytes or page count.');
+  // PostgreSQL bigint byte_size uses the driver's lossless decimal-string form.
+  ensure(!result.duplicate && result.document.sha256 === sha256(bytes) && Number(result.document.byteSize) === bytes.length && result.document.pageCount === 2, 'Finalized document does not match the reserved original bytes or page count.');
   ensure(result.document.storageKey === client.workspaceId + '/' + result.document.id && result.document.storageKey !== stagingKey, 'Final original is not a separate immutable object.');
   const replay = await json('/api/uploads/' + uploadId + '/finalize', { method: 'POST', expected: 202, client, body: {} });
   ensure(replay.replayed === true && replay.document.id === result.document.id && replay.jobId === result.jobId, 'Finalization replay created different document/job identifiers.');
