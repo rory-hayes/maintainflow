@@ -18,6 +18,10 @@ The candidate was created with `--prod --skip-domain`; its protected Vercel proj
 
 Computer bootstrap timed out repeatedly before exposing any browser state. Documented diagnostics confirmed Chrome running, its extension installed/enabled and native-host manifest correct. A documented fresh-window reconnect succeeded in opening Chrome, but Computer still timed out. The user was asked to reconnect/reinstall the Computer/Browser plugin and reply ready. Do not request the setup approval again.
 
+After the user confirmed uninstalling/reinstalling Computer, both a fresh `cua.getState()` and a direct documented Chrome/Supabase tab request still timed out before exposing browser state. Plugin dependency inspection could not resolve the bundled Computer reference in its public directory; that does not establish installation state. Do not repeat the reinstall advice without new evidence.
+
+The manual fallback is the prepared private `.local/hosted-preview/bootstrap.sql`. It was checked again against all ten current migrations; both SCRAM verifiers match the private passwords and runtime URLs already configured in Vercel. The file was queued for display in Codex so the user can copy it into the existing Supabase project's SQL Editor and run it directly. No SQL was executed by the agent during this recovery attempt. Wait for the user's execution result before testing the new database connections. The worker/Vault setup remains a separate later step.
+
 The Supabase database bootstrap, Vault secrets and watchdog have **not** been applied. The private bucket was verified on 11 September as non-public, `10485760` bytes, MIME `application/octet-stream`. Database-backed account creation, direct uploads, private originals, extraction, provider integrations and actual scheduled recovery remain unverified on the candidate. No AI, email or payment call was made by these startup checks.
 
 ## Resume after the connection is restored
