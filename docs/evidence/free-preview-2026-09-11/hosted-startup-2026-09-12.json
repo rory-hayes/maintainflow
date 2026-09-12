@@ -1,0 +1,63 @@
+{
+  "observedAt": "2026-09-12T08:28:38.537508+00:00",
+  "candidate": {
+    "id": "dpl_G1jwiGD6rRFPibT6Fw9uBFzRmds3",
+    "url": "https://maintainflow-myjps3yc4-rorys-projects-accf0d71.vercel.app",
+    "state": "READY",
+    "region": "fra1",
+    "runtimeBundleMiB": 66.7,
+    "health": {
+      "status": "ok",
+      "name": "Folio",
+      "environment": "preview",
+      "revision": "61dda4d163fbe160dddfb56bdd22f319a128cbfb",
+      "limits": {
+        "maxBytes": 10485760,
+        "maxPages": 30
+      }
+    }
+  },
+  "checks": [
+    {
+      "path": "/api/config",
+      "status": 200
+    },
+    {
+      "path": "/api/internal/worker",
+      "status": 401
+    },
+    {
+      "path": "/api/auth/register",
+      "status": 403
+    },
+    {
+      "path": "/sign-up",
+      "status": 200
+    },
+    {
+      "path": "/api/health",
+      "status": 200
+    }
+  ],
+  "config": {
+    "preview": true,
+    "inviteRequired": true,
+    "hosted": true
+  },
+  "vercelProductionVariablesConfigured": 22,
+  "vercelPlan": "hobby",
+  "databaseBootstrap": "not applied; Computer connection unavailable",
+  "scheduler": "not installed",
+  "fullHostedAcceptance": "not run; requires database setup",
+  "domainPromoted": false,
+  "domainMapping": {
+    "projectId": "prj_9995IQ0H1GERFJseqQ9bqnOI7b02",
+    "verifiedDomains": ["maintainflow.io", "www.maintainflow.io"],
+    "wwwRedirect": "maintainflow.io",
+    "liveAliasDeploymentId": "dpl_77dQ7bkAWJwhma6aUHaU5SnpkH5F"
+  },
+  "sourcePushed": false,
+  "liveDomainObservedRevision": "2ad3baf4aa27a3ac3d3c6a07c80b23b55e706147",
+  "billing": "mock",
+  "providerCalls": false
+}
