@@ -1,0 +1,81 @@
+{
+  "checkedAt": "2026-09-12T15:34:10.830Z",
+  "scope": "Hosted provider preparation; account authorization and actual delivery remain pending.",
+  "sheet": {
+    "created": true,
+    "nativeReadback": true,
+    "private": true,
+    "tabs": [
+      {
+        "title": "Receipts",
+        "headers": [
+          "Document ID",
+          "Merchant",
+          "Date",
+          "Currency",
+          "Total"
+        ]
+      },
+      {
+        "title": "Setup",
+        "headers": [
+          "Folio receipt exports",
+          "Setup"
+        ]
+      },
+      {
+        "title": "Folio QA",
+        "headers": []
+      }
+    ],
+    "acceptanceTabBlankCellsChecked": 26000,
+    "applicationOAuthConnected": false,
+    "automaticDeliveryVerified": false
+  },
+  "google": {
+    "existingClientRetained": true,
+    "candidateDeploymentId": "dpl_HnReDU1Xr8mbAcNrWNtQoneEwK5p",
+    "candidateRevision": "ead48a54a8337f42dfcf794d771701d743a8641d",
+    "callback": "https://maintainflow.io/api/google/callback",
+    "callbackSavedForProductionDeployments": true,
+    "authorizationRequestCreated": true,
+    "providerError": "redirect_uri_mismatch",
+    "temporaryIntegrationRemoved": true,
+    "sessionRevoked": true,
+    "credentialsReplaced": false,
+    "remaining": [
+      "Register the exact callback on the existing Google OAuth web client.",
+      "Confirm Sheets API and consent/test-user configuration; authorize the app.",
+      "Verify an approved synthetic export in Folio QA and replay without duplicate rows."
+    ]
+  },
+  "resend": {
+    "existingSensitiveApiKeyNamePresentOnVercel": true,
+    "existingKeyPermissionsVerified": false,
+    "inboundEnabled": false,
+    "webhookSigningSecretConfigured": false,
+    "deliveryVerified": false,
+    "remaining": [
+      "Supply accessible Full access API credential for existing Resend account.",
+      "Register or reuse the email.received webhook and store signing secret server-side.",
+      "Receive and retrieve the managed inbox challenge; then verify actual signed webhook intake/extraction."
+    ]
+  },
+  "access": {
+    "computerUseInventoryTimedOut": true,
+    "directChromeConnectionTimedOut": true,
+    "accountActionInstructionsPreparedPrivately": true
+  },
+  "billing": {
+    "mock": true,
+    "paidUpgradeMade": false
+  },
+  "privateDataOmitted": [
+    "OAuth client ID",
+    "authorization URL and state",
+    "spreadsheet and folder IDs",
+    "account identity",
+    "credentials",
+    "session cookies"
+  ]
+}

@@ -42,12 +42,20 @@ The [hosted scheduler acceptance summary](evidence/free-preview-2026-09-11/sched
 
 This demonstrates hosted recovery and no duplicate runs or usage during the observed window. The expired lease was synthetic; the test did not physically kill a running process. Timing and Vercel logs correlate the watchdog invocation with recovery, but do not establish exact pg_net request/response-ID correlation.
 
+## Provider preparation — 12 September, 15:34 UTC
+
+A private native Google Sheet was created in the existing ChatGPT folder and read back through the Drive connector. Receipts and Setup preserve the prepared template; the dedicated Folio QA tab was verified blank across 26,000 cells. This establishes the destination only. Folio OAuth and automatic delivery remain unverified.
+
+Vercel retains the legacy Google client ID/secret and Resend API key. A protected candidate at `dpl_HnReDU1Xr8mbAcNrWNtQoneEwK5p`, revision `ead48a54a8337f42dfcf794d771701d743a8641d`, reused the Google client with `https://maintainflow.io/api/google/callback`. Folio created the authorization request successfully, then Google returned **`redirect_uri_mismatch`**. The temporary disabled integration was deleted and its test session revoked. The callback has now been saved in the production environment for subsequent deployments; the existing Google web client must allow that exact URI before consent can succeed.
+
+Resend inbound remains disabled. The retained API key's permissions are unverified, and the webhook signing secret and managed receiving challenge still require setup. Browser inventory and a direct Chrome connection both timed out, so private account-action instructions and a mode-0600 Resend key file were prepared. No paid upgrades or real payment calls were made. See the [sanitized provider preparation receipt](evidence/free-preview-2026-09-11/provider-preparation-2026-09-12.json); provider identities and credential handoff files remain under ignored `.local/provider-completion/`.
+
 ## Domain, Git and remaining work
 
 Vercel is connected to `rory-hayes/maintainflow`, production branch `main`, with automatic deployments and custom-domain assignment enabled. Both `maintainflow.io` and `www.maintainflow.io` are verified; www redirects to the apex. The migration hold is removed, and the Git deployment at scheduler acceptance served revision `685d83f4bff6e6a9160eba4b908046cb24604b07` on the canonical domain. The prior source remains preserved on `backup/pre-folio-2026-09-11` at `2ad3baf4aa27a3ac3d3c6a07c80b23b55e706147`. Future release checks should read the actual domain alias and runtime revision, because `project.targets.production` can reference a canceled deployment.
 
-1. Complete Resend receiving setup and verify an actual inbound delivery through extraction.
-2. Complete Google Sheets authorization and verify delivery of approved values to a sheet.
+1. Supply an accessible Full access Resend key, complete signed receiving setup and verify an actual inbound delivery through extraction.
+2. Register the exact Google callback on the existing client, complete authorization and verify delivery of approved values to the prepared blank Folio QA tab.
 
 Neither delivery path nor customer use is verified. Real Stripe is intentionally deferred; hosted billing remains visibly mocked.
 
