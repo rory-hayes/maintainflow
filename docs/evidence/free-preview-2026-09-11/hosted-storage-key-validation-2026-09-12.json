@@ -1,0 +1,9 @@
+{
+  "observedAt": "2026-09-12T12:11:47.491Z",
+  "status": 200,
+  "valid": true,
+  "bucket": "folio-originals",
+  "private": true,
+  "fileSizeLimit": 10485760,
+  "mimePolicyMatches": true
+}
