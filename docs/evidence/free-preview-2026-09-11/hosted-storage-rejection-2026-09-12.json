@@ -1,0 +1,30 @@
+{
+  "observedAt": "2026-09-12T11:51:06.623Z",
+  "deploymentId": "dpl_GkHCHE7j1fxqB3WoLMMXvgWTPtak",
+  "targetOrigin": "https://maintainflow-md72zaral-rorys-projects-accf0d71.vercel.app",
+  "revision": "cdd6372c0187055d830853a110f851d0da69b2c1",
+  "applicationStatus": 503,
+  "storageDiagnostic": {
+    "storageCode": "STORAGE_UPSTREAM_HTTP",
+    "storageOperation": "bucket-read",
+    "upstreamStatus": 400,
+    "storageProviderCode": "AccessDenied",
+    "credentialJwtPayloadParseable": false
+  },
+  "interpretation": "Supabase rejected the configured credential for the bucket lookup. Non-JWT format alone is not evidence of invalidity; current secret keys are opaque.",
+  "servicePrivileges": {
+    "observedAt": "2026-09-12T11:53:14.635Z",
+    "service_role": {
+      "storageSchemaUsage": true,
+      "bucketSelectInsert": true,
+      "objectSelectInsert": true,
+      "bypassRls": true
+    },
+    "supabase_storage_admin": {
+      "storageSchemaUsage": true,
+      "bucketSelectInsert": true,
+      "objectSelectInsert": true
+    }
+  },
+  "nextStep": "Validate a current project server key privately before replacing the Vercel production variable."
+}

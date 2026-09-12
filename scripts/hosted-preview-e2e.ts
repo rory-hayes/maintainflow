@@ -137,10 +137,11 @@ async function storageRequest(url: URL, method: 'GET' | 'PUT' | 'OPTIONS', bytes
     ensure(allowedOrigin === requestOrigin || allowedOrigin === '*', 'Signed private storage ' + method + ' does not allow the configured application origin.');
     receipt.cors = { configuredOriginAllowed: true };
     if (method === 'OPTIONS') {
-      const tokens = (name: string) => new Set((response.headers.get(name) || '').split(',').map(value => value.trim().toLowerCase()));
-      const methods = tokens('access-control-allow-methods'), allowedHeaders = tokens('access-control-allow-headers');
+      const tokens = (name: string) => (response.headers.get(name) || '').split(',').map(value => value.trim());
+      const methods = new Set(tokens('access-control-allow-methods'));
+      const allowedHeaders = new Set(tokens('access-control-allow-headers').map(value => value.toLowerCase()));
       // Wildcards are valid because these requests deliberately omit credentials.
-      ensure(methods.has('put') || methods.has('*'), 'Signed private storage preflight does not allow PUT.');
+      ensure(methods.has('PUT') || methods.has('*'), 'Signed private storage preflight does not allow PUT.');
       ensure(allowedHeaders.has('*') || ['content-type', 'x-upsert'].every(name => allowedHeaders.has(name)), 'Signed private storage preflight does not allow the upload headers.');
       receipt.cors.putAllowed = true; receipt.cors.uploadHeadersAllowed = true;
     }

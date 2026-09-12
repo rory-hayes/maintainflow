@@ -20,7 +20,7 @@ type StorageCode='STORAGE_CONFIG_URL'|'STORAGE_CONFIG_CREDENTIALS'|'STORAGE_CONF
 // Unknown strings and all provider messages remain excluded from logs.
 const providerCodes=['InvalidJWT','InvalidRequest','InvalidBucketName','NoSuchBucket','NoSuchKey','AccessDenied','DatabaseError','InternalError','TenantNotFound','InvalidSignature','ExpiredToken'] as const;
 type StorageProviderCode=typeof providerCodes[number]|'unclassified';
-type CredentialDiagnostic={credentialJwtPayloadParseable:boolean;credentialProjectMatches?:boolean;credentialExpired?:boolean};
+type CredentialDiagnostic={credentialShape:'jwt'|'sb_secret'|'sb_publishable'|'unknown';whitespacePresent:boolean;credentialJwtPayloadParseable:boolean;credentialProjectMatches?:boolean;credentialExpired?:boolean;roleMatchesServiceRole?:boolean};
 type ProviderDiagnostic=CredentialDiagnostic&{storageProviderCode:StorageProviderCode};
 type StorageDiagnostic={storageCode:StorageCode;storageOperation?:StorageOperation;upstreamStatus?:number}&Partial<ProviderDiagnostic>;
 const diagnostics=new WeakMap<Error,Readonly<StorageDiagnostic>>();
@@ -34,14 +34,18 @@ function providerCode(body:unknown):StorageProviderCode{
 }
 /** Unverified payload hints only; these never authenticate a key or expose claims. */
 function credentialDiagnostic(key:string,hostname:string):CredentialDiagnostic{
-  if(key.length>16_384||!key.split('.').every(part=>/^[A-Za-z0-9_-]+$/.test(part))||key.split('.').length!==3)return {credentialJwtPayloadParseable:false};
+  const normalized=key.trim(),parts=normalized.split('.');
+  const credentialShape:CredentialDiagnostic['credentialShape']=normalized.length>16_384?'unknown':normalized.startsWith('sb_secret_')?'sb_secret':normalized.startsWith('sb_publishable_')?'sb_publishable':parts.length===3&&parts.every(part=>/^[A-Za-z0-9_-]+$/.test(part))?'jwt':'unknown';
+  const hints:CredentialDiagnostic={credentialShape,whitespacePresent:/\s/.test(key),credentialJwtPayloadParseable:false};
+  if(credentialShape!=='jwt')return hints;
   try{
-    const payload=JSON.parse(Buffer.from(key.split('.')[1],'base64url').toString('utf8'));
-    if(!payload||typeof payload!=='object'||Array.isArray(payload))return {credentialJwtPayloadParseable:false};
-    return {credentialJwtPayloadParseable:true,
+    const payload=JSON.parse(Buffer.from(parts[1],'base64url').toString('utf8'));
+    if(!payload||typeof payload!=='object'||Array.isArray(payload))return hints;
+    return {...hints,credentialJwtPayloadParseable:true,
       ...(typeof payload.ref==='string'?{credentialProjectMatches:payload.ref===hostname.split('.')[0]}:{}),
-      ...(typeof payload.exp==='number'&&Number.isFinite(payload.exp)?{credentialExpired:payload.exp<=Date.now()/1000}:{})};
-  }catch{return {credentialJwtPayloadParseable:false};}
+      ...(typeof payload.exp==='number'&&Number.isFinite(payload.exp)?{credentialExpired:payload.exp<=Date.now()/1000}:{}),
+      ...(Object.hasOwn(payload,'role')?{roleMatchesServiceRole:payload.role==='service_role'}:{})};
+  }catch{return hints;}
 }
 function diagnosedError(code:StorageCode,message:string,operation?:StorageOperation,upstreamStatus?:number,statusCode=503,provider?:ProviderDiagnostic){
   const error=storageError(message,statusCode);

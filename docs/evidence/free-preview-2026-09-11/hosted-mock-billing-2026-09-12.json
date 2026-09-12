@@ -1,0 +1,36 @@
+{
+  "observedAt": "2026-09-12T11:52:10.745Z",
+  "targetOrigin": "https://maintainflow-md72zaral-rorys-projects-accf0d71.vercel.app",
+  "revision": "cdd6372c0187055d830853a110f851d0da69b2c1",
+  "synthetic": true,
+  "checks": [
+    {
+      "name": "mock-team-persisted",
+      "passed": true
+    },
+    {
+      "name": "mock-cancel-preserves-parser",
+      "passed": true
+    }
+  ],
+  "providers": {
+    "stripe": {
+      "mode": "mock",
+      "realPaymentVerified": false
+    },
+    "resend": {
+      "configured": false,
+      "verified": false
+    },
+    "googleSheets": {
+      "configured": false,
+      "verified": false
+    }
+  },
+  "boundaries": {
+    "storage": "blocked at bucket lookup",
+    "documentRetentionAcrossBilling": "not tested because no upload succeeded",
+    "realPayments": "not attempted",
+    "outboundMessages": "not attempted"
+  }
+}

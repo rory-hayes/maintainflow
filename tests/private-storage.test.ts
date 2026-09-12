@@ -53,12 +53,12 @@ test('storage diagnostics identify upstream operation/status without retaining p
  for(const stage of ['bucket-read','upload-sign'] as const)for(const status of [401,403,500]){
   const client=storage(endpoint=>stage==='upload-sign'&&endpoint.pathname.includes('/bucket/')?json(bucket):json({message:'PRIVATE provider body',url:'https://private.example/?token=PRIVATE'},status));
   await assert.rejects(client.signUpload!(key),(error:any)=>{
-   assert.equal(error.statusCode,503);assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:stage,upstreamStatus:status,storageProviderCode:'unclassified',credentialJwtPayloadParseable:false});
+   assert.equal(error.statusCode,503);assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:stage,upstreamStatus:status,storageProviderCode:'unclassified',credentialShape:'unknown',whitespacePresent:true,credentialJwtPayloadParseable:false});
    assert.ok(!JSON.stringify(error).includes('PRIVATE'));assert.ok(!String(error).includes('PRIVATE'));return true;
   });
  }
  const missing=storage(()=>json({statusCode:'404'},400));
- await assert.rejects(missing.read(key),(error:any)=>{assert.equal(error.statusCode,404);assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:'bucket-read',upstreamStatus:400,storageProviderCode:'unclassified',credentialJwtPayloadParseable:false});return true;});
+ await assert.rejects(missing.read(key),(error:any)=>{assert.equal(error.statusCode,404);assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:'bucket-read',upstreamStatus:400,storageProviderCode:'unclassified',credentialShape:'unknown',whitespacePresent:true,credentialJwtPayloadParseable:false});return true;});
 });
 test('storage diagnostics distinguish transport, bucket, JSON and signed-URL failures',async()=>{
  const cases=[
@@ -92,16 +92,19 @@ test('upstream diagnostics recognize only exact published codes from code or err
   });
  }
 });
-test('credential diagnostics report only unverified project-match and expiration booleans',async()=>{
+test('credential diagnostics distinguish key shapes and expose only unverified claim booleans',async()=>{
  const jwt=(payload:unknown)=>Buffer.from('{"alg":"HS256"}').toString('base64url')+'.'+Buffer.from(JSON.stringify(payload)).toString('base64url')+'.synthetic-signature';
  const examples=[
-  {credential:jwt({ref:'storage-fixture',exp:Math.floor(Date.now()/1000)+3600,secret:'PRIVATE'}),expected:{credentialJwtPayloadParseable:true,credentialProjectMatches:true,credentialExpired:false}},
-  {credential:jwt({ref:'PRIVATE-other-project',exp:1}),expected:{credentialJwtPayloadParseable:true,credentialProjectMatches:false,credentialExpired:true}},
-  {credential:jwt({ref:42,exp:'PRIVATE'}),expected:{credentialJwtPayloadParseable:true}},
-  {credential:jwt(null),expected:{credentialJwtPayloadParseable:false}},
-  {credential:'PRIVATE opaque key',expected:{credentialJwtPayloadParseable:false}},
-  {credential:'aaa.not-json.bbb',expected:{credentialJwtPayloadParseable:false}},
-  {credential:'a'.repeat(16_385),expected:{credentialJwtPayloadParseable:false}},
+  {credential:jwt({ref:'storage-fixture',exp:Math.floor(Date.now()/1000)+3600,role:'service_role',secret:'PRIVATE'}),expected:{credentialShape:'jwt',whitespacePresent:false,credentialJwtPayloadParseable:true,credentialProjectMatches:true,credentialExpired:false,roleMatchesServiceRole:true}},
+  {credential:jwt({ref:'PRIVATE-other-project',exp:1,role:'anon'}),expected:{credentialShape:'jwt',whitespacePresent:false,credentialJwtPayloadParseable:true,credentialProjectMatches:false,credentialExpired:true,roleMatchesServiceRole:false}},
+  {credential:jwt({ref:42,exp:'PRIVATE'}),expected:{credentialShape:'jwt',whitespacePresent:false,credentialJwtPayloadParseable:true}},
+  {credential:jwt({role:null}),expected:{credentialShape:'jwt',whitespacePresent:false,credentialJwtPayloadParseable:true,roleMatchesServiceRole:false}},
+  {credential:jwt(null),expected:{credentialShape:'jwt',whitespacePresent:false,credentialJwtPayloadParseable:false}},
+  {credential:'sb_secret_PRIVATE',expected:{credentialShape:'sb_secret',whitespacePresent:false,credentialJwtPayloadParseable:false}},
+  {credential:'\tsb_publishable_PRIVATE\n',expected:{credentialShape:'sb_publishable',whitespacePresent:true,credentialJwtPayloadParseable:false}},
+  {credential:'PRIVATE opaque key',expected:{credentialShape:'unknown',whitespacePresent:true,credentialJwtPayloadParseable:false}},
+  {credential:'aaa.not-json.bbb',expected:{credentialShape:'jwt',whitespacePresent:false,credentialJwtPayloadParseable:false}},
+  {credential:'a'.repeat(16_385),expected:{credentialShape:'unknown',whitespacePresent:false,credentialJwtPayloadParseable:false}},
  ];
  for(const {credential,expected} of examples){
   const client=createSupabaseStorage({url,serviceRoleKey:credential,fetch:async()=>json({code:'InvalidJWT',message:'PRIVATE'},400)});
@@ -109,5 +112,23 @@ test('credential diagnostics report only unverified project-match and expiration
    assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:'bucket-read',upstreamStatus:400,storageProviderCode:'InvalidJWT',...expected});
    assert.ok(!JSON.stringify(storageDiagnostic(error)).includes('PRIVATE'));assert.ok(!String(error).includes(credential));return true;
   });
+ }
+});
+test('credential hints trim surrounding whitespace without changing transport credentials',async()=>{
+ const jwt=Buffer.from('{"alg":"HS256"}').toString('base64url')+'.'+Buffer.from(JSON.stringify({ref:'storage-fixture',role:'service_role'})).toString('base64url')+'.synthetic-signature';
+ for(const credential of [` ${jwt}`,`${jwt} `,`${jwt}\n`,`\t${jwt}\r\n`]){
+  let transportChecked=false;
+  const client=createSupabaseStorage({url,serviceRoleKey:credential,fetch:async(_input,init)=>{
+   assert.equal((init!.headers as Record<string,string>).apikey,credential);
+   assert.equal((init!.headers as Record<string,string>).Authorization,`Bearer ${credential}`);
+   const normalizedHeaders=new Headers(init!.headers);
+   assert.equal(normalizedHeaders.get('apikey'),jwt);
+   assert.equal(normalizedHeaders.get('authorization')!.replace(/^Bearer\s+/i,''),jwt);
+   transportChecked=true;return json({code:'AccessDenied'},400);
+  }});
+  await assert.rejects(client.signUpload!(key),(error:any)=>{
+   assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:'bucket-read',upstreamStatus:400,storageProviderCode:'AccessDenied',credentialShape:'jwt',whitespacePresent:true,credentialJwtPayloadParseable:true,credentialProjectMatches:true,roleMatchesServiceRole:true});return true;
+  });
+  assert.equal(transportChecked,true);
  }
 });

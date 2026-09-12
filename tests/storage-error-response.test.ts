@@ -16,7 +16,7 @@ test('HTTP storage failures keep generic user errors and log only trusted diagno
   const first=await app.inject({method:'GET',url:'/__test_storage_error'});
   assert.equal(first.statusCode,503);
   assert.deepEqual(first.json(),{error:'server_error',message:'The request could not be completed. Check the server status and try again.'});
-  assert.deepEqual(logs[0],{errorName:'Error',route:'/__test_storage_error',storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:'bucket-read',upstreamStatus:400,storageProviderCode:'InvalidJWT',credentialJwtPayloadParseable:false});
+  assert.deepEqual(logs[0],{errorName:'Error',route:'/__test_storage_error',storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:'bucket-read',upstreamStatus:400,storageProviderCode:'InvalidJWT',credentialShape:'unknown',whitespacePresent:true,credentialJwtPayloadParseable:false});
   assert.ok(!JSON.stringify(logs).includes('PRIVATE'));assert.ok(!first.body.includes('storageCode'));
   failure=Object.assign(new Error('PRIVATE unrelated failure'),{statusCode:503,storageCode:'PRIVATE',storageOperation:'PRIVATE',upstreamStatus:401});
   const second=await app.inject({method:'GET',url:'/__test_storage_error'});
