@@ -35,7 +35,7 @@ const evidencePath = path.join(root, 'docs/evidence/free-preview-2026-09-11/host
 const requests: Json[] = [], checks: Json[] = [];
 const evidence: Json = {
   runId, startedAt, status: 'running', synthetic: true, requests, checks,
-  scope: 'Deployed HTTP acceptance through the application and signed private storage',
+  scope: 'Deployed HTTP acceptance through the application and signed private storage, including configured-origin CORS headers',
   boundaries: { browserUI: 'not tested by this HTTP runner', realStripe: 'not tested; mock only', outboundEmail: 'not attempted', resendReceiving: 'not tested', googleSheets: 'not tested', aiProvider: 'not called; rules extraction only', expiredStagingCleanup: 'not tested; requires the capability expiry window' },
 };
 const credentials: Json = { runId };
@@ -113,18 +113,38 @@ async function json(route: string, options: RequestOptions = {}): Promise<Json> 
   try { return JSON.parse((await boundedBytes(response, 2 * 1024 * 1024)).toString('utf8')); }
   catch (error) { if (error instanceof CheckError) throw error; throw new CheckError('Application returned an invalid JSON response.'); }
 }
-async function storageRequest(url: URL, method: 'GET' | 'PUT', bytes?: Buffer) {
+async function storageRequest(url: URL, method: 'GET' | 'PUT' | 'OPTIONS', bytes?: Buffer) {
   ensure(Date.now() < deadline, 'Hosted acceptance exceeded its twelve-minute deadline.');
   const began = Date.now(); let response: Response;
-  // Deliberately independent of request(): no cookies, authorization, API keys,
-  // invitation, Origin header, or Vercel bypass are forwarded to storage.
+  // Use only the configured application origin to model the browser's CORS
+  // request. No cookies, authorization, API keys, invitation or bypass follow it.
+  const headers = new Headers({ origin: requestOrigin });
+  if (method === 'PUT') { headers.set('content-type', 'application/octet-stream'); headers.set('x-upsert', 'false'); }
+  if (method === 'OPTIONS') {
+    headers.set('access-control-request-method', 'PUT');
+    headers.set('access-control-request-headers', 'content-type,x-upsert');
+  }
   try { response = await fetch(url, {
-    method, headers: method === 'PUT' ? { 'content-type': 'application/octet-stream', 'x-upsert': 'false' } : {},
+    method, headers,
     body: bytes ? new Uint8Array(bytes) : undefined, credentials: 'omit', referrerPolicy: 'no-referrer',
     redirect: 'error', signal: AbortSignal.timeout(Math.min(90_000, Math.max(1, deadline - Date.now()))),
   }); } catch { throw new CheckError('Signed private storage ' + method + ' request failed.'); }
-  requests.push({ surface: 'private-storage', method, capability: method === 'PUT' ? 'signed-upload' : 'signed-download', status: response.status, elapsedMs: Date.now() - began });
-  ensure(response.ok, 'Signed private storage ' + method + ' returned HTTP ' + response.status + '.');
+  const receipt: Json = { surface: 'private-storage', method, capability: method === 'GET' ? 'signed-download' : 'signed-upload', status: response.status, elapsedMs: Date.now() - began };
+  requests.push(receipt);
+  try {
+    ensure(response.ok, 'Signed private storage ' + method + ' returned HTTP ' + response.status + '.');
+    const allowedOrigin = response.headers.get('access-control-allow-origin');
+    ensure(allowedOrigin === requestOrigin || allowedOrigin === '*', 'Signed private storage ' + method + ' does not allow the configured application origin.');
+    receipt.cors = { configuredOriginAllowed: true };
+    if (method === 'OPTIONS') {
+      const tokens = (name: string) => new Set((response.headers.get(name) || '').split(',').map(value => value.trim().toLowerCase()));
+      const methods = tokens('access-control-allow-methods'), allowedHeaders = tokens('access-control-allow-headers');
+      // Wildcards are valid because these requests deliberately omit credentials.
+      ensure(methods.has('put') || methods.has('*'), 'Signed private storage preflight does not allow PUT.');
+      ensure(allowedHeaders.has('*') || ['content-type', 'x-upsert'].every(name => allowedHeaders.has(name)), 'Signed private storage preflight does not allow the upload headers.');
+      receipt.cors.putAllowed = true; receipt.cors.uploadHeadersAllowed = true;
+    }
+  } catch (error) { await response.body?.cancel(); throw error; }
   return response;
 }
 async function signup(label: 'owner' | 'outsider') {
@@ -150,6 +170,7 @@ async function upload(client: Client, parserId: string, bytes: Buffer, filename:
   const uploadId = id(reservation.uploadId), stagingKey = id(client.workspaceId) + '/' + uploadId;
   ensure(reservation.method === 'PUT' && reservation.headers?.['Content-Type'] === 'application/octet-stream' && reservation.headers?.['x-upsert'] === 'false', 'Direct upload contract is unexpected.');
   const url = signedURL(reservation.uploadUrl, 'upload/sign', stagingKey);
+  await (await storageRequest(url, 'OPTIONS')).body?.cancel();
   await (await storageRequest(url, 'PUT', bytes)).body?.cancel();
   const result = await json('/api/uploads/' + uploadId + '/finalize', { method: 'POST', expected: 202, client, body: {} });
   id(result.document.id); id(result.jobId);

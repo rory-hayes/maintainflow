@@ -16,13 +16,36 @@ export interface PrivateStorage {
 function storageError(message:string,statusCode=503):Error{return Object.assign(new Error(message),{statusCode});}
 type StorageOperation='bucket-read'|'upload-sign'|'download-sign'|'object-write'|'object-read'|'object-delete';
 type StorageCode='STORAGE_CONFIG_URL'|'STORAGE_CONFIG_CREDENTIALS'|'STORAGE_CONFIG_DRIVER'|'STORAGE_UPSTREAM_NETWORK'|'STORAGE_UPSTREAM_HTTP'|'STORAGE_RESPONSE_INVALID'|'STORAGE_BUCKET_POLICY'|'STORAGE_SIGNED_URL';
-type StorageDiagnostic={storageCode:StorageCode;storageOperation?:StorageOperation;upstreamStatus?:number};
+// Exact public constants from supabase/storage src/internal/errors/codes.ts.
+// Unknown strings and all provider messages remain excluded from logs.
+const providerCodes=['InvalidJWT','InvalidRequest','InvalidBucketName','NoSuchBucket','NoSuchKey','AccessDenied','DatabaseError','InternalError','TenantNotFound','InvalidSignature','ExpiredToken'] as const;
+type StorageProviderCode=typeof providerCodes[number]|'unclassified';
+type CredentialDiagnostic={credentialJwtPayloadParseable:boolean;credentialProjectMatches?:boolean;credentialExpired?:boolean};
+type ProviderDiagnostic=CredentialDiagnostic&{storageProviderCode:StorageProviderCode};
+type StorageDiagnostic={storageCode:StorageCode;storageOperation?:StorageOperation;upstreamStatus?:number}&Partial<ProviderDiagnostic>;
 const diagnostics=new WeakMap<Error,Readonly<StorageDiagnostic>>();
 /** Only diagnostics created here are loggable; arbitrary error properties are ignored. */
 export function storageDiagnostic(error:unknown):Readonly<StorageDiagnostic>|undefined{return error instanceof Error?diagnostics.get(error):undefined;}
-function diagnosedError(code:StorageCode,message:string,operation?:StorageOperation,upstreamStatus?:number,statusCode=503){
+function providerCode(body:unknown):StorageProviderCode{
+  if(!body||typeof body!=='object'||Array.isArray(body))return 'unclassified';
+  const fields=body as {code?:unknown;error?:unknown};
+  for(const value of [fields.code,fields.error])if(typeof value==='string'&&(providerCodes as readonly string[]).includes(value))return value as StorageProviderCode;
+  return 'unclassified';
+}
+/** Unverified payload hints only; these never authenticate a key or expose claims. */
+function credentialDiagnostic(key:string,hostname:string):CredentialDiagnostic{
+  if(key.length>16_384||!key.split('.').every(part=>/^[A-Za-z0-9_-]+$/.test(part))||key.split('.').length!==3)return {credentialJwtPayloadParseable:false};
+  try{
+    const payload=JSON.parse(Buffer.from(key.split('.')[1],'base64url').toString('utf8'));
+    if(!payload||typeof payload!=='object'||Array.isArray(payload))return {credentialJwtPayloadParseable:false};
+    return {credentialJwtPayloadParseable:true,
+      ...(typeof payload.ref==='string'?{credentialProjectMatches:payload.ref===hostname.split('.')[0]}:{}),
+      ...(typeof payload.exp==='number'&&Number.isFinite(payload.exp)?{credentialExpired:payload.exp<=Date.now()/1000}:{})};
+  }catch{return {credentialJwtPayloadParseable:false};}
+}
+function diagnosedError(code:StorageCode,message:string,operation?:StorageOperation,upstreamStatus?:number,statusCode=503,provider?:ProviderDiagnostic){
   const error=storageError(message,statusCode);
-  diagnostics.set(error,Object.freeze({storageCode:code,...(operation?{storageOperation:operation}:{}),...(Number.isInteger(upstreamStatus)&&upstreamStatus!>=100&&upstreamStatus!<=599?{upstreamStatus}: {})}));
+  diagnostics.set(error,Object.freeze({storageCode:code,...(operation?{storageOperation:operation}:{}),...(typeof upstreamStatus==='number'&&Number.isInteger(upstreamStatus)&&upstreamStatus>=100&&upstreamStatus<=599?{upstreamStatus}: {}),...provider}));
   return error;
 }
 export function validateStorageKey(key:string,workspaceId?:string){
@@ -57,7 +80,7 @@ export function createSupabaseStorage(options:{url:string;serviceRoleKey:string;
     let response:Response;
     try{response=await transport(`${api}${route}`,{...init,headers:{apikey:options.serviceRoleKey,Authorization:`Bearer ${options.serviceRoleKey}`,...Object.fromEntries(new Headers(init.headers))},redirect:'error',signal:AbortSignal.timeout(45_000)});}
     catch{throw diagnosedError('STORAGE_UPSTREAM_NETWORK','Private storage is temporarily unavailable. Retry shortly.',operation);}
-    if(!response.ok){const bytes=await readBoundedResponse(response,64*1024).catch(()=>Buffer.alloc(0));let detail:any;try{detail=JSON.parse(bytes.toString());}catch{}const missing=response.status===404||String(detail?.statusCode)==='404'||detail?.code==='NoSuchKey'||detail?.error==='not_found';throw diagnosedError('STORAGE_UPSTREAM_HTTP',missing?'Original file is unavailable':'Private storage could not complete the request',operation,response.status,missing?404:503);}
+    if(!response.ok){const bytes=await readBoundedResponse(response,64*1024).catch(()=>Buffer.alloc(0));let detail:any;try{detail=JSON.parse(bytes.toString());}catch{}const missing=response.status===404||String(detail?.statusCode)==='404'||detail?.code==='NoSuchKey'||detail?.error==='not_found';throw diagnosedError('STORAGE_UPSTREAM_HTTP',missing?'Original file is unavailable':'Private storage could not complete the request',operation,response.status,missing?404:503,{storageProviderCode:providerCode(detail),...credentialDiagnostic(options.serviceRoleKey,base.hostname)});}
     return response;
   }
   async function json(operation:StorageOperation,route:string,body:unknown){const response=await request(operation,route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});try{return JSON.parse((await readBoundedResponse(response,64*1024)).toString());}catch(error){if((error as any).statusCode)throw error;throw diagnosedError('STORAGE_RESPONSE_INVALID','Private storage returned an invalid response',operation,response.status);}}

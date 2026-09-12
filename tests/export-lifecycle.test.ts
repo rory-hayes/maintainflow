@@ -39,13 +39,13 @@ async function signup(name: string): Promise<Account> {
 async function request(method: 'GET' | 'POST' | 'DELETE', url: string, payload?: unknown, account = owner, instance = app) {
   return instance.inject({ method, url, payload: payload as any, headers: { cookie: account.cookie, origin: config.origin } });
 }
-async function fixture(options: { approved?: boolean; newerReview?: boolean } = {}) {
+async function fixture(options: { approved?: boolean; newerReview?: boolean; reference?:string } = {}) {
   const id = randomUUID(), runId = randomUUID(), approvalId = randomUUID();
   const latestRunId = options.newerReview ? randomUUID() : runId;
   const original = Buffer.from(`Reference: owned-${id}\nAmount: 12.50`);
   const sha = createHash('sha256').update(original).digest('hex');
   const storageKey = `${owner.workspace.id}/${id}`;
-  const values = { reference: `approved-${id}`, amount: 12.5 };
+  const values = { reference: options.reference??`approved-${id}`, amount: 12.5 };
   await fs.mkdir(path.join(config.storageDir, owner.workspace.id), { recursive: true, mode: 0o700 });
   await fs.writeFile(path.join(config.storageDir, storageKey), original, { mode: 0o600 });
   await transaction(adminPool, async c => {
@@ -187,6 +187,75 @@ test('format limit remains actionable and records failure without persisting a p
   assert.match(history[1].details.reason, /supported size limits/);
   assert.ok(!JSON.stringify(history).includes('Controlled detailed'));
   assert.deepEqual(await storedState([document.id]), beforeState); assert.equal(await snapshotCount(), beforeCount);
+});
+
+test('hosted rendered byte cap rejects oversized exports and old downloads while local exports remain available', async () => {
+  const previousVercel=process.env.VERCEL;
+  try {
+    // Each approved value is below the 65,536-character field limit. UTF-8 makes
+    // this eligible 50-document selection exceed the host's response budget.
+    const documents=[];
+    for(let index=0;index<50;index++)documents.push(await fixture({reference:'é'.repeat(50_000)}));
+    const documentIds=documents.map(document=>document.id);
+    delete process.env.VERCEL;
+    const local=await request('POST','/api/exports',{documentIds,format:'json'});
+    assert.equal(local.statusCode,200,local.body);
+    const download=await request('GET',local.json().downloadUrl);
+    assert.equal(download.statusCode,200);
+    assert.ok(download.rawPayload.byteLength>4*1024*1024);
+    assert.equal(download.json().documents.length,50);
+    const beforeCount=await snapshotCount(),beforeState=await storedState(documentIds);
+
+    process.env.VERCEL='1';
+    const deniedDownload=await request('GET',local.json().downloadUrl);
+    assert.equal(deniedDownload.statusCode,413);
+    assert.match(deniedDownload.json().error,/Select fewer documents/);
+    assert.ok(deniedDownload.rawPayload.byteLength<1024);
+    assert.equal((await request('GET',local.json().downloadUrl,undefined,outsider)).statusCode,404);
+    const deniedExport=await request('POST','/api/exports',{documentIds,format:'json'});
+    assert.equal(deniedExport.statusCode,413);
+    assert.match(deniedExport.json().error,/Select fewer documents/);
+    assert.equal(await snapshotCount(),beforeCount);
+    assert.deepEqual(await storedState(documentIds),beforeState);
+    const attempt=(await events(documentIds)).filter(event=>event.operation_id!==local.json().id);
+    assert.equal(attempt.length,100);
+    assert.equal(new Set(attempt.map(event=>event.operation_id)).size,1);
+    assert.equal(attempt.filter(event=>event.state==='exporting').length,50);
+    assert.equal(attempt.filter(event=>event.state==='failed').length,50);
+    assert.ok(attempt.filter(event=>event.state==='failed').every(event=>/Select fewer documents/.test(event.details.reason)));
+
+    delete process.env.VERCEL;
+    assert.deepEqual((await request('GET',local.json().downloadUrl)).rawPayload,download.rawPayload);
+  } finally {
+    if(previousVercel===undefined)delete process.env.VERCEL;else process.env.VERCEL=previousVercel;
+  }
+});
+
+test('hosted export cap permits exactly 4 MiB and rejects the next rendered byte', async () => {
+  const previousVercel=process.env.VERCEL;
+  try {
+    process.env.VERCEL='1';
+    const document=await fixture(),limit=4*1024*1024;
+    for(const extraByte of [0,1]) {
+      const instance=await makeApp(async(records,options)=>{
+        const rendered=await renderExport(records,options);
+        // Trailing JSON whitespace is valid and exercises actual output bytes.
+        return {...rendered,bytes:Buffer.concat([rendered.bytes,Buffer.alloc(limit+extraByte-rendered.bytes.byteLength,0x20)])};
+      });
+      const beforeCount=await snapshotCount();
+      const response=await request('POST','/api/exports',{documentIds:[document.id],format:'json'},owner,instance);
+      assert.equal(response.statusCode,extraByte?413:200,response.body);
+      assert.equal(await snapshotCount(),beforeCount+(extraByte?0:1));
+      if(!extraByte) {
+        const download=await request('GET',response.json().downloadUrl);
+        assert.equal(download.statusCode,200);
+        assert.equal(download.rawPayload.byteLength,limit);
+        assert.equal(download.json().documents[0].documentId,document.id);
+      }
+    }
+  } finally {
+    if(previousVercel===undefined)delete process.env.VERCEL;else process.env.VERCEL=previousVercel;
+  }
 });
 
 test('a persistence constraint failure recovers the transaction and retains only the attempt journal', async () => {

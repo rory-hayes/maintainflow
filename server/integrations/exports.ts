@@ -9,6 +9,14 @@ import {renderExport,type ExportRecord} from './export-format.js';
 const columns = z.array(z.object({source:z.string().min(1).max(120),label:z.string().min(1).max(120)})).max(100);
 const optionsSchema = z.object({format:z.enum(['csv','xlsx','json']),columns:columns.optional(),lineItems:z.string().max(100).optional()});
 const exportSchema = optionsSchema.extend({documentIds:z.array(z.uuid()).min(1).max(100),revisions:z.array(z.object({documentId:z.uuid(),approvalId:z.uuid()})).max(100).optional()});
+const hostedExportMaxBytes=4*1024*1024;
+class HostedExportSizeError extends Error {
+  statusCode=413;
+  constructor(){super('This export is too large to download here. Select fewer documents and export again.');}
+}
+function checkHostedExportSize(bytes:Buffer){
+  if(process.env.VERCEL==='1'&&bytes.byteLength>hostedExportMaxBytes)throw new HostedExportSizeError();
+}
 
 export async function registerExports(app:FastifyInstance, services:{render?:typeof renderExport}={}) {
   const render=services.render??renderExport;
@@ -43,6 +51,7 @@ export async function registerExports(app:FastifyInstance, services:{render?:typ
       await client.query('SAVEPOINT export_attempt');
       try {
         const rendered=await render(records,options);
+        checkHostedExportSize(rendered.bytes);
         await client.query('INSERT INTO export_snapshots(id,workspace_id,created_by,format,document_ids,run_ids,records,options,mime_type,bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[id,actor.workspaceId,actor.userId,options.format,uniqueIds,records.map(r=>r.runId),JSON.stringify(records),JSON.stringify(options),rendered.mime,rendered.bytes]);
         await client.query("UPDATE documents SET status=case when approved_run_id=latest_run_id and status in('processed','exported') then 'exported' else status end,updated_at=clock_timestamp() WHERE id=ANY($1::uuid[]) AND workspace_id=$2",[uniqueIds,actor.workspaceId]);
         await audit(client,actor.workspaceId,actor.userId,'export.created',id,{documentCount:records.length,format:options.format});
@@ -52,7 +61,7 @@ export async function registerExports(app:FastifyInstance, services:{render?:typ
       } catch(error) {
         await client.query('ROLLBACK TO SAVEPOINT export_attempt');
         const tooLarge=typeof error==='object'&&error!==null&&'statusCode' in error&&error.statusCode===413;
-        const reason=tooLarge
+        const reason=error instanceof HostedExportSizeError?error.message:tooLarge
           ?'This export exceeds the supported size limits. Export a smaller selection.'
           :'Export generation failed. Try again or select another format.';
         await phase('failed',reason);
@@ -73,6 +82,7 @@ export async function registerExports(app:FastifyInstance, services:{render?:typ
     const id=z.uuid().parse(request.params.id);
     const row=await withWorkspace(actor.workspaceId,async c=>(await c.query('SELECT format,mime_type,bytes FROM export_snapshots WHERE id=$1 AND workspace_id=$2',[id,actor.workspaceId])).rows[0]);
     if(!row)notFound();
+    checkHostedExportSize(row.bytes);
     return reply.header('Cache-Control','private, no-store').header('Content-Disposition',`attachment; filename="folio-export-${id.slice(0,8)}.${row.format}"`).type(row.mime_type).send(row.bytes);
   });
   app.get('/api/export-mappings',async request=> {

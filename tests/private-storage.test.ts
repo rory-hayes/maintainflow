@@ -53,12 +53,12 @@ test('storage diagnostics identify upstream operation/status without retaining p
  for(const stage of ['bucket-read','upload-sign'] as const)for(const status of [401,403,500]){
   const client=storage(endpoint=>stage==='upload-sign'&&endpoint.pathname.includes('/bucket/')?json(bucket):json({message:'PRIVATE provider body',url:'https://private.example/?token=PRIVATE'},status));
   await assert.rejects(client.signUpload!(key),(error:any)=>{
-   assert.equal(error.statusCode,503);assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:stage,upstreamStatus:status});
+   assert.equal(error.statusCode,503);assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:stage,upstreamStatus:status,storageProviderCode:'unclassified',credentialJwtPayloadParseable:false});
    assert.ok(!JSON.stringify(error).includes('PRIVATE'));assert.ok(!String(error).includes('PRIVATE'));return true;
   });
  }
  const missing=storage(()=>json({statusCode:'404'},400));
- await assert.rejects(missing.read(key),(error:any)=>{assert.equal(error.statusCode,404);assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:'bucket-read',upstreamStatus:400});return true;});
+ await assert.rejects(missing.read(key),(error:any)=>{assert.equal(error.statusCode,404);assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:'bucket-read',upstreamStatus:400,storageProviderCode:'unclassified',credentialJwtPayloadParseable:false});return true;});
 });
 test('storage diagnostics distinguish transport, bucket, JSON and signed-URL failures',async()=>{
  const cases=[
@@ -75,5 +75,39 @@ test('diagnostic allowlist rejects forged properties and never copies credential
  assert.equal(storageDiagnostic(Object.assign(new Error('PRIVATE'),{storageCode:'PRIVATE',storageOperation:'PRIVATE',upstreamStatus:401})),undefined);
  for(const [configuration,code] of [[{url:'PRIVATE invalid URL',serviceRoleKey:'PRIVATE'},'STORAGE_CONFIG_URL'],[{url,serviceRoleKey:''},'STORAGE_CONFIG_CREDENTIALS']] as const){
   assert.throws(()=>createSupabaseStorage(configuration),(error:any)=>{assert.equal(error.statusCode,503);assert.deepEqual(storageDiagnostic(error),{storageCode:code});assert.equal(Object.isFrozen(storageDiagnostic(error)),true);assert.ok(!String(error).includes('PRIVATE'));return true;});
+ }
+});
+test('upstream diagnostics recognize only exact published codes from code or error fields',async()=>{
+ for(const [body,expected] of [
+  [{code:'InvalidJWT',message:'PRIVATE'},'InvalidJWT'],
+  [{error:'AccessDenied',message:'PRIVATE'},'AccessDenied'],
+  [{code:'PRIVATE arbitrary value',error:'InvalidRequest'},'InvalidRequest'],
+  [{code:'InvalidJWT PRIVATE',error:{code:'InvalidJWT'},message:'PRIVATE'},'unclassified'],
+  [{code:'constructor',error:'toString'},'unclassified'],
+  [null,'unclassified'],
+ ] as const){
+  await assert.rejects(storage(()=>json(body,400)).signUpload!(key),(error:any)=>{
+   assert.equal(error.statusCode,503);assert.equal(storageDiagnostic(error)?.storageProviderCode,expected);
+   assert.ok(!JSON.stringify(storageDiagnostic(error)).includes('PRIVATE'));return true;
+  });
+ }
+});
+test('credential diagnostics report only unverified project-match and expiration booleans',async()=>{
+ const jwt=(payload:unknown)=>Buffer.from('{"alg":"HS256"}').toString('base64url')+'.'+Buffer.from(JSON.stringify(payload)).toString('base64url')+'.synthetic-signature';
+ const examples=[
+  {credential:jwt({ref:'storage-fixture',exp:Math.floor(Date.now()/1000)+3600,secret:'PRIVATE'}),expected:{credentialJwtPayloadParseable:true,credentialProjectMatches:true,credentialExpired:false}},
+  {credential:jwt({ref:'PRIVATE-other-project',exp:1}),expected:{credentialJwtPayloadParseable:true,credentialProjectMatches:false,credentialExpired:true}},
+  {credential:jwt({ref:42,exp:'PRIVATE'}),expected:{credentialJwtPayloadParseable:true}},
+  {credential:jwt(null),expected:{credentialJwtPayloadParseable:false}},
+  {credential:'PRIVATE opaque key',expected:{credentialJwtPayloadParseable:false}},
+  {credential:'aaa.not-json.bbb',expected:{credentialJwtPayloadParseable:false}},
+  {credential:'a'.repeat(16_385),expected:{credentialJwtPayloadParseable:false}},
+ ];
+ for(const {credential,expected} of examples){
+  const client=createSupabaseStorage({url,serviceRoleKey:credential,fetch:async()=>json({code:'InvalidJWT',message:'PRIVATE'},400)});
+  await assert.rejects(client.signUpload!(key),(error:any)=>{
+   assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:'bucket-read',upstreamStatus:400,storageProviderCode:'InvalidJWT',...expected});
+   assert.ok(!JSON.stringify(storageDiagnostic(error)).includes('PRIVATE'));assert.ok(!String(error).includes(credential));return true;
+  });
  }
 });
