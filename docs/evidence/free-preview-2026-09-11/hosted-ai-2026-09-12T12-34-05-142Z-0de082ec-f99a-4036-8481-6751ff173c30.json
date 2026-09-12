@@ -1,0 +1,209 @@
+{
+  "runId": "0de082ec-f99a-4036-8481-6751ff173c30",
+  "startedAt": "2026-09-12T12:34:05.142Z",
+  "status": "passed",
+  "synthetic": true,
+  "scope": "One synthetic native-PDF extraction through the hosted app and its configured AI provider",
+  "checks": [
+    {
+      "name": "owner-provider-and-capacity",
+      "status": "passed"
+    },
+    {
+      "name": "signed-original-finalized",
+      "status": "passed",
+      "sha256Matched": true,
+      "byteSizeMatched": true,
+      "pageCount": 2
+    },
+    {
+      "name": "hosted-ai-values-grounding-and-provenance",
+      "status": "passed",
+      "engine": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "promptVersion": "folio-openai-extraction-v2",
+      "coreFields": [
+        {
+          "field": "invoice_number",
+          "valueMatched": true,
+          "nativeTextGrounded": true
+        },
+        {
+          "field": "supplier",
+          "valueMatched": true,
+          "nativeTextGrounded": true
+        },
+        {
+          "field": "invoice_date",
+          "valueMatched": true,
+          "nativeTextGrounded": true
+        },
+        {
+          "field": "currency",
+          "valueMatched": true,
+          "nativeTextGrounded": true
+        },
+        {
+          "field": "subtotal",
+          "valueMatched": true,
+          "nativeTextGrounded": true
+        },
+        {
+          "field": "tax",
+          "valueMatched": true,
+          "nativeTextGrounded": true
+        },
+        {
+          "field": "total",
+          "valueMatched": true,
+          "nativeTextGrounded": true
+        }
+      ],
+      "allFieldsIssueCount": 0,
+      "workerElapsedMs": 12657,
+      "tokenUsage": {
+        "inputTokens": 1070,
+        "outputTokens": 833,
+        "totalTokens": 1903
+      },
+      "estimatedCostUsd": 0.004551
+    },
+    {
+      "name": "two-page-usage-counted-once",
+      "status": "passed",
+      "pagesAdded": 2,
+      "documentLedgerEvents": 1
+    }
+  ],
+  "requests": [
+    {
+      "phase": "preflight",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "preflight",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "preflight",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "phase": "preflight",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "preflight",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "preflight",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "temporary-mock-capacity",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "phase": "create-synthetic-ai-parser",
+      "method": "POST",
+      "status": 201
+    },
+    {
+      "phase": "signed-upload",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "signed-upload",
+      "method": "POST",
+      "status": 201
+    },
+    {
+      "phase": "signed-upload",
+      "surface": "private-storage",
+      "method": "PUT",
+      "status": 200
+    },
+    {
+      "phase": "signed-upload",
+      "method": "POST",
+      "status": 202
+    },
+    {
+      "phase": "hosted-worker",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "hosted-worker",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "hosted-worker",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "hosted-worker",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "hosted-worker",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "usage-ledger",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "restore-mock-explore",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "phase": "revoke-run-session",
+      "method": "POST",
+      "status": 200
+    }
+  ],
+  "boundaries": {
+    "browserUI": "not tested",
+    "otherDocumentLayouts": "not tested",
+    "directProviderCalls": false,
+    "pollingLimitSeconds": 180,
+    "retainsSyntheticParserAndDocument": true
+  },
+  "targetOrigin": "https://maintainflow-1yqnlg26n-rorys-projects-accf0d71.vercel.app",
+  "fixture": {
+    "filename": "invoice-multipage.pdf",
+    "bytes": 1698,
+    "sha256": "26c9aaf4f4594abeedab34eceb3ce5baeb2a46b0308b6a6ce13d21f28bdd868e",
+    "pages": 2
+  },
+  "deployedRevision": "11165f404a169ccf3a61fb51781231aa554f1127",
+  "mockPlan": {
+    "temporary": "standard",
+    "prior": "explore",
+    "realStripe": false
+  },
+  "finishedAt": "2026-09-12T12:34:21.349Z",
+  "mockPlanRestoration": {
+    "attempted": true,
+    "restored": true,
+    "plan": "explore",
+    "status": "canceled"
+  },
+  "sessionRevoked": true
+}

@@ -1,0 +1,630 @@
+{
+  "runId": "1a3a73aa-b91a-455d-b3b2-7666e6357dee",
+  "startedAt": "2026-09-12T12:28:25.328Z",
+  "status": "passed",
+  "synthetic": true,
+  "requests": [
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200,
+      "elapsedMs": 2342
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/config",
+      "status": 200,
+      "elapsedMs": 265
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 201,
+      "elapsedMs": 231
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/uploads/config",
+      "status": 200,
+      "elapsedMs": 117
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/parsers",
+      "status": 201,
+      "elapsedMs": 293
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/parsers/8a3c7777-3ddc-4ecd-a94f-03e654d96bb1/uploads",
+      "status": 201,
+      "elapsedMs": 428
+    },
+    {
+      "surface": "private-storage",
+      "method": "OPTIONS",
+      "capability": "signed-upload",
+      "status": 200,
+      "elapsedMs": 123,
+      "cors": {
+        "configuredOriginAllowed": true,
+        "putAllowed": true,
+        "uploadHeadersAllowed": true
+      }
+    },
+    {
+      "surface": "private-storage",
+      "method": "PUT",
+      "capability": "signed-upload",
+      "status": 200,
+      "elapsedMs": 150,
+      "cors": {
+        "configuredOriginAllowed": true
+      }
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/uploads/273c8f25-2085-4a25-84d9-2bf421cc6f5d/finalize",
+      "status": 202,
+      "elapsedMs": 983
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/uploads/273c8f25-2085-4a25-84d9-2bf421cc6f5d/finalize",
+      "status": 202,
+      "elapsedMs": 154
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/9f7b2ad0-ced9-4acf-8f06-7b77bd490109",
+      "status": 200,
+      "elapsedMs": 121
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/9f7b2ad0-ced9-4acf-8f06-7b77bd490109/original",
+      "status": 302,
+      "elapsedMs": 171
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/9f7b2ad0-ced9-4acf-8f06-7b77bd490109/original-url",
+      "status": 200,
+      "elapsedMs": 131
+    },
+    {
+      "surface": "private-storage",
+      "method": "GET",
+      "capability": "signed-download",
+      "status": 200,
+      "elapsedMs": 148,
+      "cors": {
+        "configuredOriginAllowed": true
+      }
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/workspace/usage",
+      "status": 200,
+      "elapsedMs": 122
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/runs/5605645a-dc32-40b4-89e8-e47e6713cb55/corrections",
+      "status": 200,
+      "elapsedMs": 131
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/runs/5605645a-dc32-40b4-89e8-e47e6713cb55/approve",
+      "status": 200,
+      "elapsedMs": 145
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/exports",
+      "status": 200,
+      "elapsedMs": 253
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/exports/c923aa75-141a-4fe8-b539-41a12395bdba/download",
+      "status": 200,
+      "elapsedMs": 109
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/exports",
+      "status": 200,
+      "elapsedMs": 164
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/exports/b8c97a2e-2053-4d9a-8210-cc36542188f7/download",
+      "status": 200,
+      "elapsedMs": 110
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/exports",
+      "status": 200,
+      "elapsedMs": 129
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/exports/5ef57239-99e4-4fc0-ace6-045b75424b6a/download",
+      "status": 200,
+      "elapsedMs": 108
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/parsers/8a3c7777-3ddc-4ecd-a94f-03e654d96bb1/uploads",
+      "status": 201,
+      "elapsedMs": 143
+    },
+    {
+      "surface": "private-storage",
+      "method": "OPTIONS",
+      "capability": "signed-upload",
+      "status": 200,
+      "elapsedMs": 27,
+      "cors": {
+        "configuredOriginAllowed": true,
+        "putAllowed": true,
+        "uploadHeadersAllowed": true
+      }
+    },
+    {
+      "surface": "private-storage",
+      "method": "PUT",
+      "capability": "signed-upload",
+      "status": 200,
+      "elapsedMs": 1618,
+      "cors": {
+        "configuredOriginAllowed": true
+      }
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/uploads/11667833-7cc5-47ce-b850-e4ace07914c4/finalize",
+      "status": 202,
+      "elapsedMs": 1905
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/uploads/11667833-7cc5-47ce-b850-e4ace07914c4/finalize",
+      "status": 202,
+      "elapsedMs": 205
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/912f485b-8db1-407d-bae9-65f4d5bc2f0b",
+      "status": 200,
+      "elapsedMs": 118
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/912f485b-8db1-407d-bae9-65f4d5bc2f0b/original",
+      "status": 302,
+      "elapsedMs": 150
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/912f485b-8db1-407d-bae9-65f4d5bc2f0b/original-url",
+      "status": 200,
+      "elapsedMs": 126
+    },
+    {
+      "surface": "private-storage",
+      "method": "GET",
+      "capability": "signed-download",
+      "status": 200,
+      "elapsedMs": 159,
+      "cors": {
+        "configuredOriginAllowed": true
+      }
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/workspace/usage",
+      "status": 200,
+      "elapsedMs": 198
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "status": 200,
+      "elapsedMs": 83
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401,
+      "elapsedMs": 68
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200,
+      "elapsedMs": 181
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/billing/mock/plan",
+      "status": 200,
+      "elapsedMs": 123
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 200,
+      "elapsedMs": 117
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/billing/mock/cancel",
+      "status": 200,
+      "elapsedMs": 123
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/workspace/usage",
+      "status": 200,
+      "elapsedMs": 128
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/9f7b2ad0-ced9-4acf-8f06-7b77bd490109",
+      "status": 200,
+      "elapsedMs": 130
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/parsers",
+      "status": 200,
+      "elapsedMs": 105
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/exports",
+      "status": 200,
+      "elapsedMs": 92
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/exports/c923aa75-141a-4fe8-b539-41a12395bdba/download",
+      "status": 200,
+      "elapsedMs": 102
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/exports/b8c97a2e-2053-4d9a-8210-cc36542188f7/download",
+      "status": 200,
+      "elapsedMs": 101
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/exports/5ef57239-99e4-4fc0-ace6-045b75424b6a/download",
+      "status": 200,
+      "elapsedMs": 104
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 201,
+      "elapsedMs": 169
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/9f7b2ad0-ced9-4acf-8f06-7b77bd490109",
+      "status": 404,
+      "elapsedMs": 106
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/9f7b2ad0-ced9-4acf-8f06-7b77bd490109/original",
+      "status": 404,
+      "elapsedMs": 93
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/9f7b2ad0-ced9-4acf-8f06-7b77bd490109/original-url",
+      "status": 404,
+      "elapsedMs": 93
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/912f485b-8db1-407d-bae9-65f4d5bc2f0b",
+      "status": 404,
+      "elapsedMs": 101
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/912f485b-8db1-407d-bae9-65f4d5bc2f0b/original",
+      "status": 404,
+      "elapsedMs": 85
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/912f485b-8db1-407d-bae9-65f4d5bc2f0b/original-url",
+      "status": 404,
+      "elapsedMs": 91
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/exports/c923aa75-141a-4fe8-b539-41a12395bdba/download",
+      "status": 404,
+      "elapsedMs": 101
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/uploads/273c8f25-2085-4a25-84d9-2bf421cc6f5d/finalize",
+      "status": 404,
+      "elapsedMs": 96
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/parsers/8a3c7777-3ddc-4ecd-a94f-03e654d96bb1/uploads",
+      "status": 404,
+      "elapsedMs": 95
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/9f7b2ad0-ced9-4acf-8f06-7b77bd490109",
+      "status": 403,
+      "elapsedMs": 82
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents",
+      "status": 403,
+      "elapsedMs": 84
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents",
+      "status": 200,
+      "elapsedMs": 92
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401,
+      "elapsedMs": 57
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/documents/9f7b2ad0-ced9-4acf-8f06-7b77bd490109/original-url",
+      "status": 401,
+      "elapsedMs": 56
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/uploads/config",
+      "status": 401,
+      "elapsedMs": 59
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200,
+      "elapsedMs": 62
+    }
+  ],
+  "checks": [
+    {
+      "name": "hosted-preview-preflight",
+      "status": "passed",
+      "at": "2026-09-12T12:28:28.311Z",
+      "environment": "preview",
+      "revision": "11165f404a169ccf3a61fb51781231aa554f1127",
+      "hosted": true,
+      "inviteRequired": true
+    },
+    {
+      "name": "fresh-owner-and-direct-upload",
+      "status": "passed",
+      "at": "2026-09-12T12:28:31.528Z",
+      "parserId": "8a3c7777-3ddc-4ecd-a94f-03e654d96bb1",
+      "documentId": "9f7b2ad0-ced9-4acf-8f06-7b77bd490109",
+      "uploadId": "273c8f25-2085-4a25-84d9-2bf421cc6f5d",
+      "jobId": "fe313f7b-0a4a-47c7-bf5c-bafc7949caec",
+      "extractionRunId": "5605645a-dc32-40b4-89e8-e47e6713cb55",
+      "rulesOnly": true,
+      "expectedValuesMatched": true,
+      "finalizationReplayPreserved": true,
+      "usagePages": 2,
+      "original": {
+        "bytes": 1698,
+        "sha256": "26c9aaf4f4594abeedab34eceb3ce5baeb2a46b0308b6a6ce13d21f28bdd868e",
+        "privateRedirect": true
+      },
+      "workerElapsedMs": 124
+    },
+    {
+      "name": "correction-approval-and-export",
+      "status": "passed",
+      "at": "2026-09-12T12:28:32.720Z",
+      "correctionId": "e9263524-560a-4d0c-9d58-7ec129c53c20",
+      "approvalId": "4965193e-95e5-4a35-8973-fe008c97b575",
+      "immutableExtraction": true,
+      "exports": [
+        {
+          "id": "c923aa75-141a-4fe8-b539-41a12395bdba",
+          "format": "csv",
+          "bytes": 571,
+          "sha256": "08658c0674d0ae95173d9f3a3b7f74a0d74d345e0f3cbda8fd34f68d30e3546d",
+          "approvalId": "4965193e-95e5-4a35-8973-fe008c97b575",
+          "downloadPath": "/api/exports/c923aa75-141a-4fe8-b539-41a12395bdba/download"
+        },
+        {
+          "id": "b8c97a2e-2053-4d9a-8210-cc36542188f7",
+          "format": "xlsx",
+          "bytes": 6906,
+          "sha256": "bda994fc7d62c3847a0f64874369e9f87903653526a206851e290d6d1651f5d3",
+          "approvalId": "4965193e-95e5-4a35-8973-fe008c97b575",
+          "downloadPath": "/api/exports/b8c97a2e-2053-4d9a-8210-cc36542188f7/download"
+        },
+        {
+          "id": "5ef57239-99e4-4fc0-ace6-045b75424b6a",
+          "format": "json",
+          "bytes": 1248,
+          "sha256": "58e9150244b0498636154f4c6d66fa58a69792c1cebe95eede062b9372aa38f0",
+          "approvalId": "4965193e-95e5-4a35-8973-fe008c97b575",
+          "downloadPath": "/api/exports/5ef57239-99e4-4fc0-ace6-045b75424b6a/download"
+        }
+      ]
+    },
+    {
+      "name": "large-private-original-and-rules",
+      "status": "passed",
+      "at": "2026-09-12T12:28:38.350Z",
+      "documentId": "912f485b-8db1-407d-bae9-65f4d5bc2f0b",
+      "uploadId": "11667833-7cc5-47ce-b850-e4ace07914c4",
+      "jobId": "72bef8bf-eb2a-4f63-b951-f4094465798b",
+      "extractionRunId": "9498e67a-9716-47c7-9c5a-9cb45c0e3393",
+      "original": {
+        "bytes": 6296681,
+        "sha256": "a836824d80737c27af5c03be9d40b79183c47d44376505e9133fdf823df5f25b",
+        "privateRedirect": true
+      },
+      "exceedsVercelBodyLimit": true,
+      "finalizationReplayPreserved": true,
+      "expectedValuesMatched": true,
+      "usagePages": 4
+    },
+    {
+      "name": "session-persistence-and-mock-plan-cancel",
+      "status": "passed",
+      "at": "2026-09-12T12:28:39.850Z",
+      "revokedSessionRejected": true,
+      "sameUserAndWorkspace": true,
+      "upgradedPlan": "team",
+      "finalPlan": "explore",
+      "mockStatus": "canceled",
+      "realPaymentVerification": false,
+      "usagePages": 4,
+      "documentsPreserved": 2,
+      "exportSnapshotsUnchanged": true
+    },
+    {
+      "name": "cross-tenant-and-unauthenticated-denials",
+      "status": "passed",
+      "at": "2026-09-12T12:28:41.341Z",
+      "outsiderUserId": "e7705098-f80e-4eeb-8370-cc3a502fb742",
+      "outsiderWorkspaceId": "d4a048f7-f95b-464a-a1e2-a24d3013cf82",
+      "bothOriginalsDenied": true,
+      "uploadReservationAndFinalizationDenied": true,
+      "exportDenied": true,
+      "forgedWorkspaceHeadersDenied": true,
+      "unauthenticatedDenied": true
+    },
+    {
+      "name": "private-browser-handoff",
+      "status": "passed",
+      "at": "2026-09-12T12:28:41.412Z",
+      "credentialMode": "0600",
+      "syntheticWorkspaceRetained": true
+    }
+  ],
+  "scope": "Deployed HTTP acceptance through the application and signed private storage, including configured-origin CORS headers",
+  "boundaries": {
+    "browserUI": "not tested by this HTTP runner",
+    "realStripe": "not tested; mock only",
+    "outboundEmail": "not attempted",
+    "resendReceiving": "not tested",
+    "googleSheets": "not tested",
+    "aiProvider": "not called; rules extraction only",
+    "expiredStagingCleanup": "not tested; requires the capability expiry window"
+  },
+  "targetOrigin": "https://maintainflow-1yqnlg26n-rorys-projects-accf0d71.vercel.app",
+  "requestOrigin": "https://maintainflow.io",
+  "protectionBypassUsed": true,
+  "runnerSha256": "03a9c818a48b20f131d9f5262fdcf63f7e3f3af56985d6ff08b4aeb5a4e0f954",
+  "fixtures": [
+    {
+      "name": "fixtures/generated/invoice-multipage.pdf",
+      "bytes": 1698,
+      "sha256": "26c9aaf4f4594abeedab34eceb3ce5baeb2a46b0308b6a6ce13d21f28bdd868e",
+      "pageCount": 2
+    },
+    {
+      "name": "generated-in-memory-invoice-with-synthetic-attachment.pdf",
+      "bytes": 6296681,
+      "sha256": "a836824d80737c27af5c03be9d40b79183c47d44376505e9133fdf823df5f25b",
+      "pageCount": 2,
+      "exceedsVercelBodyLimit": true
+    }
+  ],
+  "deployedRevision": "11165f404a169ccf3a61fb51781231aa554f1127",
+  "browserHandoff": {
+    "ownerUserId": "79d79f35-cf79-4e94-902e-b3bc570416d3",
+    "workspaceId": "fdf4e941-bd51-48b8-a1f2-2b0c908a8868",
+    "parserId": "8a3c7777-3ddc-4ecd-a94f-03e654d96bb1",
+    "documentId": "9f7b2ad0-ced9-4acf-8f06-7b77bd490109",
+    "largeDocumentId": "912f485b-8db1-407d-bae9-65f4d5bc2f0b",
+    "documentPath": "/app/documents/9f7b2ad0-ced9-4acf-8f06-7b77bd490109",
+    "credentialsPath": ".local/hosted-preview/account.json",
+    "credentialMode": "0600",
+    "finalPlan": "explore",
+    "billingMode": "mock"
+  },
+  "completedAt": "2026-09-12T12:28:41.417Z"
+}
