@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {createSupabaseStorage,readBoundedResponse,validateStorageKey,safeDownloadName,ORIGINALS_BUCKET} from '../server/core/storage.js';
+import {createSupabaseStorage,readBoundedResponse,validateStorageKey,safeDownloadName,ORIGINALS_BUCKET,storageDiagnostic} from '../server/core/storage.js';
 const workspace=randomUUID(),key=`${workspace}/${randomUUID()}`,url='https://storage-fixture.supabase.co';
 const bucket={id:ORIGINALS_BUCKET,public:false,file_size_limit:10485760};
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
@@ -48,4 +48,32 @@ test('download links expire after 60 seconds and sanitize Content-Disposition fi
  const client=storage((endpoint,init)=>{if(endpoint.pathname.includes('/bucket/'))return json(bucket);expiry=JSON.parse(String(init.body)).expiresIn;return json({signedURL:`/object/sign/${ORIGINALS_BUCKET}/${key}?token=controlled-download-token`});});
  const signed=new URL(await client.signDownload!(key,'../../invoice\r\n".pdf'));
  assert.equal(expiry,60);assert.equal(signed.origin,url);assert.equal(signed.searchParams.get('download'),'invoice".pdf');assert.ok(!signed.toString().includes('%0D'));assert.ok(!signed.toString().includes('%0A'));
+});
+test('storage diagnostics identify upstream operation/status without retaining provider secrets',async()=>{
+ for(const stage of ['bucket-read','upload-sign'] as const)for(const status of [401,403,500]){
+  const client=storage(endpoint=>stage==='upload-sign'&&endpoint.pathname.includes('/bucket/')?json(bucket):json({message:'PRIVATE provider body',url:'https://private.example/?token=PRIVATE'},status));
+  await assert.rejects(client.signUpload!(key),(error:any)=>{
+   assert.equal(error.statusCode,503);assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:stage,upstreamStatus:status});
+   assert.ok(!JSON.stringify(error).includes('PRIVATE'));assert.ok(!String(error).includes('PRIVATE'));return true;
+  });
+ }
+ const missing=storage(()=>json({statusCode:'404'},400));
+ await assert.rejects(missing.read(key),(error:any)=>{assert.equal(error.statusCode,404);assert.deepEqual(storageDiagnostic(error),{storageCode:'STORAGE_UPSTREAM_HTTP',storageOperation:'bucket-read',upstreamStatus:400});return true;});
+});
+test('storage diagnostics distinguish transport, bucket, JSON and signed-URL failures',async()=>{
+ const cases=[
+  {client:storage(()=>{throw new Error('PRIVATE transport details');}),diagnostic:{storageCode:'STORAGE_UPSTREAM_NETWORK',storageOperation:'bucket-read'}},
+  {client:storage(()=>json({...bucket,public:true})),diagnostic:{storageCode:'STORAGE_BUCKET_POLICY',storageOperation:'bucket-read',upstreamStatus:200}},
+  {client:storage(()=>new Response('PRIVATE invalid JSON')),diagnostic:{storageCode:'STORAGE_RESPONSE_INVALID',storageOperation:'bucket-read',upstreamStatus:200}},
+  {client:storage(endpoint=>endpoint.pathname.includes('/bucket/')?json(bucket):new Response('PRIVATE invalid JSON')),diagnostic:{storageCode:'STORAGE_RESPONSE_INVALID',storageOperation:'upload-sign',upstreamStatus:200}},
+  {client:storage(endpoint=>endpoint.pathname.includes('/bucket/')?json(bucket):json({url:'https://private.example/?token=PRIVATE'})),diagnostic:{storageCode:'STORAGE_SIGNED_URL',storageOperation:'upload-sign'}},
+  {client:storage(endpoint=>endpoint.pathname.includes('/bucket/')?json(bucket):json(null)),diagnostic:{storageCode:'STORAGE_SIGNED_URL',storageOperation:'upload-sign'}},
+ ];
+ for(const {client,diagnostic} of cases)await assert.rejects(client.signUpload!(key),(error:any)=>{assert.equal(error.statusCode,503);assert.deepEqual(storageDiagnostic(error),diagnostic);assert.ok(!String(error).includes('PRIVATE'));return true;});
+});
+test('diagnostic allowlist rejects forged properties and never copies credential configuration',()=>{
+ assert.equal(storageDiagnostic(Object.assign(new Error('PRIVATE'),{storageCode:'PRIVATE',storageOperation:'PRIVATE',upstreamStatus:401})),undefined);
+ for(const [configuration,code] of [[{url:'PRIVATE invalid URL',serviceRoleKey:'PRIVATE'},'STORAGE_CONFIG_URL'],[{url,serviceRoleKey:''},'STORAGE_CONFIG_CREDENTIALS']] as const){
+  assert.throws(()=>createSupabaseStorage(configuration),(error:any)=>{assert.equal(error.statusCode,503);assert.deepEqual(storageDiagnostic(error),{storageCode:code});assert.equal(Object.isFrozen(storageDiagnostic(error)),true);assert.ok(!String(error).includes('PRIVATE'));return true;});
+ }
 });

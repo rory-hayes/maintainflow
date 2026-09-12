@@ -249,7 +249,7 @@ async function run() {
   const strategy = await json('/api/uploads/config', { client: owner });
   ensure(strategy.strategy === 'signed' && strategy.maxBytes === maxBytes, 'Hosted upload strategy does not support signed 10 MiB intake.');
   const created = await json('/api/parsers', { method: 'POST', expected: 201, client: owner, body: { name: 'Hosted QA invoice ' + runId.slice(0, 8), useCase: 'invoice', mode: 'rules', locale: 'en-IE', timezone: 'Europe/Dublin' } });
-  const parserId = id(created.parser.id); credentials.parserId = parserId;
+  const parserId = id(created.parser.id); credentials.parserId = parserId; await saveCredentials();
   const uploaded = await upload(owner, parserId, bytes, 'synthetic-hosted-invoice.pdf');
   const documentId = id(uploaded.document.id); credentials.documentId = documentId; await saveCredentials();
   const completedInvoice = await completed(owner, uploaded, bytes, fixture.expected);

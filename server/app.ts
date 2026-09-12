@@ -13,6 +13,7 @@ import {registerExports} from './integrations/exports.js';
 import {registerIntegrations} from './integrations/webhooks.js';
 import {registerProviders} from './integrations/providers.js';
 import {previewEnabled,validatePreviewConfiguration} from './core/preview.js';
+import {storageDiagnostic} from './core/storage.js';
 
 export async function buildApp(){
   validatePreviewConfiguration();
@@ -28,7 +29,7 @@ export async function buildApp(){
     if(error instanceof ZodError)return reply.status(400).send({error:'validation_error',message:error.issues.map(i=>`${i.path.join('.')||'Request'}: ${i.message}`).join(' ')});
     const code=(error as {statusCode?:number}).statusCode;
     const status=code&&code>=400&&code<600?code:500;
-    if(status>=500)request.log.error({errorName:error instanceof Error?error.name:'Unknown',route:request.routeOptions.url},'Request failed');
+    if(status>=500)request.log.error({errorName:error instanceof Error?error.name:'Unknown',route:request.routeOptions.url,...storageDiagnostic(error)},'Request failed');
     return reply.status(status).send({error:status>=500?'server_error':'request_error',message:status>=500?'The request could not be completed. Check the server status and try again.':error instanceof Error?error.message:'Invalid request.'});
   });
   app.get('/api/health',async()=>({status:'ok',name:'Folio',environment:previewEnabled()?'preview':config.production?'production':'local',revision:process.env.VERCEL_GIT_COMMIT_SHA||null,limits:{maxBytes:config.maxBytes,maxPages:config.maxPages}}));

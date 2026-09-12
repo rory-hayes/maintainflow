@@ -1,0 +1,96 @@
+{
+  "runId": "681618df-be3b-48e7-a891-3eb34e4d9bf7",
+  "startedAt": "2026-09-12T11:26:36.793Z",
+  "status": "failed",
+  "synthetic": true,
+  "requests": [
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/health",
+      "status": 200,
+      "elapsedMs": 2033
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/config",
+      "status": 200,
+      "elapsedMs": 65
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 201,
+      "elapsedMs": 294
+    },
+    {
+      "surface": "application",
+      "method": "GET",
+      "path": "/api/uploads/config",
+      "status": 200,
+      "elapsedMs": 137
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/parsers",
+      "status": 201,
+      "elapsedMs": 214
+    },
+    {
+      "surface": "application",
+      "method": "POST",
+      "path": "/api/parsers/27bf5483-9330-4ba6-b7a8-5f1c3e86fb52/uploads",
+      "status": 503,
+      "elapsedMs": 271
+    }
+  ],
+  "checks": [
+    {
+      "name": "hosted-preview-preflight",
+      "status": "passed",
+      "at": "2026-09-12T11:26:39.265Z",
+      "environment": "preview",
+      "revision": "61dda4d163fbe160dddfb56bdd22f319a128cbfb",
+      "hosted": true,
+      "inviteRequired": true
+    }
+  ],
+  "scope": "Deployed HTTP acceptance through the application and signed private storage",
+  "boundaries": {
+    "browserUI": "not tested by this HTTP runner",
+    "realStripe": "not tested; mock only",
+    "outboundEmail": "not attempted",
+    "resendReceiving": "not tested",
+    "googleSheets": "not tested",
+    "aiProvider": "not called; rules extraction only",
+    "expiredStagingCleanup": "not tested; requires the capability expiry window"
+  },
+  "targetOrigin": "https://maintainflow-myjps3yc4-rorys-projects-accf0d71.vercel.app",
+  "requestOrigin": "https://maintainflow.io",
+  "protectionBypassUsed": true,
+  "runnerSha256": "b7633d4b1ae128af026ca1ffb5cd3f53d0a3bfc60beec462a0d96c4332fef1f1",
+  "fixtures": [
+    {
+      "name": "fixtures/generated/invoice-multipage.pdf",
+      "bytes": 1698,
+      "sha256": "26c9aaf4f4594abeedab34eceb3ce5baeb2a46b0308b6a6ce13d21f28bdd868e",
+      "pageCount": 2
+    },
+    {
+      "name": "generated-in-memory-invoice-with-synthetic-attachment.pdf",
+      "bytes": 6296681,
+      "sha256": "a0d4918575bbeaa819ea7d397a661e01734fbf706e7df97fc9f11346dbbf72b9",
+      "pageCount": 2,
+      "exceedsVercelBodyLimit": true
+    }
+  ],
+  "deployedRevision": "61dda4d163fbe160dddfb56bdd22f319a128cbfb",
+  "completedAt": "2026-09-12T11:26:40.207Z",
+  "failure": {
+    "phase": "fresh-owner-and-direct-upload",
+    "message": "Unexpected application status for POST /api/parsers/27bf5483-9330-4ba6-b7a8-5f1c3e86fb52/uploads: expected 201, received 503."
+  }
+}

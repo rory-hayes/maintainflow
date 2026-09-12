@@ -1,0 +1,36 @@
+{
+  "observedAt": "2026-09-12T11:24:22.410Z",
+  "connections": [
+    {
+      "role": "folio_admin",
+      "schema": "folio",
+      "search_path": "\"folio\",pg_catalog,pg_temp",
+      "statement_timeout": "10s",
+      "lock_timeout": "5s",
+      "tlsVerified": true,
+      "restrictedRole": true,
+      "legacyTablesAccessible": 0,
+      "legacyDefinersExecutable": 0,
+      "can_create": false,
+      "can_migrate": false,
+      "can_rewrite_journal": false,
+      "direct_uploads_present": true
+    },
+    {
+      "role": "folio_app",
+      "schema": "folio",
+      "search_path": "\"folio\",pg_catalog,pg_temp",
+      "statement_timeout": "10s",
+      "lock_timeout": "5s",
+      "tlsVerified": true,
+      "restrictedRole": true,
+      "legacyTablesAccessible": 0,
+      "legacyDefinersExecutable": 0,
+      "can_create": false,
+      "can_migrate": false,
+      "can_rewrite_journal": false,
+      "direct_uploads_present": true
+    }
+  ],
+  "passed": true
+}
