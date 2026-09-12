@@ -1,0 +1,80 @@
+{
+  "observedAt": "2026-09-12T12:37:05.101Z",
+  "targetOrigin": "https://maintainflow.io",
+  "scope": "Canonical Git deployment HTTP smoke: health revision, preview configuration, sign-in app shell and www redirect",
+  "deploymentId": "dpl_91yEp6fWaGpFAg3xa2QuWnKhVdrt",
+  "source": "git",
+  "revision": "c2aa2f418da1e0ce0273abb0e9eaa1dc73e82f1b",
+  "passed": true,
+  "canonicalBrowserAcceptance": {
+    "status": "passed",
+    "startedAt": "2026-09-12T13:03:36.067Z",
+    "finishedAt": "2026-09-12T13:03:45.552Z",
+    "revision": "c2aa2f418da1e0ce0273abb0e9eaa1dc73e82f1b",
+    "evidence": "canonical-browser-2026-09-12-adfe959c.json",
+    "scope": "Real login, unique PDF upload, rules extraction, private PDF pages, correction, approval, JSON download, reload, 390px mobile navigation, logout; 11 checks."
+  },
+  "githubChecks": {
+    "revision": "c2aa2f418da1e0ce0273abb0e9eaa1dc73e82f1b",
+    "ci": {
+      "runId": 34694089530,
+      "url": "https://github.com/rory-hayes/maintainflow/actions/runs/34694089530",
+      "conclusion": "success",
+      "tests": 230,
+      "passed": 230,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "typecheckAndHostedPackaging": "passed",
+      "isolatedRuntimeAndDecoders": "passed",
+      "bundle": {
+        "files": 2147,
+        "mebibytes": 67
+      }
+    },
+    "codeql": {
+      "runId": 34694089148,
+      "url": "https://github.com/rory-hayes/maintainflow/actions/runs/34694089148",
+      "conclusion": "success",
+      "analyses": {
+        "javascript-typescript": "success",
+        "actions": "success"
+      }
+    }
+  },
+  "results": [
+    {
+      "path": "/api/health",
+      "status": 200,
+      "body": {
+        "status": "ok",
+        "name": "Folio",
+        "environment": "preview",
+        "revision": "c2aa2f418da1e0ce0273abb0e9eaa1dc73e82f1b",
+        "limits": {
+          "maxBytes": 10485760,
+          "maxPages": 30
+        }
+      }
+    },
+    {
+      "path": "/api/config",
+      "status": 200,
+      "body": {
+        "preview": true,
+        "inviteRequired": true,
+        "hosted": true
+      }
+    },
+    {
+      "path": "/sign-in",
+      "status": 200,
+      "hasAppRoot": true
+    },
+    {
+      "path": "www",
+      "status": 308,
+      "location": "https://maintainflow.io/"
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+{
+  "runId": "adfe959c-2247-4ce8-9392-5c50aa77a5cc",
+  "startedAt": "2026-09-12T13:03:36.067Z",
+  "finishedAt": "2026-09-12T13:03:45.552Z",
+  "status": "passed",
+  "origin": "https://maintainflow.io",
+  "expectedRevision": "c2aa2f418da1e0ce0273abb0e9eaa1dc73e82f1b",
+  "synthetic": true,
+  "boundaries": {
+    "freshBrowserContext": true,
+    "storedCookiesUsed": false,
+    "mutations": "UI login, one new rules PDF, its correction/approval/export, logout only",
+    "existingDocuments": "retained without mutation",
+    "existingParser": "retained without mutation",
+    "providersPaymentsMessages": "not exercised",
+    "schedulerAttribution": "not claimed"
+  },
+  "checks": [
+    {
+      "name": "canonical revision matches promotion",
+      "at": "2026-09-12T13:03:36.885Z",
+      "revision": "c2aa2f418da1e0ce0273abb0e9eaa1dc73e82f1b"
+    },
+    {
+      "name": "fresh browser signs in through the real form",
+      "at": "2026-09-12T13:03:37.716Z"
+    },
+    {
+      "name": "existing rules parser verified without edits",
+      "at": "2026-09-12T13:03:38.353Z"
+    },
+    {
+      "name": "actual file input uploaded one uniquely generated PDF",
+      "at": "2026-09-12T13:03:40.646Z",
+      "documentId": "0d7d2d48-3759-47e8-a990-572a3c0e917b"
+    },
+    {
+      "name": "durable rules extraction appears in the review UI",
+      "at": "2026-09-12T13:03:40.652Z"
+    },
+    {
+      "name": "original PDF canvas renders both pages",
+      "at": "2026-09-12T13:03:42.635Z",
+      "first": {
+        "width": 773,
+        "height": 1094,
+        "darkSamples": 2744,
+        "hash": 3693624626
+      },
+      "second": {
+        "width": 773,
+        "height": 1094,
+        "darkSamples": 1233,
+        "hash": 3755875824
+      }
+    },
+    {
+      "name": "new document correction saved while original value remains visible",
+      "at": "2026-09-12T13:03:42.858Z"
+    },
+    {
+      "name": "UI approval and real browser JSON download preserve the correction after reload",
+      "at": "2026-09-12T13:03:44.591Z"
+    },
+    {
+      "name": "390-pixel mobile fields, original PDF and navigation remain usable",
+      "at": "2026-09-12T13:03:45.221Z"
+    },
+    {
+      "name": "fresh browser session signs out through the UI",
+      "at": "2026-09-12T13:03:45.506Z"
+    },
+    {
+      "name": "no unexpected browser errors, failed requests or framework overlays",
+      "at": "2026-09-12T13:03:45.522Z"
+    }
+  ],
+  "fixture": {
+    "filename": "synthetic-browser-invoice-adfe959c-2247-4ce8-9392-5c50aa77a5cc.pdf",
+    "bytes": 3636,
+    "sha256": "b59f66dd9f72416ad2998ebfb01bdfbdf776ec63b7098f1882694ed2842bb148",
+    "pageCount": 2
+  },
+  "documentId": "0d7d2d48-3759-47e8-a990-572a3c0e917b",
+  "uploadId": "7ade49a8-4d17-452e-be5b-2242a8ca0eec",
+  "jobId": "91dee703-7457-49de-a138-de03739770e7",
+  "extractionRunId": "9b3fdea3-af54-46ad-bec4-cbbe7cbb120f",
+  "export": {
+    "filename": "approved-export.json",
+    "bytes": 1286,
+    "sha256": "3d92c32b1d83501717a04a7dd9fab3e99fe1c498fdbe6089c72d4467220cb958",
+    "approvalId": "fe00bb28-31cc-4254-947b-7bd09d774e02"
+  },
+  "mobileFields": {
+    "viewport": 390,
+    "client": 390,
+    "document": 390,
+    "body": 390
+  },
+  "mobileOriginal": {
+    "viewport": 390,
+    "client": 390,
+    "document": 390,
+    "body": 390
+  },
+  "mobileNavigation": {
+    "viewport": 390,
+    "client": 390,
+    "document": 390,
+    "body": 390
+  },
+  "browser": "Fresh isolated Playwright Chromium; real login form; no injected session cookies",
+  "sourceProofSha256": "b03cf90882718bad74e6cd27cc00f74a8d054c5306011ce3fac8519a848ce339",
+  "unexpectedBrowserErrors": 0,
+  "expectedDiagnostics": [
+    "Signed-out auth/me probes return 401.",
+    "Workspace initialization cancels its previous config query after verified login.",
+    "The accepted signed PUT response body is deliberately cancelled after status 200; canonical finalization returned 202."
+  ],
+  "screenshots": "Captured outside the repository under /private/tmp/folio-hosted-browser-20260912/",
+  "limitations": [
+    "Synthetic rules document workflow; separate candidate receipt covers hosted AI.",
+    "Background cron recovery is not yet installed or accepted.",
+    "Resend receiving and Google Sheets delivery are not verified; billing remains mocked."
+  ]
+}
