@@ -1,0 +1,95 @@
+{
+  "marker": "1036d637-d127-4f28-a3b4-be726f05f60e",
+  "workspaceId": "e4b45233-9b14-4ea5-8d43-37f14c2c7262",
+  "mode": "--observe",
+  "startedAt": "2026-09-12T13:35:46.723Z",
+  "status": "completed",
+  "synthetic": true,
+  "scope": "Restricted-role database fixture and durable recovery observations only",
+  "boundaries": {
+    "appHttpCalls": "none",
+    "originalObjects": "none",
+    "usersOrProviders": "none",
+    "aiAndPayments": "none",
+    "cronNetVaultAccess": "none",
+    "exactPgNetCorrelation": "unavailable",
+    "schedulerAttribution": "requires separate Vercel 202 logs and operator-confirmed quiet window",
+    "killedProcessRecovery": "not tested; an expired lease is simulated"
+  },
+  "runnerSha256": "0528af907d1202f760b5ac0fe3ccbeef068adc9a8c143ebe9a8cc12475cd1c73",
+  "database": {
+    "role": "folio_admin",
+    "schema": "folio",
+    "verifiedTls": true,
+    "restrictedRole": true
+  },
+  "observation": {
+    "observedAt": "2026-09-12T13:35:47.510Z",
+    "baseline": {
+      "scope": "rules worker only; no originals; no cron/net correlation",
+      "marker": "1036d637-d127-4f28-a3b4-be726f05f60e",
+      "seededAt": "2026-09-12T13:32:26.859466+00:00",
+      "acceptanceId": "d7918074-7e4f-495a-894c-6a7a9a479dbd",
+      "runnableAfter": "2026-09-12T13:33:56.552924+00:00"
+    },
+    "jobs": [
+      {
+        "jobId": "e252b920-4982-4724-b44b-d8f1336eccf2",
+        "state": "completed",
+        "attempts": 1,
+        "availableAt": "2026-09-12T13:33:56.552Z",
+        "leaseUntil": null,
+        "leaseCleared": true,
+        "activeLease": false,
+        "hasError": false,
+        "knownLeaseRecoveryDiagnostic": false,
+        "fixtureMatches": true,
+        "runCount": 1,
+        "runId": "d020f5ba-25fb-44fb-a6b1-5738c5949a39",
+        "deterministicEngine": true,
+        "expectedValues": true,
+        "noAiCostOrTokens": true,
+        "runHashMatches": true,
+        "noIssues": true,
+        "documentState": "needs_review",
+        "latestRunMatches": true,
+        "jobUpdatedAt": "2026-09-12T13:34:02.685Z",
+        "case": "queued",
+        "expectedAttempts": 1,
+        "passed": true
+      },
+      {
+        "jobId": "6ab7c63b-6394-49dc-abb4-672a0ecc2df6",
+        "state": "completed",
+        "attempts": 2,
+        "availableAt": "2026-09-12T13:33:56.552Z",
+        "leaseUntil": null,
+        "leaseCleared": true,
+        "activeLease": false,
+        "hasError": true,
+        "knownLeaseRecoveryDiagnostic": true,
+        "fixtureMatches": true,
+        "runCount": 1,
+        "runId": "7e945172-8ba8-4956-9bc3-2d720bb6932a",
+        "deterministicEngine": true,
+        "expectedValues": true,
+        "noAiCostOrTokens": true,
+        "runHashMatches": true,
+        "noIssues": true,
+        "documentState": "needs_review",
+        "latestRunMatches": true,
+        "jobUpdatedAt": "2026-09-12T13:34:02.766Z",
+        "case": "expired-lease",
+        "expectedAttempts": 2,
+        "passed": true
+      }
+    ],
+    "usage": {
+      "entries": 2,
+      "pages": 2,
+      "unchanged": true
+    },
+    "durableRecoveryPassed": true
+  },
+  "finishedAt": "2026-09-12T13:35:47.550Z"
+}

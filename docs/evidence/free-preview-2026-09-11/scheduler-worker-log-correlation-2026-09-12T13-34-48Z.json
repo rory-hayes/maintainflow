@@ -1,0 +1,73 @@
+{
+  "observedAt": "2026-09-12T13:34:48.556Z",
+  "source": "Vercel get_runtime_logs connector; root-provided restricted-database acceptance receipts",
+  "projectId": "prj_9995IQ0H1GERFJseqQ9bqnOI7b02",
+  "deploymentId": "dpl_DPPcG9J4xsjNhK6UFe4Yj9bAffV2",
+  "environment": "production",
+  "baseline": {
+    "since": "2026-09-12T13:20:43Z",
+    "until": "2026-09-12T13:30:43Z",
+    "workerPathQueryReturnedNoLogs": true,
+    "http202QueryReturnedNoLogs": true,
+    "limit": 100
+  },
+  "acceptanceQuery": {
+    "since": "2026-09-12T13:32:26Z",
+    "until": "2026-09-12T13:34:48.556Z",
+    "statusCode": "202",
+    "limit": 100,
+    "requests": [
+      {
+        "time": "2026-09-12T13:34:00Z",
+        "timePrecision": "seconds as displayed",
+        "method": "POST",
+        "path": "/api/internal/worker",
+        "statusCode": 202,
+        "logLevel": "error",
+        "source": "serverless",
+        "requestId": null,
+        "requestIdAvailability": "not returned by this connector",
+        "attachedOutputClassification": "Fastify deprecation warning"
+      }
+    ]
+  },
+  "databaseCorrelation": {
+    "source": "separate scheduler-practical receipts reported by the root agent",
+    "marker": "1036d637-d127-4f28-a3b4-be726f05f60e",
+    "workspaceId": "e4b45233-9b14-4ea5-8d43-37f14c2c7262",
+    "seededAt": "2026-09-12T13:32:26Z",
+    "runnableAfter": "2026-09-12T13:33:56.552924Z",
+    "seedReceipt": "scheduler-practical-2026-09-12T13-32-26-155Z-e36d1698-8239-4993-a870-687356f5dc10.json",
+    "firstObservationReceipt": "scheduler-practical-2026-09-12T13-34-26-524Z-ba7835bc-9b97-4fd0-a69f-50666dc769c7.json",
+    "firstObservationDurableRecoveryPassed": true,
+    "queued": {
+      "attempts": 1,
+      "runId": "d020f5ba-25fb-44fb-a6b1-5738c5949a39",
+      "completedAt": "2026-09-12T13:34:02.685Z"
+    },
+    "recoveredExpiredLease": {
+      "attempts": 2,
+      "runId": "7e945172-8ba8-4956-9bc3-2d720bb6932a",
+      "completedAt": "2026-09-12T13:34:02.766Z"
+    },
+    "secondObservationAt": "2026-09-12T13:35:47.510Z",
+    "secondObservationDurableRecoveryPassed": true,
+    "runIdsAttemptsAndJobUpdatedAtUnchanged": true,
+    "usageEntries": 2,
+    "usagePages": 2,
+    "usageUnchanged": true,
+    "cleanupFinishedAt": "2026-09-12T13:36:16.762Z",
+    "fixtureRemoved": true,
+    "rootConfirmedNoAppMutationsManualWorkerCallsOrDeploymentsDuringAcceptance": true,
+    "rootReportedPreviousAppMutationsEndedAt": "2026-09-12T13:03:45Z"
+  },
+  "assessment": "The final deployment returned worker HTTP202 after the synthetic jobs became due; both completed once with expected attempts and stable usage during the operator-controlled quiet window. This supports practical scheduled invocation and durable expired-lease recovery.",
+  "limitations": [
+    "No exact pg_net request/response or cron-run identifier correlation: restricted Folio roles cannot read cron, net or Vault.",
+    "The request ID and hostname were not returned in the connector log output; the query was scoped to the root-verified canonical production deployment.",
+    "Empty baseline log results are bounded observations and do not prove every earlier invocation was absent.",
+    "The error log level accompanies a Fastify deprecation warning; raw log text, headers and secrets are intentionally omitted.",
+    "No application HTTP call, manual worker invocation, deployment or remote mutation was made by the log observer.",
+    "Recovery used a simulated expired lease, not a killed hosted process; it does not establish AI, billing, email, Sheets or original-storage recovery."
+  ]
+}

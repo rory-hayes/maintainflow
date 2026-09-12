@@ -1,14 +1,14 @@
 # Hosted preview status — 12 September 2026
 
-Folio is live at [maintainflow.io](https://maintainflow.io) as an invite-only hosted preview, with billing mocked. Pushing the accepted source to `main` triggered the canonical Git deployment, and its HTTP smoke and GitHub checks passed. The complete synthetic canonical-domain browser workflow also passed all 11 checks. The authenticated watchdog and external provider setup remain separate gates.
+Folio is live at [maintainflow.io](https://maintainflow.io) as an invite-only hosted preview, with billing mocked. The Git deployment verified during acceptance and its GitHub checks passed; its application code is unchanged from the revision that passed all 11 canonical-domain browser checks. The authenticated watchdog is installed, and hosted recovery of synthetic queued and expired-lease jobs passed with duplicate-prevention observation and fixture cleanup. Resend receiving and Google Sheets authorization/delivery remain unverified.
 
-## Canonical Git deployment
+## Verified Git deployment at scheduler acceptance
 
-- Deployment: `dpl_91yEp6fWaGpFAg3xa2QuWnKhVdrt`, source `git`, revision `c2aa2f418da1e0ce0273abb0e9eaa1dc73e82f1b`.
-- The canonical domain returned that revision from `/api/health`; `/api/config` confirmed hosted, invite-only preview mode, and `/sign-in` served the app. `www.maintainflow.io` redirects to the apex with HTTP 308. [Canonical HTTP smoke evidence](evidence/free-preview-2026-09-11/canonical-git-deployment-2026-09-12.json).
-- [CI run 34694089530](https://github.com/rory-hayes/maintainflow/actions/runs/34694089530) passed for this exact revision: **230 tests**, zero failures/skips/cancellations, typecheck, hosted packaging and isolated function/runtime decoder verification. The CI package contained 2,147 files and measured 67 MiB.
-- [CodeQL run 34694089148](https://github.com/rory-hayes/maintainflow/actions/runs/34694089148) passed both JavaScript/TypeScript and Actions analyses for the same revision.
-- Authenticated canonical-domain browser acceptance **passed all 11 checks**: real form login, unique signed PDF upload, deterministic extraction, both private PDF pages, saved correction, pinned approval, actual JSON browser download, reload persistence, 390px mobile fields/document/navigation, and logout. No unexpected browser errors or horizontal overflow were observed. [Canonical browser evidence](evidence/free-preview-2026-09-11/canonical-browser-2026-09-12-adfe959c.json). Earlier runner failures were caused by parser-readiness bypass, an exact label matcher, full-page screenshot resizing and expected query cancellation; no application change was required. Original receipts remain outside the repository.
+- Deployment during scheduler acceptance: `dpl_DPPcG9J4xsjNhK6UFe4Yj9bAffV2`, source `git`, revision `685d83f4bff6e6a9160eba4b908046cb24604b07`. This documentation/evidence commit leaves application code unchanged from `c2aa2f418da1e0ce0273abb0e9eaa1dc73e82f1b`.
+- Actual domain aliases and `/api/health` confirmed this revision; hosted, invite-only preview mode remains enabled. The [earlier canonical HTTP smoke](evidence/free-preview-2026-09-11/canonical-git-deployment-2026-09-12.json) retains its original `c2aa2f4` revision and records the health/config checks, sign-in app shell and HTTP 308 redirect from www to the apex.
+- [CI run 34695747549](https://github.com/rory-hayes/maintainflow/actions/runs/34695747549) passed for `685d83f`: **230 tests**, zero failures/skips/cancellations, typecheck, hosted packaging and isolated function/runtime decoder verification.
+- [CodeQL run 34695747013](https://github.com/rory-hayes/maintainflow/actions/runs/34695747013) passed both JavaScript/TypeScript and Actions analyses for the same revision.
+- Authenticated canonical-domain browser acceptance on `c2aa2f4` **passed all 11 checks**: real form login, unique signed PDF upload, deterministic extraction, both private PDF pages, saved correction, pinned approval, actual JSON browser download, reload persistence, 390px mobile fields/document/navigation, and logout. No unexpected browser errors or horizontal overflow were observed. [Canonical browser evidence](evidence/free-preview-2026-09-11/canonical-browser-2026-09-12-adfe959c.json). Earlier runner failures were caused by parser-readiness bypass, an exact label matcher, full-page screenshot resizing and expected query cancellation; no application change was required. Original receipts remain outside the repository.
 - The following candidate receipts retain their original revision and scope.
 
 ## Accepted candidate evidence — revision 11165f4
@@ -29,12 +29,26 @@ Hosted testing also found and fixed shared middleware overriding the original ro
 
 The user approved the restricted logins, server credentials, private Storage and authenticated worker setup. No additional setup approval is required. Vercel remains Hobby; Supabase was last directly verified Free/Nano on 11 September. No paid plan change was made. Billing is visibly simulated and the hosted mock upgrade/cancel checks made no Stripe call.
 
+## Hosted scheduler acceptance
+
+The first private installer returned PostgreSQL `42501`: its metadata `SELECT FOR UPDATE` required UPDATE privilege that the Vault/cron access role did not have. The corrected installer removed those row locks while retaining the transaction advisory lock, exact conflict guards and supported function APIs. **Six local restricted-ACL checks passed** against synthetic SELECT-only metadata tables and function APIs; these local checks are separate from the hosted proof below. The user ran the corrected installer, and the supplied SQL Editor screenshot showed job ID 1 active.
+
+The [hosted scheduler acceptance summary](evidence/free-preview-2026-09-11/scheduler-acceptance-2026-09-12.json) records the following observations on deployed `685d83f`, with no application requests, manual worker calls or deployments made by the acceptance operators during the recovery observation window. All times are UTC on 12 September:
+
+- Two isolated synthetic jobs were seeded at 13:32:26 and became due at 13:33:56.552924. Vercel recorded an authenticated `POST /api/internal/worker` returning HTTP 202 at 13:34:00.
+- The queued job completed at 13:34:02.685 on attempt 1; the job with an expired lease completed at 13:34:02.766 on attempt 2. The 13:34:27.355 observation reported `durableRecoveryPassed=true`.
+- A second observation at 13:35:47.510, **80.155 seconds later**, found the same run IDs, attempts and update times. Usage remained exactly two ledger entries and two pages.
+- Cleanup at 13:36:16.762 reported `fixtureRemoved=true` for the marked QA workspace.
+
+This demonstrates hosted recovery and no duplicate runs or usage during the observed window. The expired lease was synthetic; the test did not physically kill a running process. Timing and Vercel logs correlate the watchdog invocation with recovery, but do not establish exact pg_net request/response-ID correlation.
+
 ## Domain, Git and remaining work
 
-Vercel is connected to `rory-hayes/maintainflow`, production branch `main`, with automatic deployments and custom-domain assignment enabled. Both `maintainflow.io` and `www.maintainflow.io` are verified; www redirects to the apex. The pushed source removed the migration hold and automatically deployed revision `c2aa2f418da1e0ce0273abb0e9eaa1dc73e82f1b` to the canonical domain. The prior source remains preserved on `backup/pre-folio-2026-09-11` at `2ad3baf4aa27a3ac3d3c6a07c80b23b55e706147`. Future release checks should read the actual domain alias and runtime revision, because `project.targets.production` can reference a canceled deployment.
+Vercel is connected to `rory-hayes/maintainflow`, production branch `main`, with automatic deployments and custom-domain assignment enabled. Both `maintainflow.io` and `www.maintainflow.io` are verified; www redirects to the apex. The migration hold is removed, and the Git deployment at scheduler acceptance served revision `685d83f4bff6e6a9160eba4b908046cb24604b07` on the canonical domain. The prior source remains preserved on `backup/pre-folio-2026-09-11` at `2ad3baf4aa27a3ac3d3c6a07c80b23b55e706147`. Future release checks should read the actual domain alias and runtime revision, because `project.targets.production` can reference a canceled deployment.
 
-1. The user runs the already-approved private `.local/hosted-preview/worker-setup-after-promotion.sql` once in Supabase SQL Editor. Computer still fails to initialize despite the user's reinstall; do not repeat reconnect advice without new evidence.
-2. After earlier worker invocations finish, use `.local/hosted-preview/scheduler-practical-acceptance.mjs` to seed future-due synthetic queued/expired-lease fixtures, observe durable recovery during a quiet window, correlate Vercel worker 202 logs, observe unchanged run IDs/usage after another minute, and clean only its marked QA workspace. Require `observation.durableRecoveryPassed=true`; an observation command exiting zero alone is not acceptance. This cannot prove exact pg_net request/response correlation or a real killed process.
-3. Complete Resend receiving and Google Sheets setup and delivery acceptance; neither delivery path is verified. Real Stripe is intentionally deferred.
+1. Complete Resend receiving setup and verify an actual inbound delivery through extraction.
+2. Complete Google Sheets authorization and verify delivery of approved values to a sheet.
+
+Neither delivery path nor customer use is verified. Real Stripe is intentionally deferred; hosted billing remains visibly mocked.
 
 Private configuration and credentials stay under ignored `.local/hosted-preview/` and are excluded by `.vercelignore`. Do not print or commit keys, passwords, cookies, invitation codes, signed URLs or private SQL Vault values. Earlier failed QA accounts and receipts are retained separately for diagnosis.

@@ -1,0 +1,85 @@
+{
+  "observedAt": "2026-09-12T13:36:16.762Z",
+  "status": "passed",
+  "applicationRevision": "685d83f4bff6e6a9160eba4b908046cb24604b07",
+  "deploymentId": "dpl_DPPcG9J4xsjNhK6UFe4Yj9bAffV2",
+  "canonicalOrigin": "https://maintainflow.io",
+  "scope": "Automatic queued-work pickup and simulated expired-lease recovery on the hosted private preview.",
+  "installer": {
+    "userConfirmed": true,
+    "evidence": "User-provided screenshot of folio_worker_setup result, 12 September 2026 14:29 Europe/Dublin; cropped after watchdog job metadata.",
+    "visibleWatchdogName": "folio-worker-watchdog",
+    "visibleJobId": 1,
+    "visibleActive": true,
+    "revision": 2,
+    "permissionFix": "Removed direct FOR UPDATE row locks on managed Vault/cron tables; retained advisory transaction lock, exact conflict checks and supported APIs.",
+    "localAclRegressionChecksPassed": 6
+  },
+  "quietWindow": {
+    "operatorAppMutations": "None during acceptance; previous browser mutations ended at 13:03:45 UTC.",
+    "manualWorkerCalls": 0,
+    "deploymentsDuringAcceptance": 0,
+    "baselineWorkerLogWindow": [
+      "2026-09-12T13:20:43Z",
+      "2026-09-12T13:30:43Z"
+    ],
+    "baselineWorker202Observed": 0
+  },
+  "seededAt": "2026-09-12T13:32:26.859466+00:00",
+  "runnableAfter": "2026-09-12T13:33:56.552924+00:00",
+  "workerRequest": {
+    "observedTime": "2026-09-12T13:34:00Z",
+    "method": "POST",
+    "path": "/api/internal/worker",
+    "status": 202,
+    "requestTimePrecision": "seconds",
+    "requestIdAvailable": false
+  },
+  "jobs": [
+    {
+      "jobId": "e252b920-4982-4724-b44b-d8f1336eccf2",
+      "case": "queued",
+      "state": "completed",
+      "attempts": 1,
+      "runCount": 1,
+      "runId": "d020f5ba-25fb-44fb-a6b1-5738c5949a39",
+      "jobUpdatedAt": "2026-09-12T13:34:02.685Z"
+    },
+    {
+      "jobId": "6ab7c63b-6394-49dc-abb4-672a0ecc2df6",
+      "case": "expired-lease",
+      "state": "completed",
+      "attempts": 2,
+      "runCount": 1,
+      "runId": "7e945172-8ba8-4956-9bc3-2d720bb6932a",
+      "jobUpdatedAt": "2026-09-12T13:34:02.766Z"
+    }
+  ],
+  "firstObservation": "2026-09-12T13:34:27.355Z",
+  "secondObservation": "2026-09-12T13:35:47.510Z",
+  "secondsBetweenObservations": 80.155,
+  "durableRecoveryPassed": true,
+  "stableRunIdsAttemptsAndUpdateTimes": true,
+  "usage": {
+    "entries": 2,
+    "pages": 2,
+    "unchanged": true
+  },
+  "fixtureRemoved": true,
+  "cleanupCompletedAt": "2026-09-12T13:36:16.762Z",
+  "receipts": [
+    "scheduler-practical-2026-09-12T13-32-26-155Z-e36d1698-8239-4993-a870-687356f5dc10.json",
+    "scheduler-practical-2026-09-12T13-34-26-524Z-ba7835bc-9b97-4fd0-a69f-50666dc769c7.json",
+    "scheduler-practical-2026-09-12T13-35-46-723Z-0462fbd6-edc0-4dc6-a544-07678be34167.json",
+    "scheduler-practical-2026-09-12T13-36-15-799Z-7b83cdef-6fcc-48a9-b401-bfffd3ecb801.json"
+  ],
+  "limitations": [
+    "The watchdog request is temporally correlated with durable completion; exact pg_net request/response-ID correlation was unavailable to the restricted role.",
+    "Recovery used a simulated expired lease, not a physically killed process.",
+    "Only deterministic synthetic text was used; no original object upload, AI call, payment, email or other provider delivery was exercised.",
+    "The cropped installer screenshot does not independently show every verification boolean.",
+    "This acceptance does not verify Resend receiving or Google Sheets delivery.",
+    "The log connector returned the deployment and request path/status, but not the request hostname or request ID."
+  ],
+  "workerLogEvidence": "scheduler-worker-log-correlation-2026-09-12T13-34-48Z.json"
+}
