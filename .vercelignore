@@ -1,0 +1,11 @@
+.git/
+.local/
+.env
+.env.*
+node_modules/
+dist/
+.vercel/
+coverage/
+test-results/
+*.log
+.DS_Store
