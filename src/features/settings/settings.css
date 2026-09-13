@@ -33,7 +33,10 @@
 .settings-key-prefix { display: block; color: var(--color-muted); font-size: 11px; margin-top: 4px; }
 .members-table { min-width: 560px; }
 .members-table select { font-size: 12px; padding: 7px 10px; min-width: 110px; }
-.api-keys-table { min-width: 675px; }
+.api-keys-scroll { position: relative; }
+.api-keys-table { min-width: 810px; }
+.api-keys-table time { display: block; max-width: 145px; }
+.api-keys-table .status.expired { color: #8a5811; background: #fff4db; }
 .usage-detail-rail { display: grid; grid-template-columns: repeat(4, 1fr); padding: 19px 0 22px; border-block: 1px solid var(--color-line); gap: 24px; }
 .usage-detail-rail > div { display: flex; flex-direction: column; gap: 6px; }
 .usage-detail-rail strong { font-size: 28px; letter-spacing: -1px; line-height: 1.2; font-variant-numeric: tabular-nums; font-weight: 600; }
