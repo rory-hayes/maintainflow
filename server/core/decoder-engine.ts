@@ -1,6 +1,8 @@
 import path from 'node:path';
 import type {PageText} from '../../shared/types.js';
-import {decoderError as badRequest,decoderLimits as config} from './decoder-limits.js';
+import {decoderError,decoderLimits as config} from './decoder-limits.js';
+import {SourceValidationError,type SourceValidationReason} from './source-validation.js';
+const invalid=(reason:SourceValidationReason):never=>{throw new SourceValidationError(reason);};
 type SourceFormat = 'pdf'|'png'|'jpeg'|'docx'|'xlsx'|'txt'|'csv'|'eml'|'html';
 const textExtensions:Record<string,SourceFormat>={'.txt':'txt','.csv':'csv','.eml':'eml','.html':'html','.htm':'html'};
 const binaryExtensions:Record<string,SourceFormat>={'.pdf':'pdf','.png':'png','.jpg':'jpeg','.jpeg':'jpeg','.docx':'docx','.xlsx':'xlsx'};
@@ -12,39 +14,39 @@ function officeEntries(bytes:Buffer):Set<string>{
   for(let offset=bytes.length-22;offset>=Math.max(0,bytes.length-65_557);offset--){
     if(bytes.readUInt32LE(offset)===0x06054b50&&offset+22+bytes.readUInt16LE(offset+20)===bytes.length){end=offset;break;}
   }
-  if(end<0)badRequest('Invalid office archive');
+  if(end<0)invalid('office_archive_invalid');
   const count=bytes.readUInt16LE(end+10),directoryBytes=bytes.readUInt32LE(end+12),directoryOffset=bytes.readUInt32LE(end+16);
-  if(bytes.readUInt16LE(end+4)||bytes.readUInt16LE(end+6)||bytes.readUInt16LE(end+8)!==count||count===0xffff||directoryOffset===0xffffffff)badRequest('Split and ZIP64 office archives are not supported');
-  if(count>2000)badRequest('Office archive contains too many entries');
-  if(directoryOffset+directoryBytes!==end)badRequest('Invalid office archive directory');
+  if(bytes.readUInt16LE(end+4)||bytes.readUInt16LE(end+6)||bytes.readUInt16LE(end+8)!==count||count===0xffff||directoryOffset===0xffffffff)invalid('office_archive_unsupported');
+  if(count>2000)invalid('office_entry_limit');
+  if(directoryOffset+directoryBytes!==end)invalid('office_directory_invalid');
   let cursor=directoryOffset,total=0;
   const names=new Set<string>();
   for(let index=0;index<count;index++){
-    if(cursor+46>end||bytes.readUInt32LE(cursor)!==0x02014b50)badRequest('Invalid office archive');
+    if(cursor+46>end||bytes.readUInt32LE(cursor)!==0x02014b50)invalid('office_archive_invalid');
     const flags=bytes.readUInt16LE(cursor+8),method=bytes.readUInt16LE(cursor+10),compressed=bytes.readUInt32LE(cursor+20);
     const nameLength=bytes.readUInt16LE(cursor+28),extraLength=bytes.readUInt16LE(cursor+30),commentLength=bytes.readUInt16LE(cursor+32),local=bytes.readUInt32LE(cursor+42);
     const next=cursor+46+nameLength+extraLength+commentLength;
-    if(!nameLength||next>end||bytes.readUInt16LE(cursor+34)||flags&1||![0,8].includes(method))badRequest('Unsupported or invalid office archive entry');
+    if(!nameLength||next>end||bytes.readUInt16LE(cursor+34)||flags&1||![0,8].includes(method))invalid('office_entry_invalid');
     total+=bytes.readUInt32LE(cursor+24);
-    if(total>40*1024*1024)badRequest('Expanded office file exceeds the 40 MB limit');
+    if(total>40*1024*1024)invalid('office_expansion_limit');
     const rawName=bytes.subarray(cursor+46,cursor+46+nameLength);
     let name:string;
-    try{name=new TextDecoder('utf-8',{fatal:true}).decode(rawName);}catch{badRequest('Office archive entry names must use UTF-8');}
-    if(name!.includes('\\')||name!.includes('\0')||name!.startsWith('/')||/^[A-Za-z]:/.test(name!)||name!.split('/').some(part=>part==='.'||part==='..')||names.has(name!))badRequest('Invalid or duplicate office archive entry');
-    if(local+30>directoryOffset||bytes.readUInt32LE(local)!==0x04034b50)badRequest('Invalid office archive local entry');
+    try{name=new TextDecoder('utf-8',{fatal:true}).decode(rawName);}catch{invalid('office_entry_encoding');}
+    if(name!.includes('\\')||name!.includes('\0')||name!.startsWith('/')||/^[A-Za-z]:/.test(name!)||name!.split('/').some(part=>part==='.'||part==='..')||names.has(name!))invalid('office_entry_path');
+    if(local+30>directoryOffset||bytes.readUInt32LE(local)!==0x04034b50)invalid('office_local_entry_invalid');
     const localNameLength=bytes.readUInt16LE(local+26),localExtraLength=bytes.readUInt16LE(local+28);
     const dataOffset=local+30+localNameLength+localExtraLength;
-    if(localNameLength!==nameLength||dataOffset+compressed>directoryOffset||bytes.readUInt16LE(local+6)!==flags||bytes.readUInt16LE(local+8)!==method||!bytes.subarray(local+30,local+30+localNameLength).equals(rawName))badRequest('Office archive entry metadata does not match');
+    if(localNameLength!==nameLength||dataOffset+compressed>directoryOffset||bytes.readUInt16LE(local+6)!==flags||bytes.readUInt16LE(local+8)!==method||!bytes.subarray(local+30,local+30+localNameLength).equals(rawName))invalid('office_entry_mismatch');
     names.add(name!);cursor=next;
   }
-  if(cursor!==end)badRequest('Invalid office archive directory size');
+  if(cursor!==end)invalid('office_directory_size');
   return names;
 }
 export function validateZipExpansion(bytes:Buffer){officeEntries(bytes);}
 function officeFormat(bytes:Buffer):SourceFormat{
   const names=officeEntries(bytes);
   const word=names.has('word/document.xml'),sheet=names.has('xl/workbook.xml');
-  if(!names.has('[Content_Types].xml')||!names.has('_rels/.rels')||word===sheet)badRequest('The archive is not a supported unambiguous DOCX or XLSX document');
+  if(!names.has('[Content_Types].xml')||!names.has('_rels/.rels')||word===sheet)invalid('office_format_unsupported');
   return word?'docx':'xlsx';
 }
 function binaryFormat(bytes:Buffer):SourceFormat|undefined{
@@ -56,7 +58,7 @@ function binaryFormat(bytes:Buffer):SourceFormat|undefined{
   const unsupported=(['GIF87a','GIF89a','OggS','fLaC','ID3','%!PS-Adobe','SQLite format 3'].some(signature=>begins(bytes,signature)))||
     [[0x1f,0x8b],[0x37,0x7a,0xbc,0xaf,0x27,0x1c],[0x52,0x61,0x72,0x21,0x1a,0x07],[0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1],[0x7f,0x45,0x4c,0x46],[0,0x61,0x73,0x6d],[0x49,0x49,0x2a,0],[0x4d,0x4d,0,0x2a],[0x49,0x49,0x2b,0],[0x4d,0x4d,0,0x2b],[0xfe,0xed,0xfa,0xce],[0xce,0xfa,0xed,0xfe],[0xfe,0xed,0xfa,0xcf],[0xcf,0xfa,0xed,0xfe],[0xca,0xfe,0xba,0xbe]].some(signature=>begins(bytes,signature))||
     begins(bytes,'RIFF')||bytes.subarray(4,8).equals(Buffer.from('ftyp'));
-  if(unsupported)badRequest('This binary file type is not supported, regardless of its filename');
+  if(unsupported)invalid('binary_format_unsupported');
 }
 function strongTextFormat(text:string):'html'|'eml'|undefined{
   // Full HTML documents are recognizable; isolated fragments can also be ordinary text.
@@ -88,21 +90,21 @@ function strongTextFormat(text:string):'html'|'eml'|undefined{
     if(current==='content-type'&&value.trim())contentType=true;
     if(current==='mime-version'&&/^1\.0(?:\s|$)/.test(value))mime=true;
   }
-  if(mime&&contentType){if(separator>65_536)badRequest('Email headers exceed the supported 64 KB limit');return 'eml';}
+  if(mime&&contentType){if(separator>65_536)invalid('email_header_limit');return 'eml';}
 }
 function classifySource(bytes:Buffer,filename:string):{format:SourceFormat;text?:string}{
   const binary=binaryFormat(bytes);
   if(binary)return {format:binary};
   const ext=path.extname(filename).toLowerCase();
   let text:string;
-  try{text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{badRequest('Text files must use UTF-8 encoding or a supported binary format');}
-  if(/[\u0000-\u0008\u000e-\u001f\u007f]/.test(text!))badRequest('Binary control content is not accepted as text');
+  try{text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{invalid('text_encoding');}
+  if(/[\u0000-\u0008\u000e-\u001f\u007f]/.test(text!))invalid('text_binary_content');
   // A PDF header preceded only by whitespace/BOM remains recognizable and must
   // never fall through to a text policy. The PDF decoder below validates it.
   if(/^\s*%PDF-/.test(text!))return {format:'pdf'};
   const recognized=strongTextFormat(text!);
   const format=recognized||textExtensions[ext]||binaryExtensions[ext];
-  if(!format)badRequest('Supported formats: PDF, PNG, JPG, TXT, EML, CSV, XLSX, DOCX and HTML');
+  if(!format)invalid('format_unsupported');
   return {format,text:text!};
 }
 async function htmlSourceText(html:string):Promise<string>{
@@ -144,18 +146,80 @@ async function htmlSourceText(html:string):Promise<string>{
   });
 }
 export async function decodeSource(bytes:Buffer,filename:string):Promise<{mimeType:string;pages:PageText[];pageCount:number}>{
-if(!bytes.length)badRequest('The file is empty');if(bytes.length>config.maxBytes)badRequest('Files must be 10 MB or smaller',413);const classified=classifySource(bytes,filename),format=classified.format;
-if(format==='pdf'){if(!bytes.subarray(0,5).equals(Buffer.from('%PDF-')))badRequest('The file does not contain a valid PDF');try{const {getDocument}=await import('pdfjs-dist/legacy/build/pdf.mjs');const loading=getDocument({data:new Uint8Array(bytes),useSystemFonts:true,stopAtErrors:true});const doc=await loading.promise;try{if(doc.numPages>config.maxPages)badRequest(`PDFs must be ${config.maxPages} pages or fewer`,413);const pages:PageText[]=[];for(let p=1;p<=doc.numPages;p++){const page=await doc.getPage(p),content=await page.getTextContent();let prevY:number|undefined;const lines:string[]=[];for(const item of content.items){if(!('str' in item))continue;const y=item.transform[5];if(prevY!==undefined&&Math.abs(y-prevY)>3)lines.push('\n');else if(lines.length&&!lines.at(-1)?.endsWith('\n'))lines.push(' ');lines.push(item.str);if(item.hasEOL)lines.push('\n');prevY=y;}pages.push({page:p,text:lines.join('').replace(/\n\s*\n/g,'\n')});}return {mimeType:'application/pdf',pages,pageCount:doc.numPages};}finally{await loading.destroy();}}catch(e){if((e as any).statusCode)throw e;badRequest('The PDF is malformed, encrypted, or cannot be read');}}
-if(['png','jpeg'].includes(format)){try{const sharp=(await import('sharp')).default;const meta=await sharp(bytes,{limitInputPixels:40000000}).metadata();if(!['jpeg','png'].includes(meta.format||''))badRequest('Only PNG and JPEG image content is supported');return {mimeType:meta.format==='png'?'image/png':'image/jpeg',pages:[{page:1,text:''}],pageCount:1};}catch(e){if((e as any).statusCode)throw e;badRequest('Invalid image or image exceeds 40 megapixels');}}
-if(format==='docx'){validateZipExpansion(bytes);try{const mammoth=(await import('mammoth')).default;const result=await mammoth.extractRawText({buffer:bytes});return {mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',pages:[{page:1,text:result.value}],pageCount:1};}catch{badRequest('The DOCX file could not be read');}}
-if(format==='xlsx'){validateZipExpansion(bytes);try{const ExcelJS=(await import('exceljs')).default;const wb=new ExcelJS.Workbook();await wb.xlsx.load(bytes as any);if(!wb.worksheets.length)badRequest('The XLSX file does not contain a worksheet');if(wb.worksheets.length>config.maxPages)badRequest('Spreadsheets must contain 30 sheets or fewer');const pages=wb.worksheets.map((sheet,i)=>{const rows:string[]=[];if(sheet.rowCount>10000||sheet.columnCount>200)badRequest('Spreadsheet dimensions exceed the supported limit');sheet.eachRow(row=>{const cells=(row.values as any[]).slice(1).map(v=>v&&typeof v==='object'?(v.text??v.result??''):v??'');rows.push(cells.join(' | '));});return {page:i+1,text:rows.join('\n')};});return {mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',pages,pageCount:Math.max(pages.length,1)};}catch(e){if((e as any).statusCode)throw e;badRequest('The XLSX file could not be read');}}
-let text=classified.text!;
-if(format==='eml'){
-  const {simpleParser}=await import('mailparser');
-  const mail=await simpleParser(bytes,{skipHtmlToText:true,skipTextToHtml:true,maxHtmlLengthToParse:2*1024*1024});
-  const body=mail.text||(typeof mail.html==='string'?await htmlSourceText(mail.html):'');
-  text=`Subject: ${mail.subject||''}\nFrom: ${mail.from?.text||''}\n${body}`;
-}
-if(format==='html')text=await htmlSourceText(text!);
-return {mimeType:format==='eml'?'message/rfc822':format==='csv'?'text/csv':format==='html'?'text/html':'text/plain',pages:[{page:1,text:text!}],pageCount:1};
+  if(!bytes.length)invalid('empty');
+  if(bytes.length>config.maxBytes)invalid('file_too_large');
+  const classified=classifySource(bytes,filename),format=classified.format;
+  if(format==='pdf'){
+    if(!bytes.subarray(0,5).equals(Buffer.from('%PDF-')))invalid('pdf_invalid');
+    // Import/initialization errors are operational failures, never invalid input.
+    const {getDocument,InvalidPDFException,PasswordException}=await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const loading=getDocument({data:new Uint8Array(bytes),useSystemFonts:true,stopAtErrors:true});
+    try{
+      const doc=await loading.promise;
+      if(doc.numPages>config.maxPages)invalid('pdf_page_limit');
+      const pages:PageText[]=[];
+      for(let p=1;p<=doc.numPages;p++){
+        const page=await doc.getPage(p),content=await page.getTextContent();
+        let prevY:number|undefined;const lines:string[]=[];
+        for(const item of content.items){
+          if(!('str' in item))continue;
+          const y=item.transform[5];
+          if(prevY!==undefined&&Math.abs(y-prevY)>3)lines.push('\n');
+          else if(lines.length&&!lines.at(-1)?.endsWith('\n'))lines.push(' ');
+          lines.push(item.str);if(item.hasEOL)lines.push('\n');prevY=y;
+        }
+        pages.push({page:p,text:lines.join('').replace(/\n\s*\n/g,'\n')});
+      }
+      return {mimeType:'application/pdf',pages,pageCount:doc.numPages};
+    }catch(error){
+      if(error instanceof InvalidPDFException)invalid('pdf_invalid');
+      if(error instanceof PasswordException)invalid('pdf_encrypted');
+      throw error;
+    }finally{await loading.destroy();}
+  }
+  if(['png','jpeg'].includes(format)){
+    const sharp=(await import('sharp')).default;
+    try{
+      const meta=await sharp(bytes,{limitInputPixels:40000000}).metadata();
+      if(!['jpeg','png'].includes(meta.format||''))invalid('image_format_unsupported');
+      return {mimeType:meta.format==='png'?'image/png':'image/jpeg',pages:[{page:1,text:''}],pageCount:1};
+    }catch(error){
+      if(error instanceof SourceValidationError)throw error;
+      // Sharp does not expose a distinct invalid-input exception. Keep this
+      // untyped even when returning the familiar safe validation message.
+      decoderError('Invalid image or image exceeds 40 megapixels');
+    }
+  }
+  if(format==='docx'){
+    validateZipExpansion(bytes);
+    const mammoth=(await import('mammoth')).default;
+    try{
+      const result=await mammoth.extractRawText({buffer:bytes});
+      return {mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',pages:[{page:1,text:result.value}],pageCount:1};
+    }catch{decoderError('The DOCX file could not be read');}
+  }
+  if(format==='xlsx'){
+    validateZipExpansion(bytes);
+    const ExcelJS=(await import('exceljs')).default;
+    const wb=new ExcelJS.Workbook();
+    try{await wb.xlsx.load(bytes as any);}catch{decoderError('The XLSX file could not be read');}
+    if(!wb.worksheets.length)invalid('xlsx_empty');
+    if(wb.worksheets.length>config.maxPages)invalid('xlsx_sheet_limit');
+    const pages=wb.worksheets.map((sheet,i)=>{
+      const rows:string[]=[];
+      if(sheet.rowCount>10000||sheet.columnCount>200)invalid('xlsx_dimensions');
+      sheet.eachRow(row=>{const cells=(row.values as any[]).slice(1).map(v=>v&&typeof v==='object'?(v.text??v.result??''):v??'');rows.push(cells.join(' | '));});
+      return {page:i+1,text:rows.join('\n')};
+    });
+    return {mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',pages,pageCount:Math.max(pages.length,1)};
+  }
+  let text=classified.text!;
+  if(format==='eml'){
+    const {simpleParser}=await import('mailparser');
+    const mail=await simpleParser(bytes,{skipHtmlToText:true,skipTextToHtml:true,maxHtmlLengthToParse:2*1024*1024});
+    const body=mail.text||(typeof mail.html==='string'?await htmlSourceText(mail.html):'');
+    text=`Subject: ${mail.subject||''}\nFrom: ${mail.from?.text||''}\n${body}`;
+  }
+  if(format==='html')text=await htmlSourceText(text!);
+  return {mimeType:format==='eml'?'message/rfc822':format==='csv'?'text/csv':format==='html'?'text/html':'text/plain',pages:[{page:1,text:text!}],pageCount:1};
 }

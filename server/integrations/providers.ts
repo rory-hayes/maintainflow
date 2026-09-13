@@ -1,4 +1,4 @@
-import {randomBytes,randomUUID} from 'node:crypto';
+import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import type {FastifyInstance,FastifyRequest} from 'fastify';
 import Stripe from 'stripe';
 import {Resend} from 'resend';
@@ -11,7 +11,7 @@ import {adminPool,withWorkspace,transaction,audit,badRequest,notFound} from '../
 import {config} from '../core/config.js';
 import {requireWorkBudget,WorkBudgetExhausted,type WorkBudget} from '../core/work-budget.js';
 import {addDocument} from '../core/intake.js';
-import {ParserFormatNotAllowedError} from '../core/intake-policy.js';
+import {ParserFormatNotAllowedError,SourceIntakeRejectedError} from '../core/intake-policy.js';
 import {encryptSecret,decryptSecret} from './secrets.js';
 import {publicRequest} from './network.js';
 import {mockBillingEnabled,mockBillingStatus,registerMockBilling,requireRealBilling} from './mock-billing.js';
@@ -114,6 +114,7 @@ export async function reconcileStripeCustomer(pointer:StripePointer,client:Strip
  });
 }
 
+class EmailAggregateLimitError extends Error {constructor(){super('Inbound email exceeds the 25 MiB aggregate limit.');}}
 export type ResendDependencies={client:Resend;download:typeof publicRequest;intake:typeof addDocument};
 export async function processResendEvent(eventId:string,pointer:ResendPointer,dependencies?:ResendDependencies,budget:WorkBudget={}){
  requireWorkBudget(budget,40_000);
@@ -124,9 +125,13 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
  const intakeItem=async(...args:Parameters<typeof addDocument>)=>{
   try{await intake(...args);}
   catch(error){
-   // Core intake commits this item's rejection receipt before throwing. A
-   // blocked body/attachment must not prevent other allowed items in the email.
-   if(!(error instanceof ParserFormatNotAllowedError)||error.statusCode!==415||error.code!=='parser_format_not_allowed'||error.parserId!==args[1])throw error;
+   // Continue only after central intake durably rejected these exact bytes.
+   // A decoder error or a lookalike exception without a receipt stays retryable.
+   if(!(error instanceof ParserFormatNotAllowedError)&&!(error instanceof SourceIntakeRejectedError))throw error;
+   if(error.parserId!==args[1]||!args[5])throw error;
+   const {rows:[receipt]}=await withWorkspace(args[0].workspaceId,c=>c.query('select rejection_code,rejection_format,rejection_reason from intake_events where workspace_id=$1 and idempotency_key=$2 and rejected_parser_id=$3 and rejection_sha256=$4',[args[0].workspaceId,args[5],args[1],createHash('sha256').update(args[2]).digest('hex')]));
+   if(!receipt||receipt.rejection_code!==error.code)throw error;
+   if(error instanceof ParserFormatNotAllowedError?receipt.rejection_format!==error.format:receipt.rejection_reason!==error.reason)throw error;
   }
  };
  requireWorkBudget(budget,20_000);
@@ -140,12 +145,21 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
  // Count every attachment on every continuation, including already committed
  // items, so splitting an email into invocations cannot bypass the aggregate cap.
  let combinedBytes=Buffer.byteLength(email.text||email.html||'')+email.attachments.filter(a=>a.content_disposition!=='inline').reduce((sum,a)=>sum+a.size,0);
- if(combinedBytes>25*1024*1024)throw new Error('Inbound email content exceeds the 25 MiB aggregate limit.');
+ if(combinedBytes>25*1024*1024)throw new EmailAggregateLimitError();
  const attachmentCache=new Map<string,Buffer>();
- // Accepted and policy-rejected intake receipts are durable checkpoints. Never
+ // Accepted and permanently rejected intake receipts are durable checkpoints. Never
  // decode handled items again when a bounded function resumes a larger email.
  const received=async(workspaceId:string,key:string)=>Boolean((await withWorkspace(workspaceId,c=>c.query('select id from intake_events where workspace_id=$1 and idempotency_key=$2',[workspaceId,key]))).rowCount);
+ let itemFailure:Error|undefined;
+ try{
  for(const route of routes){
+  let routeFailed=false;
+  const attemptItem=async(work:()=>Promise<void>)=>{
+   try{await work();}catch(error){
+    if(error instanceof WorkBudgetExhausted||error instanceof EmailAggregateLimitError)throw error;
+    routeFailed=true;itemFailure??=error instanceof Error?error:new Error('Email item processing failed.');
+   }
+  };
   requireWorkBudget(budget,10_000);
   await adminPool.query('insert into provider_event_workspaces(event_id,workspace_id) values($1,$2) on conflict do nothing',[eventId,route.workspace_id]);
   const sender=emailAddress(email.from);
@@ -155,18 +169,19 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
   const {rows:[member]}=await adminPool.query("select user_id,role from memberships where workspace_id=$1 and role in('owner','admin') order by (role='owner') desc,created_at limit 1",[route.workspace_id]);
   if(!member)throw new Error('Inbound email requires an active workspace administrator.');
   const actor:Actor={userId:member.user_id,workspaceId:route.workspace_id,role:member.role,authType:'api',scopes:['documents:write']};
-  if(route.parse_body){
+  if(route.parse_body)await attemptItem(async()=>{
    const key=`resend:${pointer.emailId}:${route.parser_id}:body`;
    if(!await received(route.workspace_id,key)){
     requireWorkBudget(budget,80_000);
     const body=await receivedEmailBody(email,config.maxBytes);
     await intakeItem(actor,route.parser_id,body,`${email.subject.slice(0,180)||'Received email'}.eml`,'message/rfc822',key);
    }
-  }
+  });
   if(route.parse_attachments){for(const attachment of email.attachments){
    if(attachment.content_disposition==='inline')continue;
+   await attemptItem(async()=>{
    const key=`resend:${pointer.emailId}:${route.parser_id}:${attachment.id}`;
-   if(await received(route.workspace_id,key))continue;
+   if(await received(route.workspace_id,key))return;
    if(attachment.size>config.maxBytes)throw new Error('An email attachment exceeds the document byte limit.');
    let bytes=attachmentCache.get(attachment.id);
    if(!bytes){
@@ -177,35 +192,46 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
     const response=await download(result.data.download_url,{method:'GET',maxBytes:config.maxBytes});
     if(response.status<200||response.status>=300)throw Object.assign(new Error('Attachment download failed.'),{status:response.status});
     bytes=response.bytes;combinedBytes+=Math.max(0,bytes.length-attachment.size);
-    if(combinedBytes>25*1024*1024)throw new Error('Inbound email exceeds the 25 MiB aggregate limit.');
+    if(combinedBytes>25*1024*1024)throw new EmailAggregateLimitError();
     attachmentCache.set(attachment.id,bytes);
    }
    requireWorkBudget(budget,80_000);
    await intakeItem(actor,route.parser_id,bytes,attachment.filename||`attachment-${attachment.id}.bin`,attachment.content_type,key);
+   });
   }}
+  if(routeFailed)continue;
   await withWorkspace(route.workspace_id,async c=>{
    await c.query('update email_routes set last_received_at=now() where id=$1',[route.id]);
    await audit(c,route.workspace_id,null,'email.received',route.id,{emailId:pointer.emailId});
   });
  }
+ }catch(error){
+  // A real item failure still consumes a retry attempt when a later item or
+  // route runs out of budget. Pure continuations remain free of failed attempts.
+  if(error instanceof WorkBudgetExhausted&&itemFailure)throw itemFailure;
+  throw error;
+ }
+ // Successful items keep their checkpoints even if a separate item needs retry.
+ if(itemFailure)throw itemFailure;
 }
 
 /** Called by the root worker. Leases, bounded attempts and persistent errors survive restarts. */
-export async function tickProviders(budget:WorkBudget={}){
+/** Optional dependencies and event ID are internal controlled-worker test seams. */
+export async function tickProviders(budget:WorkBudget={},dependencies:{resend?:ResendDependencies;eventId?:string}={}){
  if(budget.signal?.aborted||(budget.deadlineAt!==undefined&&Date.now()+140_000>=budget.deadlineAt))return false;
  await adminPool.query("update provider_events set status='failed',error='Provider processing lease expired after the final attempt.',lease_until=null,lease_token=null where status='processing' and lease_until<now() and attempts>=5");
  const token=randomUUID();
  const {rows:[event]}=await adminPool.query(`with candidate as (
-  select id from provider_events where ($2::boolean=false or provider<>'stripe') and attempts<5 and ((status in('queued','retry') and next_attempt_at<=now()) or (status='processing' and lease_until<now()))
+  select id from provider_events where ($3::text is null or id=$3) and ($2::boolean=false or provider<>'stripe') and attempts<5 and ((status in('queued','retry') and next_attempt_at<=now()) or (status='processing' and lease_until<now()))
   order by created_at for update skip locked limit 1
  ) update provider_events p set status='processing',attempts=p.attempts+1,lease_token=$1,lease_until=now()+interval '5 minutes'
- from candidate where p.id=candidate.id returning p.*`,[token,mockBillingEnabled()]);
+ from candidate where p.id=candidate.id returning p.*`,[token,mockBillingEnabled(),dependencies.eventId??null]);
  if(!event)return false;
  const heartbeat=setInterval(()=>{void adminPool.query("update provider_events set lease_until=now()+interval '5 minutes' where id=$1 and lease_token=$2 and status='processing'",[event.id,token]).catch(()=>{});},30_000);
  heartbeat.unref();
  try{
   if(event.provider==='stripe')await reconcileStripeCustomer(event.payload);
-  else if(event.provider==='resend')await processResendEvent(event.id,event.payload,undefined,budget);
+  else if(event.provider==='resend')await processResendEvent(event.id,event.payload,dependencies.resend,budget);
   else throw new Error('Unsupported provider event.');
   await adminPool.query("update provider_events set status='completed',error=null,lease_until=null,lease_token=null where id=$1 and lease_token=$2",[event.id,token]);
  }catch(error){

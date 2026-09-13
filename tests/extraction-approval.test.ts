@@ -35,6 +35,7 @@ test('actual approval rejects inconsistent totals, accepts a corrected revision 
     const content = presets.invoice.sample.replace('Subtotal: 450.00', 'Subtotal: 400.00').replace('Total: 553.50', 'Total: 600.00');
     const intake = await addDocument({ userId: userId!, workspaceId: workspaceId!, role: 'owner', authType: 'session' }, parserReply.json().parser.id, Buffer.from(content), 'owned-inconsistent-invoice.txt');
     // Scope this helper to the owned job; it cannot claim or advance any browser work.
+    assert.ok(intake.jobId);
     assert.equal(await processOneCoreJob(intake.jobId), true);
     const detail = await app.inject({ method: 'GET', url: `/api/documents/${intake.document.id}`, headers });
     assert.equal(detail.statusCode, 200, detail.body);

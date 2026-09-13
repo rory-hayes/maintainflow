@@ -89,7 +89,8 @@ test('stored JPEG and image-only PDF originals remain retrievable after explicit
       assert.equal(intake.document.pageCount, 1);
       assert.equal(intake.document.sha256, createHash('sha256').update(bytes).digest('hex'));
       // This test cannot claim any other fixture or browser job.
-      assert.equal(await processOneCoreJob(intake.jobId), true);
+      assert.ok(intake.jobId);
+    assert.equal(await processOneCoreJob(intake.jobId), true);
       const detail = await app.inject({ method: 'GET', url: `/api/documents/${intake.document.id}`, headers });
       assert.equal(detail.statusCode, 200, detail.body);
       assert.equal(detail.json().document.status, 'failed');

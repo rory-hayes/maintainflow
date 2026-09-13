@@ -9,10 +9,10 @@ import type { SourceFormat } from '../shared/source-formats.js';
 import { adminPool, closeDatabase, transaction, withWorkspace } from '../server/core/db.js';
 import { config, defaultPlan } from '../server/core/config.js';
 import { addDocument } from '../server/core/intake.js';
-import { ParserFormatNotAllowedError } from '../server/core/intake-policy.js';
+import { ParserFormatNotAllowedError, SourceIntakeRejectedError } from '../server/core/intake-policy.js';
 import { privateStorage } from '../server/core/storage.js';
 import { WorkBudgetExhausted } from '../server/core/work-budget.js';
-import { processResendEvent, storeProviderEvent, type ResendDependencies } from '../server/integrations/providers.js';
+import { processResendEvent, storeProviderEvent, tickProviders, type ResendDependencies } from '../server/integrations/providers.js';
 
 type Fixture = { userId: string; workspaceId: string; parserId: string; routeId: string; eventId: string; emailId: string; address: string };
 type Attachment = { id: string; filename: string; content_type: string; content_disposition: 'attachment'; size: number; bytes: Buffer };
@@ -194,12 +194,117 @@ test('unrelated intake failures and a rejection naming another parser are not sw
     Object.assign(new Error('Owned temporary service failure'), { statusCode: 503 }),
     Object.assign(new Error('Owned unsupported file'), { statusCode: 415, code: 'parser_format_not_allowed', parserId: fixture.parserId, format: 'eml' }),
     new ParserFormatNotAllowedError(randomUUID(), 'eml'),
+    new ParserFormatNotAllowedError(fixture.parserId, 'eml'),
+    new SourceIntakeRejectedError(fixture.parserId, 'pdf_invalid'),
     new WorkBudgetExhausted(),
   ]) {
     current = error;
     await assert.rejects(processResendEvent(fixture.eventId, pointer(fixture), state.dependencies), received => received === error);
   }
-  assert.equal(state.intakeCalls.length, 6);
+  assert.equal(state.intakeCalls.length, 8);
   assert.deepEqual(await counts(fixture), { documents: 0, jobs: 0, usage_ledger: 0, intake_events: 0, intake_files: 0 });
   assert.equal((await adminPool.query('select last_received_at from email_routes where id=$1', [fixture.routeId])).rows[0].last_received_at, null);
+});
+
+
+test('worker completes mixed permanent source rejections while accepting a later valid PDF', async () => {
+  const fixture = await route(null);
+  const malformed = attachment('PRIVATE BAD.pdf', Buffer.from('%PDF-1.7\nnot a PDF object'));
+  const unsupported = attachment('PRIVATE BAD.txt', Buffer.from('GIF89aPRIVATE CONTENT'), 'text/plain');
+  const allowed = attachment('valid.pdf', await pdf('after permanent rejections'));
+  const state = transport(fixture, [malformed, unsupported, allowed]);
+  state.email.text = 'PRIVATE INVALID BODY\u0000';
+  assert.equal(await tickProviders({}, { eventId: fixture.eventId, resend: state.dependencies }), true);
+  assert.deepEqual(await counts(fixture), { documents: 1, jobs: 1, usage_ledger: 1, intake_events: 4, intake_files: 0 });
+  const event = (await adminPool.query('select status,attempts,error from provider_events where id=$1', [fixture.eventId])).rows[0];
+  assert.deepEqual(event, { status: 'completed', attempts: 1, error: null });
+  const receipts = (await adminPool.query('select rejection_code,rejection_reason,rejection_format,document_id from intake_events where workspace_id=$1 and rejection_code is not null', [fixture.workspaceId])).rows;
+  assert.equal(receipts.length, 3);
+  assert.ok(receipts.every(row => row.rejection_code === 'source_validation_failed' && row.document_id === null && row.rejection_format === null));
+  assert.deepEqual(receipts.map(row => row.rejection_reason).sort(), ['binary_format_unsupported','pdf_invalid','text_binary_content']);
+  const audits = (await adminPool.query("select metadata from audit_events where workspace_id=$1 and action='document.rejected'", [fixture.workspaceId])).rows;
+  assert.equal(audits.length, 3);assert.ok(!JSON.stringify(audits).includes('PRIVATE'));
+  const replay = { counts: await counts(fixture), intakes: state.intakeCalls.length, downloads: state.downloadCalls.length };
+  await processResendEvent(fixture.eventId, pointer(fixture), state.dependencies);
+  assert.deepEqual({ counts: await counts(fixture), intakes: state.intakeCalls.length, downloads: state.downloadCalls.length }, replay);
+  assert.equal((await fs.readdir(path.join(config.storageDir, fixture.workspaceId))).length, 1);
+});
+
+test('an all-rejected email completes with durable reasons and zero imported documents', async () => {
+  const fixture = await route(null);
+  const state = transport(fixture, [attachment('broken.pdf', Buffer.from('%PDF-1.7\ninvalid'))]);
+  state.email.text = 'invalid\u0000body';
+  assert.equal(await tickProviders({}, { eventId: fixture.eventId, resend: state.dependencies }), true);
+  assert.deepEqual(await counts(fixture), { documents: 0, jobs: 0, usage_ledger: 0, intake_events: 2, intake_files: 0 });
+  assert.equal((await adminPool.query('select status from provider_events where id=$1', [fixture.eventId])).rows[0].status, 'completed');
+  assert.equal((await adminPool.query("select count(*)::int n from audit_events where workspace_id=$1 and action='document.rejected'", [fixture.workspaceId])).rows[0].n, 2);
+  const previousCalls = state.intakeCalls.length;
+  assert.equal(await tickProviders({}, { eventId: fixture.eventId, resend: state.dependencies }), false);
+  await processResendEvent(fixture.eventId, pointer(fixture), state.dependencies);
+  assert.equal(state.intakeCalls.length, previousCalls);
+  await assert.rejects(fs.stat(path.join(config.storageDir, fixture.workspaceId)), { code: 'ENOENT' });
+});
+
+test('a transient item does not hold up later valid attachments and the worker retries only unfinished items', async () => {
+  const fixture = await route();
+  const temporary = attachment('temporary.pdf', await pdf('temporary'));
+  const later = attachment('later.pdf', await pdf('later'));
+  let fail = true;
+  const state = transport(fixture, [temporary, later], async (...args) => {
+    if (args[5] === itemKey(fixture, temporary.id) && fail) { fail = false; throw Object.assign(new Error('PRIVATE decoder fault'), { statusCode: 422 }); }
+  });
+  assert.equal(await tickProviders({}, { eventId: fixture.eventId, resend: state.dependencies }), true);
+  assert.deepEqual(await counts(fixture), { documents: 1, jobs: 1, usage_ledger: 1, intake_events: 2, intake_files: 0 });
+  const event = (await adminPool.query('select status,attempts,error from provider_events where id=$1', [fixture.eventId])).rows[0];
+  assert.equal(event.status, 'retry');assert.equal(event.attempts, 1);assert.ok(!event.error.includes('PRIVATE'));
+  assert.equal((await adminPool.query('select last_received_at from email_routes where id=$1', [fixture.routeId])).rows[0].last_received_at, null);
+  await adminPool.query('update provider_events set next_attempt_at=now() where id=$1', [fixture.eventId]);
+  assert.equal(await tickProviders({}, { eventId: fixture.eventId, resend: state.dependencies }), true);
+  assert.deepEqual(await counts(fixture), { documents: 2, jobs: 2, usage_ledger: 2, intake_events: 3, intake_files: 0 });
+  assert.deepEqual(state.intakeCalls, [itemKey(fixture,'body'),itemKey(fixture,temporary.id),itemKey(fixture,later.id),itemKey(fixture,temporary.id)]);
+  assert.deepEqual((await adminPool.query('select status,attempts,error from provider_events where id=$1', [fixture.eventId])).rows[0], { status: 'completed', attempts: 2, error: null });
+});
+
+test('HTML-only email is decoded from stable EML bytes inside central intake', async () => {
+  const fixture = await route(null), state = transport(fixture, []);
+  state.email.text = null;state.email.html = '<p>Invoice <b>00042</b></p>';
+  await processResendEvent(fixture.eventId, pointer(fixture), state.dependencies);
+  const document = (await adminPool.query('select source_text,storage_key,mime_type from documents where workspace_id=$1', [fixture.workspaceId])).rows[0];
+  assert.equal(document.mime_type, 'message/rfc822');
+  assert.match(document.source_text[0].text, /Invoice 00042/);
+  assert.ok(!document.source_text[0].text.includes('<p>'));
+  const original = await privateStorage().read(document.storage_key);
+  assert.match(original.toString(), /Content-Type: text\/html; charset=utf-8/);
+  assert.match(original.toString(), /<p>Invoice <b>00042<\/b><\/p>/);
+});
+
+
+test('underreported metadata cannot continue downloads or intake after the actual aggregate cap is reached', async () => {
+  const fixture = await route(null);
+  const attachments = Array.from({length:4},(_,index)=>attachment(`underreported-${index}.txt`,Buffer.alloc(9*1024*1024),'text/plain'));
+  for(const item of attachments)item.size=1;
+  const state=transport(fixture,attachments);
+  await assert.rejects(processResendEvent(fixture.eventId,pointer(fixture),state.dependencies),/25 MiB aggregate limit/);
+  assert.deepEqual(state.downloadCalls,attachments.slice(0,3).map(item=>item.id));
+  assert.deepEqual(state.metadataCalls,state.downloadCalls);
+  assert.deepEqual(state.intakeCalls,[itemKey(fixture,'body'),...attachments.slice(0,2).map(item=>itemKey(fixture,item.id))]);
+  assert.equal((await adminPool.query('select id from intake_events where workspace_id=$1 and idempotency_key=any($2)',[fixture.workspaceId,attachments.slice(2).map(item=>itemKey(fixture,item.id))])).rowCount,0);
+  assert.equal((await adminPool.query('select last_received_at from email_routes where id=$1',[fixture.routeId])).rows[0].last_received_at,null);
+});
+
+
+test('a later work-budget yield does not erase an earlier real failure from worker attempts', async () => {
+  const fixture=await route(),later=attachment('later.pdf',await pdf('after real failure and yield'));
+  const budget={deadlineAt:Date.now()+240_000};let fail=true;
+  const state=transport(fixture,[later],async(...args)=>{
+    if(args[5]===itemKey(fixture,'body')&&fail){fail=false;budget.deadlineAt=Date.now()+70_000;throw Object.assign(new Error('PRIVATE earlier real failure'),{statusCode:503});}
+  });
+  assert.equal(await tickProviders(budget,{eventId:fixture.eventId,resend:state.dependencies}),true);
+  const failed=(await adminPool.query('select status,attempts,error from provider_events where id=$1',[fixture.eventId])).rows[0];
+  assert.equal(failed.status,'retry');assert.equal(failed.attempts,1);assert.ok(!failed.error.includes('PRIVATE'));
+  assert.deepEqual(state.intakeCalls,[itemKey(fixture,'body')]);assert.deepEqual(state.downloadCalls,[]);
+  await adminPool.query('update provider_events set next_attempt_at=now() where id=$1',[fixture.eventId]);
+  assert.equal(await tickProviders({},{eventId:fixture.eventId,resend:state.dependencies}),true);
+  assert.deepEqual((await adminPool.query('select status,attempts,error from provider_events where id=$1',[fixture.eventId])).rows[0],{status:'completed',attempts:2,error:null});
+  assert.deepEqual(await counts(fixture),{documents:1,jobs:1,usage_ledger:1,intake_events:2,intake_files:0});
 });
