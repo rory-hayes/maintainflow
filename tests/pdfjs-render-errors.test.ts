@@ -18,8 +18,10 @@ const previousGlobals = new Map<string, PropertyDescriptor | undefined>();
 before(async () => {
   source = await readFile(installedPath, 'utf8');
   directory = await mkdtemp(join(tmpdir(), 'folio-pdfjs-render-errors-'));
-  // Execute the installed browser module with the same transform as Vite. Keep
-  // the dependency untouched and point its fake worker at the installed worker.
+  // Execute the installed modern browser module with the same transform as
+  // Vite. Node 24 needs the upstream legacy worker's compatibility shims
+  // (including Uint8Array.toHex) in its fake-worker realm. Real Chromium
+  // acceptance separately verifies the deployed modern main/worker pair.
   const transformedPath = join(directory, 'pdf.mjs');
   await writeFile(transformedPath, patchPdfJsRenderErrors(source));
   canvas = require('@napi-rs/canvas');
@@ -28,7 +30,7 @@ before(async () => {
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: canvas[key] });
   }
   pdfjs = await import(pathToFileURL(transformedPath).href);
-  pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(require.resolve('pdfjs-dist/build/pdf.worker.mjs')).href;
+  pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs')).href;
 });
 
 after(async () => {

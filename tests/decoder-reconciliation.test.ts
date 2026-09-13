@@ -56,7 +56,8 @@ test('decoder subprocess preserves native two-page PDF and actual source evidenc
 test('decoder launch removes inherited credential variables and limits V8 heap', () => {
   const launch = decoderLaunchSpec('owned-fixture.txt');
   assert.deepEqual(Object.keys(launch.options.env).sort(), ['LANG', 'NODE_ENV', 'TSX_DISABLE_CACHE', 'TZ']);
-  assert.ok(launch.args.includes('--max-old-space-size=192')); assert.equal(launch.args.at(-1), 'owned-fixture.txt');
+  assert.ok(launch.args.includes('--max-old-space-size=256')); assert.ok(launch.args.includes('tsx'));
+  assert.equal(launch.args.at(-1), 'owned-fixture.txt');
 });
 test('decoder rejects oversized input before creating a child', async () => {
   let started = false;

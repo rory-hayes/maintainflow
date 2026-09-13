@@ -38,9 +38,10 @@ let activeDecoders = 0;
 
 /** This subprocess is a resource boundary, not an OS-level security sandbox. */
 export function decoderLaunchSpec(filename: string, split?: PdfSplitSpec) {
+  const sourceEntry = childFilename.endsWith('.ts');
   return {
     command: process.execPath,
-    args: [`--max-old-space-size=${decoderLimits.heapMb}`, ...(childFilename.endsWith('.ts') ? ['--import', 'tsx'] : []), childFilename, path.basename(filename), ...(split ? ['--pdf-split', canonicalPdfSplitSpec(split)] : [])],
+    args: [`--max-old-space-size=${sourceEntry ? decoderLimits.sourceHeapMb : decoderLimits.heapMb}`, ...(sourceEntry ? ['--import', 'tsx'] : []), childFilename, path.basename(filename), ...(split ? ['--pdf-split', canonicalPdfSplitSpec(split)] : [])],
     options: {
       cwd: runtimeRoot,
       env: { NODE_ENV: 'production', TZ: 'UTC', LANG: 'en_US.UTF-8', TSX_DISABLE_CACHE: '1' },

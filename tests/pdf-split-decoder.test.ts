@@ -161,7 +161,8 @@ test('split IPC rejects changed ranges/counts, noncanonical bytes, forged page n
 test('split resource boundary removes credentials, caps output, kills timed-out children and shares ordinary concurrency', async () => {
   const launch = decoderLaunchSpec('/private/owned.pdf', spec);
   assert.deepEqual(Object.keys(launch.options.env).sort(), ['LANG', 'NODE_ENV', 'TSX_DISABLE_CACHE', 'TZ']);
-  assert.ok(launch.args.includes('--max-old-space-size=192'));
+  assert.ok(launch.args.includes('--max-old-space-size=256'));
+  assert.ok(launch.args.includes('tsx'));
   assert.ok(launch.args.includes('owned.pdf')); assert.ok(!launch.args.includes('/private/owned.pdf'));
   let overflow!: ChildProcessWithoutNullStreams;
   await assert.rejects(splitPdfSource(Buffer.from('fixture'), 'fixture.pdf', spec, { spawnChild: () => overflow = fakeChild(child => child.stdout.emit('data', Buffer.alloc(pdfSplitLimits.maxOutputBytes + 1))) }),

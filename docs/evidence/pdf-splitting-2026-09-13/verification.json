@@ -3,7 +3,7 @@
   "scope": "Controlled local C10 new-PDF fixed-page and custom-range splitting",
   "source": {
     "count": 217,
-    "sha256": "707706f938f479fc34caf5fb4eb8f1f46f62965d74b44a9e6b660bbea5fbdc3e",
+    "sha256": "f8f0bc647d95a9de6147053558fb346578150f4dd40f6406ab991791c3b234a6",
     "unchangedDuringVerification": true
   },
   "fullSuite": {
@@ -12,69 +12,50 @@
     "failed": 0,
     "skipped": 0,
     "cancelled": 0,
-    "durationSeconds": 129.740819709,
-    "startedAt": "2026-09-13T20:08:06.046099+00:00",
-    "completedAt": "2026-09-13T20:10:15.886182+00:00"
+    "durationSeconds": 131.789766083,
+    "startedAt": "2026-09-13T20:40:56.017537+00:00",
+    "completedAt": "2026-09-13T20:43:07.980091+00:00"
   },
   "phases": {
     "suite": {
       "phase": "suite",
-      "startedAt": "2026-09-13T20:08:06.046099+00:00",
-      "completedAt": "2026-09-13T20:10:15.886182+00:00",
-      "seconds": 129.827720083,
+      "startedAt": "2026-09-13T20:40:56.017537+00:00",
+      "completedAt": "2026-09-13T20:43:07.980091+00:00",
+      "seconds": 131.961133916,
       "exitCode": 0,
       "sourceCount": 217,
-      "sourceFingerprint": "707706f938f479fc34caf5fb4eb8f1f46f62965d74b44a9e6b660bbea5fbdc3e",
+      "sourceFingerprint": "f8f0bc647d95a9de6147053558fb346578150f4dd40f6406ab991791c3b234a6",
       "sourceUnchanged": true
     },
     "build": {
       "phase": "build",
-      "startedAt": "2026-09-13T20:08:02.201847+00:00",
-      "completedAt": "2026-09-13T20:08:03.845327+00:00",
-      "seconds": 1.6434616249999998,
+      "startedAt": "2026-09-13T20:41:18.494586+00:00",
+      "completedAt": "2026-09-13T20:41:20.525300+00:00",
+      "seconds": 2.0306874589999997,
       "exitCode": 0,
       "sourceCount": 217,
-      "sourceFingerprint": "707706f938f479fc34caf5fb4eb8f1f46f62965d74b44a9e6b660bbea5fbdc3e",
+      "sourceFingerprint": "f8f0bc647d95a9de6147053558fb346578150f4dd40f6406ab991791c3b234a6",
       "sourceUnchanged": true
     },
     "package": {
       "phase": "package",
-      "startedAt": "2026-09-13T20:08:24.598295+00:00",
-      "completedAt": "2026-09-13T20:08:29.993648+00:00",
-      "seconds": 5.3953018749999995,
+      "startedAt": "2026-09-13T20:41:44.713851+00:00",
+      "completedAt": "2026-09-13T20:41:50.112736+00:00",
+      "seconds": 5.398825167,
       "exitCode": 0,
       "sourceCount": 217,
-      "sourceFingerprint": "707706f938f479fc34caf5fb4eb8f1f46f62965d74b44a9e6b660bbea5fbdc3e",
+      "sourceFingerprint": "f8f0bc647d95a9de6147053558fb346578150f4dd40f6406ab991791c3b234a6",
       "sourceUnchanged": true
     },
     "bundle": {
       "phase": "bundle",
-      "startedAt": "2026-09-13T20:09:25.832081+00:00",
-      "completedAt": "2026-09-13T20:09:30.927066+00:00",
-      "seconds": 5.092490291,
+      "startedAt": "2026-09-13T20:42:07.723765+00:00",
+      "completedAt": "2026-09-13T20:42:12.357767+00:00",
+      "seconds": 4.633947,
       "exitCode": 0,
       "sourceCount": 217,
-      "sourceFingerprint": "707706f938f479fc34caf5fb4eb8f1f46f62965d74b44a9e6b660bbea5fbdc3e",
+      "sourceFingerprint": "f8f0bc647d95a9de6147053558fb346578150f4dd40f6406ab991791c3b234a6",
       "sourceUnchanged": true
-    }
-  },
-  "focused": {
-    "decoder": {
-      "passed": 10,
-      "seconds": 12.356235542
-    },
-    "intake": {
-      "passed": 15,
-      "seconds": 18.889343625
-    },
-    "lineage": {
-      "passed": 11,
-      "seconds": 1.223866417
-    },
-    "renderer": {
-      "passed": 4,
-      "secondsApproximate": 0.894,
-      "scope": "Transformed installed browser module with real worker, oversized-image errors, concurrent callers, retries and valid image pixels"
     }
   },
   "browser": {
@@ -97,9 +78,14 @@
       "desktopMobileHelpDocumentsLimitsCreditsRecoveryScopesAndSourceDeletion": true,
       "pageIdentityVisualAndConsoleChecksUseOnlyOwnedUploadsWithZeroExternalProviders": true
     },
-    "startedAt": "2026-09-13T20:07:05.303Z",
-    "completedAt": "2026-09-13T20:07:28.211Z",
+    "startedAt": "2026-09-13T20:43:24.759Z",
+    "completedAt": "2026-09-13T20:43:46.699Z",
     "viewports": {
+      "desktop-preview-render-error": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
       "desktop-every-two-preview": {
         "viewport": 1440,
         "body": 1440,
@@ -202,7 +188,8 @@
     "First real browser guard exposed PDF.js operator-stream errors resolving a blank canvas as success",
     "Workflow attempt passed eight groups before a harness browser-context error",
     "Workflow attempt passed thirteen groups before expected fake-transfer cancellation accounting was corrected",
-    "Separate 14-group workflow pass retained the preview guard as pending; it was not final acceptance"
+    "Separate 14-group workflow pass retained the preview guard as pending; it was not final acceptance",
+    "First Linux Node 24.13.0 CI run 34780126331 passed 411 of 434 tests and failed 23; local Node 24 compatibility follow-up is recorded separately from the earlier Node 26 success"
   ],
   "release": {
     "hostedMigrationsUnapplied": [
@@ -231,11 +218,250 @@
     "listeningServer": false,
     "environmentFileLoading": false,
     "pdfjsExcludedFromOptimization": true,
-    "configuredPluginTransformVerified": true
+    "configuredPluginTransformVerified": true,
+    "evidenceBoundary": "Earlier proof for unchanged browser transformation; not rerun as a Node 24-specific development check"
   },
   "previewErrorVisual": {
     "passed": true,
     "scope": "Separate focused screenshot check on the final build; disabled submission, visible safe error and no partial ready canvas",
-    "ownedFixturesCleaned": true
+    "ownedFixturesCleaned": true,
+    "evidenceBoundary": "Earlier focused screenshot proof for unchanged frontend; current 15-group browser run separately repeats the guard"
+  },
+  "runtime": "Node 24.13.0; local macOS arm64",
+  "node24Compatibility": {
+    "status": "local_verification_passed",
+    "runtime": "Node 24.13.0",
+    "firstCI": {
+      "runId": "34780126331",
+      "platform": "Linux",
+      "tests": 434,
+      "passed": 411,
+      "failed": 23
+    },
+    "sourceDecoderHeapMiB": 256,
+    "compiledDecoderHeapMiB": 192,
+    "nodeRendererHarnessWorker": "pdfjs-dist/legacy/build/pdf.worker.mjs",
+    "browserRuntimeChanged": false,
+    "ciRuntimeVersionChanged": false,
+    "hostingPlanChanges": false,
+    "localPlatform": "macOS arm64",
+    "compiledLaunchArgumentsVerified": {
+      "ordinaryHeapMiB": 192,
+      "splitHeapMiB": 192,
+      "tsxLoader": false
+    },
+    "rendererFocused": {
+      "tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "durationSeconds": 1.522296083,
+      "scope": "Transformed installed modern main and upstream legacy fake worker under Node 24.13.0"
+    },
+    "sourceDecoderFocused": {
+      "tests": 10,
+      "passed": 10,
+      "scope": "Source decoder/planner checks under Node 24.13.0 before the final aggregate"
+    },
+    "finalCI": "See exact-head review-request checks"
+  },
+  "earlierNode26Checkpoint": {
+    "source": {
+      "count": 217,
+      "sha256": "707706f938f479fc34caf5fb4eb8f1f46f62965d74b44a9e6b660bbea5fbdc3e",
+      "unchangedDuringVerification": true
+    },
+    "fullSuite": {
+      "tests": 434,
+      "passed": 434,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "durationSeconds": 129.740819709,
+      "startedAt": "2026-09-13T20:08:06.046099+00:00",
+      "completedAt": "2026-09-13T20:10:15.886182+00:00"
+    },
+    "phases": {
+      "suite": {
+        "phase": "suite",
+        "startedAt": "2026-09-13T20:08:06.046099+00:00",
+        "completedAt": "2026-09-13T20:10:15.886182+00:00",
+        "seconds": 129.827720083,
+        "exitCode": 0,
+        "sourceCount": 217,
+        "sourceFingerprint": "707706f938f479fc34caf5fb4eb8f1f46f62965d74b44a9e6b660bbea5fbdc3e",
+        "sourceUnchanged": true
+      },
+      "build": {
+        "phase": "build",
+        "startedAt": "2026-09-13T20:08:02.201847+00:00",
+        "completedAt": "2026-09-13T20:08:03.845327+00:00",
+        "seconds": 1.6434616249999998,
+        "exitCode": 0,
+        "sourceCount": 217,
+        "sourceFingerprint": "707706f938f479fc34caf5fb4eb8f1f46f62965d74b44a9e6b660bbea5fbdc3e",
+        "sourceUnchanged": true
+      },
+      "package": {
+        "phase": "package",
+        "startedAt": "2026-09-13T20:08:24.598295+00:00",
+        "completedAt": "2026-09-13T20:08:29.993648+00:00",
+        "seconds": 5.3953018749999995,
+        "exitCode": 0,
+        "sourceCount": 217,
+        "sourceFingerprint": "707706f938f479fc34caf5fb4eb8f1f46f62965d74b44a9e6b660bbea5fbdc3e",
+        "sourceUnchanged": true
+      },
+      "bundle": {
+        "phase": "bundle",
+        "startedAt": "2026-09-13T20:09:25.832081+00:00",
+        "completedAt": "2026-09-13T20:09:30.927066+00:00",
+        "seconds": 5.092490291,
+        "exitCode": 0,
+        "sourceCount": 217,
+        "sourceFingerprint": "707706f938f479fc34caf5fb4eb8f1f46f62965d74b44a9e6b660bbea5fbdc3e",
+        "sourceUnchanged": true
+      }
+    },
+    "focused": {
+      "decoder": {
+        "passed": 10,
+        "seconds": 12.356235542
+      },
+      "intake": {
+        "passed": 15,
+        "seconds": 18.889343625
+      },
+      "lineage": {
+        "passed": 11,
+        "seconds": 1.223866417
+      },
+      "renderer": {
+        "passed": 4,
+        "secondsApproximate": 0.894,
+        "scope": "Transformed installed browser module with real worker, oversized-image errors, concurrent callers, retries and valid image pixels"
+      }
+    },
+    "browser": {
+      "passed": true,
+      "groups": 15,
+      "checks": {
+        "oversizedEmbeddedImageFailsClosedBeforeSubmitWithoutPartialReadyCanvas": true,
+        "desktopFixedPagePreviewShowsRemainderAndOriginalPageNavigation": true,
+        "customRangesRejectReverseAndShowExactSelectedOmittedPagesAndCredits": true,
+        "mobileKeyboardTabsAndPendingGuardAcceptExactlyOneBatch": true,
+        "atomicBatchPersistsTwoActualPDFsOneUnchangedOriginalTwoJobsAndThreeChargedPages": true,
+        "eachChildUsesNormalTemplateExtractionAndReviewMapsChildPagesToFullOriginal": true,
+        "explicitChildApprovalDownloadsExactMappedCSVAndPersistsItsApprovedSnapshot": true,
+        "reloadRecoveryRetainsDeletedChildIdentityAndNeverResurrectsOrRecharges": true,
+        "wholeBatchDeletionRemovesRemainingChildAndFullSourceWhileReceiptSurvives": true,
+        "startingNewSplitDuringHeldPDFLoadClearsLoadingAndRejectsStaleCallbacks": true,
+        "signedTransferAndLostFinalizeRecoverAfterReloadWithSameRequestAndSingleCharge": true,
+        "ordinaryUploadStillCreatesOneUnsplitDocumentAndUsesExistingQuotaRules": true,
+        "unfinishedAndExcludedParsersBlockNewSplitsAndViewerCannotCreateOrDeleteBatch": true,
+        "desktopMobileHelpDocumentsLimitsCreditsRecoveryScopesAndSourceDeletion": true,
+        "pageIdentityVisualAndConsoleChecksUseOnlyOwnedUploadsWithZeroExternalProviders": true
+      },
+      "startedAt": "2026-09-13T20:07:05.303Z",
+      "completedAt": "2026-09-13T20:07:28.211Z",
+      "viewports": {
+        "desktop-every-two-preview": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        },
+        "desktop-custom-ranges-omissions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        },
+        "mobile-pdf-preview": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        },
+        "mobile-selected-ranges": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        },
+        "mobile-confirmed-batch": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        },
+        "desktop-child-original-page-lineage": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        },
+        "desktop-replayed-deleted-child-receipt": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        },
+        "mobile-signed-transfer-recovery": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        },
+        "desktop-start-new-during-pdf-load": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        },
+        "mobile-signed-result-after-lost-finalize": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        },
+        "mobile-viewer-lineage": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        },
+        "desktop-split-help": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        },
+        "desktop-split-api-help": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        },
+        "mobile-split-help": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        },
+        "mobile-split-api-help": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      },
+      "pageErrors": [],
+      "blockedExternalRequests": [],
+      "providerCalls": 0,
+      "suggestionCalls": 0,
+      "usage": {
+        "pages": 13,
+        "uploadEntries": 6,
+        "realProviderCalls": 0,
+        "suggestionCalls": 0
+      },
+      "ownedFixturesCleaned": true,
+      "expectedObservations": [
+        "Signed-out 401 and missing-receipt 404 responses",
+        "Controlled failed PUT 503 and incomplete-staging finalize 500",
+        "One deliberately lost accepted finalize response",
+        "Navigation cancellations and completed intercepted PUT cancellation events",
+        "Test canvas readback performance notice"
+      ],
+      "limiter": "Controlled non-throttling memory store; not rate-limit acceptance",
+      "signedStorage": "Fully intercepted fake signed storage backed by owned local files; no real Supabase call"
+    },
+    "runtime": "Node 26.5.0"
   }
 }

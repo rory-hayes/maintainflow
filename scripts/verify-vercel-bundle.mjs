@@ -12,7 +12,11 @@ try{
     import fs from 'node:fs/promises';
     import {inspectSource,decoderLaunchSpec,splitPdfSource} from './server/core/source.js';
     import {buildApp} from './server/app.js';
-    assert.equal(decoderLaunchSpec('document.txt').args.includes('tsx'),false);
+    for (const launch of [decoderLaunchSpec('document.txt'), decoderLaunchSpec('bundle.pdf',{mode:'every',pagesPerDocument:1})]) {
+      assert.equal(launch.args.includes('tsx'),false);
+      assert.ok(launch.args.includes('--max-old-space-size=192'));
+      assert.equal(launch.args.includes('--max-old-space-size=256'),false);
+    }
     for(const filename of ['invoice-multipage.pdf','receipt-scan.png','receipt.docx','receipt.xlsx','lead.eml','freeform-receipt.txt']){
       const result=await inspectSource(await fs.readFile('fixtures/'+filename),filename);
       assert.ok(result.pageCount>=1); console.log('PASS packaged decoder '+filename);

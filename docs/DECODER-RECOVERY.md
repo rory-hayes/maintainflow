@@ -1,6 +1,6 @@
 # Decoder and interrupted-intake recovery
 
-Local implementation and controlled evidence, 6 September 2026. This is a bounded subprocess design, not an OS security sandbox or production isolation claim.
+Local implementation, with the decoder launch contract updated 13 September 2026. The original 6 September recovery evidence remains dated below. This is a bounded subprocess design, not an OS security sandbox or production isolation claim.
 
 ## Decoder contract
 
@@ -11,12 +11,14 @@ The API checks the input byte limit, then launches a fresh Node subprocess with 
 | Input | Empty files rejected; at most 10 MiB before child creation and again inside child |
 | Concurrent decoders | At most two per calling process; excess intake returns 429 with retry guidance |
 | Wall time | Parent kills the child after 30 seconds; active slot remains occupied until process close |
-| V8 heap | Child starts with `--max-old-space-size=192` |
-| Text / response | At most 2 MiB decoded text and 4 MiB JSON; parent independently bounds and validates response |
+| V8 heap | Compiled JavaScript child: `--max-old-space-size=192`. TypeScript source child with the trusted TSX loader: `--max-old-space-size=256`. The parent selects the bound from the actual entrypoint, not request input. |
+| Text / response | At most 2 MiB decoded text and 4 MiB ordinary JSON; PDF splitting has a separately validated 42 MiB response allowance. The parent independently bounds and validates responses. |
 | Formats | Existing signature, 30-page/sheet, 40-megapixel image, Office expansion and row/column limits remain |
 | Errors | Expected validation errors are bounded; unexpected dependency details become a generic public message |
 
-`tests/decoder-reconciliation.test.ts` uses a real two-page PDF and controlled child-process doubles to check environment allowlisting, heap arguments, pre-spawn byte rejection, output/deadline termination, concurrency and invalid response rejection. The actual generated PDF, EML, CSV, XLSX, DOCX, text and scan fixtures also pass through the subprocess during the separately recorded extraction evaluation. Controlled doubles prove the parent cancellation contract; they do not establish OS resource exhaustion behavior.
+The 13 September Node 24 compatibility investigation reproduced a V8 heap exhaustion in TypeScript/TSX PDF splitting at the former 192 MiB source limit. Source execution now receives 256 MiB for its loader/compiler overhead; compiled deployment execution retains 192 MiB. The 30-second deadline, two-process capacity, environment allowlist and input/output bounds are unchanged. [PDF-splitting acceptance](PDF-SPLITTING-ACCEPTANCE.md) records the separate Node 26 checkpoint, first failed Node 24 CI run and subsequent verification; a source-loader allowance is not a hosting-plan change or a larger production decoder allowance.
+
+`tests/decoder-reconciliation.test.ts` uses a real two-page PDF and controlled child-process doubles to check environment allowlisting, selected heap arguments, pre-spawn byte rejection, output/deadline termination, concurrency and invalid response rejection. The actual generated PDF, EML, CSV, XLSX, DOCX, text and scan fixtures also pass through the subprocess during the separately recorded extraction evaluation. Controlled doubles prove the parent cancellation contract; they do not establish OS resource exhaustion behavior.
 
 The child still runs as the same OS user with the project's working directory. Removing environment credentials does not deny filesystem or network access. V8 heap size does not cap native allocations, total RSS, CPU consumption or descendants; the concurrency bound is per API/worker process. A public untrusted-upload deployment still needs a dedicated identity/container with no application secrets or private storage mounted, blocked network egress, a read-only runtime, limited temporary storage, CPU/full-memory/process quotas, and supervised cancellation verified in that deployment. No such deployment was performed here.
 
