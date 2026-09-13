@@ -14,7 +14,7 @@
     "setup": "npm run db:start && npm run db:migrate",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
+    "test": "node --import tsx --import ./tests/test-environment.ts --test --test-concurrency=1 tests/*.test.ts",
     "fixtures": "tsx scripts/fixtures.ts",
     "start": "NODE_ENV=production tsx server/app.ts",
     "build:vercel": "npm run build && node scripts/build-vercel.mjs"

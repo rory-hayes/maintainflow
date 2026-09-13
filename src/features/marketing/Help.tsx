@@ -132,6 +132,7 @@ export function ApiDocs() {
       <section>
         <h2>Authentication</h2>
         <p>Create a revocable key in Workspace settings → API keys. Keep it in your server or automation secret store, and send it in the Authorization header as a bearer token. The key is scoped to one workspace and remains limited by its owner's role.</p>
+        <p>Choose an expiry of 7, 30 or 90 days, one year, or no expiry. New keys default to 30 days in Settings. Existing keys retain their original expiry. Expired keys stop authenticating automatically; create a replacement and update your connection before that time. A key’s expiry cannot be extended after creation.</p>
         <p>Use the origin of your own running Folio instance as <code>FOLIO_URL</code>. The examples below use environment variables for your Folio API key and resource IDs. They do not contain a real credential.</p>
       </section>
       <section>
@@ -161,7 +162,7 @@ export function ApiDocs() {
       </section>
       <section>
         <h2>Errors and limits</h2>
-        <p>Expect 400 for invalid input, 401 for a missing or revoked key, 403 for insufficient role or scope, 404 for unavailable resources, 413 for file/page limits, 422 for approval validation and 429 for quota limits. Retry transient failures with the same intake idempotency key; show actionable errors to the person managing the workflow.</p>
+        <p>Expect 400 for invalid input, 401 for a missing, expired or revoked key, 403 for insufficient role or scope, 404 for unavailable resources, 413 for file/page limits, 422 for approval validation and 429 for quota limits. Replace an expired or revoked key before retrying. For transient failures, retry with the same intake idempotency key; show actionable errors to the person managing the workflow.</p>
       </section>
     </GuideLayout>
   );

@@ -91,6 +91,11 @@ REVOKE ALL ON ${s}.users,${s}.sessions,${s}.memberships,${s}.workspaces,${s}.sch
 GRANT SELECT ON ${s}.workspaces TO ${u};
 REVOKE ALL ON ${s}.provider_events FROM ${u};
 REVOKE UPDATE,DELETE ON ${s}.document_events FROM ${u};`);
+ parts.push(`DO $folio_rate_limit_permissions$ BEGIN
+ IF to_regclass(${literal(`${schema}.request_rate_limits`)}) IS NOT NULL THEN
+  REVOKE ALL ON ${s}.request_rate_limits FROM ${u};
+ END IF;
+END $folio_rate_limit_permissions$;`);
  if(isolated)parts.push(`REVOKE ALL ON SCHEMA ${s} FROM PUBLIC;
 REVOKE CREATE ON SCHEMA ${s} FROM ${a},${u};
 REVOKE ALL ON ALL TABLES IN SCHEMA ${s} FROM PUBLIC;

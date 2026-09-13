@@ -15,7 +15,7 @@ export async function requireActor(request:FastifyRequest,options:{roles?:Role[]
  const header=request.headers.authorization;let actor:Actor;
  if(header?.startsWith('Bearer ')){
   const token=header.slice(7);if(!token.startsWith('fl_'))badRequest('Invalid API key',401);
-  const {rows}=await adminPool.query('select k.*,m.role from api_keys k join memberships m on m.workspace_id=k.workspace_id and m.user_id=k.user_id where k.token_hash=$1 and k.revoked_at is null',[hashToken(token)]);const key=rows[0];if(!key)badRequest('Invalid or revoked API key',401);
+  const {rows}=await adminPool.query('select k.*,m.role from api_keys k join memberships m on m.workspace_id=k.workspace_id and m.user_id=k.user_id where k.token_hash=$1 and k.revoked_at is null and (k.expires_at is null or k.expires_at>now())',[hashToken(token)]);const key=rows[0];if(!key)badRequest('Invalid, expired or revoked API key',401);
   if(options.scope&&!key.scopes.includes(options.scope))badRequest(`API key requires ${options.scope} scope`,403);
   actor={userId:key.user_id,workspaceId:key.workspace_id,role:key.role,authType:'api',scopes:key.scopes};
   await adminPool.query('update api_keys set last_used_at=now() where id=$1',[key.id]);

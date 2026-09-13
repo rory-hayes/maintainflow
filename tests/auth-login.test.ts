@@ -2,10 +2,12 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import type { Pool } from 'pg';
 import { buildApp } from '../server/app.js';
 import { adminPool, closeDatabase, transaction } from '../server/core/db.js';
 import { hashPassword } from '../server/core/auth.js';
 import { config, defaultPlan } from '../server/core/config.js';
+import { createPostgresRateLimitStore } from '../server/core/rate-limit.js';
 
 type Account = { id: string; email: string; password: string; workspaceId?: string };
 const suffix = randomUUID();
@@ -55,7 +57,7 @@ function rejected(response: Awaited<ReturnType<typeof login>>) {
 function throttled(response: Awaited<ReturnType<typeof login>>) {
   assert.equal(response.statusCode, 429, response.body);
   assert.deepEqual(response.json(), { error: 'request_error',
-    message: 'Too many authentication attempts. Try again in 15 minutes.' });
+    message: 'Too many requests. Wait for the Retry-After interval, then try again.' });
   assert.equal(response.headers['x-ratelimit-limit'], '30');
   assert.equal(response.headers['x-ratelimit-remaining'], '0');
   const retryAfter = Number(response.headers['retry-after']);
@@ -194,10 +196,10 @@ test('registration and login share an authentication budget without throttling h
   const health = await app.inject({ method: 'GET', url: '/api/health', remoteAddress: address });
   assert.equal(health.statusCode, 200, health.body);
   assert.equal(health.json().status, 'ok');
-  assert.equal(health.headers['x-ratelimit-limit'], undefined);
+  assert.equal(health.headers['x-ratelimit-limit'], '300');
   const session = await app.inject({ method: 'GET', url: '/api/auth/me', remoteAddress: address });
   assert.equal(session.statusCode, 401, session.body);
-  assert.equal(session.headers['x-ratelimit-limit'], undefined);
+  assert.equal(session.headers['x-ratelimit-limit'], '300');
   assert.equal(session.headers['set-cookie'], undefined);
   assert.equal(await sessionCount(), beforeCount);
 });
@@ -240,4 +242,27 @@ test('origin denial and a login database failure remain distinct from incorrect 
   assert.equal(recovered.statusCode, 200, recovered.body);
   assert.equal(recovered.json().user.id, owner.id);
   assert.equal(await sessionCount(), beforeCount + 1);
+});
+
+test('request-protection service failure remains distinct from incorrect credentials', async () => {
+  const beforeCount = await sessionCount();
+  const originDenied = await login({ email: owner.email, password: owner.password }, '192.0.2.137', app, 'https://unrelated.example');
+  assert.equal(originDenied.statusCode, 403, originDenied.body);
+  assert.equal(originDenied.json().message, 'Request origin is not allowed');
+  assert.equal(originDenied.headers['set-cookie'], undefined);
+
+  let storeCalls = 0;
+  const privateMarker = 'PRIVATE_SYNTHETIC_AUTH_STORE_FAILURE';
+  const database = { query: async () => { storeCalls++; throw new Error(privateMarker); } } as unknown as Pick<Pool, 'query'>;
+  const unavailableApp = await buildApp({ rateLimitStore: createPostgresRateLimitStore({ database, namespace: `auth-login-unavailable:${suffix}` }) });
+  unavailableApp.log.level = 'silent';
+  try {
+    const response = await login({ email: owner.email, password: owner.password }, '192.0.2.138', unavailableApp);
+    assert.equal(response.statusCode, 503, response.body);
+    assert.deepEqual(response.json(), { error: 'server_error', message: 'The request could not be completed. Check the server status and try again.' });
+    assert.ok(!response.body.includes(privateMarker));
+    assert.equal(response.headers['set-cookie'], undefined);
+    assert.equal(storeCalls, 1);
+  } finally { await unavailableApp.close(); }
+  assert.equal(await sessionCount(), beforeCount);
 });

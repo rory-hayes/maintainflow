@@ -1,0 +1,126 @@
+{
+  "checkedAt": "2026-09-13T08:17:07.021Z",
+  "status": "passed",
+  "scope": "One synthetic invoice through the canonical application to a private Google Sheet, followed by explicit replay and native row comparison.",
+  "targetOrigin": "https://maintainflow.io",
+  "deployedRevision": "e446f6bd74c910c8fafa8b3973239c3e216f1735",
+  "connection": {
+    "consentCompleted": true,
+    "enabled": true,
+    "scope": "https://www.googleapis.com/auth/spreadsheets"
+  },
+  "fixture": {
+    "synthetic": true,
+    "filename": "invoice-multipage.pdf",
+    "uniqueCopy": true,
+    "pageCount": 2,
+    "bytes": 2866
+  },
+  "application": {
+    "directSignedUpload": true,
+    "rulesExtractionMatchedManifest": true,
+    "correctionPreserved": true,
+    "approvalPinnedReviewedValues": true,
+    "billingMock": true
+  },
+  "delivery": {
+    "status": "delivered",
+    "providerResponseStatus": 200,
+    "attempts": 1,
+    "deliveredAt": "2026-09-13T08:14:21.600Z"
+  },
+  "nativeFirstReadback": {
+    "checkedAt": "2026-09-13T08:15:21.270Z",
+    "headers": [
+      "Document ID",
+      "Invoice number",
+      "Supplier",
+      "Currency",
+      "Total",
+      "Revision"
+    ],
+    "approvedValuesMatched": true,
+    "numericTotalMatched": true,
+    "revisionMatched": true,
+    "dataRows": 1,
+    "formulaCells": 0,
+    "completeCellsChecked": 26000
+  },
+  "replay": {
+    "sameDeliveryId": true,
+    "status": "delivered",
+    "responseStatus": 200,
+    "attempts": 1,
+    "deliveredAt": "2026-09-13T08:15:38.572Z"
+  },
+  "nativeSecondReadback": {
+    "checkedAt": "2026-09-13T08:17:07.021Z",
+    "sameHeadersAndValues": true,
+    "dataRows": 1,
+    "duplicateRows": 0,
+    "formulaCells": 0,
+    "completeCellsChecked": 26000
+  },
+  "sessions": {
+    "firstRevoked": true,
+    "replayRevoked": true
+  },
+  "boundaries": {
+    "tokenRefreshAfterRestart": "not tested",
+    "providerRevocation": "not tested",
+    "browserRenderedSheet": "Root visually observed the actual row before presentation changes; final presentation verified through native API.",
+    "customerData": "not used",
+    "realStripe": "not used; mocked billing remains active"
+  },
+  "privateDataOmitted": [
+    "spreadsheet and folder IDs",
+    "account identity",
+    "application resource IDs",
+    "OAuth client ID",
+    "OAuth tokens and state",
+    "session cookies",
+    "signed storage URLs"
+  ],
+  "finalCheckpoint": {
+    "checkedAt": "2026-09-13T08:25:00.425Z",
+    "health": {
+      "status": "ok",
+      "name": "Folio",
+      "environment": "preview",
+      "revision": "e446f6bd74c910c8fafa8b3973239c3e216f1735"
+    },
+    "config": {
+      "preview": true,
+      "inviteRequired": true,
+      "hosted": true
+    },
+    "googleConnectionEnabled": true,
+    "sessionRevoked": true,
+    "resend": {
+      "mode": "managed",
+      "configured": false,
+      "verified": false,
+      "deliveryVerified": false,
+      "addressAvailable": false
+    },
+    "billingMock": true
+  },
+  "presentation": {
+    "checkedAt": "2026-09-13T08:26:28.262Z",
+    "columnWidths": [
+      310,
+      130,
+      300,
+      90,
+      100,
+      90
+    ],
+    "headerBold": true,
+    "headerLightFill": true,
+    "frozenRows": 1,
+    "dataValuesAndOrderPreserved": true,
+    "setupNoteUpdated": true,
+    "shared": false,
+    "verification": "Native API readback; final browser screenshot unavailable because Mac locked."
+  }
+}

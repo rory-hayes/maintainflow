@@ -19,11 +19,25 @@ try{
     }
     const html=await inspectSource(Buffer.from('<h1>Owned bundle fixture</h1><p>Total: 12.50</p>'),'fixture.html');
     assert.match(html.pages[0].text,/12.50/);
-    const app=await buildApp();
+    // This isolated packaging check has no database. Exercise the packaged
+    // limiter hook with an explicit in-memory test store; shared PostgreSQL
+    // enforcement is verified by the request-rate-limit integration tests.
+    let limiterCalls=0,blockRequests=false;
+    class BundleStore {
+      incr(_key, callback) { limiterCalls++; callback(null, { current: blockRequests?301:1, ttl: 60000 }); }
+      child() { return this; }
+    }
+    const app=await buildApp({rateLimitStore:BundleStore});
     assert.equal((await app.inject('/api/health')).statusCode,200);
     const preview=await app.inject('/api/config');assert.equal(preview.json().preview,true);
+    const missing=await app.inject('/api/packaged-missing-route');
+    assert.equal(missing.statusCode,404);assert.equal(missing.headers['x-ratelimit-limit'],'300');
+    assert.equal(limiterCalls,3);
     const denied=await app.inject({method:'POST',url:'/api/auth/register',payload:{name:'Owned fixture',workspaceName:'Owned fixture',email:'bundle@example.test',password:'owned bundle fixture'}});
     assert.equal(denied.statusCode,403);
+    blockRequests=true;
+    const throttled=await app.inject('/api/packaged-missing-route');
+    assert.equal(throttled.statusCode,429);assert.ok(Number(throttled.headers['retry-after'])>0);
     await app.close(); console.log('PASS packaged API and preview invitation guard');
   `],{cwd:directory,encoding:'utf8',timeout:90_000,env:{PATH:process.env.PATH,NODE_ENV:'production',FOLIO_PREVIEW_MODE:'true',FOLIO_BILLING_MOCK:'true',FOLIO_PREVIEW_INVITE_CODE:'owned-bundle-fixture-'.repeat(3),INTEGRATION_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64')}});
   process.stdout.write(result.stdout??'');

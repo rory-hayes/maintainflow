@@ -1,0 +1,38 @@
+{
+  "baseRevision": "5dcbcefc94182cd9422322f5ce2567c0b934388c",
+  "sourceState": "working tree before request-limit commit",
+  "sourceFiles": 153,
+  "sourceSha256": "acc2339fda0d0a8c476cc2c6fe8c9c976266c687bf02c03d864c9c304e67a5ed",
+  "checks": {
+    "serialSuite": {
+      "passed": 247,
+      "failed": 0,
+      "skipped": 0,
+      "receipt": "tests-final.txt"
+    },
+    "hostedBuildAndTypecheck": {
+      "passed": true,
+      "receipt": "build-final.txt"
+    },
+    "packagedRuntimeAndSixDecoders": {
+      "passed": true,
+      "receipt": "bundle-final.txt",
+      "counterStore": "explicit isolated test store; shared PostgreSQL integration covered by serial suite",
+      "unknownApiRouteThrottling": true
+    },
+    "desktopMobileBrowser": {
+      "passed": true,
+      "checks": 14,
+      "completedAt": "2026-09-13T10:54:03.722Z",
+      "receipt": "browser-results.json"
+    },
+    "review": {
+      "counterAtomicityAndRls": "no remaining blocking finding",
+      "cleanupExpiryIndex": "eligible in read-only EXPLAIN",
+      "productionTestStoreEscape": "none found"
+    }
+  },
+  "hostedMigration021": "prepared; Mac unlock required for existing SQL Editor",
+  "hostedRuntime": "unchanged at e446f6b",
+  "gitHubChecks": "rerun pending"
+}

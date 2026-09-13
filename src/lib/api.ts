@@ -14,7 +14,7 @@ export async function api<T=any>(path:string,options:RequestInit={}):Promise<T> 
 }
 export const post=<T=any>(path:string,body:unknown={})=>api<T>(path,{method:'POST',body:JSON.stringify(body)});
 export const patch=<T=any>(path:string,body:unknown)=>api<T>(path,{method:'PATCH',body:JSON.stringify(body)});
-export function useData<T=any>(path:string,poll=false,retainPrevious=false){return useQuery<T>({queryKey:[workspaceId(),path],queryFn:({signal})=>api<T>(path,{signal}),refetchInterval:poll?1800:false,placeholderData:retainPrevious?keepPreviousData:undefined});}
+export function useData<T=any>(path:string,poll:boolean|number=false,retainPrevious=false){return useQuery<T>({queryKey:[workspaceId(),path],queryFn:({signal})=>api<T>(path,{signal}),refetchInterval:typeof poll==='number'?poll:poll?1800:false,placeholderData:retainPrevious?keepPreviousData:undefined});}
 export function useAction(){
   const client=useQueryClient();const running=useRef(false);const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [message,setMessage]=useState('');
   async function run<T>(action:()=>Promise<T>,success='Saved.'):Promise<T|undefined>{if(running.current)return undefined;running.current=true;setBusy(true);setError('');setMessage('');try{const result=await action();await client.invalidateQueries();setMessage(success);return result;}catch(e){setError(e instanceof Error?e.message:'Something went wrong.');return undefined;}finally{running.current=false;setBusy(false);}}
