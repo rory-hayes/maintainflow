@@ -90,8 +90,8 @@ Earlier stopped attempts remain separate: fixture initialization before any acco
 
 The [public-safe receipt](evidence/pdf-splitting-2026-09-13/verification.json) records source identity, times, counts and limits. Raw account identities, cookies, signed URLs and private fixtures are excluded.
 
-## CI and release — pending
+## CI and release
 
-**Pending.** Exact Git revision, PR publication, CI/CodeQL checks and any final public-safe receipt links must be filled from their actual results. The application fingerprint above is not a Git commit or deployment identity.
+The review request records the exact Git candidate and its separate CI results. The [public-safe local receipt](evidence/pdf-splitting-2026-09-13/verification.json) identifies the tested application files; that fingerprint is not a deployment identity. This feature is stacked on parser-copy PR29. CodeQL must be verified on the final integration head before the stack is merged; local tests and a Vercel preview check do not establish that result.
 
 Migration 027 is local only; hosted **021–027** and their matching release remain pending. The prior canonical sign-in release, existing free hosting plans, mock billing and previously recorded provider boundaries are unchanged by these local checks. No deployment, plan upgrade, real payment test, customer use or complete C10/reference-product parity is claimed.

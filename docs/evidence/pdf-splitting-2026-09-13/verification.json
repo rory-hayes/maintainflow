@@ -221,7 +221,7 @@
     "hostingPlanChanges": false,
     "liveProviderAcceptance": false,
     "customerAcceptance": false,
-    "gitAndCI": "Recorded separately after publication"
+    "gitAndCI": "See separately recorded review-request revision and check results; these local results do not imply CI or deployment success."
   },
   "developmentTransform": {
     "passed": true,
@@ -232,5 +232,10 @@
     "environmentFileLoading": false,
     "pdfjsExcludedFromOptimization": true,
     "configuredPluginTransformVerified": true
+  },
+  "previewErrorVisual": {
+    "passed": true,
+    "scope": "Separate focused screenshot check on the final build; disabled submission, visible safe error and no partial ready canvas",
+    "ownedFixturesCleaned": true
   }
 }
