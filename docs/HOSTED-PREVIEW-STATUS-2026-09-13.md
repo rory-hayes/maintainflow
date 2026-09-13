@@ -1,5 +1,7 @@
 # Hosted preview status — 13 September 2026
 
+Latest local checkpoint: complete native-text templates now take priority over AI and record their pinned selection. **383 tests**, ten controlled desktop/mobile browser checks and build/package checks pass; two independent document-family matches and an explicit nonmatch also pass. [Template acceptance](TEMPLATE-SELECTION-ACCEPTANCE.md). Migration026 is local only, so hosted **021–026 remain unapplied**. Canonical health returned200 on `676a61a` at15:46:10UTC; the template feature is not deployed there.
+
 Folio is live at [maintainflow.io](https://maintainflow.io) as an invite-only preview on the existing free hosting plans, with billing visibly mocked. The current canonical revision is `676a61a8b757931a649fb6b31b64d2f11937ce51`, verified after the sign-in fix in [PR 25](https://github.com/rory-hayes/maintainflow/pull/25) deployed on 13 September. Eight hosted browser checks passed at 12:31:33 UTC. Google Sheets authorization, approved-value delivery, replay without a duplicate row, and natural-expiry refresh passed on the earlier `e446f6bd74c910c8fafa8b3973239c3e216f1735` revision; those provider workflows were not rerun on the sign-in release. Actual Folio Resend intake remains unverified.
 
 The [12 September checkpoint](HOSTED-PREVIEW-STATUS-2026-09-12.md) retains the earlier deployment, browser, storage, tenant-isolation and scheduler-recovery evidence. Those dated results have not been rewritten as tests of newer work.

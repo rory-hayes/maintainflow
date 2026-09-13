@@ -1,12 +1,13 @@
 import {useId,useState} from 'react';
 import {Link,useParams,useSearchParams} from 'react-router-dom';
-import {Plus,Layers3,ChevronRight,Archive,RotateCcw,Trash2} from 'lucide-react';
-import {useData,useAction,post,patch,api} from '../../lib/api';
+import {Plus,Layers3,ChevronRight,Archive,RotateCcw} from 'lucide-react';
+import {useData,useAction,patch} from '../../lib/api';
 import {useSession} from '../../lib/session';
 import {useAiAvailability} from '../../lib/ai';
 import {PageHeader,Loading,ErrorState,Empty,Button,Notice,Tabs,Field,Status} from '../../components/ui';
 import SchemaEditor from './SchemaEditor';
 import ParserSetup from './ParserSetup';
+import TemplateEditor from './TemplateEditor';
 import Documents from '../documents/Documents';
 import Upload from '../documents/Upload';
 import {sourceFormats,type SourceFormat} from '../../../shared/source-formats';
@@ -28,7 +29,7 @@ export function ParserDetail(){
   return <><PageHeader title={parser.name} description="Choose what this parser extracts."><Button variant="secondary" onClick={()=>setTab('Fields')}>{canEdit?'Edit fields':'View fields'}</Button>{parser.archived&&<Status value="archived"/>}</PageHeader><Tabs items={items} value={tab} onChange={setTab}/>
     {(tab==='Setup'||setupPending&&tab!=='Fields')&&<ParserSetup key={parser.id} parserId={id!} canEdit={canEdit} archived={parser.archived} onEditFields={()=>setTab('Fields')} onAddSample={()=>setTab('Add a document')} onSettings={()=>setTab('Settings')} showAddSampleAction={tab!=='Add a document'}/>}
     {tab==='Add a document'&&<div className="onboarding"><h2>{setupPending?(parser.fieldSetupState==='failed'?'Upload another sample.':'Add your sample document.'):'Add your first document.'}</h2><p>{setupPending?(parser.fieldSetupState==='failed'?'After uploading, open Setup and select the new sample to retry.':'Upload one representative sample. The first accepted sample defines the initial fields for all waiting documents.'):'Try the synthetic sample to see a complete extraction, review and export workflow.'}</p><Upload parserId={id} compact/>{!setupPending&&<div className="schema-suggestion-discover"><p>After uploading, suggest fields from your document or edit them yourself.</p><Button variant="secondary" onClick={()=>setTab('Fields')}>Choose fields</Button></div>}</div>}
-    {tab==='Documents'&&<Documents parserId={id} embedded/>}{tab==='Fields'&&<SchemaEditor key={parser.id} parserId={id!} schema={schema} canEdit={canEdit} archived={parser.archived} setupPending={setupPending} onOpenSettings={()=>setTab('Settings')} onUploadDocument={()=>setTab(params.get('onboarding')?'Add a document':'Documents')}/>} {tab==='Templates'&&<TemplateEditor parserId={id!} templates={templates} fields={schema.fields} canEdit={canEdit}/>} {tab==='Settings'&&<ParserSettings key={JSON.stringify(parser)} parser={parser} canEdit={canEdit}/>}</>;
+    {tab==='Documents'&&<Documents parserId={id} embedded/>}{tab==='Fields'&&<SchemaEditor key={parser.id} parserId={id!} schema={schema} canEdit={canEdit} archived={parser.archived} setupPending={setupPending} onOpenSettings={()=>setTab('Settings')} onUploadDocument={()=>setTab(params.get('onboarding')?'Add a document':'Documents')}/>} {tab==='Templates'&&<TemplateEditor parserId={id!} templates={templates} schema={schema} mode={parser.mode} locale={parser.locale} canEdit={canEdit}/>} {tab==='Settings'&&<ParserSettings key={JSON.stringify(parser)} parser={parser} canEdit={canEdit}/>}</>;
 }
 function ParserSettings({parser,canEdit}:{parser:any;canEdit:boolean}){
   const [form,setForm]=useState({name:parser.name,mode:parser.mode,instructions:parser.instructions,locale:parser.locale,timezone:parser.timezone});
@@ -68,8 +69,4 @@ function ParserSettings({parser,canEdit}:{parser:any;canEdit:boolean}){
     <Notice error={action.error} message={action.message}/>
     <Button disabled={!canEdit||action.busy||emptyFormats||(form.mode==='ai'&&ai.configured!==true)}>Save settings</Button>
   </form>;
-}
-function TemplateEditor({parserId,templates,fields,canEdit}:{parserId:string;templates:any[];fields:any[];canEdit:boolean}){
-  const [name,setName]=useState(''),[matchText,setMatchText]=useState(''),[anchors,setAnchors]=useState<Record<string,string>>({});const action=useAction();
-  return <><h2>Saved text templates</h2><p>Match a document by a literal phrase, then read values from labelled anchors. The first matching enabled template is used. Blank matching text applies to all documents.</p>{templates.map(template=><div className="integration-row" key={template.id}><div className="integration-copy"><h3>{template.name}</h3><p>{template.matchText?`Contains “${template.matchText}”`:'Matches all documents'} · {template.rules.length} anchors</p></div><Button variant="secondary" disabled={!canEdit} onClick={()=>void action.run(()=>patch(`/api/templates/${template.id}`,{...template,enabled:!template.enabled}),template.enabled?'Template disabled.':'Template enabled.')}>{template.enabled?'Disable':'Enable'}</Button><button className="icon-button" disabled={!canEdit} aria-label={`Delete template ${template.name}`} onClick={()=>void action.run(()=>api(`/api/templates/${template.id}`,{method:'DELETE'}),'Template deleted.')}><Trash2 size={17}/></button></div>)}{canEdit&&<form onSubmit={e=>{e.preventDefault();void action.run(async()=>{await post(`/api/parsers/${parserId}/templates`,{name,matchText,rules:fields.filter(f=>anchors[f.key]?.trim()).map(f=>({field:f.key,anchor:anchors[f.key].trim()})),enabled:true});setName('');setMatchText('');setAnchors({});},'Template saved. Reprocess a document to apply it.');}} style={{marginTop:30,maxWidth:800}}><h3>Create a template</h3><div className="form-grid"><Field label="Template name"><input required value={name} onChange={e=>setName(e.target.value)}/></Field><Field label="Document contains"><input value={matchText} onChange={e=>setMatchText(e.target.value)} placeholder="A supplier name or unique phrase"/></Field></div><div className="form-grid">{fields.map(field=><Field key={field.key} label={`${field.label} anchor`}><input value={anchors[field.key]||''} onChange={e=>setAnchors({...anchors,[field.key]:e.target.value})} placeholder={field.anchor||field.label}/></Field>)}</div><Button disabled={action.busy}><Plus/>Save template</Button></form>}<Notice error={action.error} message={action.message}/></>;
 }

@@ -1,3 +1,4 @@
+import {templatePolicy} from '../../shared/template-selection.js';
 import {randomUUID,createHash} from 'node:crypto';
 import path from 'node:path';
 import type {PoolClient} from 'pg';
@@ -87,7 +88,7 @@ export async function addDocument(actor:Actor,parserId:string,buffer:Buffer,file
    if(usage.used+source.pageCount>plan.monthlyPages)badRequest('Monthly page quota reached. Update the plan before uploading more documents.',429);
    let {rows:[doc]}=await c.query('insert into documents(id,workspace_id,parser_id,name,mime_type,byte_size,sha256,storage_key,status,page_count,source_text) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *',[id,actor.workspaceId,parserId,name,source.mimeType,buffer.length,sha,storageKey,'received',source.pageCount,JSON.stringify(source.pages)]);
    const templates=(await c.query('select * from templates where parser_id=$1 order by created_at,id',[parserId])).rows;
-   const {rows:[job]}=await c.query('insert into jobs(workspace_id,document_id,schema_version_id,config,waiting_for_schema) values($1,$2,$3,$4,$5) returning id',[actor.workspaceId,id,parser.active_schema_id,JSON.stringify({mode:parser.mode,instructions:parser.instructions,locale:parser.locale,timezone:parser.timezone,templates}),parser.field_setup_state!=='ready']);
+   const {rows:[job]}=await c.query('insert into jobs(workspace_id,document_id,schema_version_id,config,waiting_for_schema) values($1,$2,$3,$4,$5) returning id',[actor.workspaceId,id,parser.active_schema_id,JSON.stringify({mode:parser.mode,instructions:parser.instructions,locale:parser.locale,timezone:parser.timezone,templates,templatePolicy}),parser.field_setup_state!=='ready']);
    doc=(await c.query("update documents set status='queued',updated_at=clock_timestamp() where id=$1 returning *",[id])).rows[0];
    await c.query('insert into usage_ledger(workspace_id,document_id,event,pages,idempotency_key) values($1,$2,$3,$4,$5)',[actor.workspaceId,id,'upload',source.pageCount,`upload:${id}`]);
    if(idempotencyKey)await c.query('insert into intake_events(workspace_id,idempotency_key,document_id) values($1,$2,$3)',[actor.workspaceId,idempotencyKey,id]);
