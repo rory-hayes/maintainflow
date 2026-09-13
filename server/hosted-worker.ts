@@ -9,15 +9,16 @@ export const workerRoute='/api/internal/worker';
 export type HostedWorkerServices={
   enqueue:()=>Promise<unknown>;
   core:(budget:WorkBudget)=>Promise<boolean>;
+  suggestion:(budget:WorkBudget)=>Promise<boolean>;
   delivery:(budget:WorkBudget)=>Promise<boolean>;
   provider:(budget:WorkBudget)=>Promise<boolean>;
   deletion:(budget:WorkBudget)=>Promise<boolean>;
   maintenance:(budget:WorkBudget)=>Promise<unknown>;
 };
-export type DrainResult={core:number;delivery:number;provider:number;deletion:number;stopped:'idle'|'budget';errors:number};
+export type DrainResult={core:number;suggestion:number;delivery:number;provider:number;deletion:number;stopped:'idle'|'budget';errors:number};
 
 /** One serial consumer per durable queue. No polling, sleeps or process lifetime dependency. */
-export function createHostedWorker(services:HostedWorkerServices,options:{budgetMs?:number;now?:()=>number;reserveMs?:Partial<Record<'core'|'delivery'|'provider'|'deletion',number>>;onError?:(lane:string,error:unknown)=>void}={}){
+export function createHostedWorker(services:HostedWorkerServices,options:{budgetMs?:number;now?:()=>number;reserveMs?:Partial<Record<'core'|'suggestion'|'delivery'|'provider'|'deletion',number>>;onError?:(lane:string,error:unknown)=>void}={}){
   const budgetMs=options.budgetMs??hostedWorkBudgetMs;
   if(!Number.isFinite(budgetMs)||budgetMs<=0||budgetMs>hostedWorkBudgetMs)throw new Error('Hosted worker budget must be positive and at most 210 seconds.');
   const now=options.now??Date.now;
@@ -26,10 +27,10 @@ export function createHostedWorker(services:HostedWorkerServices,options:{budget
     const controller=new AbortController();
     const budget:WorkBudget={signal:controller.signal,deadlineAt:now()+budgetMs};
     const timer=setTimeout(()=>controller.abort(),budgetMs);
-    const result:DrainResult={core:0,delivery:0,provider:0,deletion:0,stopped:'idle',errors:0};
+    const result:DrainResult={core:0,suggestion:0,delivery:0,provider:0,deletion:0,stopped:'idle',errors:0};
     const remaining=()=>budget.deadlineAt!-now();
     const report=(lane:string,error:unknown)=>{result.errors++;options.onError?.(lane,error);};
-    async function consume(lane:'core'|'delivery'|'provider'|'deletion',reserveMs:number){
+    async function consume(lane:'core'|'suggestion'|'delivery'|'provider'|'deletion',reserveMs:number){
       // The optional reserve override is only a controlled scheduler test seam.
       const reserve=options.reserveMs?.[lane]??reserveMs;
       try{
@@ -40,13 +41,34 @@ export function createHostedWorker(services:HostedWorkerServices,options:{budget
         result.stopped='budget';
       }catch(error){report(lane,error);}
     }
+    async function consumeExtractionWork(){
+      const failed=new Set<'core'|'suggestion'>();
+      async function attempt(lane:'core'|'suggestion'){
+        if(failed.has(lane))return false;
+        if(controller.signal.aborted||remaining()<=(options.reserveMs?.[lane]??110_000)){
+          result.stopped='budget';return false;
+        }
+        try{
+          const worked=await services[lane](budget);
+          if(worked)result[lane]++;
+          return worked;
+        }catch(error){failed.add(lane);report(lane,error);return false;}
+      }
+      // FIFO and shared workspace capacity can temporarily block either queue.
+      // Recheck after progress releases capacity; stop when neither can work.
+      while(!controller.signal.aborted){
+        const progress=await Promise.all([attempt('core'),attempt('suggestion')]);
+        if(!progress.some(Boolean))return;
+      }
+      result.stopped='budget';
+    }
     try{
       await services.enqueue();
       if(controller.signal.aborted){result.stopped='budget';return result;}
       // Separate lanes prevent a backlog of extraction from starving email, delivery
       // or cleanup. Database leases fence other concurrent function instances.
       await Promise.all([
-        consume('core',110_000),consume('delivery',70_000),
+        consumeExtractionWork(),consume('delivery',70_000),
         consume('provider',140_000),consume('deletion',40_000),
         services.maintenance(budget).catch(error=>report('maintenance',error)),
       ]);
@@ -62,13 +84,14 @@ export function createHostedWorker(services:HostedWorkerServices,options:{budget
 
 let defaultWorker:ReturnType<typeof createHostedWorker>|undefined;
 async function productionServices():Promise<HostedWorkerServices>{
-  const [{processOneCoreJob,enforceRetention},{processOneFileDeletion},{reconcileInterruptedIntake},{enqueueApprovals,processOneDelivery},{tickProviders}]=await Promise.all([
+  const [{processOneCoreJob,enforceRetention},{processOneFileDeletion},{reconcileInterruptedIntake},{enqueueApprovals,processOneDelivery},{tickProviders},{processOneSchemaSuggestion}]=await Promise.all([
     import('./core/worker.js'),import('./core/retention.js'),import('./core/object-reconciliation.js'),
-    import('./integrations/webhooks.js'),import('./integrations/providers.js'),
+    import('./integrations/webhooks.js'),import('./integrations/providers.js'),import('./core/schema-suggestions.js'),
   ]);
   return {
     enqueue:enqueueApprovals,
     core:budget=>processOneCoreJob(undefined,{signal:budget.signal}),
+    suggestion:budget=>processOneSchemaSuggestion(undefined,{signal:budget.signal}),
     delivery:budget=>processOneDelivery({signal:budget.signal}),
     provider:tickProviders,
     deletion:async budget=>budget.signal?.aborted?false:processOneFileDeletion(),

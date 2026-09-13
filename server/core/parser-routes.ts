@@ -36,7 +36,29 @@ app.patch('/api/parsers/:id',async req=>{
   return {parser:camel(updated)};
  });
 });
-app.post('/api/parsers/:id/schema',async req=>{const a=await requireActor(req,{roles:editors,scope:'parsers:write'});const id=idFrom(req.params);const schema=parserSchema.parse(req.body);return withWorkspace(a.workspaceId,async c=>{if(!(await c.query('select id from parsers where id=$1 and workspace_id=$2 for update',[id,a.workspaceId])).rows[0])notFound();const {rows:[s]}=await c.query('insert into schema_versions(workspace_id,parser_id,version,schema,created_by) select $1,$2,coalesce(max(version),0)+1,$3,$4 from schema_versions where parser_id=$2 returning *',[a.workspaceId,id,JSON.stringify(schema),a.userId]);await c.query('update parsers set active_schema_id=$2 where id=$1',[id,s.id]);await audit(c,a.workspaceId,a.userId,'schema.version_created',id,{version:s.version});return {schema:{id:s.id,version:s.version,...s.schema}};});});
+const schemaSave=parserSchema.safeExtend({baseSchemaId:z.string().uuid().optional(),suggestionId:z.string().uuid().optional()});
+app.post('/api/parsers/:id/schema',async req=>{
+ const a=await requireActor(req,{roles:editors,scope:'parsers:write'}),id=idFrom(req.params),body=schemaSave.parse(req.body);
+ const schema=parserSchema.parse({fields:body.fields});
+ return withWorkspace(a.workspaceId,async c=>{
+  const {rows:[parser]}=await c.query('select id,active_schema_id,archived from parsers where id=$1 and workspace_id=$2 for update',[id,a.workspaceId]);
+  if(!parser)notFound();
+  if(body.baseSchemaId&&parser.active_schema_id!==body.baseSchemaId)badRequest('The parser fields changed since you started editing. Reload the saved fields and review your changes before saving.',409);
+  if(body.suggestionId){
+   if(!body.baseSchemaId)badRequest('The original schema version is required when saving suggested fields.');
+   if(parser.archived)badRequest('Restore this parser before saving suggested fields.',409);
+   if(a.authType==='api'&&!a.scopes?.includes('documents:read'))badRequest('API key requires documents:read scope',403);
+   const {rows:[suggestion]}=await c.query('select * from schema_suggestions where id=$1 and parser_id=$2 for update',[body.suggestionId,id]);
+   if(!suggestion)notFound('Field suggestion not found');
+   if(suggestion.state!=='ready'||suggestion.applied_schema_id||suggestion.base_schema_id!==body.baseSchemaId)badRequest('This suggestion cannot be applied. Reload the fields or request a new suggestion.',409);
+  }
+  const {rows:[version]}=await c.query('insert into schema_versions(workspace_id,parser_id,version,schema,created_by) select $1,$2,coalesce(max(version),0)+1,$3,$4 from schema_versions where parser_id=$2 returning *',[a.workspaceId,id,JSON.stringify(schema),a.userId]);
+  await c.query('update parsers set active_schema_id=$2 where id=$1',[id,version.id]);
+  if(body.suggestionId)await c.query('update schema_suggestions set applied_schema_id=$2,updated_at=now() where id=$1',[body.suggestionId,version.id]);
+  await audit(c,a.workspaceId,a.userId,'schema.version_created',id,{version:version.version,...(body.suggestionId?{suggestionId:body.suggestionId}:{})});
+  return {schema:{id:version.id,version:version.version,...version.schema}};
+ });
+});
 const templateBody=z.object({name:z.string().trim().min(1).max(100),matchText:z.string().max(1000).default(''),enabled:z.boolean().default(true),rules:z.array(z.object({field:z.string().max(150),anchor:z.string().min(1).max(200)})).max(100)});
 app.post('/api/parsers/:id/templates',async req=>{const a=await requireActor(req,{roles:editors,scope:'parsers:write'});const id=idFrom(req.params),b=templateBody.parse(req.body);return withWorkspace(a.workspaceId,async c=>{if(!(await c.query('select id from parsers where id=$1 and workspace_id=$2',[id,a.workspaceId])).rowCount)notFound();const {rows:[t]}=await c.query('insert into templates(workspace_id,parser_id,name,match_text,rules,enabled) values($1,$2,$3,$4,$5,$6) returning *',[a.workspaceId,id,b.name,b.matchText,JSON.stringify(b.rules),b.enabled]);await audit(c,a.workspaceId,a.userId,'template.created',t.id);return {template:camel(t)};});});
 app.patch('/api/templates/:id',async req=>{const a=await requireActor(req,{roles:editors,scope:'parsers:write'});const id=idFrom(req.params),b=templateBody.parse(req.body);return withWorkspace(a.workspaceId,async c=>{const {rows:[t]}=await c.query('update templates set name=$2,match_text=$3,rules=$4,enabled=$5 where id=$1 returning *',[id,b.name,b.matchText,JSON.stringify(b.rules),b.enabled]);if(!t)notFound();return {template:camel(t)};});});

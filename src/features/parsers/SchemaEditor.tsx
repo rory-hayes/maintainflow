@@ -1,11 +1,15 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
+import {useQueryClient} from '@tanstack/react-query';
+import {Link} from 'react-router-dom';
 import {Plus,Trash2,ArrowUp,ArrowDown,ChevronRight} from 'lucide-react';
 import type {SchemaField,FieldType} from '../../../shared/types';
-import {Button,Notice} from '../../components/ui';
-import {post,useAction} from '../../lib/api';
+import type {SchemaSuggestion} from '../../../shared/schema-suggestions';
+import {Button,Modal,Notice} from '../../components/ui';
+import {api,ApiError,post,useAction,workspaceId} from '../../lib/api';
+import SchemaSuggestions,{fieldTypeLabels} from './SchemaSuggestions';
 import './schema-editor.css';
 
-const fieldTypes:Record<FieldType,string>={string:'Text',number:'Number',currency:'Currency amount',date:'Date',boolean:'Boolean',multiline:'Multiline text',array:'Table / array',object:'Nested object'};
+const fieldTypes=fieldTypeLabels;
 const isNested=(type:FieldType)=>type==='array'||type==='object';
 function newKey(fields:SchemaField[]){let number=fields.length+1;while(fields.some(field=>field.key===`field_${number}`))number++;return `field_${number}`;}
 function initialDefault(type:FieldType):unknown{return type==='boolean'?false:type==='number'||type==='currency'?0:type==='array'?[]:type==='object'?{}:type==='date'?new Date().toISOString().slice(0,10):'';}
@@ -53,7 +57,64 @@ export function FieldRows({fields,onChange,disabled=false,depth=0}:{fields:Schem
   </div>)}<Button type="button" variant="secondary" disabled={disabled||fields.length>=limit} onClick={()=>onChange([...fields,{key:newKey(fields),label:'New field',type:'string',required:false,anchor:'New field'}])}><Plus/>{depth?'Add child field':'Add field'}</Button></div>;
 }
 
-export default function SchemaEditor({parserId,schema,canEdit}:{parserId:string;schema:{id:string;version:number;fields:SchemaField[]};canEdit:boolean}){
-  const [fields,setFields]=useState<SchemaField[]>(schema.fields);const action=useAction();
-  return <form onSubmit={event=>{event.preventDefault();void action.run(()=>post(`/api/parsers/${parserId}/schema`,{fields}),'A new schema version was saved. Previous runs retain their original schema.');}}><div className="schema-toolbar"><span className="muted">Schema version {schema.version}</span><Button disabled={!canEdit||action.busy}>Save schema</Button></div><Notice error={action.error} message={action.message}/><FieldRows fields={fields} onChange={setFields} disabled={!canEdit||action.busy}/><p className="small muted" style={{marginTop:22}}>Saving creates a new version. Text-anchor mode reads a labelled value after a colon or a table beneath its anchor. Extraction instructions guide AI mode. Text-anchor rules use labels, anchors and saved templates instead. Defaults are explicit fallback values; review them before approval.</p></form>;
+interface SavedSchema {id:string;version:number;fields:SchemaField[];}
+interface FieldDraft {base:SavedSchema;fields:SchemaField[];suggestion?:Pick<SchemaSuggestion,'id'|'documentId'|'documentName'>;}
+type DraftConfirmation={kind:'replace';suggestion:SchemaSuggestion}|{kind:'reload'|'discard'};
+function savedDraft(schema:SavedSchema):FieldDraft{return {base:structuredClone(schema),fields:structuredClone(schema.fields)};}
+
+export default function SchemaEditor({parserId,schema,canEdit,archived=false,onUploadDocument}:{parserId:string;schema:SavedSchema;canEdit:boolean;archived?:boolean;onUploadDocument:()=>void}){
+  const [draft,setDraft]=useState<FieldDraft>(()=>savedDraft(schema)),[revision,setRevision]=useState(0),[conflict,setConflict]=useState(false),[confirmation,setConfirmation]=useState<DraftConfirmation|null>(null);
+  // Invalid widget text can be unsaved even before it updates a SchemaField.
+  const [inputEdited,setInputEdited]=useState(false);
+  const editorHeading=useRef<HTMLHeadingElement>(null),focusEditorAfterDialog=useRef(false);
+  const action=useAction(),client=useQueryClient(),parserPath=`/api/parsers/${parserId}`,parserKey=[workspaceId(),parserPath];
+  const dirty=inputEdited||JSON.stringify(draft.fields)!==JSON.stringify(draft.base.fields),stale=conflict||draft.base.id!==schema.id;
+  function reportConflict(){setConflict(true);void client.invalidateQueries({queryKey:parserKey});}
+  function replaceDraft(next:FieldDraft){setInputEdited(false);setDraft(next);setRevision(current=>current+1);action.setError('');action.setMessage('');}
+  function useSuggestion(suggestion:SchemaSuggestion){
+    if(!canEdit||action.busy||!suggestion.schema||suggestion.appliedSchemaId)return;
+    if(stale||suggestion.baseSchemaId!==draft.base.id){reportConflict();return;}
+    replaceDraft({...draft,fields:structuredClone(suggestion.schema.fields),suggestion:{id:suggestion.id,documentId:suggestion.documentId,documentName:suggestion.documentName}});
+    if(confirmation){focusEditorAfterDialog.current=true;setConfirmation(null);}else editorHeading.current?.focus();
+  }
+  async function loadLatest(){
+    await action.run(async()=>{
+      const result=await api<{schema:SavedSchema}>(parserPath);
+      client.setQueryData(parserKey,result);
+      replaceDraft(savedDraft(result.schema));setConflict(false);
+      if(confirmation){focusEditorAfterDialog.current=true;setConfirmation(null);}else editorHeading.current?.focus();
+      return result;
+    },'Latest saved fields loaded.');
+  }
+  async function save(){
+    if(!canEdit||action.busy||stale)return;
+    await action.run(async()=>{
+      try{
+        const result=await post<{schema:SavedSchema}>(`${parserPath}/schema`,{fields:draft.fields,baseSchemaId:draft.base.id,...(draft.suggestion?{suggestionId:draft.suggestion.id}:{})});
+        client.setQueryData<{schema:SavedSchema}>(parserKey,current=>current?{...current,schema:result.schema}:current);
+        replaceDraft(savedDraft(result.schema));setConflict(false);
+        return result;
+      }catch(error){if(error instanceof ApiError&&error.status===409)reportConflict();throw error;}
+    },'A new schema version was saved. Previous runs retain their original schema. Existing documents are not reprocessed automatically.');
+  }
+  function requestLatest(kind:'reload'|'discard'){
+    if(dirty||draft.suggestion)setConfirmation({kind});else void loadLatest();
+  }
+  return <>
+    <SchemaSuggestions parserId={parserId} baseSchemaId={draft.base.id} canEdit={canEdit} archived={archived} blocked={stale||action.busy} activeSuggestionId={draft.suggestion?.id} onUploadDocument={onUploadDocument} onConflict={reportConflict} onUse={suggestion=>{if(dirty||draft.suggestion)setConfirmation({kind:'replace',suggestion});else useSuggestion(suggestion);}}/>
+    <form onChangeCapture={()=>setInputEdited(true)} onSubmit={event=>{event.preventDefault();void save();}}>
+      <div className="schema-toolbar schema-save-toolbar"><div><h2 tabIndex={-1} ref={editorHeading}>Parser fields</h2><span className="small muted">Based on schema version {draft.base.version}{dirty?' · Unsaved changes':''}</span></div><Button disabled={!canEdit||action.busy||stale}>{action.busy?'Please wait…':'Save schema'}</Button></div>
+      {stale&&<div className="schema-draft-notice" role="alert"><p>The saved fields changed or this draft is no longer available to apply. Your edits are preserved. Load the latest saved fields before continuing.</p><Button type="button" variant="secondary" disabled={action.busy} onClick={()=>requestLatest('reload')}>Load latest saved fields</Button></div>}
+      {draft.suggestion&&<div className="schema-draft-notice"><p>Suggested draft from <Link className="link" to={`/app/documents/${draft.suggestion.documentId}`}>{draft.suggestion.documentName}</Link>. Review and edit the fields below, then save a new schema version.</p><Button type="button" variant="secondary" disabled={action.busy} onClick={()=>requestLatest('discard')}>Discard suggested draft</Button></div>}
+      <Notice error={action.error} message={action.message}/>
+      <FieldRows key={revision} fields={draft.fields} onChange={fields=>setDraft(current=>({...current,fields}))} disabled={!canEdit||action.busy}/>
+      <p className="small muted" style={{marginTop:22}}>Saving creates a new version. Text-anchor mode reads a labelled value after a colon or a table beneath its anchor. Extraction instructions guide AI mode. Text-anchor rules use labels, anchors and saved templates instead. Defaults are explicit fallback values; review them before approval.</p>
+    </form>
+    <Modal open={confirmation!==null} onOpenChange={open=>{if(!open)setConfirmation(null);}} onCloseAutoFocus={event=>{if(focusEditorAfterDialog.current){event.preventDefault();focusEditorAfterDialog.current=false;editorHeading.current?.focus();}}}
+      title={confirmation?.kind==='replace'?'Replace unsaved fields?':confirmation?.kind==='discard'?'Discard suggested draft?':'Load the latest saved fields?'}
+      description={confirmation?.kind==='replace'?'This replaces your current unsaved fields with the suggested draft. You can edit the draft before saving.': 'Your unsaved edits will be replaced with the latest saved schema. This does not change any saved fields or documents.'}>
+      <Notice error={action.error}/>
+      <div className="schema-confirm-actions"><Button type="button" variant="secondary" disabled={action.busy} onClick={()=>setConfirmation(null)}>Keep editing</Button><Button type="button" disabled={action.busy} onClick={()=>{if(confirmation?.kind==='replace')useSuggestion(confirmation.suggestion);else void loadLatest();}}>{action.busy?'Loading…':confirmation?.kind==='replace'?'Replace draft':confirmation?.kind==='discard'?'Discard draft':'Load saved fields'}</Button></div>
+    </Modal>
+  </>;
 }
