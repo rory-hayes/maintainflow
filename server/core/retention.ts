@@ -1,11 +1,14 @@
 import type { PoolClient } from 'pg';
 import path from 'node:path';
 import { adminPool, withWorkspace } from './db.js';
+import {lockParserForDocument,detachSetupSource} from './parser-setup.js';
 import { config } from './config.js';
 import { privateStorage, validateStorageKey } from './storage.js';
 
 /** Hold the document lock before removing local derived copies and immutable runs. */
 export async function purgeDocument(c: PoolClient, workspaceId: string, documentId: string) {
+  const parser=await lockParserForDocument(c,workspaceId,documentId);
+  await detachSetupSource(c,parser,documentId);
   const { rows: [document] } = await c.query(
     'select id,storage_key from documents where id=$1 and workspace_id=$2 for update',
     [documentId, workspaceId],

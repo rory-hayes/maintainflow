@@ -8,6 +8,7 @@ import {adminPool,transaction,withWorkspace,audit,badRequest,notFound} from './d
 import {requireActor,editors} from './auth.js';
 import {readStoredObject} from './storage.js';
 import {parserSchema} from './schema.js';
+import {requireSuggestionCapacity,finishInitialSetup,failInitialSetup} from './parser-setup.js';
 import {SchemaSuggestionProviderError} from './schema-suggestion-errors.js';
 
 let provider:SchemaSuggestionProvider|undefined;
@@ -64,9 +65,8 @@ export async function registerSchemaSuggestions(app:FastifyInstance){
    const {rows:[doc]}=await c.query('select * from documents where id=$1 and parser_id=$2 and workspace_id=$3',[body.documentId,id,actor.workspaceId]);
    if(!doc)notFound('Document not found in this parser');
    if(!schemaSuggestionsConfigured())badRequest('AI field suggestions are unavailable. Ask your workspace administrator to check the AI connection.',503);
-   const {rows:[counts]}=await c.query("select (select count(*)::int from audit_events where workspace_id=$1 and action='schema.suggestion_requested' and created_at>now()-interval '24 hours') recent,(select count(*)::int from schema_suggestions where workspace_id=$1 and state in('queued','processing')) pending",[actor.workspaceId]);
-   if(counts.recent>=schemaSuggestionLimits.perDay)badRequest('This workspace has used its 10 field suggestions for the last 24 hours. Try again later.',429);
-   if(counts.pending>=schemaSuggestionLimits.pendingPerWorkspace)badRequest('This workspace already has three field suggestions in progress. Wait for one to finish.',429);
+   if(parser.field_setup_state!=='ready')badRequest('AI-assisted setup already manages this parser. Finish setup or save your own fields first.',409);
+   await requireSuggestionCapacity(c,actor.workspaceId);
    const {rows:[row]}=await c.query('insert into schema_suggestions(workspace_id,parser_id,document_id,base_schema_id,requested_by,request_id,document_sha256,config) values($1,$2,$3,$4,$5,$6,$7,$8) returning *',[actor.workspaceId,id,doc.id,body.baseSchemaId,actor.userId,body.requestId,doc.sha256,JSON.stringify({locale:parser.locale})]);
    await audit(c,actor.workspaceId,actor.userId,'schema.suggestion_requested',row.id,{parserId:id,documentId:doc.id,baseSchemaId:body.baseSchemaId});
    return publicSuggestion({...row,document_name:doc.name});
@@ -101,16 +101,32 @@ async function suggestWithDeadline(work:(signal:AbortSignal)=>Promise<SchemaSugg
  finally{if(timer)clearTimeout(timer);options.signal?.removeEventListener('abort',abort);}
 }
 
+async function lockSuggestionParser(c:PoolClient,workspaceId:string,parserId:string){
+ await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[workspaceId]);
+ return (await c.query('select * from parsers where id=$1 for update',[parserId])).rows[0];
+}
+async function failCurrentSetup(c:PoolClient,parser:any,row:any){
+ if(row.auto_setup&&row.state==='failed'&&parser?.field_setup_state==='suggesting'&&parser.field_setup_suggestion_id===row.id)await failInitialSetup(c,parser,row.error||'Field discovery failed. Retry setup or define the fields yourself.');
+}
+async function recoverExpiredSuggestions(onlyId?:string){
+ const candidates=(await adminPool.query("select id,workspace_id,parser_id from schema_suggestions where state='processing' and lease_until<now() and ($1::uuid is null or id=$1) order by lease_until,id limit 20",[onlyId??null])).rows;
+ for(const candidate of candidates)await transaction(adminPool,async c=>{
+  const parser=await lockSuggestionParser(c,candidate.workspace_id,candidate.parser_id);
+  const {rows:[row]}=await c.query("update schema_suggestions set state=case when attempts>=max_attempts then 'failed' else 'queued' end,lease_owner=null,lease_until=null,error='Field suggestion was interrupted. Try again if it does not recover.',updated_at=now() where id=$1 and state='processing' and lease_until<now() returning *",[candidate.id]);
+  if(row?.state==='failed'){await audit(c,row.workspace_id,null,'schema.suggestion_failed',row.id,{parserId:row.parser_id,reason:'lease_expired'});await failCurrentSetup(c,parser,row);}
+ });
+}
+
 export async function processOneSchemaSuggestion(onlyId?:string,options:{signal?:AbortSignal;providerTimeoutMs?:number}={}){
  if(options.providerTimeoutMs!==undefined&&(!Number.isFinite(options.providerTimeoutMs)||options.providerTimeoutMs<=0||options.providerTimeoutMs>90_000))throw new Error('Suggestion deadline must be positive and at most 90 seconds');
  if(options.signal?.aborted)return false;
+ await recoverExpiredSuggestions(onlyId);
+ if(options.signal?.aborted)return false;
  const owner=randomUUID();
  const job=await transaction(adminPool,async c=>{
-  const expired=await c.query("update schema_suggestions set state=case when attempts>=max_attempts then 'failed' else 'queued' end,lease_owner=null,lease_until=null,error='Field suggestion was interrupted. Try again if it does not recover.',updated_at=now() where state='processing' and lease_until<now() and ($1::uuid is null or id=$1) returning *",[onlyId??null]);
-  for(const row of expired.rows)if(row.state==='failed')await audit(c,row.workspace_id,null,'schema.suggestion_failed',row.id,{parserId:row.parser_id,reason:'lease_expired'});
   const {rows:[selected]}=await c.query(`select s.* from schema_suggestions s join workspaces w on w.id=s.workspace_id
    where s.state='queued' and s.available_at<=now() and s.attempts<s.max_attempts
-   and ($1::uuid is not null or not exists(select 1 from jobs earlier where earlier.workspace_id=s.workspace_id and earlier.state='queued' and earlier.available_at<=now() and earlier.created_at<s.created_at)) and ($1::uuid is null or s.id=$1)
+   and ($1::uuid is not null or not exists(select 1 from jobs earlier where earlier.workspace_id=s.workspace_id and earlier.state='queued' and not earlier.waiting_for_schema and earlier.available_at<=now() and earlier.created_at<s.created_at)) and ($1::uuid is null or s.id=$1)
    and ((select count(*) from jobs j where j.workspace_id=s.workspace_id and j.state='processing')+
         (select count(*) from schema_suggestions running where running.workspace_id=s.workspace_id and running.state='processing'))<coalesce((w.plan->>'maxConcurrent')::int,2)
    order by s.created_at,s.id for update of s,w skip locked limit 1`,[onlyId??null]);
@@ -142,8 +158,9 @@ export async function processOneSchemaSuggestion(onlyId?:string,options:{signal?
   },options);
   if(!result)return true;
   await withWorkspace(job.workspace_id,async c=>{
-   const changed=await c.query("update schema_suggestions set state='ready',completed_at=now(),lease_owner=null,lease_until=null,proposed_schema=$3,model=$4,prompt_version=$5,token_usage=$6,cost_usd=$7,error=null,updated_at=now() where id=$1 and lease_owner=$2 and state='processing' returning id",[job.id,owner,JSON.stringify(result.schema),result.model,result.promptVersion,JSON.stringify(result.tokenUsage),result.costUsd]);
-   if(changed.rowCount)await audit(c,job.workspace_id,null,'schema.suggestion_ready',job.id,{parserId:job.parser_id,documentId:job.document_id});
+   await lockSuggestionParser(c,job.workspace_id,job.parser_id);
+   const changed=await c.query("update schema_suggestions set state='ready',completed_at=now(),lease_owner=null,lease_until=null,proposed_schema=$3,model=$4,prompt_version=$5,token_usage=$6,cost_usd=$7,error=null,updated_at=now() where id=$1 and lease_owner=$2 and state='processing' returning *",[job.id,owner,JSON.stringify(result.schema),result.model,result.promptVersion,JSON.stringify(result.tokenUsage),result.costUsd]);
+   if(changed.rowCount){await audit(c,job.workspace_id,null,'schema.suggestion_ready',job.id,{parserId:job.parser_id,documentId:job.document_id});await finishInitialSetup(c,changed.rows[0]);}
   });
  }catch(error){
   const trusted=error instanceof SchemaSuggestionProviderError;
@@ -151,8 +168,9 @@ export async function processOneSchemaSuggestion(onlyId?:string,options:{signal?
   const safeMessage=trusted?error.message.slice(0,500):'Field suggestions could not be completed. Try again shortly.';
   const message=permanent?safeMessage.replace('A retry is scheduled.','Request a new suggestion to try again.'):safeMessage;
   await withWorkspace(job.workspace_id,async c=>{
-   const changed=await c.query("update schema_suggestions set state=$3,lease_owner=null,lease_until=null,error=$4,available_at=now()+($5*interval '1 second'),updated_at=now() where id=$1 and lease_owner=$2 and state='processing' returning id",[job.id,owner,permanent?'failed':'queued',message,Math.min(60,2**job.attempts)]);
-   if(changed.rowCount&&permanent)await audit(c,job.workspace_id,null,'schema.suggestion_failed',job.id,{parserId:job.parser_id,reason:trusted?'provider_failed':'processing_failed'});
+   const parser=await lockSuggestionParser(c,job.workspace_id,job.parser_id);
+   const changed=await c.query("update schema_suggestions set state=$3,lease_owner=null,lease_until=null,error=$4,available_at=now()+($5*interval '1 second'),updated_at=now() where id=$1 and lease_owner=$2 and state='processing' returning *",[job.id,owner,permanent?'failed':'queued',message,Math.min(60,2**job.attempts)]);
+   if(changed.rowCount&&permanent){await audit(c,job.workspace_id,null,'schema.suggestion_failed',job.id,{parserId:job.parser_id,reason:trusted?'provider_failed':'processing_failed'});await failCurrentSetup(c,parser,changed.rows[0]);}
   });
  }
  return true;
