@@ -1,4 +1,4 @@
-import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import { randomBytes, createCipheriv, createDecipheriv, createHmac } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -29,6 +29,11 @@ function encryptionKey() {
 // Both API and worker import this module. Refuse to start a production process
 // without the shared stable key, instead of discovering it on the first export.
 if (process.env.NODE_ENV === 'production') encryptionKey();
+
+/** Stable opaque identifiers without storing the underlying private value. */
+export function privateIdentifier(namespace: string, value: string) {
+  return createHmac('sha256', encryptionKey()).update(namespace).update('\0').update(value).digest('hex');
+}
 
 export function encryptSecret(value: string) {
   const nonce = randomBytes(12);

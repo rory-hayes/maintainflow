@@ -1,0 +1,7 @@
+PASS packaged decoder invoice-multipage.pdf
+PASS packaged decoder receipt-scan.png
+PASS packaged decoder receipt.docx
+PASS packaged decoder receipt.xlsx
+PASS packaged decoder lead.eml
+PASS packaged decoder freeform-receipt.txt
+PASS packaged API and preview invitation guard

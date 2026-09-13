@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import staticFiles from '@fastify/static';
+import rateLimit, { type FastifyRateLimitStoreCtor } from '@fastify/rate-limit';
 import {ZodError} from 'zod';
 import {existsSync} from 'node:fs';
 import path from 'node:path';
@@ -14,11 +15,13 @@ import {registerIntegrations} from './integrations/webhooks.js';
 import {registerProviders} from './integrations/providers.js';
 import {previewEnabled,validatePreviewConfiguration} from './core/preview.js';
 import {storageDiagnostic} from './core/storage.js';
+import {requestRateLimitOptions} from './core/rate-limit.js';
 
-export async function buildApp(){
+export async function buildApp(options: {rateLimitStore?: FastifyRateLimitStoreCtor} = {}){
   validatePreviewConfiguration();
   // Vercel overwrites x-forwarded-for at its edge; local installs use socket IPs.
   const app=Fastify({trustProxy:process.env.VERCEL==='1',logger:{level:process.env.LOG_LEVEL||'warn',redact:['req.headers.authorization','req.headers.cookie','res.headers.set-cookie']},bodyLimit:1024*1024,requestTimeout:60_000,disableRequestLogging:true});
+  await app.register(rateLimit, {...requestRateLimitOptions({namespace:process.env.FOLIO_RATE_LIMIT_NAMESPACE}), ...(options.rateLimitStore ? {store:options.rateLimitStore} : {})});
   await app.register(cookie);await app.register(multipart,{limits:{fileSize:config.maxBytes,files:20,parts:30}});
   app.addHook('onSend',async(request,reply,payload)=>{
     reply.header('X-Content-Type-Options','nosniff').header('Permissions-Policy','camera=(), microphone=(), geolocation=()');
@@ -36,14 +39,14 @@ export async function buildApp(){
   app.get('/api/health',async()=>({status:'ok',name:'Folio',environment:previewEnabled()?'preview':config.production?'production':'local',revision:process.env.VERCEL_GIT_COMMIT_SHA||null,limits:{maxBytes:config.maxBytes,maxPages:config.maxPages}}));
   app.get('/api/config',async()=>({preview:previewEnabled(),inviteRequired:previewEnabled(),hosted:!!process.env.VERCEL}));
   await registerCore(app);await registerExports(app);await registerIntegrations(app);await registerProviders(app);
-  const dist=path.resolve('dist');
-  if(existsSync(dist)){
+  const dist=path.resolve('dist'),hasStaticFiles=existsSync(dist);
+  if(hasStaticFiles){
     await app.register(staticFiles,{root:dist,prefix:'/',index:false});
     // The static wildcard treats an existing directory with index disabled as
     // forbidden, so the application's root needs its own SPA document route.
     app.get('/',(_req,reply)=>reply.sendFile('index.html'));
-    app.setNotFoundHandler((req,reply)=>req.url.startsWith('/api/')?reply.status(404).send({error:'not_found',message:'API route not found.'}):reply.sendFile('index.html'));
   }
+  app.setNotFoundHandler({preHandler:app.rateLimit()},(req,reply)=>hasStaticFiles&&!req.url.startsWith('/api/')?reply.sendFile('index.html'):reply.status(404).send({error:'not_found',message:'API route not found.'}));
   return app;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
