@@ -9,5 +9,6 @@ import './styles/app.css';
 import './features/parsers/parser-setup.css';
 import './features/parsers/template-editor.css';
 import './features/parsers/copy-parser.css';
+import './features/documents/pdf-split.css';
 const client=new QueryClient({defaultOptions:{queries:{retry:1,staleTime:5000,refetchOnWindowFocus:false}}});
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><QueryClientProvider client={client}><BrowserRouter><SessionProvider><App/></SessionProvider></BrowserRouter></QueryClientProvider></React.StrictMode>);

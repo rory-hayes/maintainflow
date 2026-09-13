@@ -59,6 +59,15 @@ export default function Help() {
         <p>Choose Copy on the parser list or Copy parser inside a parser. Name the new parser to reuse its saved settings, current fields, text templates and saved export mappings. Source and copy can then be edited independently.</p>
         <p>The copy starts with no documents or processing history and uses one active parser slot. Finish initial field setup before copying. Set up its intake email address and parser-specific connections separately; existing workspace-wide integrations still apply.</p>
       </section>
+      <section id="split-pdf">
+        <h2>Split a PDF into documents</h2>
+        <p>In Documents, choose the target parser and select Split a PDF. Choose Every N pages or enter custom ranges such as <code>1-2, 5, 7-9</code>. Each range creates a separate document. Ranges must stay in page order without overlaps; omitted pages are allowed. The preview shows the actual source pages, proposed documents and selected-page credits before you submit. Choose files continues to upload an unsplit document.</p>
+        <p>Owners, admins and editors can split into an active parser that accepts PDF and has finished initial field setup. Use one PDF up to 10 MB and 30 pages, producing at most 20 documents. Each result must fit the workspace file limit; the resulting PDFs together must fit 20 MB. The server checks these limits and the quota before accepting the batch.</p>
+        <p>Preview applies image-size limits. If a page cannot be displayed, inspect the original file; ordinary upload remains available.</p>
+        <p>Only selected pages use page credits, once for the accepted batch. The full original is not processed as an additional document. If an upload is interrupted, choose Resume PDF split and Check split result. After a reload, reselect the same PDF if transfer is incomplete. A retry keeps the saved request; starting a new split is a separate upload with new page credits.</p>
+        <p>Open each received document to review, approve and export it. Review shows its original page range. Download this document gives you the selected child PDF; Download full original PDF includes all original pages. Omitted pages and pages from individually deleted documents remain in the full original while another document in that batch remains. Delete whole batch from review to remove all retained documents and queue deletion of the full source.</p>
+        <Link className="marketing-text-link" to="/help/api#split-pdf-api">Use PDF splitting through the API <ArrowRight size={17} /></Link>
+      </section>
       <section id="formats">
         <h2>Formats and limits</h2>
         <p>Files must be 10 MB or smaller. A batch can contain up to 20 files. Your workspace may apply a smaller allowance. Unsupported, empty, malformed or encrypted files return an explicit error.</p>
@@ -73,7 +82,7 @@ export default function Help() {
       </section>
       <section id="usage">
         <h2>Usage and duplicates</h2>
-        <p>An accepted, unique upload records one usage event for its page count. Identical files sent to the same parser are detected as duplicates. Automatic worker retries reuse the same event. Choosing Reprocess creates a new job and counts the document's pages again.</p>
+        <p>An accepted, unique ordinary upload records usage for its page count. Identical ordinary uploads sent to the same parser are detected as duplicates. PDF splits use their saved request identity: retrying the same split reuses its batch, while explicitly starting a new split uses credits again, even for the same PDF. Automatic worker retries use no additional page credits. Choosing Reprocess creates a new job and counts the document's pages again.</p>
         <p>Each test workspace has a clearly labeled allowance. Displayed prices are illustrative during the preview; changing a mock plan does not activate payments.</p>
       </section>
       <section id="integrations">
@@ -120,12 +129,32 @@ const resultExample = [
   '  -H "Authorization: Bearer $FOLIO_API_KEY"',
 ].join('\n');
 
+const splitExample = [
+  'curl "$FOLIO_URL/api/parsers/$PARSER_ID/pdf-splits" \\',
+  '  -H "Authorization: Bearer $FOLIO_API_KEY" \\',
+  '  -F "requestId=$SPLIT_REQUEST_ID" \\',
+  '  -F \'options={"mode":"ranges","ranges":[{"start":1,"end":2},{"start":5,"end":5}]}\' \\',
+  '  -F "file=@bundle.pdf"',
+  '',
+  'curl "$FOLIO_URL/api/parsers/$PARSER_ID/pdf-splits/requests/$SPLIT_REQUEST_ID" \\',
+  '  -H "Authorization: Bearer $FOLIO_API_KEY"',
+].join('\n');
+
+const signedSplitExample = JSON.stringify({
+  filename:'bundle.pdf',size:12345,sha256:'REPLACE_WITH_SHA256_OF_THE_EXACT_FILE_BYTES',
+  pdfSplit:{requestId:'REUSE_YOUR_SPLIT_REQUEST_UUID',options:{mode:'every',pagesPerDocument:2}},
+},null,2);
+
 const endpoints = [
   ['GET', '/api/parsers', 'parsers:read', 'List parsers in the key’s workspace.'],
   ['POST', '/api/parsers/:id/copy', 'parsers:read, parsers:write, results:read', 'Copy saved configuration into a new active parser; returns 201.'],
   ['POST', '/api/parsers/:id/documents', 'documents:write', 'Upload multipart files; returns 202 with document and job IDs.'],
+  ['POST', '/api/parsers/:id/pdf-splits', 'documents:write', 'Split one multipart PDF; returns 202 with an ordered batch receipt.'],
+  ['GET', '/api/parsers/:id/pdf-splits/requests/:requestId', 'documents:read', 'Recover a split receipt, including availability of deleted results.'],
+  ['DELETE', '/api/pdf-splits/:id', 'documents:write', 'Delete all retained documents in a batch and queue source-file deletion.'],
   ['GET', '/api/documents', 'documents:read', 'List documents with page, pageSize, search, status and parserId filters.'],
   ['GET', '/api/documents/:id', 'documents:read', 'Read the document, extraction runs and job history.'],
+  ['GET', '/api/documents/:id/bundle-original-url', 'documents:read', 'Get an authorized full-source download URL through a retained split document.'],
   ['GET', '/api/jobs/:id', 'documents:read', 'Read the durable job state and retry details.'],
   ['GET', '/api/runs/:id', 'results:read', 'Read extracted values, evidence, corrections and approvals.'],
   ['POST', '/api/exports', 'results:read', 'Create an export from approved document revisions.'],
@@ -162,6 +191,21 @@ export function ApiDocs() {
         <p>Send <code>POST /api/parsers/:id/copy</code> with an optional <code>name</code> (1–100 characters). The source must belong to the workspace and have completed field setup. Owners, admins and editors can copy; API keys need all three scopes listed above because the response includes saved export mappings.</p>
         <p>A successful response returns HTTP 201 with <code>parser</code>, schema version 1, <code>templates</code> and <code>mappings</code>, all with fresh IDs. Settings and template priority are preserved. No documents, processing history, email routes or provider connections are copied. An archived source produces an active copy.</p>
         <p>Each request creates a new parser. This endpoint has no idempotency key: if the response is lost, check the parser list before retrying. The copy requires an available parser slot and accepts at most 100 templates, 100 export mappings and 2 MiB of saved configuration. Incomplete setup or invalid/oversized saved configuration returns 409; active-parser capacity returns 429.</p>
+      </section>
+      <section id="split-pdf-api">
+        <h2>Split a PDF</h2>
+        <p>Use an active, PDF-accepting parser with completed field setup. Owners, admins and editors can create, finalize or delete a split with <code>documents:write</code>. Receipt recovery and original-file access require <code>documents:read</code>. A batch accepts one PDF up to 10 MB and 30 source pages, at most 20 child documents, and at most 20 MB of combined child PDFs; each child also respects the workspace file limit. Initial AI-assisted parser setup, TIFF and splitting existing documents are not supported by this endpoint.</p>
+        <h3>Multipart upload</h3>
+        <p>Generate <code>SPLIT_REQUEST_ID</code> as a UUID once, then save it for retries. Send exactly one file, <code>requestId</code> and a JSON <code>options</code> field. Custom ranges are inclusive and one-based; keep them ordered without overlaps. Every-N splitting uses <code>{'{"mode":"every","pagesPerDocument":2}'}</code>. One resulting document and omitted pages are both allowed.</p>
+        <pre className="marketing-code-block"><code>{splitExample}</code></pre>
+        <h3>Direct signed upload</h3>
+        <p>Read <code>GET /api/uploads/config</code> to choose the installation’s upload strategy. For <code>signed</code>, send <code>POST /api/parsers/:id/uploads</code> with the exact byte size and lowercase SHA-256 digest, plus the persisted split request and options:</p>
+        <pre className="marketing-code-block"><code>{signedSplitExample}</code></pre>
+        <p>PUT the unchanged PDF bytes to the returned <code>uploadUrl</code> with the returned headers, then send an empty JSON object to <code>POST /api/uploads/:uploadId/finalize</code>. Finalize reads the saved split options and returns the same batch receipt. Keep the reservation ID for recovery. Treat signed URLs as temporary credentials and keep them out of logs.</p>
+        <h3>Results and safe retries</h3>
+        <p>HTTP 202 returns <code>split</code>, an ordered <code>documents</code> array and <code>replayed</code>. Each document includes its ID, job ID, original page range and <code>available</code> flag. Only selected pages use credits; the original source is not queued separately. Processing, approval and export follow the normal document workflow.</p>
+        <p>After a lost response, use the receipt GET above. A 404 means no receipt was found yet; retry with the same request ID, parser, exact source bytes and options. If direct transfer was incomplete, a fresh staging reservation can reuse that same split request ID. Changing the binding returns 409. Explicitly choosing a new request ID creates a new charged split, even for identical bytes. Permanent input rejections retain their safe error on replay; transient failures can be retried with the same request.</p>
+        <p>A receipt remains readable when children are deleted: <code>available: false</code> does not recreate a document or charge again. Document detail includes <code>split</code> lineage. Existing <code>/api/documents/:id/original</code> downloads the child PDF; <code>/bundle-original</code> or <code>/bundle-original-url</code> accesses the full original through a live child. The full original includes omitted pages and pages from deleted children until the last child is removed. <code>DELETE /api/pdf-splits/:id</code> deletes the retained batch and queues file deletion; queued deletion does not mean the storage object has already been removed.</p>
       </section>
       <section id="webhooks">
         <h2>Signed webhook deliveries</h2>

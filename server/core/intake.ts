@@ -35,7 +35,7 @@ async function priorIntake(c:PoolClient,actor:Actor,parserId:string,sha:string,k
    return {document:camel(prior),duplicate:true,jobId:null};
   }
  }
- const {rows:[duplicate]}=await c.query('select * from documents where parser_id=$1 and sha256=$2',[parserId,sha]);
+ const {rows:[duplicate]}=await c.query('select * from documents where parser_id=$1 and sha256=$2 and pdf_split_id is null',[parserId,sha]);
  if(duplicate){
   if(key)await c.query('insert into intake_events(workspace_id,idempotency_key,document_id) values($1,$2,$3)',[actor.workspaceId,key,duplicate.id]);
   return {document:camel(duplicate),duplicate:true,jobId:null};

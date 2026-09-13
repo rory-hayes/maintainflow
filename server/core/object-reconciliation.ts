@@ -5,6 +5,7 @@ import { config } from './config.js';
 import { deleteStoredFile } from './retention.js';
 import {privateStorage,validateStorageKey} from './storage.js';
 import {reconcileExpiredDirectUploads} from './upload-routes.js';
+import {storedObjectReferenced} from './pdf-split-records.js';
 
 const uuid = /^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i;
 const graceMs = 60 * 60 * 1000;
@@ -65,7 +66,7 @@ export async function reconcileInterruptedIntake(onlyWorkspaceId?: string,option
         const stat = await statOrMissing(filename);
         if (!stat?.isFile() || stat.isSymbolicLink() || Date.now() - stat.mtimeMs < graceMs) continue;
         const intent = (await c.query('select * from intake_files where storage_key=$1 for update', [storageKey])).rows[0];
-        if ((await c.query('select id from documents where storage_key=$1', [storageKey])).rowCount) {
+        if (await storedObjectReferenced(c,workspaceId,storageKey)) {
           if (intent && new Date(intent.lease_expires_at).getTime() < Date.now()) {
             await c.query('delete from intake_files where id=$1', [intent.id]);
             expiredIntentsRemoved++;
@@ -75,7 +76,7 @@ export async function reconcileInterruptedIntake(onlyWorkspaceId?: string,option
         if (intent && new Date(intent.lease_expires_at).getTime() >= Date.now()) continue;
         if ((await c.query('select id from file_deletions where storage_key=$1', [storageKey])).rowCount) continue;
         await c.query('insert into file_deletions(workspace_id,storage_key) values($1,$2) on conflict(storage_key) do nothing', [workspaceId, storageKey]);
-        if (intent) { await c.query('delete from intake_files where id=$1', [intent.id]); expiredIntentsRemoved++; }
+        if (intent&&!intent.split_attempt_id) { await c.query('delete from intake_files where id=$1', [intent.id]); expiredIntentsRemoved++; }
         pending.push(storageKey);
       }
       // A process can stop after reserving a filename and before writing it. Give the
@@ -92,7 +93,7 @@ export async function reconcileInterruptedIntake(onlyWorkspaceId?: string,option
         if(options.signal?.aborted)break;
         const parts = String(intent.storage_key).split('/');
         if (parts.length !== 2 || parts[0] !== workspaceId || !uuid.test(parts[1])) continue;
-        const referenced = (await c.query('select id from documents where storage_key=$1', [intent.storage_key])).rowCount;
+        const referenced = await storedObjectReferenced(c,workspaceId,intent.storage_key);
         if (referenced || !await statOrMissing(path.join(workspacePath, parts[1]))) {
           await c.query('delete from intake_files where id=$1', [intent.id]);
           expiredIntentsRemoved++;
@@ -117,20 +118,23 @@ export async function reconcileInterruptedIntake(onlyWorkspaceId?: string,option
  * whole-bucket enumeration is needed and referenced originals are never removed. */
 async function reconcileRemoteIntake(onlyWorkspaceId:string|undefined,options:{signal?:AbortSignal;limit?:number}){
   const limit=Math.max(1,Math.min(100,options.limit??20));
-  const workspaces=(await adminPool.query(`select distinct workspace_id from intake_files
+  const workspaces=(await adminPool.query(`select distinct workspace_id from intake_files i
     where lease_expires_at<now()-interval '1 hour' and ($1::uuid is null or workspace_id=$1)
+    and (split_attempt_id is null or not exists(select 1 from file_deletions f where f.workspace_id=i.workspace_id and f.storage_key=i.storage_key))
     order by workspace_id limit 10`,[onlyWorkspaceId??null])).rows;
   let examined=0,queued=0,expiredIntentsRemoved=0;
   for(const workspace of workspaces){
     if(options.signal?.aborted||examined>=limit)break;
     await withWorkspace(workspace.workspace_id,async c=>{
-      const intents=(await c.query("select * from intake_files where workspace_id=$1 and lease_expires_at<now()-interval '1 hour' order by lease_expires_at,id limit $2 for update skip locked",[workspace.workspace_id,limit-examined])).rows;
+      const intents=(await c.query(`select * from intake_files i where workspace_id=$1 and lease_expires_at<now()-interval '1 hour'
+       and (split_attempt_id is null or not exists(select 1 from file_deletions f where f.workspace_id=i.workspace_id and f.storage_key=i.storage_key))
+       order by lease_expires_at,id limit $2 for update skip locked`,[workspace.workspace_id,limit-examined])).rows;
       for(const intent of intents){
         if(options.signal?.aborted)break;
         examined++;validateStorageKey(intent.storage_key,workspace.workspace_id);
-        const referenced=(await c.query('select id from documents where storage_key=$1',[intent.storage_key])).rowCount;
+        const referenced=await storedObjectReferenced(c,workspace.workspace_id,intent.storage_key);
         if(!referenced){await c.query('insert into file_deletions(workspace_id,storage_key) values($1,$2) on conflict(storage_key) do nothing',[workspace.workspace_id,intent.storage_key]);queued++;}
-        await c.query('delete from intake_files where id=$1',[intent.id]);expiredIntentsRemoved++;
+        if(referenced||!intent.split_attempt_id){await c.query('delete from intake_files where id=$1',[intent.id]);expiredIntentsRemoved++;}
       }
     });
   }

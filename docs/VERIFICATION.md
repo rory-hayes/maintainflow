@@ -1,6 +1,12 @@
 # Verification ledger
 
-## Current parser copy — 13 September 2026
+## Current PDF splitting — 13 September 2026
+
+**434/434 serial tests** passed in **129.741 seconds**, with zero failures, skips or cancellations; **15/15 controlled desktop/mobile browser groups** and final build/package/runtime checks passed on **217 unchanged source files**, fingerprint **`707706f938f479fc34caf5fb4eb8f1f46f62965d74b44a9e6b660bbea5fbdc3e`**. The packaged runtime exercised all six ordinary decoders, actual split and derived-PDF decoding, API startup and the invitation guard. [Acceptance](PDF-SPLITTING-ACCEPTANCE.md) and [public-safe evidence](evidence/pdf-splitting-2026-09-13/verification.json) preserve exact scope, timestamps, earlier failures and the renderer error-propagation fix.
+
+The final browser run verified fixed/custom ranges, omitted pages, keyboard/pending/reload recovery, child extraction, explicit approval and exact CSV bytes, lineage/source deletion, signed-transfer and lost-finalize recovery, and unchanged ordinary uploads. Six upload entries total 13 pages; zero provider requests and all owned fixtures cleaned. The synthetic signed-storage transport and non-throttling limiter do not establish live provider or rate-limit behavior. Migration 027 is local only; hosted 021–027 and matching runtime remain pending. Free plans and mock billing are unchanged.
+
+## Earlier parser copy — 13 September 2026
 
 CI compatibility follow-up: the first GitHub run stopped in the copy-test database guard because its Docker service reports a container address behind the published localhost port. Only that test guard changed; client endpoint, database, schema, role and port restrictions remain. The amended 11-case suite passes locally in 2.831960625 seconds, and application code remains identical to the browser-verified checkpoint. [Follow-up evidence](evidence/parser-copy-2026-09-13/ci-compatibility.json) records the new test-source fingerprint; PR29 carries the separate exact-head CI result.
 
