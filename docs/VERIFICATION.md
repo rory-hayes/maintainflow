@@ -1,6 +1,12 @@
 # Verification ledger
 
-## Current AI-assisted first-document setup — 13 September 2026
+## Current complete-template selection — 13 September 2026
+
+The final X06 source passed **383/383 serial tests**, zero failures/skips/cancellations in **86.793232 seconds**, plus **17 pure** and **11 controlled integration** focused cases. The production build and isolated runtime verifier passed six decoders, API startup and the preview invitation guard. **Ten desktop/mobile browser checks** passed, including exact approved JSON export; a separate two-family matching/nonmatch acceptance also passed. Browser calls were controlled: zero provider calls for template extraction and one canned AI fallback, with no live provider requests. The first selector-only browser failure is preserved. [Template acceptance](TEMPLATE-SELECTION-ACCEPTANCE.md) and its [public-safe receipt](evidence/template-precedence-2026-09-13/verification.json) record times, source fingerprint, metering and limits.
+
+Migration026 is applied only locally; hosted **021–026 remain unapplied**. Template selection now ranks complete source matches before AI, preserves old queued-job behavior and records the selected method on each new run. These local results do not deploy the stacked changes or establish new provider/customer acceptance. Free plans and mocked billing remain unchanged.
+
+## Earlier AI-assisted first-document setup — 13 September 2026
 
 The final automatic-setup source passed **355/355 serial tests**, zero failures, skips or cancellations, in **82.639557625 seconds**. The focused **13 setup cases** passed in **5.301475042 seconds**. `build:vercel` and the isolated packaged runtime verifier passed **six document decoders, API startup and the preview invitation guard**. These are local source/package checks. The separate live and replayed browser evidence follows; no hosted setup deployment is claimed.
 

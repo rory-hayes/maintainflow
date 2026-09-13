@@ -1,0 +1,156 @@
+{
+  "recordedAt": "2026-09-13T15:48:36.803035+00:00",
+  "source": {
+    "scope": "src/server/shared/migrations/scripts/tests/api/public tracked and unignored files; excludes docs/build/runtime/config secrets",
+    "fileCount": 189,
+    "sha256": "216ca57403b06e24cd56552c2ede8bb199bda5d47be699892128266f0b9331cb"
+  },
+  "tests": {
+    "pure": {
+      "tests": 17,
+      "pass": 17,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "durationMs": 249.308584
+    },
+    "integration": {
+      "tests": 11,
+      "pass": 11,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "durationMs": 3641.081458
+    },
+    "aggregate": {
+      "tests": 383,
+      "pass": 383,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "durationMs": 86793.232
+    }
+  },
+  "browser": {
+    "startedAt": "2026-09-13T15:43:39.449Z",
+    "completedAt": "2026-09-13T15:43:50.429Z",
+    "passed": true,
+    "checks": {
+      "createTemplateWithNestedAndTableAnchorsThroughUI": true,
+      "desktopPreviewRanksCompleteFieldCountThenOldestWithoutWritesOrAI": true,
+      "mobileRankingReloadKeyboardFocusAndNoHorizontalOverflow": true,
+      "editNamePhraseAndAnchorPersistsAndInvalidatesOldPreview": true,
+      "deletedTemplateStillRunsFromPinnedJobBeforeAIWithOnePageAndNoAutomaticApproval": true,
+      "recordedHistoryPreservesDeletedTemplateNameAndTieDesktopMobileReload": true,
+      "partialPreviewExplainsAIFallbackWithoutProviderOrWrites": true,
+      "oneControlledFallbackCallRecordsActualMethodCostAndNeedsReview": true,
+      "explicitUIApprovalAndExactApprovedJSONDownloadPersist": true,
+      "twoOwnedUploadPagesNoReprocessChargesAndNoExternalNetworkOrBrowserErrors": true
+    },
+    "viewports": {
+      "desktop-template-create": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "desktop-template-ranking": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "mobile-template-ranking": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-template-edit": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "desktop-pinned-history": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "mobile-pinned-history": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-partial-template-fallback": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-controlled-fallback-history": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    "controlledOnly": true,
+    "providerCalls": 1,
+    "pageErrors": [],
+    "blockedNetwork": [],
+    "cleanedOwnedFixtures": true
+  },
+  "browserConsole": {
+    "expectedSignedOutAuthProbe401": 1,
+    "unexpectedEntries": 0
+  },
+  "syntheticMetering": {
+    "uploadPages": 2,
+    "jobs": 2,
+    "runs": 2,
+    "reprocessEvents": 0,
+    "templateProviderCalls": 0,
+    "controlledFallbackCalls": 1,
+    "liveProviderCalls": 0,
+    "controlledCostUsd": 0.00123
+  },
+  "export": {
+    "sha256": "5cdadf417ce0f1339233842d233ec40643831c27fc262fbd3a03a40224d59d09",
+    "documentCount": 1,
+    "exactSnapshotBytes": true
+  },
+  "separateTwoFamilies": {
+    "checkedAt": "2026-09-13T15:45:07.216Z",
+    "passed": true,
+    "independentSyntheticFamilies": 2,
+    "exactExpectedValues": true,
+    "unmatchedFamilyFails": true,
+    "providerCalls": 0
+  },
+  "packaging": {
+    "buildPassed": true,
+    "packagedDecoders": 6,
+    "packagedApiAndPreviewGuard": true
+  },
+  "localMigrations": {
+    "count": 17,
+    "latest": "026_template_selection.sql"
+  },
+  "hosted": {
+    "templateFeatureDeployed": false,
+    "unappliedMigrations": [
+      "021",
+      "022",
+      "023",
+      "024",
+      "025",
+      "026"
+    ],
+    "canonicalHealth": {
+      "checkedAt": "2026-09-13T15:46:10.224805+00:00",
+      "status": 200,
+      "environment": "preview",
+      "revision": "676a61a8b757931a649fb6b31b64d2f11937ce51"
+    }
+  },
+  "limitations": [
+    "Controlled synthetic inputs; no new live provider or customer acceptance.",
+    "The first browser attempt stopped on a label selector before template creation; zero provider calls; owned fixtures cleaned.",
+    "Character-work and line-work limits are conservative estimates, not a CPU deadline."
+  ]
+}

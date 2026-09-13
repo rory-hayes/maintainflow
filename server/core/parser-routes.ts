@@ -9,6 +9,8 @@ import {parserSetupStatus,queueInitialSetup,releaseInitialJobs} from './parser-s
 import {schemaSuggestionsConfigured} from './schema-suggestions.js';
 import {aiConfigured} from './worker.js';
 import {allowedFormatsInput} from './intake-policy.js';
+import {selectTemplateExtraction,templateRuleValidation} from './template-selection.js';
+import {templateLimits,templateReasonLabels} from '../../shared/template-selection.js';
 const idFrom=(p:unknown)=>z.object({id:z.string().uuid()}).parse(p).id;
 const locale=z.string().max(35).refine(v=>{try{new Intl.NumberFormat(v);return true;}catch{return false;}},'Invalid locale');
 const timezone=z.string().max(80).refine(v=>{try{new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}},'Invalid timezone');
@@ -21,11 +23,21 @@ async function requireParserCapacity(c:PoolClient,workspaceId:string){
  const {rows:[workspace]}=await c.query('select plan from workspaces where id=$1',[workspaceId]);
  if(usage.count>=workspace.plan.maxParsers)badRequest('The workspace parser limit has been reached',429);
 }
+// The caller takes the workspace advisory lock before this parser row lock.
+async function lockTemplateParser(c:PoolClient,workspaceId:string,parserId:string){
+ const {rows:[parser]}=await c.query('select p.id,s.schema from parsers p join schema_versions s on s.id=p.active_schema_id and s.parser_id=p.id and s.workspace_id=p.workspace_id where p.id=$1 and p.workspace_id=$2 for update of p',[parserId,workspaceId]);
+ if(!parser)notFound('Parser not found');return parser;
+}
+function validateEnabledTemplate(parser:any,body:{enabled:boolean;rules:unknown}){
+ if(!body.enabled)return;
+ const validation=templateRuleValidation(parser.schema,body.rules);
+ if(!validation.valid)badRequest(validation.reasons.map(reason=>templateReasonLabels[reason]??'The template field anchors are invalid.').join(' '));
+}
 export async function registerParsers(app:FastifyInstance){
 app.get('/api/presets',async()=>({presets:Object.entries(presets).map(([id,p])=>({id,...p})),providers:{setup:{configured:aiConfigured()&&schemaSuggestionsConfigured(),message:aiConfigured()&&schemaSuggestionsConfigured()?'AI-assisted setup is available.':'AI-assisted setup needs both field discovery and extraction providers.'},ai:{configured:aiConfigured(),message:aiConfigured()?'Provider configured; verify with your documents.':'AI provider is not configured. Text-anchor parsing is available.'}}}));
 app.get('/api/parsers',async req=>{const a=await requireActor(req,{scope:'parsers:read'});return withWorkspace(a.workspaceId,async c=>({parsers:(await c.query('select p.*,(select count(*)::int from documents d where d.parser_id=p.id) document_count,(select count(*)::int from documents d where d.parser_id=p.id and d.status=$2) review_count from parsers p where p.workspace_id=$1 order by p.archived,p.created_at desc',[a.workspaceId,'needs_review'])).rows.map(camel)}));});
 app.post('/api/parsers',async(req,reply)=>{const a=await requireActor(req,{roles:editors,scope:'parsers:write'});const body=parserInput.parse(req.body);if(body.setupMode==='sample'){if(body.mode!=='ai'||body.useCase!=='custom'||body.schema)badRequest('Sample setup requires AI mode, a custom parser, and no preset schema override.');if(a.authType==='api'&&!a.scopes?.includes('documents:read'))badRequest('API key requires documents:read scope',403);if(!aiConfigured()||!schemaSuggestionsConfigured())badRequest('AI-assisted setup is unavailable. Configure field discovery and extraction first.',503);}const schema=body.schema||{fields:presets[body.useCase].fields};const result=await withWorkspace(a.workspaceId,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[a.workspaceId]);await requireParserCapacity(c,a.workspaceId);const {rows:[p]}=await c.query('insert into parsers(workspace_id,name,use_case,mode,instructions,locale,timezone,allowed_formats,field_setup_state) values($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *',[a.workspaceId,body.name,body.useCase,body.mode,body.instructions,body.locale,body.timezone,body.allowedFormats??null,body.setupMode==='sample'?'awaiting_sample':'ready']);const {rows:[s]}=await c.query('insert into schema_versions(workspace_id,parser_id,version,schema,created_by) values($1,$2,1,$3,$4) returning *',[a.workspaceId,p.id,JSON.stringify(schema),a.userId]);await c.query('update parsers set active_schema_id=$2 where id=$1',[p.id,s.id]);await audit(c,a.workspaceId,a.userId,'parser.created',p.id);return {parser:camel({...p,active_schema_id:s.id}),schema:{id:s.id,version:s.version,...s.schema}};});reply.code(201);return result;});
-app.get('/api/parsers/:id',async req=>{const a=await requireActor(req,{scope:'parsers:read'});const id=idFrom(req.params);return withWorkspace(a.workspaceId,async c=>{const p=(await c.query('select * from parsers where id=$1 and workspace_id=$2',[id,a.workspaceId])).rows[0];if(!p)notFound('Parser not found');const schemas=(await c.query('select * from schema_versions where parser_id=$1 order by version desc',[id])).rows.map(s=>({id:s.id,version:s.version,createdAt:s.created_at,...s.schema}));const templates=(await c.query('select * from templates where parser_id=$1 order by created_at',[id])).rows.map(camel);return {parser:camel(p),schema:schemas.find(s=>s.id===p.active_schema_id),schemas,templates};});});
+app.get('/api/parsers/:id',async req=>{const a=await requireActor(req,{scope:'parsers:read'});const id=idFrom(req.params);return withWorkspace(a.workspaceId,async c=>{const p=(await c.query('select * from parsers where id=$1 and workspace_id=$2',[id,a.workspaceId])).rows[0];if(!p)notFound('Parser not found');const schemas=(await c.query('select * from schema_versions where parser_id=$1 order by version desc',[id])).rows.map(s=>({id:s.id,version:s.version,createdAt:s.created_at,...s.schema}));const templates=(await c.query('select * from templates where parser_id=$1 order by created_at,id',[id])).rows.map(camel);return {parser:camel(p),schema:schemas.find(s=>s.id===p.active_schema_id),schemas,templates};});});
 app.get('/api/parsers/:id/setup',async req=>{
  const a=await requireActor(req,{scope:'parsers:read'}),id=idFrom(req.params);
  if(a.authType==='api'&&!a.scopes?.includes('documents:read'))badRequest('API key requires documents:read scope',403);
@@ -81,8 +93,53 @@ app.post('/api/parsers/:id/schema',async req=>{
   return {schema:{id:version.id,version:version.version,...version.schema}};
  });
 });
-const templateBody=z.object({name:z.string().trim().min(1).max(100),matchText:z.string().max(1000).default(''),enabled:z.boolean().default(true),rules:z.array(z.object({field:z.string().max(150),anchor:z.string().min(1).max(200)})).max(100)});
-app.post('/api/parsers/:id/templates',async req=>{const a=await requireActor(req,{roles:editors,scope:'parsers:write'});const id=idFrom(req.params),b=templateBody.parse(req.body);return withWorkspace(a.workspaceId,async c=>{if(!(await c.query('select id from parsers where id=$1 and workspace_id=$2',[id,a.workspaceId])).rowCount)notFound();const {rows:[t]}=await c.query('insert into templates(workspace_id,parser_id,name,match_text,rules,enabled) values($1,$2,$3,$4,$5,$6) returning *',[a.workspaceId,id,b.name,b.matchText,JSON.stringify(b.rules),b.enabled]);await audit(c,a.workspaceId,a.userId,'template.created',t.id);return {template:camel(t)};});});
-app.patch('/api/templates/:id',async req=>{const a=await requireActor(req,{roles:editors,scope:'parsers:write'});const id=idFrom(req.params),b=templateBody.parse(req.body);return withWorkspace(a.workspaceId,async c=>{const {rows:[t]}=await c.query('update templates set name=$2,match_text=$3,rules=$4,enabled=$5 where id=$1 returning *',[id,b.name,b.matchText,JSON.stringify(b.rules),b.enabled]);if(!t)notFound();return {template:camel(t)};});});
-app.delete('/api/templates/:id',async req=>{const a=await requireActor(req,{roles:editors,scope:'parsers:write'});return withWorkspace(a.workspaceId,async c=>{if(!(await c.query('delete from templates where id=$1 returning id',[idFrom(req.params)])).rowCount)notFound();return {ok:true};});});
+const templateBody=z.object({name:z.string().trim().min(1).max(100),matchText:z.string().max(1000).default(''),enabled:z.boolean().default(true),rules:z.array(z.object({field:z.string().max(259),anchor:z.string().min(1).max(200)}).strict()).max(templateLimits.rules)}).strict();
+app.post('/api/parsers/:id/templates',async req=>{
+ const a=await requireActor(req,{roles:editors,scope:'parsers:write'}),id=idFrom(req.params),b=templateBody.parse(req.body);
+ return withWorkspace(a.workspaceId,async c=>{
+  await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[a.workspaceId]);
+  const parser=await lockTemplateParser(c,a.workspaceId,id);validateEnabledTemplate(parser,b);
+  const {rows:[usage]}=await c.query('select count(*)::integer count from templates where parser_id=$1 and workspace_id=$2',[id,a.workspaceId]);
+  if(usage.count>=templateLimits.templates)badRequest(`This parser already has ${templateLimits.templates} templates. Delete a template before adding another.`,429);
+  const {rows:[t]}=await c.query('insert into templates(workspace_id,parser_id,name,match_text,rules,enabled) values($1,$2,$3,$4,$5,$6) returning *',[a.workspaceId,id,b.name,b.matchText,JSON.stringify(b.rules),b.enabled]);
+  await audit(c,a.workspaceId,a.userId,'template.created',t.id);return {template:camel(t)};
+ });
+});
+app.patch('/api/templates/:id',async req=>{
+ const a=await requireActor(req,{roles:editors,scope:'parsers:write'}),id=idFrom(req.params),b=templateBody.parse(req.body);
+ return withWorkspace(a.workspaceId,async c=>{
+  await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[a.workspaceId]);
+  const {rows:[existing]}=await c.query('select parser_id from templates where id=$1 and workspace_id=$2',[id,a.workspaceId]);if(!existing)notFound();
+  const parser=await lockTemplateParser(c,a.workspaceId,existing.parser_id);validateEnabledTemplate(parser,b);
+  const {rows:[t]}=await c.query('update templates set name=$2,match_text=$3,rules=$4,enabled=$5 where id=$1 and workspace_id=$6 and parser_id=$7 returning *',[id,b.name,b.matchText,JSON.stringify(b.rules),b.enabled,a.workspaceId,existing.parser_id]);
+  if(!t)notFound();await audit(c,a.workspaceId,a.userId,'template.updated',t.id);return {template:camel(t)};
+ });
+});
+app.delete('/api/templates/:id',async req=>{
+ const a=await requireActor(req,{roles:editors,scope:'parsers:write'}),id=idFrom(req.params);
+ return withWorkspace(a.workspaceId,async c=>{
+  await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[a.workspaceId]);
+  const {rows:[existing]}=await c.query('select parser_id from templates where id=$1 and workspace_id=$2',[id,a.workspaceId]);if(!existing)notFound();
+  await lockTemplateParser(c,a.workspaceId,existing.parser_id);
+  if(!(await c.query('delete from templates where id=$1 and workspace_id=$2 and parser_id=$3 returning id',[id,a.workspaceId,existing.parser_id])).rowCount)notFound();
+  await audit(c,a.workspaceId,a.userId,'template.deleted',id);return {ok:true};
+ });
+});
+app.post('/api/parsers/:id/templates/check',async req=>{
+ const a=await requireActor(req,{scope:'parsers:read'}),id=idFrom(req.params),b=z.object({documentId:z.uuid()}).strict().parse(req.body);
+ if(a.authType==='api'&&!a.scopes?.includes('documents:read'))badRequest('API key requires documents:read scope',403);
+ return withWorkspace(a.workspaceId,async c=>{
+  // A single statement gives the preview one current schema/template/source snapshot.
+  // It neither changes the queued job's pinned config nor reads original storage.
+  const {rows:[current]}=await c.query(`select p.mode,p.locale,s.schema,d.source_text,
+   coalesce((select jsonb_agg(t order by t.created_at,t.id) from templates t where t.parser_id=p.id and t.workspace_id=p.workspace_id),'[]'::jsonb) templates
+   from parsers p join schema_versions s on s.id=p.active_schema_id and s.parser_id=p.id and s.workspace_id=p.workspace_id
+   join documents d on d.parser_id=p.id and d.id=$3 and d.workspace_id=p.workspace_id
+   where p.id=$1 and p.workspace_id=$2`,[id,a.workspaceId,b.documentId]);
+  if(!current)notFound('Document not found in this parser');
+  const {selection,candidates,availableSourceText}=selectTemplateExtraction(current.source_text,current.schema,current.locale,current.templates,current.mode);
+  // Deliberately exclude extracted results, evidence and source values from checks.
+  return {selection,candidates,availableSourceText};
+ });
+});
 }

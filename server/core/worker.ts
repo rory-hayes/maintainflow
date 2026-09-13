@@ -6,6 +6,8 @@ import {adminPool,appPool,transaction,withWorkspace} from './db.js';
 import {config} from './config.js';
 import {lockParserForDocument} from './parser-setup.js';
 import {extractRules} from './extraction.js';
+import {selectTemplateExtraction} from './template-selection.js';
+import {templatePolicy,type TemplateSelection} from '../../shared/template-selection.js';
 import {hasWorkspaceExtractionCapacity,processOneSchemaSuggestion,setSchemaSuggestionProvider} from './schema-suggestions.js';
 import {reconcileInterruptedIntake} from './object-reconciliation.js';
 import {purgeDocument,deleteStoredFile,processOneFileDeletion} from './retention.js';
@@ -68,18 +70,27 @@ const attempt=await extractWithDeadline(async signal=>{
  const data=await withWorkspace(job.workspace_id,async c=>{const doc=(await c.query('select * from documents where id=$1',[job.document_id])).rows[0];const schema=(await c.query('select schema from schema_versions where id=$1',[job.schema_version_id])).rows[0]?.schema;return {doc,schema};});
  if(!data.doc)return undefined;signal.throwIfAborted();
  let result:ExtractionResult;
- if(job.config.mode==='ai'){
+ let selection:TemplateSelection|null=null;
+ const decision=job.config.templatePolicy===templatePolicy
+  ?selectTemplateExtraction(data.doc.source_text,data.schema,job.config.locale,job.config.templates??[],job.config.mode):undefined;
+ if(decision)selection=decision.selection;
+ if(decision?.selection.outcome==='failed'){
+  const messages={no_readable_text:'This document has no readable text. Scans and images require a configured OCR/AI provider.',limit:'Template checking exceeded a supported limit. Reduce the templates or document size, or enable AI extraction, then reprocess.',no_match:'No saved template fully matches this document. Check the template anchors and required fields, or enable AI extraction, then reprocess.'};
+  throw Object.assign(new Error(messages[decision.selection.reason as keyof typeof messages]??messages.no_match),{permanent:true});
+ }
+ if(decision?.result)result=decision.result;
+ else if(job.config.mode==='ai'){
   const activeProvider=provider;if(!activeProvider?.configured())throw Object.assign(new Error('AI extraction is not configured. Configure the server provider or choose text-anchor rules.'),{permanent:true});
   const bytes=await readStoredObject(data.doc.storage_key);signal.throwIfAborted();
   result=await activeProvider.extract({bytes,mimeType:data.doc.mime_type,pages:data.doc.source_text,schema:data.schema,instructions:job.config.instructions,locale:job.config.locale,signal});
  }else{
   if(!data.doc.source_text.some((p:any)=>p.text.trim()))throw Object.assign(new Error('This document has no readable text. Scans and images require a configured OCR/AI provider.'),{permanent:true});
-  result=extractRules(data.doc.source_text,data.schema,job.config.locale,job.config.templates||[]);
+  result=extractRules(data.doc.source_text,data.schema,job.config.locale,decision?[]:job.config.templates||[]);
  }
- signal.throwIfAborted();return {data,result};
+ signal.throwIfAborted();return {data,result,selection};
 },options);
-if(!attempt)return true;const {data,result}=attempt;
-await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const lock=(await c.query('select * from jobs where id=$1 and lease_owner=$2 and state=$3 for update',[job.id,owner,'processing'])).rows[0];if(!lock)return;const {rows:[run]}=await c.query('insert into extraction_runs(workspace_id,document_id,schema_version_id,job_id,engine,model,prompt_version,document_sha256,raw_values,normalized_values,evidence,issues,token_usage,cost_usd) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id',[job.workspace_id,job.document_id,job.schema_version_id,job.id,result.engine,result.model,result.promptVersion??'folio-extraction-v1',data.doc.sha256,JSON.stringify(result.rawValues),JSON.stringify(result.normalizedValues),JSON.stringify(result.evidence),JSON.stringify(result.issues),JSON.stringify(result.tokenUsage??{}),result.costUsd??0]);await c.query("update documents set latest_run_id=$2,status='needs_review',error=null,updated_at=now() where id=$1",[job.document_id,run.id]);await c.query("update jobs set state='completed',lease_until=null,lease_owner=null,updated_at=now() where id=$1",[job.id]);});
+if(!attempt)return true;const {data,result,selection}=attempt;
+await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const lock=(await c.query('select * from jobs where id=$1 and lease_owner=$2 and state=$3 for update',[job.id,owner,'processing'])).rows[0];if(!lock)return;const {rows:[run]}=await c.query('insert into extraction_runs(workspace_id,document_id,schema_version_id,job_id,engine,model,prompt_version,document_sha256,raw_values,normalized_values,evidence,issues,token_usage,cost_usd,selection) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning id',[job.workspace_id,job.document_id,job.schema_version_id,job.id,result.engine,result.model,result.promptVersion??'folio-extraction-v1',data.doc.sha256,JSON.stringify(result.rawValues),JSON.stringify(result.normalizedValues),JSON.stringify(result.evidence),JSON.stringify(result.issues),JSON.stringify(result.tokenUsage??{}),result.costUsd??0,selection?JSON.stringify(selection):null]);await c.query("update documents set latest_run_id=$2,status='needs_review',error=null,updated_at=now() where id=$1",[job.document_id,run.id]);await c.query("update jobs set state='completed',lease_until=null,lease_owner=null,updated_at=now() where id=$1",[job.id]);});
 }catch(e){const permanent=(e as any).permanent||job.attempts>=job.max_attempts;const message=e instanceof Error?e.message.slice(0,500):'Processing failed';await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const changed=await c.query("update jobs set state=$3,error=$4,available_at=now()+($5 * interval '1 second'),lease_owner=null,lease_until=null,updated_at=now() where id=$1 and lease_owner=$2 and state='processing' returning id",[job.id,owner,permanent?'failed':'queued',message,Math.min(60,2**job.attempts)]);if(changed.rowCount)await c.query('update documents set status=$2,error=$3,updated_at=now() where id=$1',[job.document_id,permanent?'failed':'queued',message]);});}
 return true;
 }
