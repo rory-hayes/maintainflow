@@ -10,15 +10,26 @@ try{
   const result=spawnSync(process.execPath,['--input-type=module','-e',`
     import assert from 'node:assert/strict';
     import fs from 'node:fs/promises';
-    import {inspectSource,decoderLaunchSpec} from './server/core/source.js';
+    import {inspectSource,decoderLaunchSpec,splitPdfSource} from './server/core/source.js';
     import {buildApp} from './server/app.js';
-    assert.equal(decoderLaunchSpec('document.txt').args.includes('tsx'),false);
+    for (const launch of [decoderLaunchSpec('document.txt'), decoderLaunchSpec('bundle.pdf',{mode:'every',pagesPerDocument:1})]) {
+      assert.equal(launch.args.includes('tsx'),false);
+      assert.ok(launch.args.includes('--max-old-space-size=192'));
+      assert.equal(launch.args.includes('--max-old-space-size=256'),false);
+    }
     for(const filename of ['invoice-multipage.pdf','receipt-scan.png','receipt.docx','receipt.xlsx','lead.eml','freeform-receipt.txt']){
       const result=await inspectSource(await fs.readFile('fixtures/'+filename),filename);
       assert.ok(result.pageCount>=1); console.log('PASS packaged decoder '+filename);
     }
     const html=await inspectSource(Buffer.from('<h1>Owned bundle fixture</h1><p>Total: 12.50</p>'),'fixture.html');
     assert.match(html.pages[0].text,/12.50/);
+    const split=await splitPdfSource(await fs.readFile('fixtures/invoice-multipage.pdf'),'bundle.pdf',{mode:'every',pagesPerDocument:1});
+    assert.equal(split.parts.length,2); assert.equal(split.selectedPages,2);
+    assert.match(split.parts[0].source.pages[0].text,/INV-00601/);
+    assert.match(split.parts[1].source.pages[0].text,/Desk pads/);
+    assert.equal(split.parts[1].range.start,2);
+    assert.equal((await inspectSource(split.parts[1].bytes,'child.pdf')).pageCount,1);
+    console.log('PASS packaged PDF splitting and derived PDF decoding');
     // This isolated packaging check has no database. Exercise the packaged
     // limiter hook with an explicit in-memory test store; shared PostgreSQL
     // enforcement is verified by the request-rate-limit integration tests.

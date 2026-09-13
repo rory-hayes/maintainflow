@@ -45,19 +45,20 @@ export async function uploadDocuments(parserId:string,files:File[]):Promise<Uplo
   return {...(results.length===1?results[0]:{}),results};
 }
 /** Fetch the scoped URL first so workspace headers are never forwarded across origins. */
-export async function fetchOriginalFile(documentId:string,signal?:AbortSignal){
-  const location=await api<{url:string;external:boolean}>(`/api/documents/${documentId}/original-url`,{signal});
+export async function fetchOriginalFile(documentId:string,signal?:AbortSignal,bundle=false){
+  const route=bundle?'bundle-original':'original';
+  const location=await api<{url:string;external:boolean}>(`/api/documents/${documentId}/${route}-url`,{signal});
   if(location.external){
     const url=new URL(location.url);
     if(url.protocol!=='https:'||!url.hostname.endsWith('.supabase.co'))throw new Error('The private download destination is invalid.');
     return fetch(url,{signal,credentials:'omit',redirect:'error',referrerPolicy:'no-referrer',cache:'no-store'});
   }
-  if(location.url!==`/api/documents/${documentId}/original`)throw new Error('The private download destination is invalid.');
+  if(location.url!==`/api/documents/${documentId}/${route}`)throw new Error('The private download destination is invalid.');
   return fetch(location.url,{signal,headers:{'X-Workspace-Id':workspaceId()},credentials:'same-origin',cache:'no-store'});
 }
 export async function downloadFile(path:string,filename:string){
-  const original=/^\/api\/documents\/([a-f0-9-]{36})\/original$/.exec(path);
-  const response=original?await fetchOriginalFile(original[1]):await fetch(path,{headers:{'X-Workspace-Id':workspaceId()},credentials:'same-origin'});
+  const original=/^\/api\/documents\/([a-f0-9-]{36})\/(bundle-)?original$/.exec(path);
+  const response=original?await fetchOriginalFile(original[1],undefined,Boolean(original[2])):await fetch(path,{headers:{'X-Workspace-Id':workspaceId()},credentials:'same-origin'});
   if(!response.ok)throw new Error('The download could not be completed.');
   const href=URL.createObjectURL(await response.blob());const anchor=document.createElement('a');anchor.href=href;anchor.download=filename;anchor.click();setTimeout(()=>URL.revokeObjectURL(href),5000);
 }

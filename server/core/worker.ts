@@ -10,7 +10,7 @@ import {selectTemplateExtraction} from './template-selection.js';
 import {templatePolicy,type TemplateSelection} from '../../shared/template-selection.js';
 import {hasWorkspaceExtractionCapacity,processOneSchemaSuggestion,setSchemaSuggestionProvider} from './schema-suggestions.js';
 import {reconcileInterruptedIntake} from './object-reconciliation.js';
-import {purgeDocument,deleteStoredFile,processOneFileDeletion} from './retention.js';
+import {purgeDocument,deleteStoredFiles,processOneFileDeletion} from './retention.js';
 import type {ExtractionProvider,ExtractionResult} from '../../shared/types.js';
 let provider:ExtractionProvider|undefined;
 export function setExtractionProvider(value:ExtractionProvider|undefined){provider=value;}
@@ -108,7 +108,7 @@ export async function enforceRetention(onlyWorkspaceId?:string,options:{signal?:
    const eligible=await c.query("select d.id from documents d join workspaces w on w.id=d.workspace_id where d.id=$1 and d.created_at < now()-((w.settings->>'retentionDays')::integer*interval '1 day') and not exists(select 1 from jobs j where j.document_id=d.id and j.state in('queued','processing')) and not exists(select 1 from schema_suggestions s where s.document_id=d.id and s.state in('queued','processing'))",[candidate.id]);
    return eligible.rowCount?purgeDocument(c,candidate.workspace_id,candidate.id):undefined;
   });
-  if(document){await deleteStoredFile(candidate.workspace_id,document.storage_key);removed++;}
+  if(document){await deleteStoredFiles(candidate.workspace_id,document.storageKeys);removed++;}
  }
  return {removed};
 }
