@@ -62,7 +62,7 @@ interface FieldDraft {base:SavedSchema;fields:SchemaField[];suggestion?:Pick<Sch
 type DraftConfirmation={kind:'replace';suggestion:SchemaSuggestion}|{kind:'reload'|'discard'};
 function savedDraft(schema:SavedSchema):FieldDraft{return {base:structuredClone(schema),fields:structuredClone(schema.fields)};}
 
-export default function SchemaEditor({parserId,schema,canEdit,archived=false,onUploadDocument}:{parserId:string;schema:SavedSchema;canEdit:boolean;archived?:boolean;onUploadDocument:()=>void}){
+export default function SchemaEditor({parserId,schema,canEdit,archived=false,setupPending=false,onOpenSettings,onUploadDocument}:{parserId:string;schema:SavedSchema;canEdit:boolean;archived?:boolean;setupPending?:boolean;onOpenSettings?:()=>void;onUploadDocument:()=>void}){
   const [draft,setDraft]=useState<FieldDraft>(()=>savedDraft(schema)),[revision,setRevision]=useState(0),[conflict,setConflict]=useState(false),[confirmation,setConfirmation]=useState<DraftConfirmation|null>(null);
   // Invalid widget text can be unsaved even before it updates a SchemaField.
   const [inputEdited,setInputEdited]=useState(false);
@@ -95,13 +95,13 @@ export default function SchemaEditor({parserId,schema,canEdit,archived=false,onU
         replaceDraft(savedDraft(result.schema));setConflict(false);
         return result;
       }catch(error){if(error instanceof ApiError&&error.status===409)reportConflict();throw error;}
-    },'A new schema version was saved. Previous runs retain their original schema. Existing documents are not reprocessed automatically.');
+    },setupPending?'Your fields were saved. Waiting documents are queued to extract with this schema. Review every result before approving or exporting.':'A new schema version was saved. Previous runs retain their original schema. Existing documents are not reprocessed automatically.');
   }
   function requestLatest(kind:'reload'|'discard'){
     if(dirty||draft.suggestion)setConfirmation({kind});else void loadLatest();
   }
   return <>
-    <SchemaSuggestions parserId={parserId} baseSchemaId={draft.base.id} canEdit={canEdit} archived={archived} blocked={stale||action.busy} activeSuggestionId={draft.suggestion?.id} onUploadDocument={onUploadDocument} onConflict={reportConflict} onUse={suggestion=>{if(dirty||draft.suggestion)setConfirmation({kind:'replace',suggestion});else useSuggestion(suggestion);}}/>
+    {setupPending?<div className="parser-setup-disclosure parser-setup-override"><p>Saving your fields ends automatic sample setup and starts the waiting documents with this schema. Review the field names and types before saving. If AI is unavailable, choose text-anchor rules in Settings first for readable text.</p>{onOpenSettings&&<Button type="button" variant="secondary" onClick={onOpenSettings}>Open settings</Button>}</div>:<SchemaSuggestions parserId={parserId} baseSchemaId={draft.base.id} canEdit={canEdit} archived={archived} blocked={stale||action.busy} activeSuggestionId={draft.suggestion?.id} onUploadDocument={onUploadDocument} onConflict={reportConflict} onUse={suggestion=>{if(dirty||draft.suggestion)setConfirmation({kind:'replace',suggestion});else useSuggestion(suggestion);}}/>}
     <form onChangeCapture={()=>setInputEdited(true)} onSubmit={event=>{event.preventDefault();void save();}}>
       <div className="schema-toolbar schema-save-toolbar"><div><h2 tabIndex={-1} ref={editorHeading}>Parser fields</h2><span className="small muted">Based on schema version {draft.base.version}{dirty?' · Unsaved changes':''}</span></div><Button disabled={!canEdit||action.busy||stale}>{action.busy?'Please wait…':'Save schema'}</Button></div>
       {stale&&<div className="schema-draft-notice" role="alert"><p>The saved fields changed or this draft is no longer available to apply. Your edits are preserved. Load the latest saved fields before continuing.</p><Button type="button" variant="secondary" disabled={action.busy} onClick={()=>requestLatest('reload')}>Load latest saved fields</Button></div>}

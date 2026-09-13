@@ -1,6 +1,27 @@
 # Verification ledger
 
+## Current AI-assisted first-document setup — 13 September 2026
+
+The final automatic-setup source passed **355/355 serial tests**, zero failures, skips or cancellations, in **82.639557625 seconds**. The focused **13 setup cases** passed in **5.301475042 seconds**. `build:vercel` and the isolated packaged runtime verifier passed **six document decoders, API startup and the preview invitation guard**. These are local source/package checks. The separate live and replayed browser evidence follows; no hosted setup deployment is claimed.
+
+The [setup tests](../tests/parser-setup.test.ts) cover preset compatibility; opt-in/provider/role/input guards; rejected/duplicate/concurrent first uploads; held-job exclusion; automatic schema/job/audit completion; one-upload usage; terminal failure/retry; deletion/manual override with late completion; tenant/scopes/origin; quotas; archive; busy workspace claims; and new uploads after failure or source deletion. Setup recovery reuses the original unattempted jobs without a reprocess charge. Initial schema application is automatic only for an explicitly opted-in new parser; approval/export remain explicit. [First-document acceptance](AI-ASSISTED-SETUP-ACCEPTANCE.md) and the [architecture contract](ARCHITECTURE.md#ai-assisted-first-document-setup) record the precise boundaries.
+
+Automatic-setup browser acceptance used the same application source in two distinct runs:
+
+| Run, UTC | Result | Boundary |
+| --- | --- | --- |
+| Live, **14:59:55.440–15:00:26.376** | One real suggestion automatically saved schema version 2 and released the exact original held job. One real extraction matched every synthetic manifest value, including four line-item rows. There was one original reservation and one two-page upload charge, with no placeholder extraction or automatic approval/export. | The run then explicitly approved the result, but stopped at an overly strict export-format selector before downloading. Its failed-run receipt is retained; this is not a completed uninterrupted live approval/export flow. |
+| Final replay, **15:01:21.568–15:01:35.664** | **10 grouped checks passed** using those two recorded provider outputs, with **zero additional live calls**. PDF canvas rendering, explicit approval, exact JSON download and reload preserved one job and one upload usage event for two pages. Failed-setup retry, late completion after manual override and unavailable-provider/manual-preset fallback also passed. | Recovery scenarios used **three canned suggestion calls and zero controlled extraction calls**. Desktop 1440×1000 and mobile 390×844 fit; no page errors occurred. Console observations were the expected signed-out 401 probe and test canvas-readback performance notice. Only test selectors/render waits changed between runs. |
+
+The real provider calls used `gpt-5.4-mini-2026-03-17`: field discovery prompt `folio-openai-schema-suggestion-v1` returned **788 input / 307 output tokens**, estimated **$0.0019725 USD**; extraction prompt `folio-openai-extraction-v2` returned **1,116 input / 872 output tokens**, estimated **$0.004761 USD**. Neither call used cached input tokens. These successful-response estimates are not provider-bill reconciliation. The complete match is one synthetic invoice, not general accuracy evidence. Private live/replay/provider receipts retain exact outputs and timestamps; private identifiers and credentials are omitted here. [First-document acceptance](AI-ASSISTED-SETUP-ACCEPTANCE.md) records the same boundaries.
+
+An earlier full-suite attempt passed **351/352** with one Node test-file import failure caused by a component-level CSS import. Moving that stylesheet to the browser entrypoint restored the four existing AI-availability UI tests; the final **355/355** aggregate then passed. This earlier failure is retained rather than described as a clean first run.
+
+Migration **025 is applied locally**. Its hosted wrapper is prepared and reviewed but unexecuted; hosted **021–025 remain unapplied**. The canonical invite-only preview remains `676a61a`, with free hosting plans and mocked billing unchanged. Earlier Google proof remains tied to `e446f6b`; no new Resend, Sheets, Stripe or customer-use acceptance follows from these local tests.
+
 ## W03 local implementation — 13 September 2026
+
+This **earlier 342-test explicit-suggestion checkpoint** predates automatic first-document setup. Its provider calls and browser replays retain their original scope below.
 
 The final source passed **342/342 serial tests**, zero failures, skips or cancellations, in **77.220664166 seconds**. The preceding focused 14 schema-suggestion and 12 AI-worker cases passed **26/26** in **8.757 seconds**, including delayed-storage cancellation and retention exclusion. `build:vercel` and the isolated packaged runtime verifier passed **all six decoder cases, API startup and the preview invitation guard**. These are local source/package checks, not a hosted deployment.
 

@@ -3,6 +3,7 @@ import path from 'node:path';
 import type {PoolClient} from 'pg';
 import type {Actor} from '../../shared/types.js';
 import {withWorkspace,badRequest,notFound,audit,camel} from './db.js';
+import {queueInitialSetup,failInitialSetup} from './parser-setup.js';
 import {privateStorage} from './storage.js';
 import {inspectSource} from './source.js';
 import {SourceValidationError,isSourceValidationReason} from './source-validation.js';
@@ -13,7 +14,7 @@ type IntakeResult={document:any;duplicate:boolean;jobId:string|null};
 type Decision=IntakeResult|{rejection:ParserFormatNotAllowedError|SourceIntakeRejectedError};
 async function lockParser(c:PoolClient,actor:Actor,parserId:string){
  await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[actor.workspaceId]);
- const {rows:[parser]}=await c.query('select * from parsers where id=$1 and workspace_id=$2 and archived=false',[parserId,actor.workspaceId]);
+ const {rows:[parser]}=await c.query('select * from parsers where id=$1 and workspace_id=$2 and archived=false for update',[parserId,actor.workspaceId]);
  if(!parser)notFound('Active parser not found');
  return parser;
 }
@@ -86,11 +87,13 @@ export async function addDocument(actor:Actor,parserId:string,buffer:Buffer,file
    if(usage.used+source.pageCount>plan.monthlyPages)badRequest('Monthly page quota reached. Update the plan before uploading more documents.',429);
    let {rows:[doc]}=await c.query('insert into documents(id,workspace_id,parser_id,name,mime_type,byte_size,sha256,storage_key,status,page_count,source_text) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *',[id,actor.workspaceId,parserId,name,source.mimeType,buffer.length,sha,storageKey,'received',source.pageCount,JSON.stringify(source.pages)]);
    const templates=(await c.query('select * from templates where parser_id=$1 order by created_at,id',[parserId])).rows;
-   const {rows:[job]}=await c.query('insert into jobs(workspace_id,document_id,schema_version_id,config) values($1,$2,$3,$4) returning id',[actor.workspaceId,id,parser.active_schema_id,JSON.stringify({mode:parser.mode,instructions:parser.instructions,locale:parser.locale,timezone:parser.timezone,templates})]);
+   const {rows:[job]}=await c.query('insert into jobs(workspace_id,document_id,schema_version_id,config,waiting_for_schema) values($1,$2,$3,$4,$5) returning id',[actor.workspaceId,id,parser.active_schema_id,JSON.stringify({mode:parser.mode,instructions:parser.instructions,locale:parser.locale,timezone:parser.timezone,templates}),parser.field_setup_state!=='ready']);
    doc=(await c.query("update documents set status='queued',updated_at=clock_timestamp() where id=$1 returning *",[id])).rows[0];
    await c.query('insert into usage_ledger(workspace_id,document_id,event,pages,idempotency_key) values($1,$2,$3,$4,$5)',[actor.workspaceId,id,'upload',source.pageCount,`upload:${id}`]);
    if(idempotencyKey)await c.query('insert into intake_events(workspace_id,idempotency_key,document_id) values($1,$2,$3)',[actor.workspaceId,idempotencyKey,id]);
    await audit(c,actor.workspaceId,actor.userId,'document.uploaded',id,{parserId,pages:source.pageCount});
+   if(parser.field_setup_state==='awaiting_sample'||(parser.field_setup_state==='failed'&&!parser.field_setup_suggestion_id))await queueInitialSetup(c,actor,parser,doc);
+   else if(parser.field_setup_state==='failed'){await failInitialSetup(c,parser,parser.field_setup_error||'Parser setup needs attention. Retry setup or define its fields.');doc=(await c.query('select * from documents where id=$1',[id])).rows[0];}
    return {document:camel(doc),duplicate:false,jobId:job.id};
   });
   const value=accepted(result);retained=!value.duplicate;return value;
