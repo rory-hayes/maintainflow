@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { decoderLimits, decoderError } from './decoder-limits.js';
+import { SourceValidationError, isSourceValidationReason, type SourceValidationReason } from './source-validation.js';
 import type { PageText } from '../../shared/types.js';
 export { validateZipExpansion } from './decoder-engine.js';
 
@@ -12,6 +13,11 @@ const sourceSchema = z.object({
   pages: z.array(z.object({ page: z.number().int().min(1).max(decoderLimits.maxPages), text: z.string() })).max(decoderLimits.maxPages),
   pageCount: z.number().int().min(1).max(decoderLimits.maxPages),
 });
+const responseSchema = z.union([
+  z.object({ ok: z.literal(true), source: sourceSchema }).strict(),
+  z.object({ ok: z.literal(false), code: z.literal('source_validation_failed'), reason: z.custom<SourceValidationReason>(isSourceValidationReason) }).strict(),
+  z.object({ ok: z.literal(false), code: z.literal('decoder_failed') }).strict(),
+]);
 const compiledChild = fileURLToPath(new URL('./decoder-child.js', import.meta.url));
 const childFilename = existsSync(compiledChild) ? compiledChild : fileURLToPath(new URL('./decoder-child.ts', import.meta.url));
 const runtimeRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -37,8 +43,8 @@ export async function runDecoder(
   filename: string,
   options: { spawnChild?: DecoderSpawn; timeoutMs?: number } = {},
 ): Promise<{ mimeType: string; pages: PageText[]; pageCount: number }> {
-  if (!bytes.length) decoderError('The file is empty');
-  if (bytes.length > decoderLimits.maxBytes) decoderError('Files must be 10 MB or smaller', 413);
+  if (!bytes.length) throw new SourceValidationError('empty');
+  if (bytes.length > decoderLimits.maxBytes) throw new SourceValidationError('file_too_large');
   if (activeDecoders >= decoderLimits.concurrency) decoderError('Document decoding is busy. Retry shortly.', 429);
   activeDecoders++;
   try {
@@ -79,9 +85,14 @@ export async function runDecoder(
         if (pendingFailure) { finish(pendingFailure); return; }
         if (code !== 0) { finish(Object.assign(new Error('The document decoder stopped within its resource limits'), { statusCode: 422 })); return; }
         try {
-          const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-          if (!result.ok) { finish(Object.assign(new Error(String(result.error).slice(0,300)), { statusCode: [400,413,422].includes(result.statusCode) ? result.statusCode : 400 })); return; }
-          const source = sourceSchema.parse(result.source);
+          const result = responseSchema.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+          if (!result.ok) {
+            finish(result.code === 'source_validation_failed'
+              ? new SourceValidationError(result.reason)
+              : Object.assign(new Error('The document could not be decoded. Retry shortly.'), { statusCode: 503 }));
+            return;
+          }
+          const source = result.source;
           if (source.pages.reduce((total, page) => total + Buffer.byteLength(page.text), 0) > decoderLimits.maxTextBytes) throw new Error('Decoder text limit exceeded');
           finish(undefined, source);
         } catch { finish(Object.assign(new Error('The document decoder returned an invalid response'), { statusCode: 422 })); }

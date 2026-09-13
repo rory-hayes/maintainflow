@@ -97,8 +97,10 @@ function ActivityPanel() {
   if (query.isPending) return <Loading />;
   if (query.error || !query.data) return <ErrorState error={query.error} retry={() => void query.refetch()} />;
   return <section><h2>Workspace activity</h2><p>Recent operational events, without document contents or credentials.</p>{query.data.events.length ? <div className="table-wrap"><table><thead><tr><th>Action</th><th>Resource</th><th>Time</th></tr></thead><tbody>{query.data.events.map((event) => {
-    const reason = event.action === 'email.rejected' && event.metadata && typeof event.metadata === 'object' && 'reason' in event.metadata && typeof event.metadata.reason === 'string' ? event.metadata.reason.slice(0, 300).trim() : '';
-    return <tr key={event.id}><td>{event.action === 'email.rejected' ? 'Email rejected' : event.action.replaceAll('.', ' · ').replaceAll('_', ' ')}{reason ? <small className="muted" style={{ display: 'block', marginTop: 6, maxWidth: 440, overflowWrap: 'anywhere' }}>{reason}</small> : null}</td><td><code>{event.entityId ? event.entityId.slice(0, 8) : 'Workspace'}</code></td><td>{dateTime(event.createdAt)}</td></tr>;
+    const rejection = event.action === 'email.rejected' || event.action === 'document.rejected';
+    const reason = rejection && event.metadata && typeof event.metadata === 'object' && 'reason' in event.metadata && typeof event.metadata.reason === 'string' ? event.metadata.reason.slice(0, 300).trim() : '';
+    const label = event.action === 'email.rejected' ? 'Email rejected' : event.action === 'document.rejected' ? 'Document rejected' : event.action.replaceAll('.', ' · ').replaceAll('_', ' ');
+    return <tr key={event.id}><td>{label}{reason ? <small className="muted" style={{ display: 'block', marginTop: 6, maxWidth: 440, overflowWrap: 'anywhere' }}>{reason}</small> : null}</td><td><code>{event.entityId ? event.entityId.slice(0, 8) : 'Workspace'}</code></td><td>{dateTime(event.createdAt)}</td></tr>;
   })}</tbody></table></div> : <p>No activity recorded yet.</p>}</section>;
 }
 

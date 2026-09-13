@@ -1,5 +1,6 @@
 import { decodeSource } from './decoder-engine.js';
 import { decoderLimits } from './decoder-limits.js';
+import { SourceValidationError, isSourceValidationReason } from './source-validation.js';
 
 // stdout contains one bounded JSON response. Decoder-library diagnostics cannot mix with it.
 console.log = () => {};
@@ -12,7 +13,7 @@ try {
   for await (const chunk of process.stdin) {
     const bytes = Buffer.from(chunk);
     size += bytes.length;
-    if (size > decoderLimits.maxBytes) throw Object.assign(new Error('Files must be 10 MB or smaller'), { statusCode: 413 });
+    if (size > decoderLimits.maxBytes) throw new SourceValidationError('file_too_large');
     chunks.push(bytes);
   }
   const source = await decodeSource(Buffer.concat(chunks), process.argv[2] || 'document');
@@ -23,7 +24,10 @@ try {
   if (Buffer.byteLength(json) > decoderLimits.maxOutputBytes) throw Object.assign(new Error('Decoded source response exceeds the limit'), { statusCode: 413 });
   process.stdout.write(json);
 } catch (error) {
-  const statusCode = (error as { statusCode?: number }).statusCode;
-  // Unexpected dependency details are not returned across the process boundary.
-  process.stdout.write(JSON.stringify({ ok: false, error: statusCode ? (error as Error).message : 'The document could not be decoded', statusCode: statusCode || 400 }));
+  // Neither arbitrary statuses nor dependency diagnostics can authorize a
+  // durable rejection. The parent reconstructs fixed messages from this code.
+  const result = error instanceof SourceValidationError && isSourceValidationReason(error.reason)
+    ? { ok: false, code: 'source_validation_failed', reason: error.reason }
+    : { ok: false, code: 'decoder_failed' };
+  process.stdout.write(JSON.stringify(result));
 }

@@ -13,10 +13,11 @@ import {addDocument} from '../server/core/intake.js';
 type Account={user:{id:string};workspace:{id:string};cookie:string};
 const objects=new Map<string,Buffer>(),workspaceIds:string[]=[],userIds:string[]=[],suffix=randomUUID();
 let app:FastifyInstance,owner:Account,other:Account,viewer:Account,parserId:string,reads=0,writes=0,removes=0,failWrite=false;
+let readFailure:Error|undefined;
 let readStarted:(()=>void)|undefined,readRelease:Promise<void>|undefined;
 const bytes=Buffer.from('Owned direct upload fixture\nReference: UPLOAD-20260911\nAmount: 42');
 const sha=(value:Buffer)=>createHash('sha256').update(value).digest('hex');
-const storage:PrivateStorage={kind:'supabase',async write(key,value){writes++;objects.set(key,Buffer.from(value));if(failWrite){failWrite=false;throw Object.assign(new Error('Synthetic lost acknowledgement'),{statusCode:503});}},async read(key,maxBytes=config.maxBytes){reads++;if(readStarted){const started=readStarted;readStarted=undefined;started();await readRelease;}const value=objects.get(key);if(!value)throw Object.assign(new Error('Original file is unavailable'),{statusCode:404});if(value.length>maxBytes)throw Object.assign(new Error('File exceeds the 10 MB limit'),{statusCode:413});return Buffer.from(value);},async remove(key){removes++;objects.delete(key);},async signUpload(key){return `https://storage-fixture.supabase.co/storage/v1/object/upload/sign/folio-originals/${key}?token=controlled-token`;},async signDownload(key,name){return `https://storage-fixture.supabase.co/storage/v1/object/sign/folio-originals/${key}?token=controlled-token&download=${encodeURIComponent(name)}`;}};
+const storage:PrivateStorage={kind:'supabase',async write(key,value){writes++;objects.set(key,Buffer.from(value));if(failWrite){failWrite=false;throw Object.assign(new Error('Synthetic lost acknowledgement'),{statusCode:503});}},async read(key,maxBytes=config.maxBytes){reads++;if(readFailure){const error=readFailure;readFailure=undefined;throw error;}if(readStarted){const started=readStarted;readStarted=undefined;started();await readRelease;}const value=objects.get(key);if(!value)throw Object.assign(new Error('Original file is unavailable'),{statusCode:404});if(value.length>maxBytes)throw Object.assign(new Error('File exceeds the 10 MB limit'),{statusCode:413});return Buffer.from(value);},async remove(key){removes++;objects.delete(key);},async signUpload(key){return `https://storage-fixture.supabase.co/storage/v1/object/upload/sign/folio-originals/${key}?token=controlled-token`;},async signDownload(key,name){return `https://storage-fixture.supabase.co/storage/v1/object/sign/folio-originals/${key}?token=controlled-token&download=${encodeURIComponent(name)}`;}};
 async function request(method:'GET'|'POST'|'PATCH',url:string,payload?:unknown,account=owner){return app.inject({method,url,payload:payload as any,headers:{cookie:account.cookie,origin:config.origin}});}
 async function signup(label:string):Promise<Account>{const response=await app.inject({method:'POST',url:'/api/auth/register',payload:{name:`Owned upload ${label}`,email:`uploads-${label}-${suffix}@example.test`,password:'owned direct upload test password',workspaceName:`Owned upload ${label}`},headers:{origin:config.origin}});assert.equal(response.statusCode,201,response.body);const result=response.json();workspaceIds.push(result.workspace.id);userIds.push(result.user.id);return {...result,cookie:response.cookies.map(cookie=>`${cookie.name}=${cookie.value}`).join('; ')};}
 async function reserve(value=bytes,name=`owned-${randomUUID()}.txt`){const response=await request('POST',`/api/parsers/${parserId}/uploads`,{filename:name,size:value.length,sha256:sha(value)});assert.equal(response.statusCode,201,response.body);const id=response.json().uploadId;const row=(await adminPool.query('select * from direct_uploads where id=$1',[id])).rows[0];return {id,key:row.storage_key,row};}
@@ -105,4 +106,32 @@ test('unfinished and failed capabilities reserve their full possible bytes, even
   const response=await request('POST',`/api/parsers/${parserId}/uploads`,{filename:'tiny.txt',size:1,sha256:sha(Buffer.from('x'))});
   assert.equal(response.statusCode,429,response.body);assert.equal(writes,beforeWrites);
  }finally{await adminPool.query('delete from direct_uploads where id=any($1::uuid[])',[ids]);}
+});
+
+
+test('permanent source rejection fails its signed reservation without storing a document original',async()=>{
+ const staged=await stage(Buffer.from('%PDF-1.7\ninvalid owned PDF'));
+ const beforeDocuments=await count('documents'),beforeJobs=await count('jobs'),beforeUsage=await count('usage_ledger'),beforeWrites=writes;
+ const response=await request('POST',`/api/uploads/${staged.id}/finalize`,{});
+ assert.equal(response.statusCode,400,response.body);assert.match(response.json().message,/valid PDF/);
+ assert.equal((await adminPool.query('select state from direct_uploads where id=$1',[staged.id])).rows[0].state,'failed');
+ assert.equal(await count('documents'),beforeDocuments);assert.equal(await count('jobs'),beforeJobs);assert.equal(await count('usage_ledger'),beforeUsage);assert.equal(writes,beforeWrites);
+ const receipt=(await adminPool.query('select rejection_code,rejection_reason,document_id from intake_events where workspace_id=$1 and idempotency_key=$2',[owner.workspace.id,`direct-upload:${staged.id}`])).rows[0];
+ assert.deepEqual(receipt,{rejection_code:'source_validation_failed',rejection_reason:'pdf_invalid',document_id:null});
+ assert.ok(objects.has(staged.key)); // The signed capability retains its existing expiry window.
+ assert.equal((await request('POST',`/api/uploads/${staged.id}/finalize`,{})).statusCode,410);
+});
+
+test('untyped failures leave signed finalization retryable regardless of their HTTP status',async()=>{
+ for(const statusCode of [400,413,422,503]){
+  const staged=await stage(Buffer.from(`Owned recoverable source ${statusCode}`));
+  const beforeDocuments=await count('documents'),beforeUsage=await count('usage_ledger');
+  readFailure=Object.assign(new Error('Owned temporary storage or decoder boundary failure'),{statusCode});
+  const response=await request('POST',`/api/uploads/${staged.id}/finalize`,{});assert.equal(response.statusCode,statusCode,response.body);
+  assert.equal((await adminPool.query('select state from direct_uploads where id=$1',[staged.id])).rows[0].state,'pending');
+  assert.equal(await count('documents'),beforeDocuments);assert.equal(await count('usage_ledger'),beforeUsage);
+  assert.equal((await adminPool.query('select id from intake_events where workspace_id=$1 and idempotency_key=$2',[owner.workspace.id,`direct-upload:${staged.id}`])).rowCount,0);
+  const retry=await request('POST',`/api/uploads/${staged.id}/finalize`,{});assert.equal(retry.statusCode,202,retry.body);
+  assert.equal(await count('documents'),beforeDocuments+1);assert.equal(await count('usage_ledger'),beforeUsage+1);
+ }
 });

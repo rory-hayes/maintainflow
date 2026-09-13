@@ -54,6 +54,7 @@ after(async () => {
 
 test('atomic intake journals received and queued, then actual processing and approval preserve ordered phases', async () => {
   const intake = await addDocument(account.actor, parserId, Buffer.from(presets.invoice.sample), 'owned-lifecycle-invoice.txt');
+  assert.ok(intake.jobId);
   documentId = intake.document.id; initialJobId = intake.jobId;
   assert.equal(intake.document.status, 'queued');
   const initial = chronological(await detail());
@@ -98,7 +99,8 @@ test('duplicate intake and unchanged status do not fabricate phases; reprocessin
 test('real no-text failure journals the exact owned job without creating a successful run', async () => {
   const intake = await addDocument(account.actor, parserId, await fs.readFile('fixtures/source-formats/receipt-image.jpg'), 'owned-lifecycle-image.jpg');
   failedDocumentId = intake.document.id;
-  assert.equal(await processOneCoreJob(intake.jobId), true);
+  assert.ok(intake.jobId);
+    assert.equal(await processOneCoreJob(intake.jobId), true);
   const body = await detail(failedDocumentId), events = chronological(body);
   assert.equal(body.document.status, 'failed'); assert.equal(body.runs.length, 0);
   assert.deepEqual(events.map(event => event.state), ['received', 'queued', 'processing', 'failed']);

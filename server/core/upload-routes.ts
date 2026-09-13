@@ -7,8 +7,10 @@ import {adminPool,withWorkspace,badRequest,notFound,camel} from './db.js';
 import {config} from './config.js';
 import {privateStorage,safeDownloadName,validateStorageKey} from './storage.js';
 import {addDocument} from './intake.js';
+import {ParserFormatNotAllowedError,SourceIntakeRejectedError} from './intake-policy.js';
 
 const reserveBody=z.object({filename:z.string().min(1).max(300),size:z.number().int().min(1).max(10*1024*1024),sha256:z.string().regex(/^[0-9a-f]{64}$/)}).strict();
+class UploadBytesMismatch extends Error {readonly statusCode=400;constructor(){super('Uploaded bytes do not match this reservation. Start a new upload.');}}
 const uploadId=(params:unknown)=>z.object({id:z.string().uuid()}).parse(params).id;
 export async function reserveDirectUpload(actor:Actor,parserId:string,input:z.infer<typeof reserveBody>){
   const storage=privateStorage();if(!storage.signUpload)badRequest('Direct upload is unavailable on this installation',409);
@@ -49,7 +51,7 @@ export async function finalizeDirectUpload(actor:Actor,id:string){
   const row=claimed.row!;
   try{
     const bytes=await privateStorage().read(row.storage_key,Math.min(config.maxBytes,row.expected_bytes));
-    if(bytes.length!==row.expected_bytes||createHash('sha256').update(bytes).digest('hex')!==row.expected_sha256)badRequest('Uploaded bytes do not match this reservation. Start a new upload.',400);
+    if(bytes.length!==row.expected_bytes||createHash('sha256').update(bytes).digest('hex')!==row.expected_sha256)throw new UploadBytesMismatch();
     // Persist a distinct object from these verified bytes. The original signed
     // capability never points at the immutable document object consumed by workers.
     const result=await addDocument(actor,row.parser_id,bytes,row.filename,'application/octet-stream',`direct-upload:${id}`);
@@ -59,8 +61,8 @@ export async function finalizeDirectUpload(actor:Actor,id:string){
     });
     return result;
   }catch(error){
-    const status=(error as {statusCode?:number}).statusCode;
-    await withWorkspace(actor.workspaceId,c=>c.query("update direct_uploads set state=$3,finalize_owner=null,finalize_lease_until=null where id=$1 and finalize_owner=$2",[id,leaseOwner,[400,413,422].includes(status??0)?'failed':'pending']));
+    const terminal=error instanceof UploadBytesMismatch||error instanceof ParserFormatNotAllowedError||error instanceof SourceIntakeRejectedError;
+    await withWorkspace(actor.workspaceId,c=>c.query("update direct_uploads set state=$3,finalize_owner=null,finalize_lease_until=null where id=$1 and finalize_owner=$2",[id,leaseOwner,terminal?'failed':'pending']));
     throw error;
   }
 }

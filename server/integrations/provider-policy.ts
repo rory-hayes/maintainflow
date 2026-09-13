@@ -1,6 +1,5 @@
 import Stripe from 'stripe';
 import { Webhook } from 'svix';
-import { simpleParser } from 'mailparser';
 import { z } from 'zod';
 import type { GetReceivingEmailResponseSuccess, GetDomainResponseSuccess } from 'resend';
 import { PLANS } from '../../shared/plans.js';
@@ -144,14 +143,12 @@ export async function writeSheetRange(transport:SheetsTransport,write:{spreadshe
  return {status:response.status};
 }
 export async function receivedEmailBody(email:GetReceivingEmailResponseSuccess,maxBytes:number) {
- let body=email.text;
- if(body===null&&email.html){
-  if(Buffer.byteLength(email.html)>maxBytes)throw new Error('Email body exceeds the intake byte limit.');
-  const parsed=await simpleParser(Buffer.from(`Content-Type: text/html; charset=utf-8\r\n\r\n${email.html}`),{skipHtmlToText:false});
-  body=parsed.text||'';
- }
+ // Construct stable bytes here; HTML parsing stays inside the isolated decoder.
+ const html=email.text===null&&Boolean(email.html);
+ const body=(html?email.html:email.text)||'';
+ if(Buffer.byteLength(body)>maxBytes)throw new Error('Email body exceeds the intake byte limit.');
  const cleanHeader=(s:string)=>s.replace(/[\r\n\u0000]/g,' ').slice(0,500);
- const eml=Buffer.from(`From: ${cleanHeader(email.from)}\r\nTo: ${email.received_for.map(cleanHeader).join(', ')}\r\nSubject: ${cleanHeader(email.subject)}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body||''}`);
+ const eml=Buffer.from(`From: ${cleanHeader(email.from)}\r\nTo: ${email.received_for.map(cleanHeader).join(', ')}\r\nSubject: ${cleanHeader(email.subject)}\r\nMIME-Version: 1.0\r\nContent-Type: ${html?'text/html':'text/plain'}; charset=utf-8\r\n\r\n${body}`);
  if(eml.length>maxBytes)throw new Error('Email body exceeds the intake byte limit.');
  return eml;
 }
