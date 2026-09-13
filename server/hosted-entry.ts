@@ -2,12 +2,15 @@ import type {IncomingMessage,ServerResponse} from 'node:http';
 import {buildApp} from './app.js';
 import {setExtractionProvider} from './core/worker.js';
 import {createOpenAIProvider} from './core/openai-provider.js';
+import {setSchemaSuggestionProvider} from './core/schema-suggestions.js';
+import {createOpenAISchemaSuggestionProvider} from './core/openai-schema-suggestions.js';
 import {waitUntil} from '@vercel/functions';
 import {registerHostedWorker,wakeHostedWorker} from './hosted-worker.js';
 
 let application:ReturnType<typeof buildApp>|undefined;
 async function hostedApp(){
   setExtractionProvider(createOpenAIProvider());
+  setSchemaSuggestionProvider(createOpenAISchemaSuggestionProvider());
   const app=await buildApp();
   registerHostedWorker(app,{waitUntil});
   app.addHook('onResponse',async(request,reply)=>{

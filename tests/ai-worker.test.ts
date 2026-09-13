@@ -8,6 +8,7 @@ import { buildApp } from '../server/app.js';
 import { adminPool, closeDatabase } from '../server/core/db.js';
 import { config } from '../server/core/config.js';
 import { addDocument } from '../server/core/intake.js';
+import { privateStorage } from '../server/core/storage.js';
 import { extractRules } from '../server/core/extraction.js';
 import { aiConfigured, processOneCoreJob, setExtractionProvider } from '../server/core/worker.js';
 import type { Actor, ExtractionResult, ParserSchema, ProviderInput } from '../shared/types.js';
@@ -200,7 +201,7 @@ test('deadline aborts the controlled provider and ignores a late response after 
     captured = input; signal = input.signal;
     return new Promise<ExtractionResult>(resolve => { finish = resolve; });
   } });
-  await processOneCoreJob(item.jobId, { providerTimeoutMs: 20 });
+  await processOneCoreJob(item.jobId, { providerTimeoutMs: 250 });
   assert.equal(signal?.aborted, true);
   let body = await detail(item.document.id);
   assert.equal(body.jobs[0].state, 'queued'); assert.equal(body.jobs[0].attempts, 1);
@@ -209,6 +210,45 @@ test('deadline aborts the controlled provider and ignores a late response after 
   finish(result(captured)); await new Promise(resolve => setImmediate(resolve));
   body = await detail(item.document.id);
   assert.equal(body.runs.length, 0); assert.equal(body.document.status, 'queued');
+});
+
+test('slow private storage is included in the extraction deadline and cannot start a late AI call', async context => {
+  const item = await intake('storage-deadline');
+  const storageKey = (await adminPool.query('select storage_key from documents where id=$1', [item.document.id])).rows[0].storage_key;
+  const storage = privateStorage(), originalRead = storage.read;
+  let release!: () => void, notifyStarted!: () => void, notifyReadDone!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { notifyStarted = resolve; });
+  const readDone = new Promise<void>(resolve => { notifyReadDone = resolve; });
+  let calls = 0, readEntered = false;
+  setExtractionProvider({ configured: () => true, extract: async input => { calls++; return result(input); } });
+  const read = context.mock.method(storage, 'read', async function (key: string, maxBytes?: number) {
+    if (key !== storageKey) return originalRead.call(storage, key, maxBytes);
+    readEntered = true; notifyStarted();
+    await gate;
+    try { return await originalRead.call(storage, key, maxBytes); }
+    finally { notifyReadDone(); }
+  });
+  const bounded = async (pending: Promise<void>) => {
+    let timer!: ReturnType<typeof setTimeout>;
+    try { await Promise.race([pending, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Owned storage gate did not settle')), 5000); })]); }
+    finally { clearTimeout(timer); }
+  };
+  const processing = processOneCoreJob(item.jobId, { providerTimeoutMs: 250 });
+  try {
+    await bounded(started); assert.equal(await processing, true);
+    const timedOut = await detail(item.document.id);
+    assert.equal(timedOut.jobs[0].state, 'queued'); assert.equal(timedOut.jobs[0].attempts, 1);
+    assert.equal(timedOut.runs.length, 0); assert.equal(timedOut.document.status, 'queued');
+    assert.deepEqual(await lease(item.jobId), { lease_owner: null, lease_until: null });
+    assert.equal(calls, 0); assert.equal(await usageCount(item.document.id), 1);
+    release(); await bounded(readDone); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 0); assert.deepEqual(await detail(item.document.id), timedOut);
+    assert.equal(await usageCount(item.document.id), 1);
+  } finally {
+    try { release(); await processing; if (readEntered) await bounded(readDone); }
+    finally { read.mock.restore(); }
+  }
 });
 
 test('worker cancellation aborts extraction, leaves a retryable job, and a pre-aborted worker claims nothing', async () => {
@@ -305,7 +345,7 @@ test('authenticated hosted wake recovers a crashed worker from its expired durab
   await adminPool.query("update jobs set state='processing',attempts=1,lease_owner=$2,lease_until=now()-interval '1 second' where id=$1",[item.jobId,randomUUID()]);
   await adminPool.query("update documents set status='processing' where id=$1",[item.document.id]);
   // The fresh scheduler has no knowledge of the crashed invocation or its token.
-  const wake=createHostedWorker({enqueue:async()=>{},core:budget=>processOneCoreJob(item.jobId,{signal:budget.signal}),provider:async()=>false,delivery:async()=>false,deletion:async()=>false,maintenance:async()=>{}});
+  const wake=createHostedWorker({enqueue:async()=>{},core:budget=>processOneCoreJob(item.jobId,{signal:budget.signal}),provider:async()=>false,suggestion:async()=>false,delivery:async()=>false,deletion:async()=>false,maintenance:async()=>{}});
   const endpoint=Fastify();const attached:Promise<unknown>[]=[];
   const secret='controlled-hosted-recovery-secret-0123456789';
   registerHostedWorker(endpoint,{secret:()=>secret,waitUntil:work=>attached.push(work),wake});

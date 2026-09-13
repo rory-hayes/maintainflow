@@ -4,7 +4,8 @@ import {registerParsers} from './parser-routes.js';
 import {registerDocuments} from './document-routes.js';
 import {registerWorkspace} from './workspace-routes.js';
 import {registerNotifications} from './notifications.js';
-export async function registerCore(app:FastifyInstance){await registerAuth(app);await registerParsers(app);await registerDocuments(app);await registerWorkspace(app);await registerNotifications(app);}
+import {registerSchemaSuggestions} from './schema-suggestions.js';
+export async function registerCore(app:FastifyInstance){await registerAuth(app);await registerParsers(app);await registerDocuments(app);await registerWorkspace(app);await registerNotifications(app);await registerSchemaSuggestions(app);}
 export {requireActor,editors,admins,requireSession} from './auth.js';
 export {withWorkspace,adminPool,appPool,camel,badRequest,notFound,audit} from './db.js';
 export {resolveRun,publicRun} from './runs.js';

@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import {acceptsWorkerBearer,createHostedWorker,registerHostedWorker,workerRoute,type HostedWorkerServices} from '../server/hosted-worker.js';
 
 const secret='controlled-worker-secret-0123456789abcdef';
-const idle=():HostedWorkerServices=>({enqueue:async()=>{},core:async()=>false,delivery:async()=>false,provider:async()=>false,deletion:async()=>false,maintenance:async()=>{}});
+const idle=():HostedWorkerServices=>({enqueue:async()=>{},core:async()=>false,suggestion:async()=>false,delivery:async()=>false,provider:async()=>false,deletion:async()=>false,maintenance:async()=>{}});
 
 test('worker endpoint rejects unauthorized wakes and acknowledges before platform-owned work completes',async()=>{
   const app=Fastify();let calls=0,done!:()=>void;
@@ -37,14 +37,49 @@ test('one warm instance shares in-flight work, drains every lane, then stops wit
   let unblock!:()=>void;
   const gate=new Promise<void>(resolve=>{unblock=resolve;});
   let enqueued=0,maintenance=0;
-  const remaining={core:2,delivery:1,provider:1,deletion:1};
+  const remaining={core:2,suggestion:2,delivery:1,provider:1,deletion:1};
   const services=idle();services.enqueue=async()=>{enqueued++;await gate;};services.maintenance=async()=>{maintenance++;};
-  for(const lane of ['core','delivery','provider','deletion'] as const)services[lane]=async()=>remaining[lane]-->0;
+  for(const lane of ['core','suggestion','delivery','provider','deletion'] as const)services[lane]=async()=>remaining[lane]-->0;
   const wake=createHostedWorker(services);
   const first=wake(),second=wake();assert.equal(first,second);unblock();
-  assert.deepEqual(await first,{core:2,delivery:1,provider:1,deletion:1,stopped:'idle',errors:0});
+  assert.deepEqual(await first,{core:2,suggestion:2,delivery:1,provider:1,deletion:1,stopped:'idle',errors:0});
   assert.equal(enqueued,1);assert.equal(maintenance,1);
   assert.notEqual(wake(),first);await wake();
+});
+
+for(const first of ['core','suggestion'] as const){
+  test(`one wake drains shared-capacity work when ${first} is the older queued item`,async()=>{
+    const second=first==='core'?'suggestion':'core';
+    const queued:('core'|'suggestion')[]=[first,second],completed:string[]=[],calls={core:0,suggestion:0};
+    let active=false;
+    const services=idle();
+    for(const lane of ['core','suggestion'] as const)services[lane]=async()=>{
+      calls[lane]++;
+      if(active||queued[0]!==lane)return false;
+      active=true;
+      // The other lane gets its claim attempt while this oldest item owns
+      // the single workspace slot, just as in the database-backed worker.
+      await new Promise<void>(resolve=>setImmediate(resolve));
+      assert.equal(queued.shift(),lane);completed.push(lane);active=false;
+      return true;
+    };
+    const result=await createHostedWorker(services)();
+    assert.deepEqual(completed,[first,second]);assert.deepEqual(queued,[]);
+    assert.equal(result.core,1);assert.equal(result.suggestion,1);
+    assert.equal(result.stopped,'idle');assert.equal(result.errors,0);
+    assert.deepEqual(calls,{core:3,suggestion:3});
+  });
+}
+
+test('a failed extraction lane is reported once while other lanes finish without idle retries',async()=>{
+  const services=idle();let coreCalls=0,suggestions=0,delivered=0;
+  services.core=async()=>{coreCalls++;throw new Error('controlled extraction outage');};
+  services.suggestion=async()=>suggestions++<2;
+  services.delivery=async()=>delivered++<1;
+  const reported:string[]=[];
+  const result=await createHostedWorker(services,{onError:lane=>reported.push(lane)})();
+  assert.equal(coreCalls,1);assert.equal(result.suggestion,2);assert.equal(result.delivery,1);
+  assert.equal(result.errors,1);assert.equal(result.stopped,'idle');assert.deepEqual(reported,['core']);
 });
 
 test('remaining budget prevents another claim and one failed lane cannot starve others',async()=>{
@@ -63,6 +98,6 @@ test('deadline abort reaches the active consumer and no further work is claimed'
     await new Promise<void>(resolve=>budget.signal!.addEventListener('abort',()=>{aborted=true;resolve();},{once:true}));
     return true;
   };
-  const result=await createHostedWorker(services,{budgetMs:20,reserveMs:{core:0,delivery:0,provider:0,deletion:0}})();
+  const result=await createHostedWorker(services,{budgetMs:20,reserveMs:{core:0,suggestion:0,delivery:0,provider:0,deletion:0}})();
   assert.equal(aborted,true);assert.equal(claims,1);assert.equal(result.stopped,'budget');
 });

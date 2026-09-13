@@ -1,8 +1,35 @@
 # Verification ledger
 
+## W03 local implementation — 13 September 2026
+
+The final source passed **342/342 serial tests**, zero failures, skips or cancellations, in **77.220664166 seconds**. The preceding focused 14 schema-suggestion and 12 AI-worker cases passed **26/26** in **8.757 seconds**, including delayed-storage cancellation and retention exclusion. `build:vercel` and the isolated packaged runtime verifier passed **all six decoder cases, API startup and the preview invitation guard**. These are local source/package checks, not a hosted deployment.
+
+The local field-suggestion adapter passed **14 controlled tests**, zero failures/skips, in **0.365 seconds** using injected transport only. Typecheck and diff checks passed at that adapter checkpoint. The [test source](../tests/openai-schema-suggestions.test.ts) covers strict recursive requests, PDF/image originals and native text, 60-field/four-level bounds, forbidden inferred metadata, output/usage/cost validation, safe provider errors and cancellation through response-body reading. These adapter tests made no live provider calls; separate live/browser evidence follows below.
+
+Reproduce the focused adapter check with:
+
+```sh
+node --import tsx --import ./tests/test-environment.ts --test --test-concurrency=1 tests/openai-schema-suggestions.test.ts
+```
+
+Separate local acceptance on 13 September used one real OpenAI suggestion and one real OpenAI extraction, both on `gpt-5.4-mini-2026-03-17`:
+
+| Run | Observed result | Evidence boundary |
+| --- | --- | --- |
+| First live suggestion, 14:02:54–14:03:06 UTC | The synthetic PDF was uploaded through the UI, a rules run was saved, the queued suggestion survived reload and its ready draft left the saved schema/runs unchanged. Prompt `folio-openai-schema-suggestion-v1` returned 788 input tokens, 281 output tokens and estimated cost **$0.0018555 USD**. | The browser run stopped on an assertion after the real draft became ready. This run did not finish review/save/extraction; its failed-run result is retained. |
+| Follow-up, 14:04:31–14:04:49 UTC | **12 grouped browser checks passed**, reusing the recorded real suggestion with **no second suggestion-provider call**, then completing **one real extraction**. Review/use/edit/save, unsaved replace/cancel/discard, mobile draft display, explicit save/provenance, new-schema reprocessing with the old run preserved, separate costs, stale-save 409/reload and honest provider unavailability/history were exercised. Extraction prompt `folio-openai-extraction-v2` returned 1,073 input tokens, 829 output tokens and estimated cost **$0.00453525 USD**. | This was a controlled suggestion replay followed by real extraction, not one uninterrupted real-provider workflow. The actual extraction was subsequently compared with the synthetic manifest and matched exactly, including all four line-item rows, with no issues. This is one synthetic example and does not establish general accuracy. |
+
+A final browser run at **14:06:53–14:07:05 UTC passed 14 grouped checks**, replaying both recorded provider outputs with no new live calls. It includes confirmation before replacing invalid, uncommitted allowed-choice input. Desktop 1440×1000 and mobile 390×844 layouts fit; no page errors occurred. Console observations were the expected signed-out session 401 probe and intentional stale-save 409. Eight focused hosted-worker tests pass after coordinating extraction/suggestion rounds within one invocation; queued/processing suggestion sources are also excluded from scheduled retention and rechecked under the document lock. `build:vercel` passed after final runtime/UI fixes, and a bounded 639-file secret scan found no matches. The final 342-test suite includes the additional cancellation/retention regressions. [W03 acceptance](SCHEMA-SUGGESTIONS-ACCEPTANCE.md) records the separate runs and limits; private receipts retain original outputs/timestamps, with account/resource/provider-response identifiers omitted from tracked evidence. The [implementation contract](ARCHITECTURE.md#field-suggestion-contract) records request replay, tenant and schema-version checks, quotas, shared extraction concurrency, lease/deletion handling and successful-cost estimates. Migration **024 is local only**. Migration 020 is applied to the hosted database; hosted **021–024 remain unapplied**, with the specific 021 migration approval outstanding. The canonical preview is still sign-in revision `676a61a`; see [current hosted status](HOSTED-PREVIEW-STATUS-2026-09-13.md).
+
+The completed pre-W03 C04 checkpoint passed **310 tests**, zero failures/skips in **71.212 seconds**, final hosted packaging/build checks and **24 local desktop/mobile browser checks**. Those results predate W03 and are not its verification. Current Google proof is separately dated to `e446f6b`; actual Folio Resend intake and real Stripe remain unverified. Plans stay free and billing mocked; no customer-use evidence is claimed.
+
+## Historical ledger — 6–8 September 2026
+
+The entries below retain their original dated source identities, totals and provider boundaries. References to “current” in this historical ledger describe those checkpoints, not the newer runtime or W03 implementation.
+
 Recorded 6–8 September 2026 (Europe/Dublin). Secure OpenAI setup and the real synthetic-receipt browser creation/upload/review/approval/JSON/reload workflow are complete. [AI-BROWSER-ACCEPTANCE.md](AI-BROWSER-ACCEPTANCE.md) records the actual persisted result. The current source passed **184 tests** and the production build after adding the requested local billing mock and managed Resend inbox support. [PROVIDER-SETUP.md](PROVIDER-SETUP.md) records the current source identity and exact external prerequisites. The preceding workspace checkpoint fixed parser restoration capacity and atomic membership/invitation audit events. Seven added regressions cover these workspace paths; [WORKSPACE-INTEGRITY.md](WORKSPACE-INTEGRITY.md) records the contract and limits. Prior AI and source-disclosure browser checks remain preserved with their original source identity. A fresh independently authored held-out set measured **49/51 values**; after a date-selection prompt correction, its unchanged-input regression replay measured **51/51**. The original result remains unchanged. The earlier approval and Mac-lock gates are resolved. Resend receiving and Google Sheets setup remain incomplete. The user requested mock billing for now, so real Stripe testing is deferred rather than a current account prerequisite. This ledger does not establish full parity, general document accuracy, production deployment, Resend/Sheets/Stripe account operation or customer use. See [the remaining gates](RELEASE-GATES.md).
 
-## Current evidence
+### Current evidence
 
 | Layer | Evidence | Current conclusion |
 | --- | --- | --- |
@@ -32,19 +59,19 @@ The preceding `npm test` aggregate passed **160/160, 0 failures and 0 skipped**,
 
 The historical lifecycle aggregate passed **107/107** on 6 September. Its breakdown was bearer API workflow 5, automation 2, core 18, decoder/reconciliation 9, defensive regressions 5, extraction 12, correction/approval reconciliation 1, frontend-value helpers 4, integrations 12, providers 9, retention/notifications 4, source formats 10, intake policies 3, document lifecycle 7 and export lifecycle 6. The [historical manifest](evidence/verification-lifecycle-run.json) identifies that earlier source; it is not proof for later OpenAI changes.
 
-## Current provider-setup source — 8 September 2026
+### Current provider-setup source — 8 September 2026
 
 The complete suite passed **184/184 tests**, zero failures/skips, from `2026-09-08T20:27:19.867548Z` to `20:27:50.185332Z`; TypeScript/Vite build passed from `20:27:50.186090Z` to `20:27:52.235746Z`. [Test output](evidence/provider-setup-2026-09-08/tests-results.txt), [test timing](evidence/provider-setup-2026-09-08/tests-run.json), [build output](evidence/provider-setup-2026-09-08/build-results.txt) and [build timing](evidence/provider-setup-2026-09-08/build-run.json) retain the actual commands and exits. [Verification](evidence/provider-setup-2026-09-08/verification.json) and [source manifest](evidence/provider-setup-2026-09-08/source-before.json) identify **191 files**, fingerprint `a1b67de414f66a5724ead433ff286f28620a77014a8f41f0f331cebef9de99e0`, unchanged during verification. The 17 additional cases comprise six mock backend tests, three mock UI tests, seven managed-inbox tests and one managed email-route case in the now ten-test provider suite.
 
 [Provider setup](PROVIDER-SETUP.md) separates account access and prepared artifacts from completed integrations. Local mock billing is enabled and real Stripe verification is deferred by the user. Resend key creation and the synthetic probe are unapproved/unsent; Google project creation was rejected and no native spreadsheet exists. The [billing browser workflow](evidence/provider-setup-2026-09-08/billing-browser.json) passed Standard → Team → cancel to Explore → restore Team → reload. [Runtime/DB readback](evidence/provider-setup-2026-09-08/runtime-and-billing-state.json) confirms the Team mock allowance, 39 used pages, eight preserved documents, four matching audit events and zero subscription/Checkout rows. Desktop 1280×720 and mobile 390×844 layouts had matching document/body widths; mobile mutations were not tested. The viewport was reset and captured browser warnings/errors were empty. Web/API health and `/api/presets` returned HTTP 200 at `2026-09-08T20:33:22.739Z`; the earlier diagnostic `/api/public/presets` 404 is retained as an incorrect route probe. Earlier AI calls and browser results are preserved; the new controlled tests make no provider requests.
 
-## Historical workspace-integrity source — 7 September 2026
+### Historical workspace-integrity source — 7 September 2026
 
 The 7 September source passed **167/167 tests**, zero failures/skips, from `2026-09-07T17:30:36.845509Z` to `17:31:00.277777Z`; TypeScript/Vite build passed from `17:31:00.278492Z` to `17:31:01.952573Z`. [Test output](evidence/workspace-integrity-tests-results.txt), [test timing](evidence/workspace-integrity-tests-run.json), [build output](evidence/workspace-integrity-build-results.txt) and [build timing](evidence/workspace-integrity-build-run.json) are preserved. The [final integrity record](evidence/workspace-integrity-final.json) identifies **186 files**, fingerprint `a4641915d5042524908c4e98efe14945ac15df13923f27c9307f7733264ed4f0`, unchanged during verification. Only parser/workspace routes and the two associated test files changed from the previous AI-browser source checkpoint. Extraction/model code and the existing UI are unchanged; no additional model calls were needed.
 
 The focused [two parser-capacity tests](evidence/parser-quota-targeted-results.txt) and [five membership-audit tests](evidence/membership-audit-targeted-results.txt) passed before the full aggregate. Four safe Request failed logs in the latter are deliberate audit-insertion faults; the rollback assertions passed. [WORKSPACE-INTEGRITY.md](WORKSPACE-INTEGRITY.md) records the cooperating-route concurrency boundary, bounded audit metadata, no-op behavior and exact limitations. No additional provider request, customer evidence or browser race simulation is inferred.
 
-## What the automated checks establish
+### What the automated checks establish
 
 Core fixtures create two independently authenticated accounts and workspaces, store real password/session records, save a versioned parser, upload a real synthetic original, and run the durable text-anchor worker. Assertions check invoice identifiers/amounts/line items and actual page evidence; duplicate content reserves usage once; unauthorized documents are unavailable through routes and RLS. They also exercise stale correction/approval revisions, preservation of earlier approved runs, manual invitation acceptance, viewer limits, scoped-key revocation, malformed/empty/unsupported uploads, explicit scan failure, a recovered expired job lease, saved template/nonmatching-template behavior, numeric/date/boolean normalization, cross-origin rejection, and original/result deletion.
 
@@ -52,7 +79,7 @@ Provider fixtures create unique local tenant records and use controlled external
 
 The first provider run found an installed-SDK incompatibility: Svix 2 verifies the signature but returns no parsed object. The adapter now verifies first and explicitly parses JSON afterward; the rerun passed. The initial sandbox runs could not connect to local sockets. The passing run used approved local socket access; this was an execution-environment issue rather than an application test result.
 
-## Historical deterministic extraction evaluation scope
+### Historical deterministic extraction evaluation scope
 
 | Fixture class | Measured result |
 | --- | --- |
@@ -69,7 +96,7 @@ The first provider run found an installed-SDK incompatibility: Svix 2 verifies t
 
 The held-out fixture files differ from the onboarding samples, but their supported layouts deliberately follow field labels and table headers that the deterministic engine can recognize. Counts include expected missing values and are small synthetic measurements, not general accuracy percentages. Freeform and scan failures are retained in the report. The separate source-format tests and browser checks below establish bounded HTML intake behavior; HTML is not included in these 54/54 leaf-value counts. Arbitrary customer layouts, general HTML/CSS rendering fidelity, merged or complex nested tables, broad OCR languages, noisy scans, and large-load behavior remain unproven. No AI provider was invoked in this deterministic evaluation; later real OpenAI results are recorded separately. Raw discrepancies and issues are retained in the JSON evidence.
 
-## Browser QA
+### Browser QA
 
 Root has recorded real UI actions and screenshots in [BROWSER-QA.md](BROWSER-QA.md). The sample and independently uploaded two-page PDF passed intake, persistent worker processing, source review, corrections, approval and real CSV/XLSX/JSON downloads. Saved column mappings and enum corrections survive reload. A second account demonstrated workspace denial, manual invitation acceptance and viewer restrictions. Mobile/tablet/desktop navigation, lower marketing sections, help and legal pages were inspected. The historical unconfigured scan check correctly failed with an OCR/provider-required message. Those deterministic actions remain separate from the later [completed AI receipt browser path](AI-BROWSER-ACCEPTANCE.md), which records actual image comparison, approval, JSON bytes, model/prompt/tokens, usage and all seven lifecycle events after reload.
 
@@ -79,7 +106,7 @@ The later lifecycle browser pass uploaded a synthetic German receipt, displayed 
 
 At 390×844, the lifecycle History view had a 390-pixel document width and all seven events were accessible through actual scrolling, followed by selected-run provenance and the action footer. Canonical viewport screenshots are [initial History](evidence/lifecycle-mobile.png) and [scrolled History](evidence/lifecycle-mobile-scrolled.png), with [initial DOM evidence](evidence/lifecycle-mobile.json) and [scrolled DOM evidence](evidence/lifecycle-mobile-scrolled.json). After restoring 1280×720, the [captured tab console](evidence/browser-console-lifecycle.json) had no error/warning entries. This is local synthetic browser evidence, separate from the source-stable test/build run.
 
-## AI receipt and review-source browser completion — 7 September 2026
+### AI receipt and review-source browser completion — 7 September 2026
 
 The user unlocked the Mac and explicitly approved parser creation. The real browser workflow now proves AI receipt intake, worker extraction, image comparison, approval without correction, exact JSON bytes and persisted reload with all seven lifecycle events. [AI-BROWSER-ACCEPTANCE.md](AI-BROWSER-ACCEPTANCE.md) records the four matching values, raw total, model/prompt/tokens and estimated usage. [Machine-readable acceptance](evidence/ai-browser-acceptance.json) preserves IDs, download hash, browser assertions and limits.
 
@@ -87,7 +114,7 @@ Browser verification passed at **1280×720** and **390×844**. Desktop document/
 
 The preceding AI-browser source passed **160/160 tests**, zero failures/skips, from `2026-09-07T17:15:22.744417Z` to `17:16:03.468224Z`; TypeScript/Vite build passed from `17:16:03.469913Z` to `17:16:05.141937Z`. [Test output](evidence/ai-browser-tests-results.txt), [test timing](evidence/ai-browser-tests-run.json), [build output](evidence/ai-browser-build-results.txt) and [build timing](evidence/ai-browser-build-run.json) are preserved. The [final integrity record](evidence/ai-browser-final-integrity.json) identifies **185 files**, fingerprint `d58b8bbac1a945458f955b204da5499273de6ef12531636d809ca11f27f736c4`, unchanged during verification. Only `src/features/documents/review.css` changed from the preceding source-disclosure checkpoint: its table wrapper now contains the absolutely positioned screen-reader label, eliminating the observed mobile page overflow.
 
-## Reproduce and extend evidence
+### Reproduce and extend evidence
 
 Run from the project root with the database migrated and a separately running development worker stopped while tests own queue fixtures:
 
@@ -101,11 +128,11 @@ npm run build
 
 Tests should remain serial across files while using the same database. Evaluation writes the documented Markdown/JSON outputs and original generated files. Tests must retain their own workspace/data cleanup. Do not substitute a production customer database for the local fixture database.
 
-## Final verification additions
+### Final verification additions
 
 Root browser evidence is linked above. Each later addition retains its command/workflow, date, result, material limitation and artifact path. Real AI, email, Google account, Stripe test-mode, deployment and customer use remain separate evidence layers.
 
-### Earlier 63-test backend/build evidence — 6 September 2026
+#### Earlier 63-test backend/build evidence — 6 September 2026
 
 - `npm test`: **63/63 passed**, 0 failures, 0 skipped; started `2026-09-06T21:35:32.800014Z`, finished `21:35:42.733150Z`; exact output [final-test-results.txt](evidence/final-test-results.txt).
 - `npm run build`: exit **0**; TypeScript and Vite production bundle passed; started `2026-09-06T21:36:55.380700Z`, finished `21:36:57.301671Z`; exact output [final-build-results.txt](evidence/final-build-results.txt). This produced a local bundle, not a deployment.
@@ -118,19 +145,19 @@ Before the earlier 50-test serial suite, the only pending browser job was verifi
 
 The final source uses a bounded decoder subprocess and durable interrupted-intake recovery. Nine focused regressions establish real PDF decoding, environment allowlisting, heap arguments, input/output/deadline/concurrency controls, reference/live-lease preservation, cursor progress beyond 100 originals and expired no-file reservation cleanup. [DECODER-RECOVERY.md](DECODER-RECOVERY.md) records exact limits. The subprocess still has the OS user’s filesystem/network privileges; OS/container restrictions and CPU/full-memory/process quotas remain deployment gates. Directory metadata enumeration is linear. Unattended retention/crash/load soak and production backup/restore are not established. Originals removed from Folio do not revoke copies already downloaded or sent to external destinations.
 
-### Earlier source identity and historical evidence
+#### Earlier source identity and historical evidence
 
 [verification-final-run.json](evidence/verification-final-run.json) records 119 source/config/test/fixture/public files and separately timestamped test, evaluation and build results. Its SHA-256 fingerprint is `7acc735a5ddbd73002bbd06ab15443082a3423c95a0c637357c2f81f7b83fd4c`. The exact file list was checked unchanged from the final test start through post-build verification at `2026-09-06T21:38:06.102000Z`. Documentation, generated `dist`, installed dependencies, runtime data and secrets are outside that source fingerprint; the manifest states its scope and algorithm.
 
 The earlier [verification-run.json](evidence/verification-run.json), [50-test output](evidence/test-results.txt), and [earlier build output](evidence/build-results.txt) remain unchanged as historical evidence. They describe earlier source. The 63-test record, 81-test continuation and 107-test lifecycle verification are historical beside the later OpenAI verification. Evaluation regenerates its general report path and binary fixtures, so old recorded hashes identify their earlier versions; preserved command outputs remain the historical evidence. The intervening frontend-only build remains separately recorded; it is not used as proof that the earlier tests covered later UI. Browser actions and screenshots can be updated independently without changing executable-source identity.
 
-### Configured retention and processing notifications — 6 September 2026
+#### Configured retention and processing notifications — 6 September 2026
 
 `node --import tsx --test --test-concurrency=1 tests/retention-notifications.test.ts` passed **4/4**, 0 failures and 0 skipped after a test-only SQL parameter cast fix. Migrations 005/006 applied and TypeScript passed. Owned two-workspace fixtures call the actual age-expiry maintenance function with a workspace restriction; aged terminal files and all local derived copies/read receipts disappear, while fresh/active/other-workspace data remain. Read actions preserve exact documents/runs/jobs; preference and personal read state persist. This proves age selection and deletion behavior, not an unattended multi-day timer soak.
 
 [NOTIFICATIONS-RETENTION.md](NOTIFICATIONS-RETENTION.md) records the event/read/deletion contracts and limits. The [browser pass](BROWSER-QA.md#processing-notifications) verified disabled/enabled states, five real outcomes, read persistence, document navigation, 390-pixel fit and Escape focus restoration. The setting now has implemented and verified in-app behavior; notification emails are not implemented.
 
-### Scoped bearer API workflow — 6 September 2026
+#### Scoped bearer API workflow — 6 September 2026
 
 `node --import tsx --test --test-concurrency=1 tests/api-workflow.test.ts` passed **5/5**, 0 failures and 0 skipped; `npm run typecheck` also passed. The suite constructs the actual `buildApp()` Fastify server and registers two owned local accounts. It creates scoped keys through the session route, sends a real multipart request with a synthetic original and idempotency header, reads the queued job, invokes only `processOneCoreJob(returnedJobId)`, and retrieves the completed job/document/run through bearer endpoints. Actual original bytes, digest, schema version, page evidence, leading-zero identifier, currency number, false boolean, missing null, and raw/normalized separation are asserted.
 
@@ -138,7 +165,7 @@ The HTTP replay and an independently keyed same-content upload preserve one docu
 
 The run emitted the existing Fastify `FSTDEP023` warning about deprecated `disableRequestLogging`; it did not fail a test. This verifies the documented local HTTP contract using injection and the real decoder/database/worker, not a network deployment, external automation account or API load test. The former browser-ledger claim of automated pagination-boundary coverage was retracted; root records actual pagination actions separately.
 
-### Earlier 81-test continuation: multiline, API and browser completion checks
+#### Earlier 81-test continuation: multiline, API and browser completion checks
 
 The rules engine now records **deterministic-v2**. A multiline field captures its first anchored block on one page, stopping at a blank line, effective schema/template anchor, known CSV header, or pipe/tab structure. Internal newlines, raw values and exact source evidence remain distinct from normalized/corrected values. A block exceeding 100 value lines or 65,536 UTF-16 units returns null with a review issue. This is bounded labelled-text extraction; it does not recover arbitrary page-spanning messages or general freeform content.
 
@@ -153,7 +180,7 @@ Twelve pure extraction tests cover those boundaries, empty/default behavior, raw
 After restarting the worker, the browser uploaded the original `fixtures/browser-multiline/lead-message.txt` into a stock Lead emails parser. Review displayed all three message lines, separate Company, and deterministic-v2 provenance. Approval and JSON export persisted after reload as Run 1 · Approved / Exported. The actual downloaded [approved-multiline.json](evidence/approved-multiline.json) matches all four expected values exactly, including newlines and email, with no correction. Its 575 bytes hash to `da492821d480569ed60d9f1114c8c5b7508e0d790679d5d713b33d888b082d31`. [BROWSER-QA.md](BROWSER-QA.md) also records pagination, membership/invitation/template controls and a synthetic webhook management fixture; no outbound request was made. The browser error/warning log captured for that continuation was empty.
 
 
-### Historical 107-test lifecycle verification — 6 September 2026
+#### Historical 107-test lifecycle verification — 6 September 2026
 
 - `npm test`: **107/107 passed**, 0 failures and 0 skipped; started `2026-09-06T22:44:24.273055Z`, finished `22:44:45.209463Z`; [exact test output](evidence/lifecycle-test-results.txt).
 - `npm run build`: exit **0**, including TypeScript and Vite production bundle; started `2026-09-06T22:44:56.418472Z`, finished `22:44:58.325104Z`; [exact build output](evidence/lifecycle-build-results.txt). This is a local build.
@@ -169,7 +196,7 @@ Lifecycle tests prove received and queued events commit with real job creation i
 
 The [final integrity check](evidence/lifecycle-final-integrity.json) at `2026-09-06T22:58:24.484759Z` confirmed the same 169-file source fingerprint and matching test/build/evaluation outputs, frozen evaluation report and downloaded locale JSON hashes.
 
-### Current OpenAI verification — 7 September 2026
+#### Current OpenAI verification — 7 September 2026
 
 Secure credential setup resolved the previous hard stop. The entrypoints now initialize the native Responses API adapter with the pinned `gpt-5.4-mini-2026-03-17` model and `folio-openai-extraction-v1` prompt. Every PDF sends its original plus decoded page text; PNG/JPEG send original image bytes; other supported formats send decoded text. Strict required/nullable schemas and local recursive validation reject missing/unknown keys or invalid structures. Missing extracted values stay null before documented defaults; normalization preserves raw values. A native quote and raw scalar must occur on the cited page; model-read visual quotes are explicitly qualified and require review. These checks do not establish semantic field association or independent visual verification. [AI-EXTRACTION.md](AI-EXTRACTION.md) records resource bounds, error categories, cancellation, model/token/cost provenance and provider-data limitations.
 
@@ -195,7 +222,7 @@ Historical results remain unchanged:
 Historical approval checkpoint: automatic approval review rejected the browser **Create AI receipt QA** action. [The prepared form](evidence/ai-parser-pending-approval.png) records the configured AI option, name and receipt preset before submission. At that checkpoint the positive browser workflow was pending explicit approval; no completed AI parser or result was claimed. [Local runtime checks](evidence/openai-local-runtime.json) returned HTTP 200 for web/API/presets with AI configured, and the worker restarted after the aggregate. The goal subsequently became blocked by approval/Mac lock, then resumed after the user explicitly approved creation and unlocked the Mac. The [completed AI workflow](AI-BROWSER-ACCEPTANCE.md) now supplies direct browser evidence. Resend receiving, Google Sheets, Stripe test Checkout/portal, production authentication/deployment and customer use retain distinct gates.
 
 
-## Held-out evaluation and current date-selection correction
+### Held-out evaluation and current date-selection correction
 
 The [independent authoring record](evidence/heldout-ai-2026-09-07/authoring-verification.json) and [manifest](evidence/heldout-ai-2026-09-07/manifest.json) were finalized before any model call. The author read only the public schema types/presets and installed-library list, without extraction code, existing tests/fixtures or reports. Original bytes, expectations, runner and v1 source were hashed before evaluation. Five unique valid documents cover a two-page six-row invoice, French image receipt, image-only PDF with no date, narrative email with paragraph breaks and freeform English receipt; an exact image duplicate and malformed PDF complete the set.
 
@@ -207,7 +234,7 @@ Only `openai-provider.ts` changed afterward: prompt version v2 adds date-field s
 Historical v2 handoff checkpoint: [v2 runtime](evidence/openai-date-local-runtime.json) confirms HTTP 200 web/API/presets and observed worker startup after tests; [redacted credential check](evidence/openai-date-key-boundary-check.json) confirms mode 600, Git ignored/untracked and no key match across 172 client files. At that checkpoint the AI browser workflow awaited explicit approval; the later completed workflow is recorded in [AI-BROWSER-ACCEPTANCE.md](AI-BROWSER-ACCEPTANCE.md).
 
 
-## Current review-source acceptance gate
+### Current review-source acceptance gate
 
 [REVIEW-PROVENANCE.md](REVIEW-PROVENANCE.md) records the source-disclosure fix and 15 controlled rendering cases included in the 160-test checkpoint. [Passive browser evidence](evidence/ai-passive-browser-check.json) confirms the prepared AI form at 390×844 and Usage at 1280×720 before that disclosure. CUA then reported a locked Mac and failed automatic unlock; disclosure checks, viewport reset and the rejected AI creation action remained pending at that historical checkpoint. The user subsequently unlocked the Mac and explicitly approved creation. The [actual AI browser workflow](AI-BROWSER-ACCEPTANCE.md) is now complete; the completed disclosure/mobile/keyboard acceptance is recorded in [REVIEW-PROVENANCE.md](REVIEW-PROVENANCE.md).
 
