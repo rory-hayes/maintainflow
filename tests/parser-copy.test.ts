@@ -120,7 +120,9 @@ before(async () => {
   for (const [pool, role] of pools) {
     const { rows: [connected] } = await pool.query("select current_database() name,current_schema() schema,current_user role,current_setting('port')::int port,inet_server_addr()::text address");
     assert.equal(connected.name, 'folio'); assert.equal(connected.schema, 'public'); assert.equal(connected.role, role); assert.equal(connected.port, urlMode ? 5432 : 55432);
-    if (urlMode) assert.ok(['127.0.0.1', '::1'].includes(connected.address)); else assert.equal(connected.address, null);
+    // GitHub publishes its disposable Docker service on localhost. PostgreSQL
+    // sees the container interface; the client URLs above enforce loopback.
+    if (urlMode) assert.ok(connected.address, 'CI must use the verified TCP endpoint'); else assert.equal(connected.address, null);
   }
   localVerified = true; setStorageForTests(storage);
   globalThis.fetch = async () => { io.fetch++; throw new Error('External requests are forbidden in parser-copy fixtures'); };

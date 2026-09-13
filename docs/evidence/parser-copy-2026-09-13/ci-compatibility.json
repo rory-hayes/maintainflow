@@ -1,0 +1,30 @@
+{
+  "recordedAt": "2026-09-13T16:51:05.273805+00:00",
+  "source": {
+    "recordedAt": "2026-09-13T16:51:05.273805+00:00",
+    "count": 196,
+    "fingerprint": "12ff937326983113b663716b8370fc7c19d229ef5e46efeedb209ce5c316e875",
+    "postSuiteChange": "After the browser checkpoint, only the parser-copy test database guard changed for GitHub Docker service compatibility. Application code remains identical."
+  },
+  "browserVerifiedSource": "2a2a0fad0acb307fefb2a98f0e27b2a5fb3a909f212d1ee840ce6942fe0db30a",
+  "changedFiles": [
+    "tests/parser-copy.test.ts"
+  ],
+  "focusedLocal": {
+    "tests": 11,
+    "pass": 11,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "durationMs": 2831.960625
+  },
+  "firstCI": {
+    "head": "298853252826a9f2c60dda42392951fdc351beee",
+    "run": 34769328464,
+    "failed": true,
+    "cause": "The test guard incorrectly required PostgreSQL server address to be loopback. GitHub reaches a Docker container through a published localhost port. No copy test body ran."
+  },
+  "guard": "Both client URLs must remain loopback-only in CI test mode; actual database, schema, role and port checks are retained. Local runs still require the checkout Unix socket.",
+  "applicationChanged": false,
+  "exactHeadCI": "Pending on follow-up commit; see PR29 for final status."
+}
