@@ -37,6 +37,9 @@ function countFields(fields:SchemaField[]):number{return fields.reduce((count,fi
 const identity=(template:any)=>({id:typeof template?.id==='string'?template.id.slice(0,64):null,name:typeof template?.name==='string'?template.name.slice(0,100):'Unnamed template'});
 const createdAt=(template:any)=>{const value=template?.created_at??template?.createdAt;const parsed=value?new Date(value).getTime():NaN;return Number.isFinite(parsed)?parsed:Infinity;};
 
+/** Shared with parser copying so fresh template identities preserve matching priority. */
+export function compareTemplatePriority(a:any,b:any){const aid=identity(a).id??'',bid=identity(b).id??'';return createdAt(a)-createdAt(b)||(aid<bid?-1:aid>bid?1:0);}
+
 /** Read-only, bounded selection. All inputs belong to a pinned job or an explicitly labelled preview. */
 export function selectTemplateExtraction(pages:PageText[],schema:ParserSchema,locale:string,templates:any[],mode:'ai'|'rules'):{selection:TemplateSelection;candidates:TemplateCandidate[];availableSourceText:boolean;result?:ExtractionResult}{
  const enabled=(Array.isArray(templates)?templates:[]).filter(template=>template?.enabled===true),text=pages.map(page=>page.text).join('\n'),availableSourceText=Boolean(text.trim());
@@ -68,7 +71,7 @@ export function selectTemplateExtraction(pages:PageText[],schema:ParserSchema,lo
  });
  const candidates=evaluated.map(row=>row.candidate),qualified=evaluated.filter(row=>row.candidate.matched);
  if(!qualified.length)return fallback(availableSourceText?'no_match':'no_readable_text',candidates);
- qualified.sort((a,b)=>b.candidate.fieldCount-a.candidate.fieldCount||createdAt(a.template)-createdAt(b.template)||((a.candidate.id??'')<(b.candidate.id??'')?-1:(a.candidate.id??'')>(b.candidate.id??'')?1:0)||a.index-b.index);
+ qualified.sort((a,b)=>b.candidate.fieldCount-a.candidate.fieldCount||compareTemplatePriority(a.template,b.template)||a.index-b.index);
  const chosen=qualified[0],selection:TemplateSelection={...base,outcome:'template',reason:'matched',eligibleTemplates:qualified.length,template:{...identity(chosen.template),fieldCount:chosen.candidate.fieldCount,tieCount:qualified.filter(row=>row.candidate.fieldCount===chosen.candidate.fieldCount).length}};
  return {selection,candidates,availableSourceText,result:{...chosen.result!,engine:'text-template',model:'deterministic-v3',promptVersion:'folio-text-template-v1'}};
 }

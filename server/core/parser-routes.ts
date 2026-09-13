@@ -11,18 +11,15 @@ import {aiConfigured} from './worker.js';
 import {allowedFormatsInput} from './intake-policy.js';
 import {selectTemplateExtraction,templateRuleValidation} from './template-selection.js';
 import {templateLimits,templateReasonLabels} from '../../shared/template-selection.js';
+import {templateBody} from './template-input.js';
+import {requireParserCapacity} from './parser-capacity.js';
+import {copyParser} from './parser-copy.js';
 const idFrom=(p:unknown)=>z.object({id:z.string().uuid()}).parse(p).id;
 const locale=z.string().max(35).refine(v=>{try{new Intl.NumberFormat(v);return true;}catch{return false;}},'Invalid locale');
 const timezone=z.string().max(80).refine(v=>{try{new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}},'Invalid timezone');
 const parserInput=z.object({setupMode:z.enum(['preset','sample']).default('preset'),name:z.string().trim().min(1).max(100),useCase:z.enum(['invoice','purchase_order','receipt','leads','custom']).default('custom'),mode:z.enum(['rules','ai']).default('rules'),instructions:z.string().max(8000).default(''),locale:locale.default('en-IE'),timezone:timezone.default('Europe/Dublin'),schema:parserSchema.optional(),allowedFormats:allowedFormatsInput.optional()});
 // Creation defaults must never reset settings omitted from a partial update.
 const parserPatch=z.object({name:parserInput.shape.name.optional(),mode:z.enum(['rules','ai']).optional(),instructions:z.string().max(8000).optional(),locale:locale.optional(),timezone:timezone.optional(),archived:z.boolean().optional(),allowedFormats:allowedFormatsInput.optional()});
-// Call only after taking the workspace advisory lock shared by create/archive/restore.
-async function requireParserCapacity(c:PoolClient,workspaceId:string){
- const {rows:[usage]}=await c.query('select count(*)::integer count from parsers where workspace_id=$1 and archived=false',[workspaceId]);
- const {rows:[workspace]}=await c.query('select plan from workspaces where id=$1',[workspaceId]);
- if(usage.count>=workspace.plan.maxParsers)badRequest('The workspace parser limit has been reached',429);
-}
 // The caller takes the workspace advisory lock before this parser row lock.
 async function lockTemplateParser(c:PoolClient,workspaceId:string,parserId:string){
  const {rows:[parser]}=await c.query('select p.id,s.schema from parsers p join schema_versions s on s.id=p.active_schema_id and s.parser_id=p.id and s.workspace_id=p.workspace_id where p.id=$1 and p.workspace_id=$2 for update of p',[parserId,workspaceId]);
@@ -37,7 +34,13 @@ export async function registerParsers(app:FastifyInstance){
 app.get('/api/presets',async()=>({presets:Object.entries(presets).map(([id,p])=>({id,...p})),providers:{setup:{configured:aiConfigured()&&schemaSuggestionsConfigured(),message:aiConfigured()&&schemaSuggestionsConfigured()?'AI-assisted setup is available.':'AI-assisted setup needs both field discovery and extraction providers.'},ai:{configured:aiConfigured(),message:aiConfigured()?'Provider configured; verify with your documents.':'AI provider is not configured. Text-anchor parsing is available.'}}}));
 app.get('/api/parsers',async req=>{const a=await requireActor(req,{scope:'parsers:read'});return withWorkspace(a.workspaceId,async c=>({parsers:(await c.query('select p.*,(select count(*)::int from documents d where d.parser_id=p.id) document_count,(select count(*)::int from documents d where d.parser_id=p.id and d.status=$2) review_count from parsers p where p.workspace_id=$1 order by p.archived,p.created_at desc',[a.workspaceId,'needs_review'])).rows.map(camel)}));});
 app.post('/api/parsers',async(req,reply)=>{const a=await requireActor(req,{roles:editors,scope:'parsers:write'});const body=parserInput.parse(req.body);if(body.setupMode==='sample'){if(body.mode!=='ai'||body.useCase!=='custom'||body.schema)badRequest('Sample setup requires AI mode, a custom parser, and no preset schema override.');if(a.authType==='api'&&!a.scopes?.includes('documents:read'))badRequest('API key requires documents:read scope',403);if(!aiConfigured()||!schemaSuggestionsConfigured())badRequest('AI-assisted setup is unavailable. Configure field discovery and extraction first.',503);}const schema=body.schema||{fields:presets[body.useCase].fields};const result=await withWorkspace(a.workspaceId,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[a.workspaceId]);await requireParserCapacity(c,a.workspaceId);const {rows:[p]}=await c.query('insert into parsers(workspace_id,name,use_case,mode,instructions,locale,timezone,allowed_formats,field_setup_state) values($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *',[a.workspaceId,body.name,body.useCase,body.mode,body.instructions,body.locale,body.timezone,body.allowedFormats??null,body.setupMode==='sample'?'awaiting_sample':'ready']);const {rows:[s]}=await c.query('insert into schema_versions(workspace_id,parser_id,version,schema,created_by) values($1,$2,1,$3,$4) returning *',[a.workspaceId,p.id,JSON.stringify(schema),a.userId]);await c.query('update parsers set active_schema_id=$2 where id=$1',[p.id,s.id]);await audit(c,a.workspaceId,a.userId,'parser.created',p.id);return {parser:camel({...p,active_schema_id:s.id}),schema:{id:s.id,version:s.version,...s.schema}};});reply.code(201);return result;});
-app.get('/api/parsers/:id',async req=>{const a=await requireActor(req,{scope:'parsers:read'});const id=idFrom(req.params);return withWorkspace(a.workspaceId,async c=>{const p=(await c.query('select * from parsers where id=$1 and workspace_id=$2',[id,a.workspaceId])).rows[0];if(!p)notFound('Parser not found');const schemas=(await c.query('select * from schema_versions where parser_id=$1 order by version desc',[id])).rows.map(s=>({id:s.id,version:s.version,createdAt:s.created_at,...s.schema}));const templates=(await c.query('select * from templates where parser_id=$1 order by created_at,id',[id])).rows.map(camel);return {parser:camel(p),schema:schemas.find(s=>s.id===p.active_schema_id),schemas,templates};});});
+app.post('/api/parsers/:id/copy',async(req,reply)=>{
+ const actor=await requireActor(req,{roles:editors,scope:'parsers:write'}),id=idFrom(req.params);
+ if(actor.authType==='api')for(const scope of ['parsers:read','results:read'])if(!actor.scopes?.includes(scope))badRequest(`API key requires ${scope} scope`,403);
+ const body=z.object({name:parserInput.shape.name.optional()}).strict().parse(req.body??{});
+ return reply.code(201).send(await copyParser(actor,id,body.name));
+});
+app.get('/api/parsers/:id',async req=>{const a=await requireActor(req,{scope:'parsers:read'});const id=idFrom(req.params);return withWorkspace(a.workspaceId,async c=>{const p=(await c.query('select * from parsers where id=$1 and workspace_id=$2',[id,a.workspaceId])).rows[0];if(!p)notFound('Parser not found');const schemas=(await c.query('select * from schema_versions where parser_id=$1 order by version desc',[id])).rows.map(s=>({...s.schema,id:s.id,version:s.version,createdAt:s.created_at}));const templates=(await c.query('select * from templates where parser_id=$1 order by created_at,id',[id])).rows.map(camel);return {parser:camel(p),schema:schemas.find(s=>s.id===p.active_schema_id),schemas,templates};});});
 app.get('/api/parsers/:id/setup',async req=>{
  const a=await requireActor(req,{scope:'parsers:read'}),id=idFrom(req.params);
  if(a.authType==='api'&&!a.scopes?.includes('documents:read'))badRequest('API key requires documents:read scope',403);
@@ -93,7 +96,7 @@ app.post('/api/parsers/:id/schema',async req=>{
   return {schema:{id:version.id,version:version.version,...version.schema}};
  });
 });
-const templateBody=z.object({name:z.string().trim().min(1).max(100),matchText:z.string().max(1000).default(''),enabled:z.boolean().default(true),rules:z.array(z.object({field:z.string().max(259),anchor:z.string().min(1).max(200)}).strict()).max(templateLimits.rules)}).strict();
+
 app.post('/api/parsers/:id/templates',async req=>{
  const a=await requireActor(req,{roles:editors,scope:'parsers:write'}),id=idFrom(req.params),b=templateBody.parse(req.body);
  return withWorkspace(a.workspaceId,async c=>{
