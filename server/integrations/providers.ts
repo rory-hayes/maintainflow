@@ -11,6 +11,7 @@ import {adminPool,withWorkspace,transaction,audit,badRequest,notFound} from '../
 import {config} from '../core/config.js';
 import {requireWorkBudget,WorkBudgetExhausted,type WorkBudget} from '../core/work-budget.js';
 import {addDocument} from '../core/intake.js';
+import {ParserFormatNotAllowedError} from '../core/intake-policy.js';
 import {encryptSecret,decryptSecret} from './secrets.js';
 import {publicRequest} from './network.js';
 import {mockBillingEnabled,mockBillingStatus,registerMockBilling,requireRealBilling} from './mock-billing.js';
@@ -120,6 +121,14 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
  const client=dependencies?.client||resendClient();
  const download=dependencies?.download||publicRequest;
  const intake=dependencies?.intake||addDocument;
+ const intakeItem=async(...args:Parameters<typeof addDocument>)=>{
+  try{await intake(...args);}
+  catch(error){
+   // Core intake commits this item's rejection receipt before throwing. A
+   // blocked body/attachment must not prevent other allowed items in the email.
+   if(!(error instanceof ParserFormatNotAllowedError)||error.statusCode!==415||error.code!=='parser_format_not_allowed'||error.parserId!==args[1])throw error;
+  }
+ };
  requireWorkBudget(budget,20_000);
  const {data:email,error}=await client.emails.receiving.get(pointer.emailId,{html_format:'cid'});
  if(error||!email)throw new Error('Resend could not retrieve the received email content.');
@@ -133,8 +142,8 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
  let combinedBytes=Buffer.byteLength(email.text||email.html||'')+email.attachments.filter(a=>a.content_disposition!=='inline').reduce((sum,a)=>sum+a.size,0);
  if(combinedBytes>25*1024*1024)throw new Error('Inbound email content exceeds the 25 MiB aggregate limit.');
  const attachmentCache=new Map<string,Buffer>();
- // Existing intake receipts are the checkpoint. Never decode completed items again
- // merely because a bounded function yielded halfway through a larger email.
+ // Accepted and policy-rejected intake receipts are durable checkpoints. Never
+ // decode handled items again when a bounded function resumes a larger email.
  const received=async(workspaceId:string,key:string)=>Boolean((await withWorkspace(workspaceId,c=>c.query('select id from intake_events where workspace_id=$1 and idempotency_key=$2',[workspaceId,key]))).rowCount);
  for(const route of routes){
   requireWorkBudget(budget,10_000);
@@ -151,7 +160,7 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
    if(!await received(route.workspace_id,key)){
     requireWorkBudget(budget,80_000);
     const body=await receivedEmailBody(email,config.maxBytes);
-    await intake(actor,route.parser_id,body,`${email.subject.slice(0,180)||'Received email'}.eml`,'message/rfc822',key);
+    await intakeItem(actor,route.parser_id,body,`${email.subject.slice(0,180)||'Received email'}.eml`,'message/rfc822',key);
    }
   }
   if(route.parse_attachments){for(const attachment of email.attachments){
@@ -172,7 +181,7 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
     attachmentCache.set(attachment.id,bytes);
    }
    requireWorkBudget(budget,80_000);
-   await intake(actor,route.parser_id,bytes,attachment.filename||`attachment-${attachment.id}.bin`,attachment.content_type,key);
+   await intakeItem(actor,route.parser_id,bytes,attachment.filename||`attachment-${attachment.id}.bin`,attachment.content_type,key);
   }}
   await withWorkspace(route.workspace_id,async c=>{
    await c.query('update email_routes set last_received_at=now() where id=$1',[route.id]);

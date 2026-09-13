@@ -60,7 +60,7 @@ export async function finalizeDirectUpload(actor:Actor,id:string){
     return result;
   }catch(error){
     const status=(error as {statusCode?:number}).statusCode;
-    await withWorkspace(actor.workspaceId,c=>c.query("update direct_uploads set state=$3,finalize_owner=null,finalize_lease_until=null where id=$1 and finalize_owner=$2",[id,leaseOwner,[400,413,422].includes(status??0)?'failed':'pending']));
+    await withWorkspace(actor.workspaceId,c=>c.query("update direct_uploads set state=$3,finalize_owner=null,finalize_lease_until=null where id=$1 and finalize_owner=$2",[id,leaseOwner,[400,413,415,422].includes(status??0)?'failed':'pending']));
     throw error;
   }
 }
