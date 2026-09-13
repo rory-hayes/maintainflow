@@ -1,4 +1,5 @@
 import type {FastifyInstance} from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import {z} from 'zod';
 import {randomUUID} from 'node:crypto';
 import {adminPool,transaction,badRequest,camel} from './db.js';
@@ -9,15 +10,20 @@ const credentials=z.object({email:z.string().email().max(254).transform(v=>v.tri
 // Password creation rules must not reject an existing credential at sign-in.
 const loginCredentials=z.object({email:z.string().max(254).trim().email().toLowerCase(),password:z.string().min(1).max(128)});
 const incorrectCredentials='Email or password is incorrect';
-const attempts=new Map<string,{count:number,until:number}>();
-function limit(ip:string){const now=Date.now();for(const [key,v]of attempts)if(v.until<now)attempts.delete(key);const item=attempts.get(ip)||{count:0,until:now+15*60000};item.count++;attempts.set(ip,item);if(item.count>30)badRequest('Too many authentication attempts. Try again in 15 minutes.',429);}
 function authOrigin(origin:string|undefined){if(origin&&origin!==config.origin)badRequest('Request origin is not allowed',403);}
 export async function sessionResponse(userId:string,workspaceId:string){const user=(await adminPool.query('select id,email,name,created_at from users where id=$1',[userId])).rows[0];const workspaces=(await adminPool.query('select w.*,m.role from memberships m join workspaces w on w.id=m.workspace_id where m.user_id=$1 order by w.created_at',[userId])).rows.map(camel);return {user:camel(user),workspace:workspaces.find(w=>w.id===workspaceId),workspaces};}
 export async function registerAuth(app:FastifyInstance){
-app.post('/api/auth/register',async(req,reply)=>{authOrigin(req.headers.origin);limit(req.ip);const body=credentials.extend({name:z.string().trim().min(1).max(100),workspaceName:z.string().trim().min(1).max(100),inviteCode:z.string().max(256).optional()}).parse(req.body);if(!acceptsPreviewInvite(body.inviteCode))badRequest('An invite code is required for this test preview.',403);const passwordHash=await hashPassword(body.password);const ids=await transaction(adminPool,async c=>{if((await c.query('select 1 from users where email=$1',[body.email])).rowCount)badRequest('This email is already registered',409);const {rows:[u]}=await c.query('insert into users(email,name,password_hash) values($1,$2,$3) returning id',[body.email,body.name,passwordHash]);const {rows:[w]}=await c.query('insert into workspaces(name,slug,plan) values($1,$2,$3) returning id',[body.workspaceName,`${body.workspaceName.toLowerCase().replace(/[^a-z0-9]+/g,'-')}-${randomUUID().slice(0,8)}`,JSON.stringify(defaultPlan)]);await c.query('insert into memberships(workspace_id,user_id,role) values($1,$2,$3)',[w.id,u.id,'owner']);return {userId:u.id,workspaceId:w.id};});await createSession(reply,ids.userId,ids.workspaceId);reply.code(201);return sessionResponse(ids.userId,ids.workspaceId);});
-app.post('/api/auth/login',async(req,reply)=>{
+// Share one bounded in-memory budget for login and registration in this process.
+// Encapsulation keeps session reads and workspace routes outside this limiter.
+await app.register(async authentication=>{
+ await authentication.register(rateLimit,{
+  global:true,hook:'onRequest',max:30,timeWindow:15*60_000,
+  skipOnError:false,continueExceeding:false,exponentialBackoff:false,ban:-1,
+  errorResponseBuilder:(_request,context)=>Object.assign(new Error('Too many authentication attempts. Try again in 15 minutes.'),{statusCode:context.statusCode}),
+ });
+authentication.post('/api/auth/register',async(req,reply)=>{authOrigin(req.headers.origin);const body=credentials.extend({name:z.string().trim().min(1).max(100),workspaceName:z.string().trim().min(1).max(100),inviteCode:z.string().max(256).optional()}).parse(req.body);if(!acceptsPreviewInvite(body.inviteCode))badRequest('An invite code is required for this test preview.',403);const passwordHash=await hashPassword(body.password);const ids=await transaction(adminPool,async c=>{if((await c.query('select 1 from users where email=$1',[body.email])).rowCount)badRequest('This email is already registered',409);const {rows:[u]}=await c.query('insert into users(email,name,password_hash) values($1,$2,$3) returning id',[body.email,body.name,passwordHash]);const {rows:[w]}=await c.query('insert into workspaces(name,slug,plan) values($1,$2,$3) returning id',[body.workspaceName,`${body.workspaceName.toLowerCase().replace(/[^a-z0-9]+/g,'-')}-${randomUUID().slice(0,8)}`,JSON.stringify(defaultPlan)]);await c.query('insert into memberships(workspace_id,user_id,role) values($1,$2,$3)',[w.id,u.id,'owner']);return {userId:u.id,workspaceId:w.id};});await createSession(reply,ids.userId,ids.workspaceId);reply.code(201);return sessionResponse(ids.userId,ids.workspaceId);});
+authentication.post('/api/auth/login',async(req,reply)=>{
  authOrigin(req.headers.origin);
- limit(req.ip);
  const parsed=loginCredentials.safeParse(req.body);
  if(!parsed.success)badRequest(incorrectCredentials,401);
  const body=parsed.data;
@@ -28,6 +34,7 @@ app.post('/api/auth/login',async(req,reply)=>{
  if(!member)badRequest(incorrectCredentials,401);
  await createSession(reply,user.id,member.workspace_id);
  return sessionResponse(user.id,member.workspace_id);
+});
 });
 app.get('/api/auth/me',async req=>{const actor=await requireActor(req);requireSession(actor);return sessionResponse(actor.userId,actor.workspaceId);});
 app.post('/api/auth/logout',async(req,reply)=>{const actor=await requireActor(req);requireSession(actor);await adminPool.query('delete from sessions where token_hash=$1',[hashToken(req.cookies.folio_session!)]);reply.clearCookie('folio_session',{path:'/'});return {ok:true};});

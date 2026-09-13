@@ -52,6 +52,18 @@ function rejected(response: Awaited<ReturnType<typeof login>>) {
   assert.equal(response.cookies.length, 0);
 }
 
+function throttled(response: Awaited<ReturnType<typeof login>>) {
+  assert.equal(response.statusCode, 429, response.body);
+  assert.deepEqual(response.json(), { error: 'request_error',
+    message: 'Too many authentication attempts. Try again in 15 minutes.' });
+  assert.equal(response.headers['x-ratelimit-limit'], '30');
+  assert.equal(response.headers['x-ratelimit-remaining'], '0');
+  const retryAfter = Number(response.headers['retry-after']);
+  assert.ok(Number.isInteger(retryAfter) && retryAfter >= 1 && retryAfter <= 900);
+  assert.equal(response.headers['set-cookie'], undefined);
+  assert.equal(response.cookies.length, 0);
+}
+
 before(async () => {
   // These fixtures are deliberately local, even if a caller has hosted env vars.
   const options = adminPool.options;
@@ -160,10 +172,33 @@ test('invalid login shapes consume the real authentication budget and preserve a
     rejected(await login({ email: owner.email, password: '' }, '192.0.2.136'));
   }
   const response = await login({ email: owner.email, password: owner.password }, '192.0.2.136');
-  assert.equal(response.statusCode, 429, response.body);
-  assert.deepEqual(response.json(), { error: 'request_error',
-    message: 'Too many authentication attempts. Try again in 15 minutes.' });
-  assert.equal(response.headers['set-cookie'], undefined);
+  throttled(response);
+  assert.equal(await sessionCount(), beforeCount);
+});
+
+test('registration and login share an authentication budget without throttling health or session checks', async () => {
+  const beforeCount = await sessionCount();
+  const address = '192.0.2.140';
+  const invalidRegistration = () => app.inject({ method: 'POST', url: '/api/auth/register', remoteAddress: address,
+    headers: { origin: config.origin }, payload: {} });
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const registration = await invalidRegistration();
+    assert.equal(registration.statusCode, 400, registration.body);
+    assert.equal(registration.json().error, 'validation_error');
+    assert.equal(registration.headers['set-cookie'], undefined);
+    rejected(await login({ email: owner.email, password: '' }, address));
+  }
+  throttled(await invalidRegistration());
+  throttled(await login({ email: owner.email, password: owner.password }, address));
+
+  const health = await app.inject({ method: 'GET', url: '/api/health', remoteAddress: address });
+  assert.equal(health.statusCode, 200, health.body);
+  assert.equal(health.json().status, 'ok');
+  assert.equal(health.headers['x-ratelimit-limit'], undefined);
+  const session = await app.inject({ method: 'GET', url: '/api/auth/me', remoteAddress: address });
+  assert.equal(session.statusCode, 401, session.body);
+  assert.equal(session.headers['x-ratelimit-limit'], undefined);
+  assert.equal(session.headers['set-cookie'], undefined);
   assert.equal(await sessionCount(), beforeCount);
 });
 
