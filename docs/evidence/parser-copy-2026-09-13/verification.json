@@ -1,0 +1,208 @@
+{
+  "recordedAt": "2026-09-13T16:38:00.167689+00:00",
+  "source": {
+    "recordedAt": "2026-09-13T16:32:29.373017+00:00",
+    "count": 196,
+    "fingerprint": "2a2a0fad0acb307fefb2a98f0e27b2a5fb3a909f212d1ee840ce6942fe0db30a",
+    "postSuiteChange": "Only mobile parser-row CSS changed after aggregate. Final build/browser verify that layout; exact-head CI is recorded separately."
+  },
+  "tests": {
+    "focused": {
+      "tests": 11,
+      "pass": 11,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "durationMs": 2950.834458
+    },
+    "aggregate": {
+      "tests": 394,
+      "pass": 394,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "durationMs": 89084.501167
+    }
+  },
+  "browser": {
+    "startedAt": "2026-09-13T16:37:06.630Z",
+    "completedAt": "2026-09-13T16:37:27.194Z",
+    "passed": true,
+    "checks": {
+      "desktopNamedCopyAndMobileHeldRequestGuardSubmitCancelAndClose": true,
+      "freshCopyNavigatesEmptyAndPreservesExactSettingsFieldsTemplatePriorityAndMapping": true,
+      "editingOriginalSettingsLeavesCopiedConfigurationIndependent": true,
+      "archivedListSourceCreatesAnActiveCopyWithoutRestoringOriginal": true,
+      "setupBlockedWithoutRequestAndOwnedPlanLimitShowsActionableServerError": true,
+      "lostResponseAfterRealServerCommitPromptsListAndPreventsReplay": true,
+      "archivedListLostResponseRecoversToActiveViewAndShowsSingleCommittedCopy": true,
+      "viewerHasNoCopyControlsInListOrDetailSettings": true,
+      "copyAcceptsOwnUploadAndPreservesTiedTemplateWinnerWithZeroProvidersAndNoAutoApproval": true,
+      "explicitApprovalAndCopiedMappingProduceExactCSVRowsAndApprovedRevisionMetadata": true,
+      "desktopAndMobileHelpExplainCopyIdentityInstructionsAllScopesAndLimitsWithoutOverflowOrMutations": true,
+      "onlyTwoOwnedUploadPagesAndExplicitlyScopedExpectedErrorsWithNoExternalCalls": true
+    },
+    "viewports": {
+      "desktop-copy-dialog": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "mobile-copy-pending-guard": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-fresh-empty-copy": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-copy-setup-block": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-copy-plan-limit": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-copy-uncertain-response": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-archived-source-row-before-copy": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-archived-list-uncertain-copy": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-archived-copy-recovered-active-list": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "desktop-viewer-no-copy": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "mobile-viewer-settings-no-copy": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "desktop-copied-template-history": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "desktop-copied-export-mapping": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "desktop-help-copy-parser": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "desktop-help-copy-parser-api": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "desktop-help-copy-api-scopes": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "mobile-help-copy-parser": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-help-copy-parser-api": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-help-copy-api-scopes": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    "controlledOnly": true,
+    "providerCalls": 0,
+    "suggestionCalls": 0,
+    "pageErrors": [],
+    "blockedNetwork": [],
+    "cleanedOwnedFixtures": true
+  },
+  "browserConsole": {
+    "unexpectedEntries": 0,
+    "expectedErrors": [
+      "Signed-out auth probe401",
+      "Owned parser-capacity429",
+      "Two deliberately lost copy responses"
+    ],
+    "limiter": "Controlled memory store does not throttle artificial rapid navigation; actual rate-limit behavior has separate regression tests."
+  },
+  "syntheticMetering": {
+    "uploadPages": 2,
+    "schemaSuggestions": 0,
+    "extractionCostUsd": 0,
+    "reprocessEvents": 0,
+    "liveProviderCalls": 0
+  },
+  "export": {
+    "format": "csv",
+    "sha256": "5a143edb8456f7d7642ec278cf3d3f9dfb40bbc569f2143ba2dbc74eb30706ca",
+    "exactExpectedBytes": true,
+    "exactSnapshotBytes": true,
+    "mappingName": "Copied invoice rows",
+    "rows": 2,
+    "approvalMetadataVerified": true
+  },
+  "packaging": {
+    "buildPassed": true,
+    "packagedDecoders": 6,
+    "packagedApiAndPreviewGuard": true
+  },
+  "localMigrations": {
+    "count": 17,
+    "latest": "026_template_selection.sql",
+    "newMigrationForCopy": false
+  },
+  "hosted": {
+    "parserCopyDeployed": false,
+    "unappliedMigrations": [
+      "021",
+      "022",
+      "023",
+      "024",
+      "025",
+      "026"
+    ]
+  },
+  "limitations": [
+    "Controlled synthetic inputs and local browser only; no new live-provider or customer acceptance.",
+    "The first browser attempt passed seven groups then stopped on an incorrect upload-navigation assumption; it also encountered artificial fixture-limiter429s. Its evidence and owned cleanup are preserved privately.",
+    "A separate source review found archived-list recovery could hide an active copy; the UI now opens the active list and the final browser run exercises this case.",
+    "The second browser attempt stopped on a tab-selection assertion racing navigation; the next run awaits rendered selection. Failed evidence and scoped cleanup are preserved."
+  ],
+  "visualReview": {
+    "desktopDialog": true,
+    "mobileArchivedSourceNameWidth": 281,
+    "mobileArchivedSourceNameHeight": 19.546875,
+    "activeRecoveryList": true,
+    "mobileApiHelp": true
+  }
+}

@@ -54,6 +54,11 @@ export default function Help() {
         </ol>
         <Link className="button primary marketing-cta" to="/sign-up?sample=invoice">Try the invoice sample</Link>
       </section>
+      <section id="copy-parser">
+        <h2>Reuse a parser</h2>
+        <p>Choose Copy on the parser list or Copy parser inside a parser. Name the new parser to reuse its saved settings, current fields, text templates and saved export mappings. Source and copy can then be edited independently.</p>
+        <p>The copy starts with no documents or processing history and uses one active parser slot. Finish initial field setup before copying. Set up its intake email address and parser-specific connections separately; existing workspace-wide integrations still apply.</p>
+      </section>
       <section id="formats">
         <h2>Formats and limits</h2>
         <p>Files must be 10 MB or smaller. A batch can contain up to 20 files. Your workspace may apply a smaller allowance. Unsupported, empty, malformed or encrypted files return an explicit error.</p>
@@ -117,6 +122,7 @@ const resultExample = [
 
 const endpoints = [
   ['GET', '/api/parsers', 'parsers:read', 'List parsers in the key’s workspace.'],
+  ['POST', '/api/parsers/:id/copy', 'parsers:read, parsers:write, results:read', 'Copy saved configuration into a new active parser; returns 201.'],
   ['POST', '/api/parsers/:id/documents', 'documents:write', 'Upload multipart files; returns 202 with document and job IDs.'],
   ['GET', '/api/documents', 'documents:read', 'List documents with page, pageSize, search, status and parserId filters.'],
   ['GET', '/api/documents/:id', 'documents:read', 'Read the document, extraction runs and job history.'],
@@ -150,6 +156,12 @@ export function ApiDocs() {
         <h2>Endpoints</h2>
         <div className="marketing-guide-table-wrap"><table className="marketing-endpoints-table"><thead><tr><th scope="col">Method</th><th scope="col">Path</th><th scope="col">Scope</th><th scope="col">Purpose</th></tr></thead><tbody>{endpoints.map(([method, path, scope, purpose]) => <tr key={path}><td><strong>{method}</strong></td><td><code>{path}</code></td><td><code>{scope}</code></td><td>{purpose}</td></tr>)}</tbody></table></div>
         <p>Export requests accept <code>documentIds</code>, <code>format</code> (csv, xlsx or json), optional <code>columns</code> mappings and an optional <code>lineItems</code> field key. Every selected document needs an approved revision.</p>
+      </section>
+      <section id="copy-parser-api">
+        <h2>Copy a parser</h2>
+        <p>Send <code>POST /api/parsers/:id/copy</code> with an optional <code>name</code> (1–100 characters). The source must belong to the workspace and have completed field setup. Owners, admins and editors can copy; API keys need all three scopes listed above because the response includes saved export mappings.</p>
+        <p>A successful response returns HTTP 201 with <code>parser</code>, schema version 1, <code>templates</code> and <code>mappings</code>, all with fresh IDs. Settings and template priority are preserved. No documents, processing history, email routes or provider connections are copied. An archived source produces an active copy.</p>
+        <p>Each request creates a new parser. This endpoint has no idempotency key: if the response is lost, check the parser list before retrying. The copy requires an available parser slot and accepts at most 100 templates, 100 export mappings and 2 MiB of saved configuration. Incomplete setup or invalid/oversized saved configuration returns 409; active-parser capacity returns 429.</p>
       </section>
       <section id="webhooks">
         <h2>Signed webhook deliveries</h2>

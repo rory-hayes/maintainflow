@@ -6,7 +6,7 @@ import {withWorkspace,audit,badRequest,notFound,camel} from '../core/db.js';
 import {appendDocumentEvent} from '../core/document-events.js';
 import {renderExport,type ExportRecord} from './export-format.js';
 
-const columns = z.array(z.object({source:z.string().min(1).max(120),label:z.string().min(1).max(120)})).max(100);
+import {exportColumns as columns,exportMappingInput} from './export-input.js';
 const optionsSchema = z.object({format:z.enum(['csv','xlsx','json']),columns:columns.optional(),lineItems:z.string().max(100).optional()});
 const exportSchema = optionsSchema.extend({documentIds:z.array(z.uuid()).min(1).max(100),revisions:z.array(z.object({documentId:z.uuid(),approvalId:z.uuid()})).max(100).optional()});
 const hostedExportMaxBytes=4*1024*1024;
@@ -91,7 +91,7 @@ export async function registerExports(app:FastifyInstance, services:{render?:typ
   });
   app.post('/api/export-mappings',async request=> {
     const actor=await requireActor(request,{roles:['owner','admin','editor'],scope:'parsers:write'});
-    const input=z.object({parserId:z.uuid(),name:z.string().min(1).max(100),columns,lineItems:z.string().max(100).optional()}).parse(request.body);
+    const input=exportMappingInput.parse(request.body);
     return withWorkspace(actor.workspaceId,async c=> {
       if(!(await c.query('SELECT id FROM parsers WHERE id=$1 AND workspace_id=$2',[input.parserId,actor.workspaceId])).rowCount)notFound();
       return camel((await c.query('INSERT INTO export_mappings(id,workspace_id,parser_id,name,columns,line_items) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[randomUUID(),actor.workspaceId,input.parserId,input.name,JSON.stringify(input.columns),input.lineItems||null])).rows[0]);
