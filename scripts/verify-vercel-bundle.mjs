@@ -5,6 +5,11 @@ import {spawnSync} from 'node:child_process';
 
 const directory=await fs.mkdtemp(path.join(os.tmpdir(),'folio-bundle-check-'));
 try{
+  const routing=JSON.parse(await fs.readFile('.vercel/output/config.json','utf8'));
+  for(const pathname of ['/forgot-password','/reset-password']){
+    const privacy=routing.routes.find(route=>route.headers?.['Referrer-Policy']==='no-referrer'&&new RegExp('^'+route.src+'$').test(pathname));
+    if(!privacy||privacy.headers['Cache-Control']!=='private, no-store'||privacy.continue!==true)throw new Error('Account recovery privacy headers are absent from the deployment routes.');
+  }
   await fs.cp('.vercel/output/functions/api.func',directory,{recursive:true});
   await fs.cp('fixtures/generated',path.join(directory,'fixtures'),{recursive:true});
   const result=spawnSync(process.execPath,['--input-type=module','-e',`
@@ -40,7 +45,7 @@ try{
     }
     const app=await buildApp({rateLimitStore:BundleStore});
     assert.equal((await app.inject('/api/health')).statusCode,200);
-    const preview=await app.inject('/api/config');assert.equal(preview.json().preview,true);
+    const preview=await app.inject('/api/config');assert.equal(preview.json().preview,true);assert.equal(preview.json().passwordRecovery.available,false);
     const missing=await app.inject('/api/packaged-missing-route');
     assert.equal(missing.statusCode,404);assert.equal(missing.headers['x-ratelimit-limit'],'300');
     assert.equal(limiterCalls,3);

@@ -96,6 +96,13 @@ REVOKE UPDATE,DELETE ON ${s}.document_events FROM ${u};`);
   REVOKE ALL ON ${s}.request_rate_limits FROM ${u};
  END IF;
 END $folio_rate_limit_permissions$;`);
+ parts.push(`DO $folio_recovery_permissions$ DECLARE relation text; BEGIN
+ FOREACH relation IN ARRAY ARRAY['account_recovery_requests','account_recovery_tokens','account_email_outbox','account_recovery_limits','account_security_events'] LOOP
+  IF to_regclass(format('%I.%I',${literal(schema)},relation)) IS NOT NULL THEN
+   EXECUTE format('REVOKE ALL ON %I.%I FROM PUBLIC,%I',${literal(schema)},relation,${literal(appRole)});
+  END IF;
+ END LOOP;
+END $folio_recovery_permissions$;`);
  if(isolated)parts.push(`REVOKE ALL ON SCHEMA ${s} FROM PUBLIC;
 REVOKE CREATE ON SCHEMA ${s} FROM ${a},${u};
 REVOKE ALL ON ALL TABLES IN SCHEMA ${s} FROM PUBLIC;

@@ -3,14 +3,23 @@ import {randomBytes,createHash,scrypt as scryptCallback,timingSafeEqual} from 'n
 import {promisify} from 'node:util';
 import type {FastifyRequest,FastifyReply} from 'fastify';
 import type {Actor,Role} from '../../shared/types.js';
-import {adminPool,badRequest} from './db.js';
+import {adminPool,transaction,badRequest} from './db.js';
 import {config} from './config.js';
 const scrypt=promisify(scryptCallback);
 export const hashToken=(value:string)=>createHash('sha256').update(value).digest('hex');
 export const newToken=()=>randomBytes(32).toString('base64url');
 export async function hashPassword(password:string){const salt=randomBytes(16).toString('hex');const hash=await scrypt(password,salt,64) as Buffer;return `${salt}:${hash.toString('hex')}`;}
 export async function verifyPassword(password:string,encoded:string){const [salt,hash]=encoded.split(':');if(!salt||!hash)return false;const expected=Buffer.from(hash,'hex');const value=await scrypt(password,salt,64) as Buffer;return expected.length===value.length&&timingSafeEqual(expected,value);}
-export async function createSession(reply:FastifyReply,userId:string,workspaceId:string){const token=newToken();await adminPool.query("insert into sessions(token_hash,user_id,workspace_id,expires_at) values($1,$2,$3,now()+interval '14 days')",[hashToken(token),userId,workspaceId]);reply.setCookie('folio_session',token,{path:'/',httpOnly:true,sameSite:'lax',secure:config.production,maxAge:14*86400});}
+export async function createSession(reply:FastifyReply,userId:string,workspaceId:string,expectedPasswordHash:string){
+ const token=newToken();
+ await transaction(adminPool,async c=>{
+  const {rows:[user]}=await c.query('select password_hash from users where id=$1 for update',[userId]);
+  if(!user||user.password_hash!==expectedPasswordHash)badRequest('Email or password is incorrect',401);
+  if(!(await c.query('select 1 from memberships where user_id=$1 and workspace_id=$2',[userId,workspaceId])).rowCount)badRequest('Email or password is incorrect',401);
+  await c.query("insert into sessions(token_hash,user_id,workspace_id,expires_at) values($1,$2,$3,clock_timestamp()+interval '14 days')",[hashToken(token),userId,workspaceId]);
+ });
+ reply.setCookie('folio_session',token,{path:'/',httpOnly:true,sameSite:'lax',secure:config.production,maxAge:14*86400});
+}
 export async function requireActor(request:FastifyRequest,options:{roles?:Role[];scope?:string}={}):Promise<Actor>{
  const header=request.headers.authorization;let actor:Actor;
  if(header?.startsWith('Bearer ')){

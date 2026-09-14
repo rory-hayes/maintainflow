@@ -118,6 +118,8 @@ export async function startWorker(tick?:()=>Promise<unknown>){
   process.on('SIGINT',stop);process.on('SIGTERM',stop);
   let cycles=0;
   console.log('Folio durable worker started');
+  const {runAccountEmailWorker}=await import('./account-email-worker.js');
+  const emailWork=runAccountEmailWorker(shutdown.signal,{onError:()=>console.error('Account email worker failed; durable work remains queued.')});
   try{
     while(!shutdown.signal.aborted){
       try{
@@ -134,6 +136,8 @@ export async function startWorker(tick?:()=>Promise<unknown>){
       }
     }
   }finally{
+    shutdown.abort();
+    await emailWork;
     process.off('SIGINT',stop);process.off('SIGTERM',stop);
     await Promise.all([adminPool.end(),appPool.end()]);
   }

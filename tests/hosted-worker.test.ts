@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import {acceptsWorkerBearer,createHostedWorker,registerHostedWorker,workerRoute,type HostedWorkerServices} from '../server/hosted-worker.js';
 
 const secret='controlled-worker-secret-0123456789abcdef';
-const idle=():HostedWorkerServices=>({enqueue:async()=>{},core:async()=>false,suggestion:async()=>false,delivery:async()=>false,provider:async()=>false,deletion:async()=>false,maintenance:async()=>{}});
+const idle=():HostedWorkerServices=>({enqueue:async()=>{},core:async()=>false,suggestion:async()=>false,delivery:async()=>false,provider:async()=>false,deletion:async()=>false,email:async()=>false,maintenance:async()=>{}});
 
 test('worker endpoint rejects unauthorized wakes and acknowledges before platform-owned work completes',async()=>{
   const app=Fastify();let calls=0,done!:()=>void;
@@ -37,12 +37,12 @@ test('one warm instance shares in-flight work, drains every lane, then stops wit
   let unblock!:()=>void;
   const gate=new Promise<void>(resolve=>{unblock=resolve;});
   let enqueued=0,maintenance=0;
-  const remaining={core:2,suggestion:2,delivery:1,provider:1,deletion:1};
+  const remaining={core:2,suggestion:2,delivery:1,provider:1,deletion:1,email:1};
   const services=idle();services.enqueue=async()=>{enqueued++;await gate;};services.maintenance=async()=>{maintenance++;};
-  for(const lane of ['core','suggestion','delivery','provider','deletion'] as const)services[lane]=async()=>remaining[lane]-->0;
+  for(const lane of ['core','suggestion','delivery','provider','deletion','email'] as const)services[lane]=async()=>remaining[lane]-->0;
   const wake=createHostedWorker(services);
   const first=wake(),second=wake();assert.equal(first,second);unblock();
-  assert.deepEqual(await first,{core:2,suggestion:2,delivery:1,provider:1,deletion:1,stopped:'idle',errors:0});
+  assert.deepEqual(await first,{core:2,suggestion:2,delivery:1,provider:1,deletion:1,email:1,stopped:'idle',errors:0});
   assert.equal(enqueued,1);assert.equal(maintenance,1);
   assert.notEqual(wake(),first);await wake();
 });
@@ -98,6 +98,28 @@ test('deadline abort reaches the active consumer and no further work is claimed'
     await new Promise<void>(resolve=>budget.signal!.addEventListener('abort',()=>{aborted=true;resolve();},{once:true}));
     return true;
   };
-  const result=await createHostedWorker(services,{budgetMs:20,reserveMs:{core:0,suggestion:0,delivery:0,provider:0,deletion:0}})();
+  const result=await createHostedWorker(services,{budgetMs:20,reserveMs:{core:0,suggestion:0,delivery:0,provider:0,deletion:0,email:0}})();
   assert.equal(aborted,true);assert.equal(claims,1);assert.equal(result.stopped,'budget');
+});
+
+test('account email progresses while extraction is held and an email outage leaves other queues available',async()=>{
+  const services=idle();let release!:()=>void,delivered=0,coreDone=false;
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  services.core=async()=>{if(coreDone)return false;coreDone=true;await held;return true;};
+  services.email=async()=>{if(delivered++)return false;assert.equal(coreDone,true);release();return true;};
+  const result=await createHostedWorker(services)();
+  assert.equal(result.core,1);assert.equal(result.email,1);
+  let errorCount=0;
+  const failing=idle();failing.email=async()=>{throw new Error('Controlled mail outage');};failing.delivery=async()=>errorCount++===0;
+  const after=await createHostedWorker(failing)();assert.equal(after.email,0);assert.equal(after.delivery,1);assert.equal(after.errors,1);
+});
+
+test('approval enqueue work cannot hold up account email and enqueue failure retains existing delivery work',async()=>{
+  const services=idle();let release!:()=>void,emails=0,deliveries=0;
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  services.enqueue=async()=>{await held;throw new Error('Controlled approval enqueue failure');};
+  services.email=async()=>{if(emails++)return false;release();return true;};
+  services.delivery=async()=>deliveries++===0;
+  const result=await createHostedWorker(services)();
+  assert.equal(result.email,1);assert.equal(result.delivery,1);assert.equal(result.errors,1);
 });

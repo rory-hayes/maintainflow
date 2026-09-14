@@ -16,6 +16,7 @@ import {registerProviders} from './integrations/providers.js';
 import {previewEnabled,validatePreviewConfiguration} from './core/preview.js';
 import {storageDiagnostic} from './core/storage.js';
 import {requestRateLimitOptions} from './core/rate-limit.js';
+import {accountEmailStatus} from './integrations/account-email.js';
 
 export async function buildApp(options: {rateLimitStore?: FastifyRateLimitStoreCtor} = {}){
   validatePreviewConfiguration();
@@ -26,6 +27,7 @@ export async function buildApp(options: {rateLimitStore?: FastifyRateLimitStoreC
   app.addHook('onSend',async(request,reply,payload)=>{
     reply.header('X-Content-Type-Options','nosniff').header('Permissions-Policy','camera=(), microphone=(), geolocation=()');
     if(!reply.hasHeader('Referrer-Policy'))reply.header('Referrer-Policy','same-origin');
+    if(/^\/(?:forgot-password|reset-password)\/?(?:\?|$)/.test(request.url))reply.header('Referrer-Policy','no-referrer').header('Cache-Control','private, no-store');
     if(request.url.startsWith('/api/'))reply.header('Cache-Control','private, no-store');
     return payload;
   });
@@ -37,7 +39,7 @@ export async function buildApp(options: {rateLimitStore?: FastifyRateLimitStoreC
     return reply.status(status).send({error:status>=500?'server_error':'request_error',message:status>=500?'The request could not be completed. Check the server status and try again.':error instanceof Error?error.message:'Invalid request.'});
   });
   app.get('/api/health',async()=>({status:'ok',name:'Folio',environment:previewEnabled()?'preview':config.production?'production':'local',revision:process.env.VERCEL_GIT_COMMIT_SHA||null,limits:{maxBytes:config.maxBytes,maxPages:config.maxPages}}));
-  app.get('/api/config',async()=>({preview:previewEnabled(),inviteRequired:previewEnabled(),hosted:!!process.env.VERCEL}));
+  app.get('/api/config',async()=>({preview:previewEnabled(),inviteRequired:previewEnabled(),hosted:!!process.env.VERCEL,passwordRecovery:accountEmailStatus()}));
   await registerCore(app);await registerExports(app);await registerIntegrations(app);await registerProviders(app);
   const dist=path.resolve('dist'),hasStaticFiles=existsSync(dist);
   if(hasStaticFiles){

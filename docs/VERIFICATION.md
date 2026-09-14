@@ -1,6 +1,18 @@
 # Verification ledger
 
-## Current PDF splitting — 13 September 2026
+## Current password recovery — 13 September 2026
+
+Password recovery passed **472/472 serial tests** in **123.381374167 seconds**, with zero failures, skips or cancellations; **20 focused cases** in **2.916794166 seconds**; and **12/12 controlled browser groups** on **Node 24.13.0**. Final build/package/compiled-runtime checks passed on **229 unchanged source files**, fingerprint **`f8cbd686c74f4a465f6d70e7e58194d8e6f5ad2c13801f93da5e757c4601ef9b`**. [Recovery contract and acceptance](ACCOUNT-RECOVERY.md) and [public-safe receipt](evidence/account-recovery-2026-09-13/verification.json).
+
+The browser ran at **21:42:26.933–21:42:31.187 UTC** on desktop/mobile, with 11 screenshots, zero page errors/external/extraction/suggestion calls and eight owned accounts cleaned. Twelve controlled mail attempts produced 11 accepted captures after one temporary failure; these are synthetic acknowledgements, not inbox-delivery proof. Two sessions were revoked; a stored document, usage entry, workspace/membership and API key remained intact. Same-tab stale responses and lost accepted completion were checked without blind replay. Four earlier harness-only failures are retained separately.
+
+The earlier **471/471** aggregate passed in **124.33385275 seconds** at **21:28:49–21:30:53 UTC** on source `75942c388643da06ee195271b2880af5a856e0b8442a400a64f84eb047d70ab0`. Review then found that cleanup could remove an expired address-limit row between insert-conflict handling and its locked read, causing an unexpected 500. A bounded retry and deterministic regression fix that race. The earlier pass/build/package/runtime records remain historical and do not verify the changed source.
+
+Migration 028 and recovery are local only. Hosted **021–028**, matching runtime release, a verified authentication sender/domain and actual inbox recovery remain separate gates. Email verification and invitation email remain unimplemented; existing accounts are not marked verified. API keys remain independently revocable. Free plans and mock billing are unchanged.
+
+The final suite ran at **21:43:31.385396–21:45:34.842765 UTC**. Build passed in **1.753654458 seconds**, package in **5.216898417 seconds**, and compiled runtime in **4.7498365 seconds**. Runtime coverage includes six ordinary decoders, split/derived-PDF processing, API startup, the preview invitation guard and privacy headers. The 701-file known-secret comparison found zero matches. All 47 original capability identities and acceptance criteria match the saved baseline; exact-head CI is separate.
+
+## Earlier PDF splitting — 13 September 2026
 
 **Node 24.13.0** local acceptance passed: **434/434 serial tests** in **131.790 seconds**, with zero failures, skips or cancellations; **15/15 controlled desktop/mobile browser groups** and build/package/runtime checks passed on **217 unchanged source files**, fingerprint **`f8f0bc647d95a9de6147053558fb346578150f4dd40f6406ab991791c3b234a6`**. The compiled package verified all six ordinary decoders, actual splitting/derived-PDF decoding, API startup and the invitation guard, with both decoder launch paths explicitly retaining 192 MiB and no TSX loader. [Acceptance](PDF-SPLITTING-ACCEPTANCE.md) and the [public-safe receipt](evidence/pdf-splitting-2026-09-13/verification.json) preserve the earlier Node 26 proof and failed first CI run.
 

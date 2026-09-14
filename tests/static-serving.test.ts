@@ -37,6 +37,12 @@ test('production server serves the root and SPA routes while retaining static as
         const asset=await app.inject({method:'GET',url:'/assets/app.js'});
         assert.equal(asset.statusCode,200,asset.body);
         assert.equal(asset.body,'globalThis.staticRoutingQA = true;');
+        for(const url of ['/forgot-password','/reset-password?ignored=value']){
+          const response=await app.inject({method:'GET',url});
+          assert.equal(response.statusCode,200,response.body);
+          assert.equal(response.headers['referrer-policy'],'no-referrer');
+          assert.equal(response.headers['cache-control'],'private, no-store');
+        }
         const health=await app.inject({method:'GET',url:'/api/health'});
         assert.equal(health.statusCode,200,health.body);
         assert.equal(health.json().environment,'production');
