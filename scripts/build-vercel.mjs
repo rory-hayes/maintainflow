@@ -36,6 +36,7 @@ await fs.writeFile(path.join(functionRoot,'.vc-config.json'),JSON.stringify({run
 await fs.cp('dist',path.join(output,'static'),{recursive:true});
 await fs.writeFile(path.join(output,'config.json'),JSON.stringify({version:3,routes:[
   {src:'/api(?:/.*)?',dest:'/api'},
+  {src:'/(?:forgot-password|reset-password)/?',headers:{'Referrer-Policy':'no-referrer','Cache-Control':'private, no-store'},continue:true},
   {src:'/assets/(.*)',headers:{'Cache-Control':'public, max-age=31536000, immutable'},continue:true},
   {handle:'filesystem'},
   {src:'/.*',dest:'/index.html'},

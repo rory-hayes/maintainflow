@@ -1,0 +1,256 @@
+{
+  "feature": "Password recovery",
+  "recordedAt": "2026-09-13T21:46:00.029744+00:00",
+  "source": {
+    "count": 229,
+    "fingerprint": "f8cbd686c74f4a465f6d70e7e58194d8e6f5ad2c13801f93da5e757c4601ef9b",
+    "unchangedDuringAllFinalChecks": true,
+    "distIndexSha256": "eace1013cc573decc10ca48539d304332f88c9d998a6661fde1a7d4e001fada2"
+  },
+  "runtime": {
+    "node": "24.13.0",
+    "platform": "macOS arm64",
+    "database": "Guarded local PostgreSQL folio/public; 19 migrations through028 applied"
+  },
+  "tests": {
+    "tests": 472,
+    "pass": 472,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0,
+    "durationMs": 123381.374167
+  },
+  "focusedRecovery": {
+    "tests": 20,
+    "pass": 20,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "durationMs": 2916.794166,
+    "includesDeterministicCleanupRace": true
+  },
+  "phases": {
+    "suite": {
+      "phase": "suite",
+      "startedAt": "2026-09-13T21:43:31.385396+00:00",
+      "completedAt": "2026-09-13T21:45:34.842765+00:00",
+      "seconds": 123.456283417,
+      "exitCode": 0,
+      "sourceCount": 229,
+      "sourceFingerprint": "f8cbd686c74f4a465f6d70e7e58194d8e6f5ad2c13801f93da5e757c4601ef9b",
+      "sourceUnchanged": true
+    },
+    "build": {
+      "phase": "build",
+      "startedAt": "2026-09-13T21:43:32.559189+00:00",
+      "completedAt": "2026-09-13T21:43:34.312861+00:00",
+      "seconds": 1.7536544580000002,
+      "exitCode": 0,
+      "sourceCount": 229,
+      "sourceFingerprint": "f8cbd686c74f4a465f6d70e7e58194d8e6f5ad2c13801f93da5e757c4601ef9b",
+      "sourceUnchanged": true
+    },
+    "package": {
+      "phase": "package",
+      "startedAt": "2026-09-13T21:44:31.950832+00:00",
+      "completedAt": "2026-09-13T21:44:37.167778+00:00",
+      "seconds": 5.2168984169999995,
+      "exitCode": 0,
+      "sourceCount": 229,
+      "sourceFingerprint": "f8cbd686c74f4a465f6d70e7e58194d8e6f5ad2c13801f93da5e757c4601ef9b",
+      "sourceUnchanged": true
+    },
+    "bundle": {
+      "phase": "bundle",
+      "startedAt": "2026-09-13T21:45:44.626198+00:00",
+      "completedAt": "2026-09-13T21:45:49.376081+00:00",
+      "seconds": 4.7498365,
+      "exitCode": 0,
+      "sourceCount": 229,
+      "sourceFingerprint": "f8cbd686c74f4a465f6d70e7e58194d8e6f5ad2c13801f93da5e757c4601ef9b",
+      "sourceUnchanged": true
+    }
+  },
+  "browser": {
+    "startedAt": "2026-09-13T21:42:26.933Z",
+    "completedAt": "2026-09-13T21:42:31.187Z",
+    "origin": "http://127.0.0.1:4336",
+    "browser": "Installed Playwright; Browser plugin skill unavailable",
+    "rateLimitBoundary": "Owned nonthrottling store; rate-limit behavior is covered separately by Node tests.",
+    "checks": {
+      "signInKeyboardRecoveryUnknownRequestIsGenericAndSendsNoMail": true,
+      "knownRequestIsSingleEncryptedAsyncEnvelopeAndRetryUsesSameControlledIdempotency": true,
+      "fragmentClearsBeforeAppAndFriendlyValidationUsesKeyboardWithoutPostingInvalidPasswords": true,
+      "mobileSingleCompletionRevokesSessionsPreservesAccountDataAndDoesNotAutoLogin": true,
+      "NormalSignInRejectsOldCredentialsGenericallyAndAcceptsNewPassword": true,
+      "UsedAndExpiredLinksFailSafelyWithoutPasswordFormReuse": true,
+      "ReloadBackAndMissingTokensRequireReopeningTheOriginalEmail": true,
+      "UnavailableSenderBlocksRequestsButAnAlreadyIssuedLinkStillCompletes": true,
+      "SecondSameTabEmailLinkCancelsAndFencesAnAlreadyCommittedOldResponse": true,
+      "LostAcceptedCompletionShowsUncertainOutcomeAndNewPasswordWorksWithoutBlindRetry": true,
+      "DesktopMobileLayoutsRemainReadableAndSignupGuidanceStaysSeparate": true,
+      "PageIdentityConsoleAndPrivacyChecksPassWithZeroExternalMailOrExtractionCalls": true
+    },
+    "viewports": {
+      "desktop-generic-request": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "desktop-password-guidance": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "mobile-password-form": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-password-changed": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-old-password-rejected": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-used-link": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-refreshed-link": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-sender-unavailable": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "desktop-same-tab-new-link-success": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "mobile-uncertain-completion": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "desktop-recovery-form": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    "externalProviderCalls": 0,
+    "extractionCalls": 0,
+    "suggestionCalls": 0,
+    "pageErrors": [],
+    "blockedNetwork": [],
+    "controlledEmailAttempts": 12,
+    "controlledEmailAccepted": 11,
+    "preserved": {
+      "storedTextDocuments": 1,
+      "usageEntries": 1,
+      "memberships": 1,
+      "otherAccountUnchanged": true,
+      "apiKeyActive": true,
+      "browserSessionsRevoked": 2
+    },
+    "cleanedOwnedFixtures": true,
+    "ownedAccounts": 8
+  },
+  "browserExpectedDiagnostics": {
+    "httpStatuses": [
+      400,
+      401
+    ],
+    "httpErrorCount": 14,
+    "consoleCount": 15,
+    "requestFailures": [
+      {
+        "label": "same-tab",
+        "path": "/api/auth/password-reset/complete",
+        "method": "POST",
+        "error": "net::ERR_ABORTED",
+        "phase": "same-tab-new-link"
+      },
+      {
+        "label": "uncertain",
+        "path": "/api/auth/password-reset/complete",
+        "method": "POST",
+        "error": "net::ERR_FAILED",
+        "phase": "lost-completion-response"
+      }
+    ],
+    "explanation": "Signed-out and old-password401s, used/expired-token400s, cancelled stale response and deliberately lost successful response are expected. No unexpected page or network errors."
+  },
+  "screenshots": [
+    "desktop-recovery-form.png",
+    "mobile-old-password-rejected.png",
+    "mobile-password-changed.png",
+    "mobile-uncertain-completion.png"
+  ],
+  "screenshotNote": "Email inputs are masked in magenta. Screenshots represent controlled local fixtures.",
+  "earlierBrowserAttempts": [
+    {
+      "startedAt": "2026-09-13T21:41:07.283Z",
+      "completedAt": "2026-09-13T21:41:21.970Z",
+      "groupsPassed": 6,
+      "phase": "reload-back",
+      "sourceUnchanged": true,
+      "cleanedOwnedFixtures": true
+    },
+    {
+      "startedAt": "2026-09-13T21:39:42.410Z",
+      "completedAt": "2026-09-13T21:39:55.867Z",
+      "groupsPassed": 0,
+      "phase": "request-unknown",
+      "sourceUnchanged": true,
+      "cleanedOwnedFixtures": true
+    },
+    {
+      "startedAt": "2026-09-13T21:38:21.304Z",
+      "completedAt": "2026-09-13T21:38:35.266Z",
+      "groupsPassed": 2,
+      "phase": "reset-guidance",
+      "sourceUnchanged": true,
+      "cleanedOwnedFixtures": true
+    },
+    {
+      "startedAt": "2026-09-13T21:39:17.149Z",
+      "completedAt": "2026-09-13T21:39:18.881Z",
+      "groupsPassed": 2,
+      "phase": "reset-guidance",
+      "sourceUnchanged": true,
+      "cleanedOwnedFixtures": true
+    }
+  ],
+  "earlierAttemptBoundary": "Four harness-only failures: exact label matching, serialized variable shadowing, then route readiness before fill and back navigation. No application change followed these failures; all owned fixtures were cleaned.",
+  "earlierAggregate": {
+    "tests": 471,
+    "pass": 471,
+    "durationMs": 124333.85275,
+    "sourceFingerprint": "75942c388643da06ee195271b2880af5a856e0b8442a400a64f84eb047d70ab0",
+    "boundary": "Precedes the reviewed expired-address-limit cleanup race fix and its added regression."
+  },
+  "limits": {
+    "realEmailOrProviderCalls": 0,
+    "providerAcceptanceIsNotInboxDelivery": true,
+    "hostedMigrationsUnapplied": "021\u2013028",
+    "hostedRecoveryRuntimeVerified": false,
+    "senderAndInboxDeliveryVerified": false,
+    "emailVerificationImplemented": false,
+    "invitationEmailImplemented": false,
+    "freePlansUnchanged": true,
+    "billingRemainsMocked": true,
+    "originalCapabilityCount": 47
+  }
+}

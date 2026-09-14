@@ -1,0 +1,14 @@
+.auth-recovery-link{display:flex;justify-content:flex-end;margin:-5px 0 20px;font-size:13px}
+.recovery-main{max-width:510px;margin:0 auto;padding:58px 30px 70px}
+.recovery-main h1{font-size:32px;line-height:1.2;margin:18px 0 12px}
+.recovery-main .auth-form>p{margin-bottom:24px}
+.recovery-icon{display:inline-flex;padding:13px;border-radius:14px;background:#f0f1ff;color:var(--color-accent)}
+.recovery-feedback:empty{display:none}
+.recovery-feedback{outline:none}
+.recovery-feedback:focus-visible{outline:2px solid var(--color-accent);outline-offset:5px;border-radius:8px}
+.recovery-feedback .notice{overflow-wrap:anywhere}
+.recovery-return{margin:24px 0 0!important;text-align:center;font-size:13px}
+.recovery-text-button{display:inline;padding:0;border:0;border-radius:0;background:none;color:var(--color-accent);font:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.recovery-text-button:focus-visible{outline:2px solid var(--color-accent);outline-offset:3px}
+.recovery-disclosure{margin-top:22px}
+@media(max-width:760px){.recovery-main{padding:34px 24px 48px}.recovery-main h1{font-size:28px}.recovery-page>header{gap:20px}}

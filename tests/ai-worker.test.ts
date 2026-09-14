@@ -345,7 +345,7 @@ test('authenticated hosted wake recovers a crashed worker from its expired durab
   await adminPool.query("update jobs set state='processing',attempts=1,lease_owner=$2,lease_until=now()-interval '1 second' where id=$1",[item.jobId,randomUUID()]);
   await adminPool.query("update documents set status='processing' where id=$1",[item.document.id]);
   // The fresh scheduler has no knowledge of the crashed invocation or its token.
-  const wake=createHostedWorker({enqueue:async()=>{},core:budget=>processOneCoreJob(item.jobId,{signal:budget.signal}),provider:async()=>false,suggestion:async()=>false,delivery:async()=>false,deletion:async()=>false,maintenance:async()=>{}});
+  const wake=createHostedWorker({enqueue:async()=>{},core:budget=>processOneCoreJob(item.jobId,{signal:budget.signal}),provider:async()=>false,suggestion:async()=>false,delivery:async()=>false,deletion:async()=>false,email:async()=>false,maintenance:async()=>{}});
   const endpoint=Fastify();const attached:Promise<unknown>[]=[];
   const secret='controlled-hosted-recovery-secret-0123456789';
   registerHostedWorker(endpoint,{secret:()=>secret,waitUntil:work=>attached.push(work),wake});
