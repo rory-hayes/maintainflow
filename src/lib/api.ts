@@ -54,11 +54,13 @@ export async function fetchOriginalFile(documentId:string,signal?:AbortSignal,bu
     return fetch(url,{signal,credentials:'omit',redirect:'error',referrerPolicy:'no-referrer',cache:'no-store'});
   }
   if(location.url!==`/api/documents/${documentId}/${route}`)throw new Error('The private download destination is invalid.');
-  return fetch(location.url,{signal,headers:{'X-Workspace-Id':workspaceId()},credentials:'same-origin',cache:'no-store'});
+  const selectedWorkspace=workspaceId();
+  return fetch(location.url,{signal,headers:selectedWorkspace?{'X-Workspace-Id':selectedWorkspace}:undefined,credentials:'same-origin',cache:'no-store'});
 }
 export async function downloadFile(path:string,filename:string){
   const original=/^\/api\/documents\/([a-f0-9-]{36})\/(bundle-)?original$/.exec(path);
-  const response=original?await fetchOriginalFile(original[1],undefined,Boolean(original[2])):await fetch(path,{headers:{'X-Workspace-Id':workspaceId()},credentials:'same-origin'});
+  const selectedWorkspace=workspaceId();
+  const response=original?await fetchOriginalFile(original[1],undefined,Boolean(original[2])):await fetch(path,{headers:selectedWorkspace?{'X-Workspace-Id':selectedWorkspace}:undefined,credentials:'same-origin'});
   if(!response.ok)throw new Error('The download could not be completed.');
   const href=URL.createObjectURL(await response.blob());const anchor=document.createElement('a');anchor.href=href;anchor.download=filename;anchor.click();setTimeout(()=>URL.revokeObjectURL(href),5000);
 }
