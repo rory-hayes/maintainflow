@@ -1,15 +1,18 @@
-import {useEffect,useRef,useState} from 'react';
+import {useLayoutEffect,useRef,useState} from 'react';
 import type {PDFDocumentProxy} from 'pdfjs-dist';
 import {Notice} from '../../components/ui';
+import {readPdfSplitNativeText} from '../../lib/pdf-split';
 import {pdfSplitLimits} from '../../../shared/pdf-split';
 
 /** Shared local/stored PDF renderer. PDF.js owns a copy so its worker cannot detach caller bytes. */
-export default function PdfCanvas({bytes,page,label,onReady,onRendered,onError}:{bytes:Uint8Array;page:number;label:string;onReady?:(count:number)=>void;onRendered?:(page:number)=>void;onError?:(message:string)=>void}){
-  const target=useRef<HTMLCanvasElement>(null),callbacks=useRef({onReady,onRendered,onError});callbacks.current={onReady,onRendered,onError};
+export default function PdfCanvas({bytes,page,label,onReady,onRendered,onError,readNativeText=false,onNativeText,onNativeTextError}:{bytes:Uint8Array;page:number;label:string;onReady?:(count:number)=>void;onRendered?:(page:number)=>void;onError?:(message:string)=>void;readNativeText?:boolean;onNativeText?:(pages:string[])=>void;onNativeTextError?:(message:string)=>void}){
+  const target=useRef<HTMLCanvasElement>(null),callbacks=useRef({onReady,onRendered,onError,onNativeText,onNativeTextError});
+  useLayoutEffect(()=>{callbacks.current={onReady,onRendered,onError,onNativeText,onNativeTextError};});
   const [loaded,setLoaded]=useState<{bytes:Uint8Array;pdf:PDFDocumentProxy}|null>(null),[error,setError]=useState('');
   const [rendered,setRendered]=useState<{bytes:Uint8Array;page:number}|null>(null);
   const pdf=loaded?.bytes===bytes?loaded.pdf:null,ready=rendered?.bytes===bytes&&rendered.page===page;
-  useEffect(()=>{
+  // Cancel old work during commit, before replacement callbacks can receive late results.
+  useLayoutEffect(()=>{
     let disposed=false;let task:ReturnType<typeof import('pdfjs-dist')['getDocument']>|undefined;
     setLoaded(null);setRendered(null);setError('');
     void(async()=>{try{
@@ -22,7 +25,12 @@ export default function PdfCanvas({bytes,page,label,onReady,onRendered,onError}:
     }catch{if(!disposed){const message='The PDF could not be opened. Choose an unlocked, readable PDF.';setError(message);callbacks.current.onError?.(message);}}})();
     return()=>{disposed=true;void task?.destroy();};
   },[bytes]);
-  useEffect(()=>{
+  useLayoutEffect(()=>{
+    if(!pdf||!readNativeText)return;let disposed=false;
+    void readPdfSplitNativeText(pdf,()=>!disposed).then(pages=>{if(!disposed)callbacks.current.onNativeText?.(pages);}).catch(cause=>{if(!disposed)callbacks.current.onNativeTextError?.(cause instanceof Error?cause.message:'Searchable text could not be read. Use custom page ranges.');});
+    return()=>{disposed=true;};
+  },[pdf,readNativeText]);
+  useLayoutEffect(()=>{
     setRendered(null);if(!pdf)return;let disposed=false;let rendering:ReturnType<Awaited<ReturnType<PDFDocumentProxy['getPage']>>['render']>|undefined;
     if(target.current)target.current.getContext('2d')?.clearRect(0,0,target.current.width,target.current.height);
     void(async()=>{try{

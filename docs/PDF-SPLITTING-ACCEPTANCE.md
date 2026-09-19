@@ -1,5 +1,7 @@
 # PDF splitting acceptance — 13 September 2026
 
+The later [text-marker acceptance](PDF-MARKER-SPLITTING.md) adds native-text boundaries and current verification. The fixed/custom-range evidence below remains dated historical evidence.
+
 **Node 24.13.0** local acceptance passed: **434/434 serial tests** in **131.790 seconds**, with zero failures, skips or cancellations; **15/15 controlled desktop/mobile browser groups** and build/package/runtime checks passed on **217 unchanged source files**, fingerprint **`f8f0bc647d95a9de6147053558fb346578150f4dd40f6406ab991791c3b234a6`**. The first failed Node 24 CI run and earlier Node 26 checkpoint remain recorded below. Git/CI and hosted release are separate.
 
 Migration [027](../migrations/027_pdf_splitting.sql) is applied locally only. Hosted migrations **021–027** and the corresponding runtime release remain pending. Existing free plans and visibly mocked billing remain unchanged. This record establishes no new live-provider, hosted or customer-use acceptance.

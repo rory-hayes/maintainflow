@@ -1,7 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { decodeSource } from './decoder-engine.js';
 import { decoderLimits } from './decoder-limits.js';
-import { pdfSplitLimits, planPdfSplit, PdfSplitValidationError, type PdfSplitSpec } from '../../shared/pdf-split.js';
+import { pdfSplitLimits, planPdfSplit, verifyPdfMarkerRanges, PdfSplitValidationError, type PdfSplitSpec } from '../../shared/pdf-split.js';
 
 /** Called only inside decoder-child. The original stays byte-for-byte untouched. */
 export async function decodePdfSplit(bytes: Buffer, filename: string, spec: PdfSplitSpec) {
@@ -12,6 +12,7 @@ export async function decodePdfSplit(bytes: Buffer, filename: string, spec: PdfS
     throw new PdfSplitValidationError('text_limit');
   }
   const plan = planPdfSplit(spec, source.pageCount);
+  verifyPdfMarkerRanges(spec, source.pages.map(page => page.text));
   // PDF.js establishes validity/page limits before pdf-lib is given the input.
   // Unexpected library failures remain retryable decoder failures, not input receipts.
   const original = await PDFDocument.load(bytes, { updateMetadata: false });

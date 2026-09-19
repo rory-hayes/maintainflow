@@ -182,3 +182,15 @@ test('split resource boundary removes credentials, caps output, kills timed-out 
   children[1].stdout.emit('data', Buffer.from(JSON.stringify({ ok: true, source: { mimeType: 'text/plain', pages: [{ page: 1, text: 'fixture' }], pageCount: 1 } }))); children[1].emit('close', 0);
   assert.equal((await first).parts.length, 1); assert.equal((await second).pageCount, 1);
 });
+
+test('marker IPC independently rejects changed text boundaries as retryable malformed output', async () => {
+  const value=reply();value.split.sourcePageCount=2;value.split.selectedPages=2;
+  value.split.parts[0].range.end=2;value.split.parts[0].source.pageCount=2;
+  value.split.parts[0].source.pages=[{page:1,text:'Prefix'},{page:2,text:'Marker'}];
+  await assert.rejects(splitPdfSource(Buffer.from('fixture'),'owned-marker.pdf',
+    {mode:'marker',marker:'Marker',ranges:[{start:1,end:2}]},{spawnChild:respond(value)}),
+    (error:any)=>error.statusCode===422&&!(error instanceof PdfSplitValidationError));
+  await assert.rejects(splitPdfSource(Buffer.from('fixture'),'owned-marker.pdf',
+    {mode:'marker',marker:'Marker',ranges:[{start:1,end:2}]},{spawnChild:respond({ok:false,code:'pdf_split_validation_failed',reason:'marker_plan_mismatch'})}),
+    splitFailure('marker_plan_mismatch'));
+});

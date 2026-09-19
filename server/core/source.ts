@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { decoderLimits, decoderError } from './decoder-limits.js';
 import { SourceValidationError, isSourceValidationReason, type SourceValidationReason } from './source-validation.js';
 import type { PageText } from '../../shared/types.js';
-import { canonicalPdfSplitSpec, planPdfSplit, pdfSplitLimits, PdfSplitValidationError, isPdfSplitValidationReason, type PdfSplitValidationReason, type PdfSplitSpec, type PdfPageRange } from '../../shared/pdf-split.js';
+import { canonicalPdfSplitSpec, planPdfSplit, verifyPdfMarkerRanges, pdfSplitLimits, PdfSplitValidationError, isPdfSplitValidationReason, type PdfSplitValidationReason, type PdfSplitSpec, type PdfPageRange } from '../../shared/pdf-split.js';
+import {encodeSplitInput} from './decoder-input.js';
 export { validateZipExpansion } from './decoder-engine.js';
 
 const sourceSchema = z.object({
@@ -41,7 +42,7 @@ export function decoderLaunchSpec(filename: string, split?: PdfSplitSpec) {
   const sourceEntry = childFilename.endsWith('.ts');
   return {
     command: process.execPath,
-    args: [`--max-old-space-size=${sourceEntry ? decoderLimits.sourceHeapMb : decoderLimits.heapMb}`, ...(sourceEntry ? ['--import', 'tsx'] : []), childFilename, path.basename(filename), ...(split ? ['--pdf-split', canonicalPdfSplitSpec(split)] : [])],
+    args: [`--max-old-space-size=${sourceEntry ? decoderLimits.sourceHeapMb : decoderLimits.heapMb}`, ...(sourceEntry ? ['--import', 'tsx'] : []), childFilename, path.basename(filename), ...(split ? ['--pdf-split'] : [])],
     options: {
       cwd: runtimeRoot,
       env: { NODE_ENV: 'production', TZ: 'UTC', LANG: 'en_US.UTF-8', TSX_DISABLE_CACHE: '1' },
@@ -115,7 +116,7 @@ async function runIsolated<T>(
         } catch { finish(Object.assign(new Error('The document decoder returned an invalid response'), { statusCode: 422 })); }
       });
       child.stdin.on('error', () => {});
-      child.stdin.end(bytes);
+      child.stdin.end(split ? encodeSplitInput(bytes, split) : bytes);
     });
   } finally { activeDecoders--; }
 }
@@ -158,6 +159,7 @@ export function splitPdfSource(bytes: Buffer, filename: string, value: PdfSplitS
       return { range, bytes: childBytes, source: part.source };
     });
     if (totalBytes > pdfSplitLimits.maxDerivedBytes || totalText > decoderLimits.maxTextBytes) throw new Error('Split response limit exceeded');
+    verifyPdfMarkerRanges(spec, parts.flatMap(part => part.source.pages.map(page => page.text)));
     return { sourcePageCount: result.sourcePageCount, selectedPages: result.selectedPages, parts };
   }, options, spec);
 }

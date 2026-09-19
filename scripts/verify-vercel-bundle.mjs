@@ -35,6 +35,20 @@ try{
     assert.equal(split.parts[1].range.start,2);
     assert.equal((await inspectSource(split.parts[1].bytes,'child.pdf')).pageCount,1);
     console.log('PASS packaged PDF splitting and derived PDF decoding');
+    const markerSpec={mode:'marker',marker:'Desk pads',ranges:[{start:1,end:1},{start:2,end:2}]};
+    const markerLaunch=decoderLaunchSpec('marker-bundle.pdf',markerSpec);
+    assert.ok(markerLaunch.args.includes('--max-old-space-size=192'));
+    assert.equal(markerLaunch.args.some(argument=>argument.includes(markerSpec.marker)),false);
+    const markerSplit=await splitPdfSource(await fs.readFile('fixtures/invoice-multipage.pdf'),'marker-bundle.pdf',markerSpec);
+    assert.deepEqual(markerSplit.parts.map(part=>part.range),markerSpec.ranges);
+    assert.equal(markerSplit.sourcePageCount,2);assert.equal(markerSplit.selectedPages,2);
+    assert.match(markerSplit.parts[0].source.pages[0].text,/INV-00601/);
+    assert.match(markerSplit.parts[1].source.pages[0].text,/Desk pads/);
+    assert.equal((await inspectSource(markerSplit.parts[1].bytes,'marker-child.pdf')).pageCount,1);
+    await assert.rejects(splitPdfSource(await fs.readFile('fixtures/invoice-multipage.pdf'),'marker-bundle.pdf',{
+      ...markerSpec,ranges:[{start:1,end:2}],
+    }),error=>error.code==='pdf_split_validation_failed'&&error.reason==='marker_plan_mismatch');
+    console.log('PASS packaged marker boundaries, preserved prefix and rejected changed preview');
     // This isolated packaging check has no database. Exercise the packaged
     // limiter hook with an explicit in-memory test store; shared PostgreSQL
     // enforcement is verified by the request-rate-limit integration tests.

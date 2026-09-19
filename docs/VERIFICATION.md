@@ -1,6 +1,12 @@
 # Verification ledger
 
-## Current nested review acceptance — 19 September 2026
+## Current PDF text-marker acceptance — 19 September 2026
+
+Native-text marker PDF splitting is locally verified: **555/555 tests** passed on **Node 24.13.0** in **155.618 seconds**, with no failures, skips or cancellations. **Nine desktop/mobile workflow groups** and **five tablet preview/control groups** passed at **1440×1000, 390×844 and 820×1000**. Build, hosted packaging and isolated runtime checks passed on the same **252 source files**, fingerprint **`a54d0bdf296ef723d1b3f8226ce16ef2d12fe5b4569db1e71927e174e25c551c`**. Four actual deterministic rules jobs produced independently reviewed/approved downloads; six page credits remained unchanged after lost-response recovery. No real provider calls occurred. Both owned test accounts/workspaces and four child documents were cleaned across the two browser runs. Local migration **031** is applied (22 local migrations); hosted **021–031** and matching runtime activation remain pending. Free plans and mocked billing are unchanged; all 47 original capability criteria remain intact.
+
+[Contract](PDF-MARKER-SPLITTING.md) · [Dated evidence](evidence/pdf-marker-2026-09-19/verification.json) · [Source manifest](evidence/pdf-marker-2026-09-19/source-manifest.json).
+
+## Earlier nested review acceptance — 19 September 2026
 
 Nested document review and approved exports are locally verified: **544/544 tests** passed in **139.575 seconds**, and **13/13 browser groups** passed at **1440×1000, 820×1000 and 390×844**. Build, hosted packaging and isolated runtime/decoder checks passed on the same **249 source files**, fingerprint **`8d94c9e343e0db8e921f5bb61db9bb7def28da8937faa3a49ea973ef39258f90`**. Row focus/layout, stale recovery, fresh-tab file access, selected-approval downloads and nested schema/path validation are fixed. Two controlled extraction calls occurred; no real provider calls or browser errors were recorded, and both owned accounts, both owned workspaces and the test document were cleaned up. Hosted **021–030** and matching runtime activation remain pending. Free plans and mock billing are unchanged. All 47 original capability criteria remain intact.
 

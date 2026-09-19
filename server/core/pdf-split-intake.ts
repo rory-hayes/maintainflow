@@ -3,7 +3,8 @@ import type {PoolClient} from 'pg';
 import {z} from 'zod';
 import type {Actor} from '../../shared/types.js';
 import {templatePolicy} from '../../shared/template-selection.js';
-import {canonicalPdfSplitSpec,PdfSplitValidationError,isPdfSplitValidationReason,pdfSplitLimits,planPdfSplit,type PdfSplitSpec,type PdfSplitReceipt} from '../../shared/pdf-split.js';
+import {canonicalPdfSplitSpec,PdfSplitValidationError,isPdfSplitValidationReason,pdfSplitLimits,planPdfSplit,verifyPdfMarkerRanges,type PdfSplitSpec,type PdfSplitReceipt} from '../../shared/pdf-split.js';
+import {decoderLimits} from './decoder-limits.js';
 import {withWorkspace,badRequest,notFound,audit} from './db.js';
 import {splitPdfSource} from './source.js';
 import {SourceValidationError,isSourceValidationReason} from './source-validation.js';
@@ -109,6 +110,16 @@ export async function addSplitDocuments(actor:Actor,parserId:string,bytes:Buffer
   // This also defends internal adapters against accidentally dropping/reordering parts.
   const planned=planPdfSplit(JSON.parse(canonical),decoded.sourcePageCount);
   if(decoded.parts.length!==planned.ranges.length||decoded.selectedPages!==planned.selectedPages||decoded.parts.some((part,i)=>part.range.start!==planned.ranges[i]!.start||part.range.end!==planned.ranges[i]!.end||part.source.mimeType!=='application/pdf'||part.source.pageCount!==part.range.end-part.range.start+1||!Buffer.isBuffer(part.bytes)||!part.bytes.length||part.bytes.length>pdfSplitLimits.maxBytes)||decoded.parts.reduce((n,p)=>n+p.bytes.length,0)>pdfSplitLimits.maxDerivedBytes)throw Object.assign(new Error('The PDF splitter returned an invalid result. Retry shortly.'),{statusCode:503});
+  if((JSON.parse(canonical) as PdfSplitSpec).mode==='marker'){
+   // Marker plans include every page, so child text reconstructs the complete
+   // source sequence. A broken internal adapter remains retryable, never durable.
+   try{
+    if(decoded.parts.some(part=>part.source.pages.length!==part.source.pageCount||part.source.pages.some((page,i)=>page.page!==i+1||typeof page.text!=='string')))throw new Error();
+    const texts=decoded.parts.flatMap(part=>part.source.pages.map(page=>page.text));
+    if(texts.reduce((sum,text)=>sum+Buffer.byteLength(text),0)>decoderLimits.maxTextBytes)throw new Error();
+    verifyPdfMarkerRanges(JSON.parse(canonical),texts);
+   }catch{throw Object.assign(new Error('The PDF splitter returned an invalid result. Retry shortly.'),{statusCode:503});}
+  }
   const sourceId=splitId;
   files=[{id:sourceId,key:`${actor.workspaceId}/${sourceId}`,bytes,attempted:false,completed:false},...decoded.parts.map(part=>{const id=randomUUID();return {id,key:`${actor.workspaceId}/${id}`,bytes:part.bytes,attempted:false,completed:false};})];
   const reserved=await withWorkspace(actor.workspaceId,async c=>{
