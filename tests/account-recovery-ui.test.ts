@@ -16,7 +16,7 @@ function render({reset=false,availability='enabled',auth}:{reset?:boolean;availa
   globalThis.fetch=(async()=>{calls++;throw new Error('Network is forbidden in this UI fixture');}) as typeof fetch;
   const client=new QueryClient({defaultOptions:{queries:{retry:false,staleTime:Infinity,gcTime:Infinity}}});
   const key=['','/api/config'];
-  if(availability!=='loading')client.setQueryData(key,{preview:true,inviteRequired:false,hosted:false,passwordRecovery:{available:availability!=='disabled'}});
+  if(availability!=='loading')client.setQueryData(key,{preview:true,inviteRequired:false,hosted:false,passwordRecovery:{available:availability!=='disabled'},emailVerification:{available:availability!=='disabled',requiredForSignup:false}});
   if(availability==='stale-error')client.getQueryCache().find({queryKey:key,exact:true})!.setState({status:'error',error:new Error('Sensitive synthetic provider detail'),fetchStatus:'idle'});
   const route=auth?`/${auth}`:reset?'/reset-password':'/forgot-password';
   try{
@@ -107,7 +107,7 @@ test('sign-in exposes recovery without a creation-length rule; signup retains it
   assert.ok(signInPassword);assert.match(signInPassword,/autoComplete="current-password"/);assert.doesNotMatch(signInPassword,/minLength/);
   const signUp=render({auth:'sign-up'});
   assert.match(signUp,/Use at least 10 characters/);assert.match(signUp,/minLength="10"/);
-  assert.match(signUp,/Email verification is not enabled yet/);
+  assert.match(signUp,/Email verification is optional on this installation/);
   assert.doesNotMatch(signUp,/Forgot password\?|Email verification and recovery are not enabled|Password recovery is currently unavailable/);
-  assert.match(render({auth:'sign-up',availability:'disabled'}),/Password recovery is currently unavailable/);
+  assert.match(render({auth:'sign-up',availability:'disabled'}),/Email verification is optional on this installation/);
 });

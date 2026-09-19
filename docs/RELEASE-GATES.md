@@ -1,6 +1,20 @@
 # Remaining implementation and release gates
 
-## Current gates — 13 September 2026
+## Current gates — 19 September 2026
+
+Email verification is implemented and locally verified with controlled senders. Fresh **53/53 focused tests** passed in **9.297709583 seconds** on **Node 24.13.0**, for **238 source files**, fingerprint **`acf25f241811ef9057b00ac22f14112fbe21042c1a44d6f6acff1ce01c84b1a0`**. The failed-request regression proves ready password-reset delivery, peer progress, idle backoff and registration retry after repair. [Verification contract](EMAIL-VERIFICATION.md) and [current ledger](VERIFICATION.md). The full suite passed **512/512 tests** in **142.958095834 seconds**, with zero failures, skips, cancellations or todo cases, and build/package/runtime checks passed. **13/13 controlled desktop/mobile browser groups** also passed on the same unchanged source. The [acceptance receipt](evidence/email-verification-2026-09-19/verification.json) records the exact local scope.
+
+| Gate | Current evidence | Required next evidence |
+| --- | --- | --- |
+| W01 email verification | Required new users have no workspace session before token-plus-password confirmation; existing accounts retain access without fabricated verification timestamps. The 53 focused tests, 512-test full suite, final build/package/runtime checks and 13 controlled desktop/mobile browser groups pass on the same source. | Record exact-source Git/CI and deployment evidence separately, then complete actual sender/inbox acceptance. The local result does not establish those external outcomes. |
+| Hosted migration and matching runtime | Migration 029 is applied only to the guarded local database, which has 20 applied migrations. Hosted 021–029 remain unapplied. | Resolve the existing exact hosted migration approval gate, apply and verify the reviewed sequence and matching runtime, then perform hosted acceptance. Local checks do not establish any of these outcomes. |
+| Actual authentication email | The durable lane isolates failed queues and uses a controlled sender for local acceptance. Password recovery retains its separate dated acceptance below. | Configure the separately authorized authentication sender/domain and verify actual delivered verification and recovery links, normal sign-in and inbox behavior. Controlled acceptance is not provider or inbox proof. |
+| W07 invitation email and remaining reference scope | Invitation email remains a separate increment. The original 47 capability IDs and criteria remain in the matrix. | Complete invitation delivery and the other open matrix criteria with their own evidence; do not infer full parity or customer use from W01. |
+| Billing and hosting | Existing free plans and visibly mocked billing remain unchanged. | Real Stripe testing and plan upgrades remain deferred under the user's instruction. |
+
+The 13 September section below preserves its historical status, including features that were unimplemented at that date. This 19 September checkpoint supersedes those statements only for the work described above.
+
+## Earlier gates — 13 September 2026
 
 Password recovery passed **472/472 serial tests** in **123.381374167 seconds**, with zero failures, skips or cancellations; **20 focused cases** in **2.916794166 seconds**; and **12/12 controlled browser groups** on **Node 24.13.0**. Final build/package/compiled-runtime checks passed on **229 unchanged source files**, fingerprint **`f8cbd686c74f4a465f6d70e7e58194d8e6f5ad2c13801f93da5e757c4601ef9b`**. [Recovery acceptance](ACCOUNT-RECOVERY.md). Migration 028 and recovery are local only. Hosted **021–028**, matching runtime release, a verified authentication sender/domain and actual inbox recovery remain separate gates. Email verification and invitation email remain unimplemented; existing accounts are not marked verified. API keys remain independently revocable. Free plans and mock billing are unchanged.
 

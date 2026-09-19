@@ -4,18 +4,42 @@ import {z} from 'zod';
 import {adminPool,transaction} from './db.js';
 import {hashToken} from './auth.js';
 import {processOneAccountRecoveryRequest} from './account-recovery.js';
+import {cleanupAccountRegistrations,processOneAccountRegistration} from './account-registration.js';
+import {cleanupEmailVerification,isEmailVerificationMailValid,processOneEmailVerificationRequest} from './email-verification.js';
 import {decryptSecret} from '../integrations/secrets.js';
 import {AccountEmailError,accountEmailStatus,sendAccountEmail,type AccountEmailErrorCode} from '../integrations/account-email.js';
 import {requireWorkBudget,type WorkBudget} from './work-budget.js';
 
-const payloadSchema=z.object({to:z.string().email().max(254),subject:z.enum(['Reset your Folio password','Your Folio password was changed']),text:z.string().min(1).refine(value=>Buffer.byteLength(value)<=4096)}).strict();
+const payloadSchema=z.object({to:z.string().email().max(254),subject:z.enum(['Reset your Folio password','Your Folio password was changed','Verify your Folio email']),text:z.string().min(1).refine(value=>Buffer.byteLength(value)<=4096)}).strict();
 const providerCodes=new Set<AccountEmailErrorCode>(['unavailable','invalid_message','temporary_failure','permanent_failure','timeout','cancelled','invalid_response']);
-type MailRow={id:string;user_id:string;token_id:string|null;kind:'password_reset'|'password_changed';payload_ciphertext:string|null;state:string;attempts:number;expires_at:Date;lease_owner:string|null;lease_until:Date|null;available_at:Date};
+type MailRow={id:string;user_id:string;token_id:string|null;verification_token_id:string|null;kind:'password_reset'|'password_changed'|'email_verification';payload_ciphertext:string|null;state:string;attempts:number;expires_at:Date;lease_owner:string|null;lease_until:Date|null;available_at:Date};
 type Claim={row:MailRow;lease:string;remainingMs:number};
+const subjects={password_reset:'Reset your Folio password',password_changed:'Your Folio password was changed',email_verification:'Verify your Folio email'} as const;
+const requestQueues=[processOneAccountRegistration,processOneEmailVerificationRequest,processOneAccountRecoveryRequest];
+let nextQueue=0;
+
+/** Try each queue once; a retained failing request must not starve peers or ready mail. */
+async function admitRequest(budget:WorkBudget){
+ let failed=false;
+ for(let attempt=0;attempt<requestQueues.length;attempt++){
+  requireWorkBudget(budget,1000);
+  const processRequest=requestQueues[nextQueue];
+  nextQueue=(nextQueue+1)%requestQueues.length;
+  try{if(await processRequest())return {resolved:true,failed};}
+  catch{
+   // Resolver transactions roll back independently, preserving the request for
+   // retry. Never retain or report raw database, recipient, or token details.
+   requireWorkBudget(budget,1000);
+   failed=true;
+  }
+ }
+ return {resolved:false,failed};
+}
 
 async function terminal(c:PoolClient,row:MailRow,state:'failed'|'cancelled',code:string){
  await c.query(`UPDATE account_email_outbox SET state=$2,payload_ciphertext=NULL,lease_owner=NULL,lease_until=NULL,failure_code=$3,finished_at=clock_timestamp() WHERE id=$1`,[row.id,state,code]);
  if(row.token_id)await c.query('DELETE FROM account_recovery_tokens WHERE id=$1 AND user_id=$2',[row.token_id,row.user_id]);
+ if(row.verification_token_id)await c.query('DELETE FROM email_verification_tokens WHERE id=$1 AND user_id=$2',[row.verification_token_id,row.user_id]);
 }
 
 /** Bounded secret cleanup also runs when sending is unavailable. User locks precede token/mail locks. */
@@ -54,7 +78,7 @@ async function claim(budget:WorkBudget):Promise<Claim|undefined>{
   requireWorkBudget(budget,1000);
   const result=await transaction(adminPool,async c=>{
    // Skip contention without holding an outbox row while waiting for its user.
-   const {rows:[user]}=await c.query('SELECT id,password_hash FROM users WHERE id=$1 FOR UPDATE SKIP LOCKED',[candidate.user_id]);
+   const {rows:[user]}=await c.query('SELECT id,email,password_hash,email_verified_at FROM users WHERE id=$1 FOR UPDATE SKIP LOCKED',[candidate.user_id]);
    if(!user)return;
    const {rows:[row]}=await c.query('SELECT * FROM account_email_outbox WHERE id=$1 AND user_id=$2 FOR UPDATE',[candidate.id,user.id]) as {rows:MailRow[]};
    const {rows:[clock]}=await c.query('SELECT clock_timestamp() AS at');
@@ -64,6 +88,9 @@ async function claim(budget:WorkBudget):Promise<Claim|undefined>{
    if(row.kind==='password_reset'){
     const {rows:[token]}=await c.query("SELECT credential_digest,expires_at FROM account_recovery_tokens WHERE id=$1 AND user_id=$2 AND purpose='password_reset'",[row.token_id,user.id]);
     if(!token||token.expires_at<=clock.at||token.credential_digest!==hashToken(user.password_hash)){await terminal(c,row,'cancelled','invalid_token');return;}
+   }
+   if(row.kind==='email_verification'&&!await isEmailVerificationMailValid(c,user,row.verification_token_id)){
+    await terminal(c,row,'cancelled','invalid_token');return;
    }
    const lease=randomUUID();
    await c.query(`UPDATE account_email_outbox SET state='sending',attempts=attempts+1,lease_owner=$2,lease_until=clock_timestamp()+interval '45 seconds',failure_code=NULL WHERE id=$1`,[row.id,lease]);
@@ -95,12 +122,18 @@ async function finish(claimed:Claim,error?:unknown){
 
 /** One awaited durable unit. Delivery acceptance never asserts inbox delivery. */
 export async function processOneAccountEmail(budget:WorkBudget={}):Promise<boolean>{
+ await cleanupEmailVerification(budget);
+ await cleanupAccountRegistrations(budget);
  await cleanupAccountRecovery(budget);
  if(!accountEmailStatus().available)return false;
  requireWorkBudget(budget,1000);
- const resolved=await processOneAccountRecoveryRequest();
+ const admission=await admitRequest(budget);
  requireWorkBudget(budget,1000);
- const claimed=await claim(budget);if(!claimed)return resolved;
+ const claimed=await claim(budget);
+ if(!claimed){
+  if(!admission.resolved&&admission.failed)throw new Error('Account email request processing failed.');
+  return admission.resolved;
+ }
  const controller=new AbortController();
  const remaining=Math.min(20_000,claimed.remainingMs,budget.deadlineAt===undefined?Infinity:budget.deadlineAt-Date.now());
  let timer:ReturnType<typeof setTimeout>|undefined,error:unknown;
@@ -116,7 +149,7 @@ export async function processOneAccountEmail(budget:WorkBudget={}):Promise<boole
   try{payload=JSON.parse(decryptSecret(claimed.row.payload_ciphertext!));}catch{throw new AccountEmailError('invalid_message',false);}
   const parsed=payloadSchema.safeParse(payload);
   if(!parsed.success)throw new AccountEmailError('invalid_message',false);
-  if((claimed.row.kind==='password_reset')!==(parsed.data.subject==='Reset your Folio password'))throw new AccountEmailError('invalid_message',false);
+  if(parsed.data.subject!==subjects[claimed.row.kind])throw new AccountEmailError('invalid_message',false);
   timer=setTimeout(()=>controller.abort(),remaining);
   await Promise.race([sendAccountEmail({...parsed.data,idempotencyKey:`folio-account-email/${claimed.row.id}`},{signal:controller.signal,deadlineAt:Date.now()+remaining}),aborted]);
  }catch(failure){error=failure;}

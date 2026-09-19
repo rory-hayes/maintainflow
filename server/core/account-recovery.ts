@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {invalidateEmailVerification} from './email-verification.js';
 import {randomUUID} from 'node:crypto';
 import type {PoolClient} from 'pg';
 import {adminPool,transaction,badRequest} from './db.js';
@@ -43,7 +44,7 @@ export async function enqueuePasswordChanged(c:PoolClient,user:{id:string;email:
 }
 
 /** Revocation and ciphertext removal happen atomically with the credential change. */
-async function invalidateRecovery(c:PoolClient,userId:string){
+export async function invalidateRecovery(c:PoolClient,userId:string){
  await c.query(`UPDATE account_email_outbox SET state='cancelled',payload_ciphertext=NULL,lease_owner=NULL,lease_until=NULL,
   failure_code='invalid_token',finished_at=clock_timestamp() WHERE user_id=$1 AND kind='password_reset' AND state IN ('pending','sending')`,[userId]);
  return (await c.query('DELETE FROM account_recovery_tokens WHERE user_id=$1',[userId])).rowCount??0;
@@ -76,9 +77,9 @@ export async function processOneAccountRecoveryRequest(){
   try{payload=JSON.parse(decryptSecret(request.payload_ciphertext));}catch{await discard();return true;}
   const parsed=z.object({email:z.string().max(254).email()}).strict().safeParse(payload);
   if(!parsed.success||privateIdentifier('folio:account-recovery:address:v1',parsed.data.email)!==request.address_key){await discard();return true;}
-  const {rows:[user]}=await c.query('SELECT id,email,password_hash,password_changed_at FROM users WHERE email=$1 FOR UPDATE',[parsed.data.email]);
+  const {rows:[user]}=await c.query('SELECT id,email,password_hash,password_changed_at,email_verified_at FROM users WHERE email=$1 FOR UPDATE',[parsed.data.email]);
   const {rows:[clock]}=await c.query('SELECT clock_timestamp() AS at');
-  if(!user||request.expires_at<=clock.at||user.password_changed_at&&request.created_at<=user.password_changed_at){await discard();return true;}
+  if(!user||request.expires_at<=clock.at||user.password_changed_at&&request.created_at<=user.password_changed_at||user.email_verified_at&&request.created_at<=user.email_verified_at){await discard();return true;}
   const token=newToken(),tokenId=randomUUID(),outboxId=randomUUID();
   await c.query(`INSERT INTO account_recovery_tokens(id,user_id,token_hash,credential_digest,expires_at)
    VALUES($1,$2,$3,$4,$5)`,[tokenId,user.id,hashToken(token),hashToken(user.password_hash),request.expires_at]);
@@ -107,7 +108,7 @@ export async function completePasswordReset(token:string,newPassword:string){
   if(!record||record.expires_at<=clock.at||record.credential_digest!==hashToken(user.password_hash))invalidReset();
   await c.query('UPDATE users SET password_hash=$1,password_changed_at=clock_timestamp() WHERE id=$2',[passwordHash,user.id]);
   const sessions=(await c.query('DELETE FROM sessions WHERE user_id=$1',[user.id])).rowCount??0;
-  const tokens=await invalidateRecovery(c,user.id);
+  const tokens=await invalidateRecovery(c,user.id)+await invalidateEmailVerification(c,user.id);
   await enqueuePasswordChanged(c,user);
   await c.query(`INSERT INTO account_security_events(user_id,action,sessions_revoked,tokens_invalidated) VALUES($1,'password_reset_completed',$2,$3)`,[user.id,sessions,tokens]);
  });
@@ -125,7 +126,7 @@ export async function changeAccountPassword(userId:string,sessionToken:string,cu
   if(user.password_hash!==verified.password_hash)badRequest('Current password is incorrect',400);
   await c.query('UPDATE users SET password_hash=$1,password_changed_at=clock_timestamp() WHERE id=$2',[passwordHash,userId]);
   const sessions=(await c.query('DELETE FROM sessions WHERE user_id=$1 AND token_hash<>$2',[userId,sessionHash])).rowCount??0;
-  const tokens=await invalidateRecovery(c,userId);
+  const tokens=await invalidateRecovery(c,userId)+await invalidateEmailVerification(c,userId);
   await enqueuePasswordChanged(c,user);
   await c.query(`INSERT INTO account_security_events(user_id,action,sessions_revoked,tokens_invalidated) VALUES($1,'password_changed',$2,$3)`,[userId,sessions,tokens]);
  });
