@@ -6,7 +6,7 @@ import {spawnSync} from 'node:child_process';
 const directory=await fs.mkdtemp(path.join(os.tmpdir(),'folio-bundle-check-'));
 try{
   const routing=JSON.parse(await fs.readFile('.vercel/output/config.json','utf8'));
-  for(const pathname of ['/forgot-password','/reset-password','/verify-email','/verify-email/confirm','/verify-email/confirm/']){
+  for(const pathname of ['/invite','/invite/','/app/invite','/app/invite/','/forgot-password','/reset-password','/verify-email','/verify-email/confirm','/verify-email/confirm/']){
     const privacy=routing.routes.find(route=>route.headers?.['Referrer-Policy']==='no-referrer'&&new RegExp('^'+route.src+'$').test(pathname));
     if(!privacy||privacy.headers['Cache-Control']!=='private, no-store'||privacy.continue!==true)throw new Error('Account access privacy headers are absent from the deployment routes.');
   }

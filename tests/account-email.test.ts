@@ -76,10 +76,12 @@ test('oversized or malformed account mail fails before transport',async()=>{
 });
 
 
-test('verification mail uses the same bounded sender and dedicated verification subject',async()=>{
+test('verification and invitation mail use the same bounded sender and their dedicated subjects',async()=>{
  const sent:unknown[]=[];
  const sender=createAccountEmailSender(environment,{fetchImpl:(async(_url,options)=>{sent.push(JSON.parse(String(options?.body)));return success();}) as typeof fetch})!;
- const payload={...message(),subject:'Verify your Folio email',text:'Open https://owned-folio.example.test/verify-email/confirm#token=owned-fixture'};
- await sender.send(payload);
- assert.deepEqual(sent,[{from:'Folio <recovery@example.test>',to:[payload.to],subject:payload.subject,text:payload.text}]);
+ for(const [subject,route] of [['Verify your Folio email','verify-email/confirm'],['Join your Folio workspace','invite']]){
+  const payload={...message(),subject,text:`Open https://owned-folio.example.test/${route}#token=owned-fixture`};
+  await sender.send(payload);
+  assert.deepEqual(sent.at(-1),{from:'Folio <recovery@example.test>',to:[payload.to],subject:payload.subject,text:payload.text});
+ }
 });

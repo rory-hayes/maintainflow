@@ -28,7 +28,7 @@ export async function buildApp(options: {rateLimitStore?: FastifyRateLimitStoreC
   app.addHook('onSend',async(request,reply,payload)=>{
     reply.header('X-Content-Type-Options','nosniff').header('Permissions-Policy','camera=(), microphone=(), geolocation=()');
     if(!reply.hasHeader('Referrer-Policy'))reply.header('Referrer-Policy','same-origin');
-    if(/^\/(?:forgot-password|reset-password|verify-email(?:\/confirm)?)\/?(?:\?|$)/.test(request.url))reply.header('Referrer-Policy','no-referrer').header('Cache-Control','private, no-store');
+    if(/^\/(?:invite|app\/invite|forgot-password|reset-password|verify-email(?:\/confirm)?)\/?(?:\?|$)/.test(request.url))reply.header('Referrer-Policy','no-referrer').header('Cache-Control','private, no-store');
     if(request.url.startsWith('/api/'))reply.header('Cache-Control','private, no-store');
     return payload;
   });

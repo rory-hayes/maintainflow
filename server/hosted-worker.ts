@@ -87,9 +87,9 @@ export function createHostedWorker(services:HostedWorkerServices,options:{budget
 
 let defaultWorker:ReturnType<typeof createHostedWorker>|undefined;
 async function productionServices():Promise<HostedWorkerServices>{
-  const [{processOneCoreJob,enforceRetention},{processOneFileDeletion},{reconcileInterruptedIntake},{enqueueApprovals,processOneDelivery},{tickProviders},{processOneSchemaSuggestion},{processOneAccountEmail}]=await Promise.all([
+  const [{processOneCoreJob,enforceRetention},{processOneFileDeletion},{reconcileInterruptedIntake},{enqueueApprovals,processOneDelivery},{tickProviders},{processOneSchemaSuggestion},{processOneWorkspaceEmail}]=await Promise.all([
     import('./core/worker.js'),import('./core/retention.js'),import('./core/object-reconciliation.js'),
-    import('./integrations/webhooks.js'),import('./integrations/providers.js'),import('./core/schema-suggestions.js'),import('./core/account-recovery-mail.js'),
+    import('./integrations/webhooks.js'),import('./integrations/providers.js'),import('./core/schema-suggestions.js'),import('./core/workspace-email.js'),
   ]);
   return {
     enqueue:enqueueApprovals,
@@ -98,7 +98,7 @@ async function productionServices():Promise<HostedWorkerServices>{
     delivery:budget=>processOneDelivery({signal:budget.signal}),
     provider:tickProviders,
     deletion:async budget=>budget.signal?.aborted?false:processOneFileDeletion(),
-    email:processOneAccountEmail,
+    email:processOneWorkspaceEmail,
     maintenance:async budget=>{
       await reconcileInterruptedIntake(undefined,{signal:budget.signal,limit:1});
       if(!budget.signal?.aborted)await enforceRetention(undefined,{signal:budget.signal,limit:1});

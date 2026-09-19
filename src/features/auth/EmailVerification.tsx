@@ -28,7 +28,7 @@ export function captureEmailVerificationLink(browser:LinkLocation=window){
   if(verificationListeners.size){const token=pendingVerificationToken;pendingVerificationToken='';for(const receive of verificationListeners)receive(token);}
 }
 export function verificationPasswordError(password:string){return password.length>=1&&password.length<=128?'': 'Enter your Folio password to verify your email.';}
-function safeNext(value:string){return(value==='/app'||value.startsWith('/app/')||value.startsWith('/app?'))&&!value.includes('\\')?value:'/app';}
+function safeNext(value:string){return(value==='/invite'||value==='/app'||value.startsWith('/app/')||value.startsWith('/app?'))&&!value.includes('\\')?value:'/app';}
 function useVerificationPost(){
   const pending=useRef<AbortController|null>(null),mounted=useRef(true);const [busy,setBusy]=useState(false);
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;pending.current?.abort();};},[]);
