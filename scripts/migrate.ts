@@ -97,7 +97,7 @@ REVOKE UPDATE,DELETE ON ${s}.document_events FROM ${u};`);
  END IF;
 END $folio_rate_limit_permissions$;`);
  parts.push(`DO $folio_recovery_permissions$ DECLARE relation text; BEGIN
- FOREACH relation IN ARRAY ARRAY['account_recovery_requests','account_recovery_tokens','account_email_outbox','account_recovery_limits','account_security_events','account_registration_requests','account_registration_limits','email_verification_requests','email_verification_limits','email_verification_tokens'] LOOP
+ FOREACH relation IN ARRAY ARRAY['account_recovery_requests','account_recovery_tokens','account_email_outbox','account_recovery_limits','account_security_events','account_registration_requests','account_registration_limits','email_verification_requests','email_verification_limits','email_verification_tokens','invitation_email_outbox','invitation_email_limits'] LOOP
   IF to_regclass(format('%I.%I',${literal(schema)},relation)) IS NOT NULL THEN
    EXECUTE format('REVOKE ALL ON %I.%I FROM PUBLIC,%I',${literal(schema)},relation,${literal(appRole)});
   END IF;

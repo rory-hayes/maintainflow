@@ -1,0 +1,178 @@
+{
+  "recordedAt": "2026-09-19T20:46:06.422972+00:00",
+  "capability": "W07 workspace invitation email",
+  "node": "24.13.0",
+  "source": {
+    "count": 246,
+    "fingerprint": "5e0b5fba4dfc5b0eaf14cafe0b8abce57c5e287ec4d06c3a210546167ef51778"
+  },
+  "tests": {
+    "tests": 536,
+    "pass": 536,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0,
+    "duration_ms": 139207.773042
+  },
+  "phases": {
+    "suite": {
+      "phase": "suite",
+      "startedAt": "2026-09-19T20:43:22.521675+00:00",
+      "completedAt": "2026-09-19T20:45:41.836430+00:00",
+      "seconds": 139.313028875,
+      "exitCode": 0,
+      "sourceCount": 246,
+      "sourceFingerprint": "5e0b5fba4dfc5b0eaf14cafe0b8abce57c5e287ec4d06c3a210546167ef51778",
+      "sourceUnchanged": true
+    },
+    "build": {
+      "phase": "build",
+      "startedAt": "2026-09-19T20:41:34.010244+00:00",
+      "completedAt": "2026-09-19T20:41:36.081661+00:00",
+      "seconds": 2.071390208,
+      "exitCode": 0,
+      "sourceCount": 246,
+      "sourceFingerprint": "5e0b5fba4dfc5b0eaf14cafe0b8abce57c5e287ec4d06c3a210546167ef51778",
+      "sourceUnchanged": true
+    },
+    "package": {
+      "phase": "package",
+      "startedAt": "2026-09-19T20:43:16.146031+00:00",
+      "completedAt": "2026-09-19T20:43:21.458238+00:00",
+      "seconds": 5.312140458999999,
+      "exitCode": 0,
+      "sourceCount": 246,
+      "sourceFingerprint": "5e0b5fba4dfc5b0eaf14cafe0b8abce57c5e287ec4d06c3a210546167ef51778",
+      "sourceUnchanged": true
+    },
+    "bundle": {
+      "phase": "bundle",
+      "startedAt": "2026-09-19T20:43:47.210074+00:00",
+      "completedAt": "2026-09-19T20:43:52.192065+00:00",
+      "seconds": 4.981927167,
+      "exitCode": 0,
+      "sourceCount": 246,
+      "sourceFingerprint": "5e0b5fba4dfc5b0eaf14cafe0b8abce57c5e287ec4d06c3a210546167ef51778",
+      "sourceUnchanged": true
+    }
+  },
+  "browser": {
+    "runId": "e3e4d9cb-bb1d-41ed-be4a-60f39f51fd0e",
+    "startedAt": "2026-09-19T20:42:14.512Z",
+    "completedAt": "2026-09-19T20:42:37.094Z",
+    "checks": {
+      "ownerEmailCreationQueuedThenProviderAcceptedWithoutTokenOrDeliveryClaim": true,
+      "SenderUnavailableManualFallbackAndLostOwnerCreateResendRequireStatusRefresh": true,
+      "signedOutSignInContinuationRequiresExplicitReviewAndJoin": true,
+      "wrongAccountNoWorkspaceDisclosureAndSameTabAccountSwitch": true,
+      "existingRolePreservedOriginalWorkspaceDataAndApiKeyRetained": true,
+      "ExpiredRevokedUsedAndResentOldLinksFailNewResendWorks": true,
+      "RepeatedJoinSubmitOneRequestOneAuditThenExplicitWorkspaceOpen": true,
+      "RefreshRequiresOriginalLinkLegacyQuerySanitizedBeforeSignIn": true,
+      "SameTabReplacementJoinsCurrentWorkspaceAndMalformedLinkClearsOldSuccess": true,
+      "LateCommittedAcceptOpenWorkspaceAndLogoutRespectLatestInvitationIdentity": true,
+      "LostCommittedJoinResponseRecoversByCheckingActualWorkspaceAccess": true,
+      "NewInviteeRequiredVerificationNormalSignInReopenAndJoin": true,
+      "NoPrivatePersistenceExternalCallsUnrelatedWorkspaceChangesOrUnexplainedErrors": true
+    },
+    "preserved": {
+      "documents": 1,
+      "usage": 1,
+      "originalMemberships": 1,
+      "key": true,
+      "unrelatedWorkspace": true,
+      "unrelatedSession": true
+    },
+    "cleanedOwnedFixtures": {
+      "accounts": 13,
+      "workspaces": 13
+    },
+    "sourceUnchanged": true,
+    "externalProviderCalls": 0,
+    "controlledEmailAttempts": 7,
+    "controlledInvitationEmails": 6,
+    "controlledVerificationEmails": 1,
+    "unexpectedConsole": [],
+    "pageErrors": [],
+    "blockedNetwork": []
+  },
+  "browserEnvironment": {
+    "origin": "http://127.0.0.1:4337",
+    "fallback": "Browser plugin unavailable; installed Playwright fallback",
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 1000
+      },
+      {
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "httpRateLimits": "Controlled browser store; actual rate and recipient limits are covered by integration tests"
+  },
+  "screenshots": [
+    {
+      "file": "desktop-recipient-review.png",
+      "sha256": "65629ec3f077294711ab51d33bf0e2370826db99db921ceb92ad243c2a05e5d7",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "mobile-recipient-review.png",
+      "sha256": "0d61bab88ffd26e98730ea7ab3aca1bdf6324a8988f15d45dbeb83befe9498d7",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "mobile-owner-invitation-status.png",
+      "sha256": "cd820cec3c5d02f0573b09e3ef75205c60fcbb5693bcdc3216b002d77ad6302e",
+      "visuallyReviewed": true
+    },
+    {
+      "file": "mobile-uncertain-join.png",
+      "sha256": "f8a0d422d9fc6371db3516f8fd6a7dfff55632d53e03e4aeacc0c8c1c766d9cb",
+      "visuallyReviewed": true
+    }
+  ],
+  "browserHarnessSha256": "a87a0565b2749a4b8ddf4e151044effd33c0f6576d7bc91dcbfd2fa3bd36164a",
+  "priorBrowserAttempts": [
+    {
+      "runId": "4eff5d63-8dfe-4bee-ab4c-02ca5500193f",
+      "classification": "private harness selector",
+      "details": "Exact wrapped-select label did not match option/hint text. Prefix selectors corrected; product unchanged; all 3 fixtures cleaned."
+    },
+    {
+      "runId": "085bd6ed-3ddc-4ad7-bad6-8441719947d6",
+      "classification": "product overflow",
+      "details": "At 390px body remained390 while root document was565 due uncontained absolute sr-only Actions header inside horizontally scrollable member table. All3fixturescleaned."
+    },
+    {
+      "runId": "e62cb751-768b-4f45-aea6-be2ba4a52229",
+      "classification": "same overflow diagnostic",
+      "details": "Computed bounds isolated offending Actions span at right564.984px. Root added a positioned member-table wrapper, rebuilt, and complete13group rerun passed at document width390."
+    }
+  ],
+  "all47OriginalCapabilityCriteriaPreserved": true,
+  "release": {
+    "localMigrations": 21,
+    "latestLocalMigration": "030_invitation_email.sql",
+    "hostedMigrationsPending": "021\u2013030",
+    "realEmailProviderOrInboxVerified": false,
+    "canonicalRuntimeChanged": false,
+    "billing": "Existing visibly mocked billing unchanged",
+    "plans": "Existing free plans unchanged"
+  },
+  "logSha256": {
+    "suite": "e829bc882822e557c916f68e4472e1743d8b66eeda3aed0bc767299d9fd486d8",
+    "build": "e573fbad2483009fca7ea609999482520df0c1fcee93ebf3f2bb58890a70397d",
+    "package": "2e2b465ea4e86f2aa582be3b95a939e889efb36f706ad14b17bde049697231bc",
+    "bundle": "9cf500c4a13b154acf9f973de93bff5b06d162881137afe9f84822e649df516f"
+  },
+  "knownSecretScan": {
+    "recordedAt": "2026-09-19T20:46:06.699715+00:00",
+    "filesScanned": 732,
+    "knownValuesCompared": 12,
+    "matches": [],
+    "passed": true
+  }
+}

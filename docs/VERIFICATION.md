@@ -1,6 +1,16 @@
 # Verification ledger
 
-## Current email verification — 19 September 2026
+## Current invitation email — 19 September 2026
+
+W07 invitation email is implemented and locally verified with controlled senders. Owners and administrators can explicitly queue email or create a manual link, inspect delivery status, resend with token rotation, and revoke invitations. The recipient reviews the workspace and role after normal sign-in; new accounts complete required email verification before joining. Expiry, role preservation, delayed responses, lost responses and mobile layout are covered. **536/536 serial tests** passed on **Node 24.13.0** in **139.208 seconds**, with no failures or skips. Build, hosted packaging and isolated runtime/decoder checks passed on the same **246 source files**, fingerprint **`5e0b5fba4dfc5b0eaf14cafe0b8abce57c5e287ec4d06c3a210546167ef51778`**. **13/13 desktop/mobile browser groups** passed; six invitation and one verification email were captured locally, zero real provider calls occurred, and all 13 owned accounts/workspaces were cleaned while preservation checks passed. Migration **030 is local only**, with 21 local migrations; hosted **021–030** and actual authentication sender/inbox acceptance remain pending. Free plans and mocked billing are unchanged. All 47 original capability criteria remain preserved.
+
+[Contract](INVITATION-EMAIL.md) · [Dated receipt](evidence/invitation-email-2026-09-19/verification.json) · [Source manifest](evidence/invitation-email-2026-09-19/source-manifest.json). Browser proof uses the guarded local runtime at `http://127.0.0.1:4337/`, Chromium at 1440×1000 and 390×844, and an installed Playwright fallback because the Browser plugin was unavailable. It includes wrong-account switching, legacy/query cleanup, one-request acceptance, new/invalid-link replacement, late accept/select/logout fencing, lost committed create/resend/join responses, and newly verified recipients.
+
+The first browser attempt used an incorrect exact wrapped-select label. Two subsequent attempts found and diagnosed real mobile root overflow from an absolutely positioned hidden table header. A scoped positioned scroll wrapper fixed it; the final complete run has zero root overflow and no unexplained browser errors. All failed-run fixtures were also cleaned. Four masked and visually reviewed screenshots accompany the receipt.
+
+Hosted migration approval, matching runtime deployment, actual authentication email delivery, other open matrix capabilities and customer use remain separate gates. This increment makes no hosted or real-provider change. The following earlier sections retain dated historical evidence.
+
+## Earlier email verification — 19 September 2026
 
 W01 email verification is implemented and locally verified with controlled senders. Required registration uses encrypted asynchronous admission and no pending-user session. Confirmation requires the email token and current password, then records an actual timestamp and revokes that account's browser sessions. Existing unrestricted accounts retain access and are not retrospectively marked verified. The [verification contract](EMAIL-VERIFICATION.md) records the complete access, token, queue and delivery boundaries.
 

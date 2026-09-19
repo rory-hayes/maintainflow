@@ -12,7 +12,7 @@ export default function Auth({signUp=false}:{signUp?:boolean}){
   const runtime=useData<Runtime>('/api/config');
   const action=useAction(),session=useSession(),navigate=useNavigate();const [params]=useSearchParams();
   const requestedNext=params.get('next')||'';
-  const next=(requestedNext==='/app'||requestedNext.startsWith('/app/')||requestedNext.startsWith('/app?'))&&!requestedNext.includes('\\')?requestedNext:'';
+  const next=(requestedNext==='/invite'||requestedNext==='/app'||requestedNext.startsWith('/app/')||requestedNext.startsWith('/app?'))&&!requestedNext.includes('\\')?requestedNext:'';
   const destination=next||(signUp?`/app/parsers/new${params.get('sample')?'?sample=invoice':''}`:'/app');
   const otherAuthRoute=(signUp?'/sign-in':'/sign-up')+(params.size?`?${params.toString()}`:'');
   const observedVerification=runtime.data?.emailVerification;
@@ -41,6 +41,7 @@ export default function Auth({signUp=false}:{signUp?:boolean}){
       {!signUp?<p className="auth-recovery-link"><Link className="link" to="/forgot-password">Forgot password?</Link></p>:null}
       <Button disabled={action.busy||blocked} type="submit">{action.busy?'Please wait…':signUp?'Create workspace':'Sign in'}<ArrowRight/></Button>
     </form>
+    {next==='/invite'?<p className="small">Use the email address your workspace invitation was created for. If you need to verify a new account, reopen the invitation after verification.</p>:null}
     <p className="small auth-footer">{signUp?(runtime.isSuccess?signupPolicy:'Account setup is being checked.'):'Use the account created on this installation. Remote Parseur accounts are separate.'}</p>
     {!signUp?<p className="small"><Link className="link" to="/verify-email">Need a verification email?</Link></p>:null}
   </section></main></div>;
