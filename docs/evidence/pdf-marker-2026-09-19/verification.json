@@ -1,0 +1,703 @@
+{
+  "recordedAt": "2026-09-19T21:54:57.399478+00:00",
+  "parentHead": "04b0151b078f082ae7280b7698065ca61e5d9883",
+  "sourceCount": 252,
+  "sourceFingerprint": "a54d0bdf296ef723d1b3f8226ce16ef2d12fe5b4569db1e71927e174e25c551c",
+  "node": "24.13.0",
+  "testCounts": {
+    "tests": 555,
+    "pass": 555,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0,
+    "duration_ms": 155617.998917
+  },
+  "phases": {
+    "build": {
+      "startedAt": "2026-09-19T21:47:27.061816+00:00",
+      "completedAt": "2026-09-19T21:47:28.649227+00:00",
+      "seconds": 1.58743125,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "package": {
+      "startedAt": "2026-09-19T21:47:56.011139+00:00",
+      "completedAt": "2026-09-19T21:48:01.008139+00:00",
+      "seconds": 4.996977958,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "bundle": {
+      "startedAt": "2026-09-19T21:48:57.767350+00:00",
+      "completedAt": "2026-09-19T21:49:03.695965+00:00",
+      "seconds": 5.92857125,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "suite": {
+      "startedAt": "2026-09-19T21:49:02.809694+00:00",
+      "completedAt": "2026-09-19T21:51:38.533801+00:00",
+      "seconds": 155.723001666,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    }
+  },
+  "focused": {
+    "decoder": {
+      "passed": 17,
+      "failed": 0,
+      "durationMs": 19852.665792,
+      "log": ".local/pdf-marker-2026-09-19/decoder-final.log"
+    },
+    "intake": {
+      "passed": 19,
+      "failed": 0,
+      "durationMs": 22807.237083,
+      "log": ".local/pdf-marker-2026-09-19/intake-final.log"
+    }
+  },
+  "migration": {
+    "localOnly": true,
+    "database": "folio",
+    "schema": "public",
+    "port": 55432,
+    "migration": "migrations/031_pdf_marker_splitting.sql",
+    "sha256": "dab661c4615cff9539e84064f0dc154b4f82542f5b285f4eb295d52a5b0977e7",
+    "beforeCount": 21,
+    "afterCount": 22,
+    "added": [
+      "031_pdf_marker_splitting.sql"
+    ],
+    "constraintVerified": true
+  },
+  "browser": {
+    "runId": "ec8ef3db-9db1-46d7-bbdd-3f78d44390f8",
+    "startedAt": "2026-09-19T21:48:09.087Z",
+    "completedAt": "2026-09-19T21:48:22.057Z",
+    "origin": "http://127.0.0.1:4337",
+    "node": "24.13.0",
+    "browserAvailability": "Browser plugin unavailable; installed Playwright fallback",
+    "flow": "Generated native-text PDF -> marker preview -> split -> review -> approve -> exact download lineage",
+    "checks": {
+      "NativeTextWhitespaceMatchesPrefixConsecutiveRepeatsAndTextlessPageCoverage": true,
+      "CaseSensitiveLiteralNoCrossPageNoMatchAndNoTextRemainActionable": true,
+      "DetectedRangesConvertToManualAndOmissionsRecalculateCredits": true,
+      "DelayedFileAndMarkerChangesCannotRestoreStalePreview": true,
+      "MobileKeyboardBoundaryPreviewAndCreditsFitViewport": true,
+      "LostCommittedResponseReloadRecoversSameMarkerRequestWithoutDuplicateCredits": true,
+      "FourRealChildrenReviewApproveAndDownloadExactSourceAndRevisionLineage": true,
+      "PublicHelpMarkerAndApiAnchorsFitDesktopAndMobile": true,
+      "NoProviderCallsOrUnexplainedErrorsAndOnlyOwnedCredits": true
+    },
+    "screenshots": [
+      {
+        "file": "desktop-marker-preview.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "desktop-raster-marker-without-searchable-text.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "desktop-no-matching-marker.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "desktop-adjusted-custom-ranges.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "mobile-marker-settings.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      },
+      {
+        "file": "mobile-boundary-page-preview.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      },
+      {
+        "file": "mobile-marker-confirmation.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      },
+      {
+        "file": "desktop-lost-response-saved-marker-request.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "desktop-recovered-marker-split-receipt.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "desktop-child-review-original-page-lineage.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "mobile-child-review.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      },
+      {
+        "file": "help-marker-guide-1440.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "help-marker-guide-390.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      },
+      {
+        "file": "help-marker-api-1440.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "help-marker-api-390.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      }
+    ],
+    "children": [
+      {
+        "index": 1,
+        "pageCount": 1,
+        "originalRange": {
+          "start": 1,
+          "end": 1
+        },
+        "childSha256": "b91f9970650e3cae26f9d8bed80a48267597781a2a89f9ee190f4506be3d45c4",
+        "fullSourceSha256": "5205fb94caf59b494964ecfee5762b1c3ab3e1ba91bb638fcb0159e270486890",
+        "approved": true,
+        "exported": true
+      },
+      {
+        "index": 2,
+        "pageCount": 2,
+        "originalRange": {
+          "start": 2,
+          "end": 3
+        },
+        "childSha256": "db34eb06b0505b02a48bb0267cd8aa134351363abaefcfbaeb681a32f97a8200",
+        "fullSourceSha256": "5205fb94caf59b494964ecfee5762b1c3ab3e1ba91bb638fcb0159e270486890",
+        "approved": true,
+        "exported": true
+      },
+      {
+        "index": 3,
+        "pageCount": 1,
+        "originalRange": {
+          "start": 4,
+          "end": 4
+        },
+        "childSha256": "e10e2b0ffc3b82c3d6586b0634b8db5941b9a1815fffa2949a2c532c9eb84599",
+        "fullSourceSha256": "5205fb94caf59b494964ecfee5762b1c3ab3e1ba91bb638fcb0159e270486890",
+        "approved": true,
+        "exported": true
+      },
+      {
+        "index": 4,
+        "pageCount": 2,
+        "originalRange": {
+          "start": 5,
+          "end": 6
+        },
+        "childSha256": "0c4df350d783eeefae308bab0d4cb3925f82037a772a767a07a8cb5ce354459f",
+        "fullSourceSha256": "5205fb94caf59b494964ecfee5762b1c3ab3e1ba91bb638fcb0159e270486890",
+        "approved": true,
+        "exported": true
+      }
+    ],
+    "fixture": {
+      "sourceSha256": "5205fb94caf59b494964ecfee5762b1c3ab3e1ba91bb638fcb0159e270486890",
+      "nativeTextPdf": true,
+      "rasterMarkerPageSha256": "348c76a9d2e94cadf77bce41f112b9747391a7d2cde643f44f280806cdeb6919",
+      "rasterOnlyMarkerNotMatched": true,
+      "rulesWorker": true
+    },
+    "cleanedOwnedFixtures": {
+      "accounts": 1,
+      "workspaces": 1,
+      "documents": 4
+    },
+    "seededWorkspace": false,
+    "realProviderCalls": 0,
+    "extractionCalls": 4,
+    "pageErrors": [],
+    "expectedConsole": [
+      {
+        "type": "error",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "type": "error",
+        "text": "Failed to load resource: net::ERR_FAILED"
+      },
+      {
+        "type": "error",
+        "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      }
+    ],
+    "unexpectedConsole": [],
+    "blockedNetwork": [],
+    "sourceUnchanged": true,
+    "buildIndexSha256": "f95a74646fea3e5314c520ddead00c6753efdabc19bd584ed5be43063f14cfb4"
+  },
+  "tabletSupplement": {
+    "runId": "54c918d6-26c9-413a-b4c0-4b0f55b5db64",
+    "startedAt": "2026-09-19T21:52:25.645Z",
+    "completedAt": "2026-09-19T21:52:29.084Z",
+    "origin": "http://127.0.0.1:4337",
+    "node": "24.13.0",
+    "browserAvailability": "Browser plugin unavailable; installed Playwright fallback",
+    "flow": "Tablet supplement: native-text marker preview, manual adjustment, keyboard page and readiness; no submitted split",
+    "checks": {
+      "TabletMarkerWhitespaceBoundariesAndRasterPageRetained": true,
+      "TabletCustomAdjustmentRetainsDetectedRangesAndRecalculatesOmission": true,
+      "TabletKeyboardBoundaryPageAndCreateReadiness": true,
+      "TabletRasterOnlyMarkerIsNotMatched": true,
+      "TabletNoOverflowNoSubmittedSplitOrProviderCalls": true
+    },
+    "screenshots": [
+      {
+        "file": "tablet-marker-matches-and-credits.png",
+        "width": 820,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 820,
+          "body": 820,
+          "document": 820
+        }
+      },
+      {
+        "file": "tablet-manual-adjustment-and-credit-change.png",
+        "width": 820,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 820,
+          "body": 820,
+          "document": 820
+        }
+      },
+      {
+        "file": "tablet-keyboard-boundary-page-preview.png",
+        "width": 820,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 820,
+          "body": 820,
+          "document": 820
+        }
+      },
+      {
+        "file": "tablet-raster-only-marker-no-searchable-text.png",
+        "width": 820,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 820,
+          "body": 820,
+          "document": 820
+        }
+      }
+    ],
+    "fixture": {
+      "sourceSha256": "dc54968c088aeb2ed75d0dc481b9e6a9807380b761aa596d3acfeccb8d3743f6",
+      "rasterMarkerPageSha256": "348c76a9d2e94cadf77bce41f112b9747391a7d2cde643f44f280806cdeb6919",
+      "submitted": false
+    },
+    "cleanedOwnedFixtures": {
+      "accounts": 1,
+      "workspaces": 1,
+      "documents": 0
+    },
+    "seededWorkspace": false,
+    "realProviderCalls": 0,
+    "extractionCalls": 0,
+    "pageErrors": [],
+    "blockedNetwork": [],
+    "sourceUnchanged": true,
+    "buildIndexSha256": "f95a74646fea3e5314c520ddead00c6753efdabc19bd584ed5be43063f14cfb4"
+  },
+  "independentReview": {
+    "pure": {
+      "scope": "Read-only shared module tests; no application, database, browser, provider or network requests.",
+      "time": "2026-09-19T21:36:54.059Z",
+      "sourceSha256": "ad3484d5f2e1eba71ef04328a1352157416c4cfbd44b2bed2811517f6c14464e",
+      "cases": 2367,
+      "groups": {
+        "explicit boundaries": 7,
+        "all boundary subsets through ten pages": 2036,
+        "safe failure cases": 7,
+        "invalid stored marker": 6,
+        "largest valid marker spec": 4,
+        "canonical normalized identity": 1,
+        "marker cannot omit pages": 3,
+        "forged complete marker ranges": 3,
+        "native assembly parity with prior decoder": 300
+      },
+      "passed": true
+    },
+    "envelopeAndClient": {
+      "scope": "Independent pure envelope/client-helper checks with entirely mocked fetch/sessionStorage. No network/browser/app/DB/provider requests.",
+      "time": "2026-09-19T21:39:12.135Z",
+      "passed": 19,
+      "checks": [
+        "stdin roundtrip and argv isolation",
+        "malformed envelope 1 fixed operational error",
+        "malformed envelope 2 fixed operational error",
+        "malformed envelope 3 fixed operational error",
+        "malformed envelope 4 fixed operational error",
+        "malformed envelope 5 fixed operational error",
+        "malformed envelope 6 fixed operational error",
+        "malformed envelope 7 fixed operational error",
+        "malformed envelope 8 fixed operational error",
+        "malformed envelope 9 fixed operational error",
+        "malformed envelope 10 fixed operational error",
+        "malformed envelope 11 fixed operational error",
+        "malformed envelope 12 fixed operational error",
+        "native text dependency failure is safe",
+        "native text UTF8 budget",
+        "late save never replaces newer request",
+        "late save enriches matching request only",
+        "lost scope after config causes no upload",
+        "late reservation stores recovery without PUT or finalization"
+      ],
+      "sha256": {
+        "server/core/decoder-input.ts": "592f3b3c6519f6e58d6a15d897945fb82ed2b571d7daf38dfd83318cd4c96fa5",
+        "server/core/source.ts": "fde56ca6850c86f7aad89ed9d0ec17a279c72394ed3b219acae7c3c9e64f0b1d",
+        "src/lib/pdf-split.ts": "21b1d89f2ff75c30042050b32baefba59fb952314c968038861d5329101c7887"
+      }
+    },
+    "strictMode": {
+      "scope": "Actual SplitPdf, shared client helpers, Radix Modal and React/ReactDOM development StrictMode. QueryClient and MemoryRouter mounted. Only session provider and unused PdfCanvas module stubbed; CSS font imports omitted. All fetch responses mocked in memory; page network blocked except synthetic HTML. No application, database or provider access.",
+      "time": "2026-09-19T21:49:28.744Z",
+      "sourceSha256": "177a19eb0d522f182c313987e084dc83a65b5fb932164983cd3e59ec76e601b0",
+      "checks": [
+        {
+          "order": "obsolete-first",
+          "strictModeReceiptRequests": 2,
+          "appliedCompletions": 1,
+          "currentDeletedReceiptRetained": true,
+          "obsoleteAvailableReceiptIgnored": true,
+          "busyCleared": true,
+          "dialogCloses": true,
+          "pageErrors": [],
+          "consoleErrors": [],
+          "unmockedNetworkRequests": []
+        },
+        {
+          "order": "current-first",
+          "strictModeReceiptRequests": 2,
+          "appliedCompletions": 1,
+          "currentDeletedReceiptRetained": true,
+          "obsoleteAvailableReceiptIgnored": true,
+          "busyCleared": true,
+          "dialogCloses": true,
+          "pageErrors": [],
+          "consoleErrors": [],
+          "unmockedNetworkRequests": []
+        }
+      ],
+      "passed": true
+    },
+    "canvasCallbacks": {
+      "scope": "Actual PdfCanvas and native-text helper mounted with React development concurrent transitions; all PDF.js document/page/render promises controlled in memory. Old promises settle from replacement parent layout effect. No application, file, API, DB, provider or network access.",
+      "time": "2026-09-19T21:47:49.427Z",
+      "sourceSha256": "2a09fec94ac891e1eb2099f8c747ab339270d7de5ef4750650e180723b5d8cdc",
+      "checks": [
+        {
+          "mode": "ready-success",
+          "lateCallbacks": [
+            {
+              "version": 2,
+              "kind": "ready",
+              "count": 3
+            },
+            {
+              "version": 2,
+              "kind": "rendered",
+              "page": 1
+            }
+          ],
+          "staleCallbacks": [],
+          "pageErrors": [],
+          "passed": true
+        },
+        {
+          "mode": "ready-error",
+          "lateCallbacks": [
+            {
+              "version": 2,
+              "kind": "ready",
+              "count": 3
+            },
+            {
+              "version": 2,
+              "kind": "rendered",
+              "page": 1
+            }
+          ],
+          "staleCallbacks": [],
+          "pageErrors": [],
+          "passed": true
+        },
+        {
+          "mode": "render-success-bytes",
+          "lateCallbacks": [
+            {
+              "version": 2,
+              "kind": "ready",
+              "count": 3
+            },
+            {
+              "version": 2,
+              "kind": "rendered",
+              "page": 2
+            }
+          ],
+          "staleCallbacks": [],
+          "pageErrors": [],
+          "passed": true
+        },
+        {
+          "mode": "render-error-bytes",
+          "lateCallbacks": [
+            {
+              "version": 2,
+              "kind": "ready",
+              "count": 3
+            },
+            {
+              "version": 2,
+              "kind": "rendered",
+              "page": 2
+            }
+          ],
+          "staleCallbacks": [],
+          "pageErrors": [],
+          "passed": true
+        },
+        {
+          "mode": "render-success-page",
+          "lateCallbacks": [
+            {
+              "version": 2,
+              "kind": "rendered",
+              "page": 2
+            }
+          ],
+          "staleCallbacks": [],
+          "pageErrors": [],
+          "passed": true
+        },
+        {
+          "mode": "render-error-page",
+          "lateCallbacks": [
+            {
+              "version": 2,
+              "kind": "rendered",
+              "page": 2
+            }
+          ],
+          "staleCallbacks": [],
+          "pageErrors": [],
+          "passed": true
+        },
+        {
+          "mode": "native-success",
+          "lateCallbacks": [
+            {
+              "version": 2,
+              "kind": "ready",
+              "count": 1
+            },
+            {
+              "version": 2,
+              "kind": "rendered",
+              "page": 1
+            },
+            {
+              "version": 2,
+              "kind": "text",
+              "pages": [
+                "NEW SOURCE"
+              ]
+            }
+          ],
+          "staleCallbacks": [],
+          "pageErrors": [],
+          "passed": true
+        },
+        {
+          "mode": "native-error",
+          "lateCallbacks": [
+            {
+              "version": 2,
+              "kind": "ready",
+              "count": 1
+            },
+            {
+              "version": 2,
+              "kind": "rendered",
+              "page": 1
+            },
+            {
+              "version": 2,
+              "kind": "text",
+              "pages": [
+                "NEW SOURCE"
+              ]
+            }
+          ],
+          "staleCallbacks": [],
+          "pageErrors": [],
+          "passed": true
+        },
+        {
+          "mode": "native-disable",
+          "lateCallbacks": [],
+          "staleCallbacks": [],
+          "pageErrors": [],
+          "passed": true
+        }
+      ],
+      "passed": 9
+    }
+  },
+  "visual": {
+    "reviewedAt": "2026-09-19T21:49:46.133Z",
+    "tabletReviewedAt": "2026-09-19T21:53:12.148Z",
+    "retainedFrames": 19,
+    "findings": [],
+    "publishedScreenshots": [
+      {
+        "sha256": "9cafe7f5e6d8161ca484e9ddf50c71fd5314bdee6878b6cc6c5459edcd3d4c3c",
+        "file": "desktop-marker-preview.png"
+      },
+      {
+        "sha256": "12ce4f77165d4530d9d80656e6cda37e88b9e31870a257564ddb9a8f892978eb",
+        "file": "desktop-raster-marker-without-searchable-text.png"
+      },
+      {
+        "sha256": "4f312eeea8554910c2c236046f42dfcccbbc54a0d06373592e8f2bf78a2299e5",
+        "file": "mobile-marker-confirmation.png"
+      },
+      {
+        "sha256": "8d0c4fa7b728d08b937bcc762d6ac86015cd0cfab57a08e757e0fb49d4a37cb0",
+        "file": "desktop-child-review-original-page-lineage.png"
+      },
+      {
+        "sha256": "ab0312066e9e5970e81cbc7ce2d36edb8a154fe0a3c161d306c3329dfbf215d6",
+        "file": "tablet-marker-matches-and-credits.png"
+      }
+    ]
+  },
+  "originalCriteriaPreserved": 47,
+  "limits": [
+    "Generated PDFs and real deterministic text-anchor worker only; no provider extraction, hosted deployment or real signed storage service exercised.",
+    "Matching is literal, case-sensitive, native text only and within one page; no OCR, regex, fuzzy matching or arbitrary PDF quality claim.",
+    "Browser integrated run used multipart storage and reload recovery. Separate backend/reviewer evidence owns signed-upload and commit-time lifecycle coverage.",
+    "Tablet supplement verifies local controls/preview/readiness, not a second split submission.",
+    "Hosted migrations 021\u2013031 and matching activation remain pending; free plans and mock billing unchanged.",
+    "AI boundaries, TIFF, archive expansion and existing-document resplitting remain required gaps."
+  ],
+  "historicalAttempts": {
+    "backend": "17/19 initially due to two test audit-column typos; corrected19/19 pass retained alongside failure.",
+    "browser": [
+      "4ee940e9-15fd-433a-abc1-923cffc26976: textbox locator/hint mismatch, cleaned",
+      "c426d2f0-c5c5-4a6a-a955-69a926615cf9: expected201 instead of202 after accepted split; guarded recovery cleaned1account/1workspace/4children and verified none remained"
+    ],
+    "productFinding": "Old PDF native text could reach replacement callback before passive cleanup; layout lifecycle fix verified by original reproduction and9callback cases."
+  },
+  "knownSecretScan": {
+    "recordedAt": "2026-09-19T21:55:08.283519+00:00",
+    "filesScanned": 753,
+    "knownValuesCompared": 12,
+    "matches": [],
+    "passed": true
+  }
+}

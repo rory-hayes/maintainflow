@@ -304,3 +304,71 @@ test('same-bound staging retry works at the final page credit while changed bind
  const state=await counts(f);assert.equal(state.pdf_splits,1);assert.equal(state.documents,1);assert.equal(state.jobs,1);assert.equal(state.pages,1);
  assert.equal((await adminPool.query('select count(*)::int n from direct_uploads where workspace_id=$1',[f.account.workspace.id])).rows[0].n,2,'Both physical staging capabilities remain tracked');
 });
+
+test('marker upload binds canonical text and exact lineage, and replay never charges or redecodes',async()=>{
+ const f=await fixture('marker-real'),foreign=await fixture('marker-foreign'),id=randomUUID();
+ const marker='OWNED-PAGE-3',options:PdfSplitSpec={mode:'marker',marker,ranges:[{start:1,end:2},{start:3,end:4}]};
+ await adminPool.query("update workspaces set plan=jsonb_set(plan,'{monthlyPages}','4') where id=$1",[f.account.workspace.id]);
+ const body=multipart(pdf,id,options),url=`/api/parsers/${f.parserId}/pdf-splits`;
+ assert.equal((await request(foreign.account,'POST',url,body.payload,body.headers)).statusCode,404);
+ assert.equal((await request(f.account,'POST',url,body.payload,{...body.headers,origin:'https://untrusted.example.test'})).statusCode,403);
+ const response=await request(f.account,'POST',url,body.payload,body.headers);assert.equal(response.statusCode,202,response.body);const receipt=response.json();
+ assert.deepEqual(receipt.documents.map((d:any)=>[d.originalPageStart,d.originalPageEnd,d.pageCount]),[[1,2,2],[3,4,2]]);assert.equal(receipt.split.selectedPages,4);
+ assert.deepEqual(objects.get(`${f.account.workspace.id}/${receipt.split.id}`),pdf);
+ const stored=(await adminPool.query('select canonical_spec from pdf_splits where id=$1',[receipt.split.id])).rows[0];assert.deepEqual(stored.canonical_spec,options);
+ const rows=(await adminPool.query('select source_text from documents where pdf_split_id=$1 order by pdf_split_index',[receipt.split.id])).rows;
+ assert.deepEqual(rows.map(row=>row.source_text.map((p:any)=>p.page)),[[1,2],[1,2]]);assert.match(rows[1].source_text[0].text,/OWNED-PAGE-3/);
+ const before=await counts(f),beforeWrites=writes,forbidden=async()=>{throw new Error('Marker replay must not decode');};
+ const replay=await split(f,{...options,marker:` \t${marker} \n`},id,{splitSource:forbidden});assert.equal(replay.replayed,true);assert.equal(replay.split.id,receipt.split.id);assert.equal(writes,beforeWrites);assert.deepEqual(await counts(f),before);
+ await assert.rejects(split(f,{...options,marker:'OWNED-PAGE-2'},id,{splitSource:forbidden}),status(409));
+ await assert.rejects(split(f,{...options,ranges:[{start:1,end:4}]},id,{splitSource:forbidden}),status(409));
+ const lookup=`/api/parsers/${f.parserId}/pdf-splits/requests/${id}`;assert.equal((await request(foreign.account,'GET',lookup)).statusCode,404);
+ const audits=(await adminPool.query('select action,metadata from audit_events where workspace_id=$1',[f.account.workspace.id])).rows;
+ assert.ok(!JSON.stringify(audits).includes(marker));assert.ok(!JSON.stringify(receipt).includes(marker));
+});
+
+test('marker no-text, no-match and forged-plan rejections persist once without writes or usage',async()=>{
+ const f=await fixture('marker-rejections'),blank=await PDFDocument.create();blank.addPage();const blankBytes=Buffer.from(await blank.save());
+ const cases=[
+  {bytes:pdf,spec:{mode:'marker',marker:'PRIVATE unmatched marker',ranges:[{start:1,end:4}]} as PdfSplitSpec,reason:'marker_not_found'},
+  {bytes:pdf,spec:{mode:'marker',marker:'OWNED-PAGE-3',ranges:[{start:1,end:4}]} as PdfSplitSpec,reason:'marker_plan_mismatch'},
+  {bytes:blankBytes,spec:{mode:'marker',marker:'PRIVATE no native text',ranges:[{start:1,end:1}]} as PdfSplitSpec,reason:'marker_no_text'},
+ ];
+ const beforeWrites=writes;
+ for(const item of cases){
+  const id=randomUUID(),invoke=(options:Parameters<typeof addSplitDocuments>[6]={})=>addSplitDocuments(actor(f.account),f.parserId,item.bytes,'owned-marker.pdf',id,item.spec,options);
+  const check=(error:any)=>error instanceof PdfSplitValidationError&&error.reason===item.reason&&!error.message.includes('PRIVATE');
+  await assert.rejects(invoke(),check);await assert.rejects(invoke({splitSource:async()=>{throw new Error('Durable marker rejection must not decode');}}),check);
+  const read=await request(f.account,'GET',`/api/parsers/${f.parserId}/pdf-splits/requests/${id}`);assert.equal(read.statusCode,400,read.body);assert.ok(!read.body.includes('PRIVATE'));
+ }
+ assert.equal(writes,beforeWrites);const state=await counts(f);assert.equal(state.pdf_splits,3);assert.equal(state.documents,0);assert.equal(state.jobs,0);assert.equal(state.pages,0);assert.equal(state.intake_files,0);
+ const reasons=(await adminPool.query('select rejection_reason from pdf_splits where workspace_id=$1 order by rejection_reason',[f.account.workspace.id])).rows.map(r=>r.rejection_reason);
+ assert.deepEqual(reasons,['marker_no_text','marker_not_found','marker_plan_mismatch']);
+ const audits=(await adminPool.query('select action,metadata from audit_events where workspace_id=$1',[f.account.workspace.id])).rows;assert.ok(!JSON.stringify(audits).includes('PRIVATE'));
+ // Unsupported JSON strings fail before any durable receipt is attempted.
+ for(const marker of ['\0','\ud800']){
+  const body=multipart(pdf,randomUUID(),{mode:'marker',marker,ranges:[{start:1,end:4}]});const response=await request(f.account,'POST',`/api/parsers/${f.parserId}/pdf-splits`,body.payload,body.headers);assert.equal(response.statusCode,400,response.body);
+ }
+ assert.equal((await counts(f)).pdf_splits,3);
+});
+
+test('marker signed-upload retry preserves canonical binding at the final page credit',async()=>{
+ const f=await fixture('marker-staging');await adminPool.query("update workspaces set plan=jsonb_set(plan,'{monthlyPages}','1') where id=$1",[f.account.workspace.id]);
+ const id=randomUUID(),options:PdfSplitSpec={mode:'marker',marker:'Reference: OWNED-PAGE-1',ranges:[{start:1,end:1}]};
+ const input={filename:'owned-marker.pdf',size:onePage.length,sha256:hash(onePage),pdfSplit:{requestId:id,options}};
+ const interrupted=await reserveDirectUpload(actor(f.account),f.parserId,input);await assert.rejects(finalizeDirectUpload(actor(f.account),interrupted.uploadId),status(404));
+ await assert.rejects(reserveDirectUpload(actor(f.account),f.parserId,{...input,pdfSplit:{requestId:id,options:{...options,marker:'changed marker'}}}),status(429));
+ const fresh=await reserveDirectUpload(actor(f.account),f.parserId,{...input,pdfSplit:{requestId:id,options:{...options,marker:' Reference:\tOWNED-PAGE-1 '}}});
+ objects.set(`${f.account.workspace.id}/${fresh.uploadId}`,onePage);
+ const result=await finalizeDirectUpload(actor(f.account),fresh.uploadId);assert.equal(result.split.requestId,id);assert.equal(result.split.selectedPages,1);assert.equal(result.documents.length,1);
+ const before=await counts(f),beforeWrites=writes;assert.equal((await finalizeDirectUpload(actor(f.account),fresh.uploadId)).replayed,true);assert.deepEqual(await counts(f),before);assert.equal(writes,beforeWrites);assert.equal(before.pages,1);
+});
+
+test('marker adapter mismatch stays retryable even if an internal caller changes its original spec',async()=>{
+ const f=await fixture('marker-adapter'),options:PdfSplitSpec={mode:'marker',marker:'OWNED-PAGE-3',ranges:[{start:1,end:2},{start:3,end:4}]},id=randomUUID(),beforeWrites=writes;
+ await assert.rejects(split(f,options,id,{splitSource:async(...args)=>{
+  const invalid=await controlled(...args);(options as any).mode='ranges';return invalid;
+ }}),status(503));
+ assert.equal(writes,beforeWrites);const state=await counts(f);assert.equal(state.pdf_splits,0);assert.equal(state.pages,0);assert.equal(state.intake_files,0);
+ const accepted=await split(f,{...options,mode:'marker'},id);assert.equal(accepted.split.selectedPages,4);
+});

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type {PageText} from '../../shared/types.js';
+import {nativePdfPageText} from '../../shared/pdf-split.js';
 import {decoderError,decoderLimits as config} from './decoder-limits.js';
 import {SourceValidationError,type SourceValidationReason} from './source-validation.js';
 const invalid=(reason:SourceValidationReason):never=>{throw new SourceValidationError(reason);};
@@ -160,15 +161,7 @@ export async function decodeSource(bytes:Buffer,filename:string):Promise<{mimeTy
       const pages:PageText[]=[];
       for(let p=1;p<=doc.numPages;p++){
         const page=await doc.getPage(p),content=await page.getTextContent();
-        let prevY:number|undefined;const lines:string[]=[];
-        for(const item of content.items){
-          if(!('str' in item))continue;
-          const y=item.transform[5];
-          if(prevY!==undefined&&Math.abs(y-prevY)>3)lines.push('\n');
-          else if(lines.length&&!lines.at(-1)?.endsWith('\n'))lines.push(' ');
-          lines.push(item.str);if(item.hasEOL)lines.push('\n');prevY=y;
-        }
-        pages.push({page:p,text:lines.join('').replace(/\n\s*\n/g,'\n')});
+        pages.push({page:p,text:nativePdfPageText(content.items)});
       }
       return {mimeType:'application/pdf',pages,pageCount:doc.numPages};
     }catch(error){

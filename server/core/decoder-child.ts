@@ -1,7 +1,8 @@
 import { decodeSource } from './decoder-engine.js';
 import { decoderLimits } from './decoder-limits.js';
 import { SourceValidationError, isSourceValidationReason } from './source-validation.js';
-import { canonicalPdfSplitSpec, pdfSplitLimits, PdfSplitValidationError, isPdfSplitValidationReason } from '../../shared/pdf-split.js';
+import { pdfSplitLimits, PdfSplitValidationError, isPdfSplitValidationReason } from '../../shared/pdf-split.js';
+import {decodeSplitInput,maxSplitInputBytes} from './decoder-input.js';
 
 // stdout contains one bounded JSON response. Decoder-library diagnostics cannot mix with it.
 console.log = () => {};
@@ -10,19 +11,20 @@ console.error = () => {};
 
 const chunks: Buffer[] = [];
 let size = 0;
+const splitting = process.argv[3] === '--pdf-split';
 try {
   for await (const chunk of process.stdin) {
     const bytes = Buffer.from(chunk);
     size += bytes.length;
-    if (size > decoderLimits.maxBytes) throw new SourceValidationError('file_too_large');
+    if (splitting && size > maxSplitInputBytes) throw new Error('Invalid decoder input envelope');
+    if (!splitting && size > decoderLimits.maxBytes) throw new SourceValidationError('file_too_large');
     chunks.push(bytes);
   }
-  const splitting = process.argv[3] === '--pdf-split';
   let json: string;
   if (splitting) {
-    const spec = JSON.parse(canonicalPdfSplitSpec(JSON.parse(process.argv[4] || 'null')));
+    const {bytes,spec} = decodeSplitInput(Buffer.concat(chunks));
     const { decodePdfSplit } = await import('./pdf-split-engine.js');
-    json = JSON.stringify({ ok: true, split: await decodePdfSplit(Buffer.concat(chunks), process.argv[2] || 'document.pdf', spec) });
+    json = JSON.stringify({ ok: true, split: await decodePdfSplit(bytes, process.argv[2] || 'document.pdf', spec) });
   } else {
     const source = await decodeSource(Buffer.concat(chunks), process.argv[2] || 'document');
     if (source.pages.reduce((total, page) => total + Buffer.byteLength(page.text), 0) > decoderLimits.maxTextBytes) {
