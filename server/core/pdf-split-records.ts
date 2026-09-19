@@ -60,5 +60,6 @@ export async function retainedPdfSource(c:PoolClient,workspaceId:string,document
 /** All original-object adopters participate in the same owned reference check. */
 export async function storedObjectReferenced(c:PoolClient,workspaceId:string,storageKey:string):Promise<boolean>{
  return Boolean((await c.query(`select 1 from documents where workspace_id=$1 and storage_key=$2
-  union all select 1 from pdf_splits where workspace_id=$1 and source_storage_key=$2 limit 1`,[workspaceId,storageKey])).rowCount);
+  union all select 1 from pdf_splits where workspace_id=$1 and source_storage_key=$2
+  union all select 1 from archive_imports where workspace_id=$1 and source_storage_key=$2 limit 1`,[workspaceId,storageKey])).rowCount);
 }

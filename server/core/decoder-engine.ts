@@ -108,6 +108,8 @@ function classifySource(bytes:Buffer,filename:string):{format:SourceFormat;text?
   if(!format)invalid('format_unsupported');
   return {format,text:text!};
 }
+/** Byte-led classification without loading document-conversion dependencies. */
+export const detectSourceFormat = (bytes:Buffer, filename:string):SourceFormat => classifySource(bytes,filename).format;
 async function htmlSourceText(html:string):Promise<string>{
   // The converter is already used by mailparser. Extraction disables presentation
   // wrapping, heading case conversion and added link/image URLs.

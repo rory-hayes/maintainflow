@@ -10,11 +10,12 @@ export async function purgeDocument(c: PoolClient, workspaceId: string, document
   const parser=await lockParserForDocument(c,workspaceId,documentId);
   await detachSetupSource(c,parser,documentId);
   const { rows: [document] } = await c.query(
-    'select id,storage_key,pdf_split_id from documents where id=$1 and workspace_id=$2',
+    'select id,storage_key,pdf_split_id,archive_import_id from documents where id=$1 and workspace_id=$2',
     [documentId, workspaceId],
   );
   if (!document) return undefined;
   if(document.pdf_split_id)await c.query('select id from pdf_splits where id=$1 and workspace_id=$2 for update',[document.pdf_split_id,workspaceId]);
+  if(document.archive_import_id)await c.query('select id from archive_imports where id=$1 and workspace_id=$2 for update',[document.archive_import_id,workspaceId]);
   await c.query('select id from documents where id=$1 and workspace_id=$2 for update',[documentId,workspaceId]);
   const tables = (await c.query("select to_regclass('export_snapshots') exports,to_regclass('webhook_deliveries') deliveries,to_regclass('sheet_writes') sheets")).rows[0];
   if (tables.exports) await c.query('delete from export_snapshots where workspace_id=$1 and $2::uuid=any(document_ids)', [workspaceId, documentId]);
@@ -26,6 +27,11 @@ export async function purgeDocument(c: PoolClient, workspaceId: string, document
   if(document.pdf_split_id){
     await c.query('update pdf_split_children set document_name=null where document_id=$1 and workspace_id=$2',[documentId,workspaceId]);
     const sourceKey=await releaseEmptyPdfSplit(c,workspaceId,document.pdf_split_id);
+    if(sourceKey)storageKeys.push(sourceKey);
+  }
+  if(document.archive_import_id){
+    await c.query('update archive_import_entries set document_name=null,entry_path=null where document_id=$1 and workspace_id=$2',[documentId,workspaceId]);
+    const sourceKey=await releaseEmptyArchive(c,workspaceId,document.archive_import_id);
     if(sourceKey)storageKeys.push(sourceKey);
   }
   return {...document,storageKeys};
@@ -95,7 +101,7 @@ export async function deleteStoredFile(
     // workspace -> intent -> deletion ordering. A new deletion intent wins.
     await withWorkspace(workspaceId,async c=>{
       await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[workspaceId]);
-      const intent=(await c.query('select id from intake_files where workspace_id=$1 and storage_key=$2 and split_attempt_id is not null for update',[workspaceId,storageKey])).rows[0];
+      const intent=(await c.query('select id from intake_files where workspace_id=$1 and storage_key=$2 and (split_attempt_id is not null or archive_attempt_id is not null) for update',[workspaceId,storageKey])).rows[0];
       if(intent)await c.query('delete from intake_files where id=$1 and not exists(select 1 from file_deletions where workspace_id=$2 and storage_key=$3)',[intent.id,workspaceId,storageKey]);
     });
   }
@@ -107,4 +113,23 @@ export async function processOneFileDeletion() {
   if (!entry) return false;
   await deleteStoredFile(entry.workspace_id, entry.storage_key);
   return true;
+}
+
+async function releaseEmptyArchive(c:PoolClient,workspaceId:string,archiveId:string){
+ const archive=(await c.query('select source_storage_key from archive_imports where id=$1 and workspace_id=$2 for update',[archiveId,workspaceId])).rows[0];
+ if(!archive?.source_storage_key||(await c.query('select id from documents where archive_import_id=$1 and workspace_id=$2 limit 1',[archiveId,workspaceId])).rowCount)return undefined;
+ await c.query('insert into file_deletions(workspace_id,storage_key) values($1,$2) on conflict(storage_key) do nothing',[workspaceId,archive.source_storage_key]);
+ await c.query('update archive_imports set source_storage_key=null,source_name=null,source_released_at=now() where id=$1 and workspace_id=$2',[archiveId,workspaceId]);
+ return archive.source_storage_key as string;
+}
+export async function purgeArchiveImport(c:PoolClient,workspaceId:string,archiveId:string){
+ await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[workspaceId]);
+ const parser=(await c.query("select p.id from parsers p join archive_imports a on a.parser_id=p.id and a.workspace_id=p.workspace_id where a.id=$1 and a.workspace_id=$2 and a.state='accepted' for update of p",[archiveId,workspaceId])).rows[0];
+ if(!parser)return undefined;
+ await c.query('select id from archive_imports where id=$1 and workspace_id=$2 for update',[archiveId,workspaceId]);
+ const documents=(await c.query('select id from documents where archive_import_id=$1 and workspace_id=$2 order by archive_entry_index',[archiveId,workspaceId])).rows;
+ const storageKeys:string[]=[];
+ for(const document of documents){const removed=await purgeDocument(c,workspaceId,document.id);if(removed)storageKeys.push(...removed.storageKeys);}
+ const sourceKey=await releaseEmptyArchive(c,workspaceId,archiveId);if(sourceKey)storageKeys.push(sourceKey);
+ return {id:archiveId,removedDocuments:documents.length,storageKeys:[...new Set(storageKeys)]};
 }

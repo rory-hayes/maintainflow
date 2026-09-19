@@ -1,6 +1,8 @@
 # MaintainFlow document workspace (Folio)
 
-Latest local acceptance: text-marker PDF splitting passes 555 tests, nine desktop/mobile workflow groups and five tablet preview/control groups. [Contract, screenshots and limits](docs/PDF-MARKER-SPLITTING.md). Hosted activation remains pending.
+Latest local acceptance: selective ZIP imports pass 594 tests and 11 desktop/tablet/mobile workflow groups. Preview the archive, choose supported files, then review and approve each imported document independently. [Contract, screenshots and limits](docs/ZIP-IMPORTS.md). Hosted activation remains pending; free plans and mock billing are unchanged.
+
+Earlier local acceptance: text-marker PDF splitting passes 555 tests, nine desktop/mobile workflow groups and five tablet preview/control groups. [Contract, screenshots and limits](docs/PDF-MARKER-SPLITTING.md). Hosted activation remains pending.
 
 Earlier local acceptance: nested review and approved exports pass 544 tests and 13 desktop/tablet/mobile browser groups. [Contract and limits](docs/NESTED-REVIEW.md). Hosted activation remains pending.
 

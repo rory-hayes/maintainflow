@@ -45,8 +45,8 @@ export async function uploadDocuments(parserId:string,files:File[]):Promise<Uplo
   return {...(results.length===1?results[0]:{}),results};
 }
 /** Fetch the scoped URL first so workspace headers are never forwarded across origins. */
-export async function fetchOriginalFile(documentId:string,signal?:AbortSignal,bundle=false){
-  const route=bundle?'bundle-original':'original';
+export async function fetchOriginalFile(documentId:string,signal?:AbortSignal,bundle:boolean|'archive'=false){
+  const route=bundle==='archive'?'archive-original':bundle?'bundle-original':'original';
   const location=await api<{url:string;external:boolean}>(`/api/documents/${documentId}/${route}-url`,{signal});
   if(location.external){
     const url=new URL(location.url);
@@ -58,9 +58,9 @@ export async function fetchOriginalFile(documentId:string,signal?:AbortSignal,bu
   return fetch(location.url,{signal,headers:selectedWorkspace?{'X-Workspace-Id':selectedWorkspace}:undefined,credentials:'same-origin',cache:'no-store'});
 }
 export async function downloadFile(path:string,filename:string){
-  const original=/^\/api\/documents\/([a-f0-9-]{36})\/(bundle-)?original$/.exec(path);
+  const original=/^\/api\/documents\/([a-f0-9-]{36})\/(bundle-|archive-)?original$/.exec(path);
   const selectedWorkspace=workspaceId();
-  const response=original?await fetchOriginalFile(original[1],undefined,Boolean(original[2])):await fetch(path,{headers:selectedWorkspace?{'X-Workspace-Id':selectedWorkspace}:undefined,credentials:'same-origin'});
+  const response=original?await fetchOriginalFile(original[1],undefined,original[2]==='archive-'?'archive':Boolean(original[2])):await fetch(path,{headers:selectedWorkspace?{'X-Workspace-Id':selectedWorkspace}:undefined,credentials:'same-origin'});
   if(!response.ok)throw new Error('The download could not be completed.');
   const href=URL.createObjectURL(await response.blob());const anchor=document.createElement('a');anchor.href=href;anchor.download=filename;anchor.click();setTimeout(()=>URL.revokeObjectURL(href),5000);
 }

@@ -15,9 +15,12 @@ try{
   const result=spawnSync(process.execPath,['--input-type=module','-e',`
     import assert from 'node:assert/strict';
     import fs from 'node:fs/promises';
-    import {inspectSource,decoderLaunchSpec,splitPdfSource} from './server/core/source.js';
+    import {inspectSource,decoderLaunchSpec,splitPdfSource,previewArchiveSource,importArchiveSource} from './server/core/source.js';
+    import {createHash} from 'node:crypto';
+    import JSZip from 'jszip';
+    import {PDFDocument,StandardFonts} from 'pdf-lib';
     import {buildApp} from './server/app.js';
-    for (const launch of [decoderLaunchSpec('document.txt'), decoderLaunchSpec('bundle.pdf',{mode:'every',pagesPerDocument:1})]) {
+    for (const launch of [decoderLaunchSpec('document.txt'), decoderLaunchSpec('bundle.pdf',{mode:'every',pagesPerDocument:1}),decoderLaunchSpec('archive.zip',undefined,{})]) {
       assert.equal(launch.args.includes('tsx'),false);
       assert.ok(launch.args.includes('--max-old-space-size=192'));
       assert.equal(launch.args.includes('--max-old-space-size=256'),false);
@@ -49,6 +52,42 @@ try{
       ...markerSpec,ranges:[{start:1,end:2}],
     }),error=>error.code==='pdf_split_validation_failed'&&error.reason==='marker_plan_mismatch');
     console.log('PASS packaged marker boundaries, preserved prefix and rejected changed preview');
+    const archiveFiles=['invoice-multipage.pdf','receipt-scan.png','receipt.docx','receipt.xlsx','lead.eml','freeform-receipt.txt'];
+    const mixedZip=new JSZip();
+    for(let index=0;index<20;index++){
+      const filename=archiveFiles[index%archiveFiles.length];
+      mixedZip.file(index+'-'+filename,await fs.readFile('fixtures/'+filename),{createFolders:false});
+    }
+    const mixedBytes=await mixedZip.generateAsync({type:'nodebuffer',compression:'DEFLATE',streamFiles:true});
+    let benchmark=performance.now();
+    const mixedArchive=await previewArchiveSource(mixedBytes,'mixed.zip');
+    assert.equal(mixedArchive.parts.length,20);assert.equal(mixedArchive.entries.length,20);
+    console.log('PASS packaged 20-document mixed ZIP '+Math.round(performance.now()-benchmark)+' ms');
+    const selected={mode:'zip',version:1,sourceSha256:createHash('sha256').update(mixedBytes).digest('hex'),entries:[1,7,13,19]};
+    const archive=await importArchiveSource(mixedBytes,'mixed.zip',selected);
+    assert.deepEqual(archive.parts.map(part=>part.index),selected.entries);
+    assert.ok(archive.parts.every(part=>part.bytes.equals(mixedArchive.parts[part.index-1].bytes)));
+    assert.equal(archive.totalPages,8);
+    assert.equal(decoderLaunchSpec('archive.zip',undefined,{spec:selected}).args.some(value=>value.includes(selected.sourceSha256)),false);
+    const sourcePng=await fs.readFile('fixtures/receipt-scan.png');
+    assert.ok(sourcePng.length<1024*1024);
+    const paddedPng=Buffer.alloc(1024*1024);sourcePng.copy(paddedPng);
+    const boundedZip=new JSZip();
+    for(let index=0;index<20;index++)boundedZip.file(index+'.png',paddedPng);
+    benchmark=performance.now();
+    const bounded=await previewArchiveSource(await boundedZip.generateAsync({type:'nodebuffer',compression:'DEFLATE'}),'20mb-expanded.zip');
+    assert.equal(bounded.parts.length,20);assert.equal(bounded.parts.reduce((n,part)=>n+part.bytes.length,0),20*1024*1024);
+    assert.ok(bounded.parts.every(part=>part.bytes.equals(paddedPng)));
+    console.log('PASS packaged full 20 MiB expanded ZIP '+Math.round(performance.now()-benchmark)+' ms');
+    const thirtyPdf=await PDFDocument.create(),thirtyFont=await thirtyPdf.embedFont(StandardFonts.Helvetica);
+    for(let page=1;page<=30;page++)thirtyPdf.addPage().drawText('Reference PAGE-'+page,{x:40,y:600,font:thirtyFont});
+    const thirtyBytes=Buffer.from(await thirtyPdf.save()),pageZip=new JSZip();
+    for(let index=0;index<20;index++)pageZip.file(index+'.pdf',thirtyBytes);
+    benchmark=performance.now();
+    const allPages=await previewArchiveSource(await pageZip.generateAsync({type:'nodebuffer',compression:'DEFLATE'}),'600-pages.zip');
+    assert.equal(allPages.totalPages,600);assert.equal(allPages.parts.length,20);
+    assert.ok(allPages.parts.every(part=>part.source.pageCount===30&&part.source.pages[29].text.includes('PAGE-30')));
+    console.log('PASS packaged full 600-page ZIP '+Math.round(performance.now()-benchmark)+' ms');
     // This isolated packaging check has no database. Exercise the packaged
     // limiter hook with an explicit in-memory test store; shared PostgreSQL
     // enforcement is verified by the request-rate-limit integration tests.
