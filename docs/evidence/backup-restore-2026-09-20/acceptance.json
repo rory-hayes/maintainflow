@@ -1,0 +1,166 @@
+{
+  "status": "passed",
+  "recordedAt": "2026-09-19T23:32:49.119185+00:00",
+  "startedAt": "2026-09-19T23:32:02.460Z",
+  "completedAt": "2026-09-19T23:32:15.799Z",
+  "durationSeconds": 13.339,
+  "cliAcceptanceSeconds": 9.229,
+  "node": "24.13.0",
+  "postgresMajor": 17,
+  "scope": "Separate generated local PostgreSQL cluster; filesystem storage only; no normal development database or user documents accessed.",
+  "source": {
+    "count": 278,
+    "fingerprint": "7a5a878d331c87bb591c3959ae18f132c065bdd33a64f3f07380fc8217cf7a7a",
+    "unchanged": true
+  },
+  "commands": [
+    "keygen",
+    "create --quiesced",
+    "inspect",
+    "restore",
+    "activate --allow-outbound"
+  ],
+  "topLevelGroups": {
+    "NewIsolatedPostgres17ClusterRestrictedRolesAndDistinctDatabases": true,
+    "SyntheticSourceFixtureAndEveryTableSnapshotAfterRuntimeShutdown": true,
+    "RealEncryptedCreateAndInspectAfterQuiescedSourceShutdown": true,
+    "MissingRequiredSourceFileRefusesCaptureWithoutDatabaseChanges": true,
+    "EveryTableAndSequenceExactlyRestoredBeforeRuntimeMutation": true,
+    "FreshApiAndWorkerRefusePendingRestoreBeforeActivation": true,
+    "ActivationRequiresExplicitOutboundFlagAndExactRestoredObjectBytes": true,
+    "ActivationReceiptCrashRecoveryAndRepeatDoNotStartServicesOrChangeData": true,
+    "FreshRestoredRuntimeLoginTenantIsolationOriginalsExportsKeyAndQueueOnce": true,
+    "DistinctEmptyTargetsRejectMalformedTruncatedWrongIdentityMissingPayloadAndRequiredObjectOmissionOrDowngrade": true,
+    "ExistingTargetDatabaseStorageAndKeyRemainUnchangedAfterRefusedRestore": true
+  },
+  "runtimeChecks": {
+    "login": true,
+    "tenantIsolation": true,
+    "correctionApprovalRawProvenance": true,
+    "exactSavedCsvXlsxJsonBytesAndTypedValues": true,
+    "schemasTemplateMapping": true,
+    "exactEveryLiveOriginal": true,
+    "retainedPdfAndZipLineage": true,
+    "replaysTombstonesUnchangedPageUsage": true,
+    "encryptionKeyCanary": true,
+    "deterministicQueuedJobOnceWithoutRecharging": true,
+    "pendingDeletionResumed": true,
+    "pendingOutboxControlledDeliveryOnce": true,
+    "pendingEmailPreservedWithoutSending": true
+  },
+  "database": {
+    "tables": 54,
+    "rows": 116,
+    "sequences": 1,
+    "allTableSnapshotSha256": "3d3616a09beac8af4e73b645e44b388bb2ecf2ebc76996fa0f1f27b2cd79277a",
+    "allSequenceStateSha256": "e282f9d27d21def405ca11e2cd5a6ef74df14c36d59b700a4bca5f295c6317cc",
+    "exactSourceTargetComparisonBeforeRuntimeMutation": true,
+    "digestMethod": "Each source table hashes its ordered PostgreSQL to_jsonb row strings; public aggregate is SHA256 of canonical sorted JSON containing table row counts and table digests. Sequence aggregate hashes the complete canonical sequence-state map. No row values or account identifiers are published."
+  },
+  "encryptedArtifact": {
+    "bytes": 91105,
+    "sha256": "a7bb614152e2af8b865f75ec207c97a796e860b1bf894210b19656bb353d0111",
+    "tables": 54,
+    "payloadFiles": 64,
+    "objects": 9
+  },
+  "fixtures": {
+    "accounts": 2,
+    "workspaces": 2,
+    "liveDocuments": 6,
+    "savedExports": [
+      "CSV",
+      "XLSX",
+      "JSON"
+    ],
+    "typedValues": [
+      "string",
+      "number zero",
+      "boolean false",
+      "null"
+    ],
+    "retainedSources": [
+      "PDF with omitted page",
+      "ZIP with deleted child and live sibling"
+    ],
+    "queuedDeterministicJob": 1,
+    "pendingDeletion": 1,
+    "encryptedIntegrationCanary": 1,
+    "pendingWebhookDelivery": 1,
+    "pendingAccountEmail": 1
+  },
+  "failureCases": [
+    {
+      "case": "malformed",
+      "code": "BACKUP_HEADER",
+      "databaseSchemaAbsent": true,
+      "pendingMarkerRetained": false
+    },
+    {
+      "case": "truncated",
+      "code": "BACKUP_FAILED",
+      "databaseSchemaAbsent": true,
+      "pendingMarkerRetained": false
+    },
+    {
+      "case": "wrong-key",
+      "code": "BACKUP_FAILED",
+      "databaseSchemaAbsent": true,
+      "pendingMarkerRetained": false
+    },
+    {
+      "case": "missing-required",
+      "code": "BACKUP_INVENTORY",
+      "databaseSchemaAbsent": true,
+      "pendingMarkerRetained": false
+    },
+    {
+      "case": "missing-object",
+      "code": "BACKUP_DATABASE",
+      "databaseSchemaAbsent": true,
+      "pendingMarkerRetained": true
+    },
+    {
+      "case": "optional-object",
+      "code": "BACKUP_DATABASE",
+      "databaseSchemaAbsent": true,
+      "pendingMarkerRetained": true
+    }
+  ],
+  "activation": {
+    "requiresExplicitOutboundFlag": true,
+    "changedRestoredObjectRefused": true,
+    "matchingReceiptWithPendingMarkerRecovered": true,
+    "repeatActivationRecognized": true,
+    "servicesStartedByCli": false
+  },
+  "network": {
+    "forbiddenRuntimeAttempts": 0,
+    "realProviderCalls": 0,
+    "controlledWebhookDeliveries": 1,
+    "accountEmailsSent": 0,
+    "blockedTransports": [
+      "fetch",
+      "http",
+      "https",
+      "dgram",
+      "DNS",
+      "socket connections except the exact owned PostgreSQL Unix socket"
+    ]
+  },
+  "cleanup": {
+    "clusterRemoved": true,
+    "socketRemoved": true,
+    "sourceAndRestoredStorageRemoved": true,
+    "privateKeysAndCredentialFixtureRemoved": true,
+    "ownedAccountsPerPopulatedDatabase": 2,
+    "populatedDatabases": 2,
+    "normalDevelopmentDatabaseTouched": false
+  },
+  "limits": [
+    "Local PostgreSQL17/filesystem proof only; hosted database/storage disaster recovery is not covered.",
+    "Explicit quiescence and operator activation are required; no automatic backups or service restart are claimed.",
+    "Synthetic native-text rules extraction and injected webhook transport verify restored workflow state; no live provider delivery or OCR accuracy claim.",
+    "Current build migrations only; compatibility with older/newer schema versions is rejected, not migrated during restore."
+  ]
+}

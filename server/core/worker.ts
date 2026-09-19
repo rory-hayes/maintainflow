@@ -4,6 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {adminPool,appPool,transaction,withWorkspace} from './db.js';
 import {config} from './config.js';
+import {assertStorageRestoreReady} from './restore-state.js';
 import {lockParserForDocument} from './parser-setup.js';
 import {extractRules} from './extraction.js';
 import {selectTemplateExtraction} from './template-selection.js';
@@ -55,6 +56,7 @@ async function recoverExpiredCoreJobs(onlyJobId?:string){
 }
 
 export async function processOneCoreJob(onlyJobId?:string,options:JobOptions={}){
+await assertStorageRestoreReady(config.storageDir,process.env.STORAGE_DRIVER||'filesystem');
 // Each claim needs its own fence, including overlapping invocations in a warm function.
 const owner=randomUUID();
 // The optional shorter deadline is an internal controlled-test seam, never an API parameter.
@@ -113,6 +115,7 @@ export async function enforceRetention(onlyWorkspaceId?:string,options:{signal?:
  return {removed};
 }
 export async function startWorker(tick?:()=>Promise<unknown>){
+  await assertStorageRestoreReady(config.storageDir,process.env.STORAGE_DRIVER||'filesystem');
   const shutdown=new AbortController();
   const stop=()=>shutdown.abort();
   process.on('SIGINT',stop);process.on('SIGTERM',stop);
