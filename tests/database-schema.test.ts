@@ -65,7 +65,7 @@ test('fresh isolated migrations are idempotent, preserve legacy tables and never
 });
 
 test('account recovery tables preserve forced RLS and backend-only grants after private-schema migration replays',async()=>{
- for(const table of ['account_recovery_requests','account_recovery_tokens','account_email_outbox','account_recovery_limits','account_security_events']){
+ for(const table of ['account_recovery_requests','account_recovery_tokens','account_email_outbox','account_recovery_limits','account_security_events','account_registration_requests','account_registration_limits','email_verification_requests','email_verification_limits','email_verification_tokens']){
   const name=`${schema}.${table}`;
   const flags=(await control.query('SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid=$1::regclass',[name])).rows[0];
   assert.deepEqual(flags,{relrowsecurity:true,relforcerowsecurity:true});

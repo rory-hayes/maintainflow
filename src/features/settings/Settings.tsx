@@ -7,6 +7,7 @@ import { useSession } from '../../lib/session';
 import MembersPanel from './MembersPanel';
 import ApiKeysPanel from './ApiKeysPanel';
 import BillingPanel from './BillingPanel';
+import {EmailVerificationStatus} from '../auth/EmailVerification';
 import './settings.css';
 
 type WorkspaceSettings = {
@@ -29,7 +30,7 @@ function GeneralPanel({ data, canManage }: { data: WorkspaceSettings; canManage:
       <div className="setting-row"><div><strong>Workspace name</strong><p>The name people see in this workspace.</p></div><input aria-label="Workspace name" required maxLength={100} value={name} disabled={!canManage} onChange={(event) => setName(event.target.value)} /></div>
       <div className="setting-row"><div><strong>Locale and timezone</strong><p>Each parser’s locale controls how dates and numbers are read.</p></div><div><p>Date fields keep the written calendar date. Timezone is saved with the parser; timestamp and timezone conversion are not supported.</p><Link className="link" to="/app/parsers">Manage parsers</Link></div></div>
       <div className="setting-row"><div><strong>Upload limits</strong><p>Validated before a document enters the queue.</p></div><p>{Math.floor(data.limits.maxBytes / 1024 / 1024)} MB per file · {data.limits.maxPages} pages per PDF</p></div>
-      <div className="setting-row"><div><strong>Authentication</strong><p>Your account uses the local application sign-in.</p></div><p>Local password authentication. Email verification and password-reset email are not configured.</p></div>
+      <div className="setting-row"><div><strong>Authentication</strong><p>Your account uses the local application sign-in.</p></div><div><p>Password sign-in. Verification email is {data.authentication.emailVerification?'available':'currently unavailable'}. Password recovery email is {data.authentication.passwordResetEmail?'available':'currently unavailable'}.</p><Link className="link" to="/app/settings?tab=password">Manage your account email and password</Link></div></div>
       <Notice error={action.error} message={action.message} />
       {canManage ? <div className="actions"><Button type="submit" disabled={action.busy || !name.trim()}>Save changes</Button></div> : <p className="small muted settings-bottom-note">A workspace owner or administrator can change these settings.</p>}
       <div className="settings-callout settings-inline-link"><div><strong>Billing connection</strong><p>View provider setup and the configurable test-mode plans.</p></div><Link className="button secondary" to="/app/settings?tab=billing">View plans</Link></div>
@@ -130,7 +131,7 @@ export default function Settings() {
         {active.id === 'retention' ? <RetentionPanel data={query.data} canManage={canManage} /> : null}
         {active.id === 'notifications' ? <NotificationsPanel data={query.data} canManage={canManage} /> : null}
         {active.id === 'billing' ? <BillingPanel /> : null}
-        {active.id === 'password' ? <PasswordPanel /> : null}
+        {active.id === 'password' ? <><EmailVerificationStatus /><PasswordPanel /></> : null}
         {active.id === 'activity' ? <ActivityPanel /> : null}
       </div>
     </div>

@@ -12,3 +12,10 @@
 .recovery-text-button:focus-visible{outline:2px solid var(--color-accent);outline-offset:3px}
 .recovery-disclosure{margin-top:22px}
 @media(max-width:760px){.recovery-main{padding:34px 24px 48px}.recovery-main h1{font-size:28px}.recovery-page>header{gap:20px}}
+.verification-address{overflow-wrap:anywhere;font-weight:500;color:var(--color-ink)}
+.verification-status{margin-bottom:30px;padding-bottom:26px;border-bottom:1px solid var(--color-line);max-width:650px}
+.verification-status>.button{margin:8px 10px 8px 0}
+.verification-status>.recovery-feedback{margin-top:16px}
+.verification-banner{display:flex;gap:14px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:12px 16px;margin-bottom:24px;background:#f6f6ff;border:1px solid #e2e3f5;border-radius:8px;font-size:13px}
+.verification-banner .link{white-space:nowrap}
+@media(max-width:760px){.verification-status>.button{width:100%;margin-right:0}.verification-banner{align-items:flex-start}}

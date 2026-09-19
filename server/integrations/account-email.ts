@@ -76,7 +76,7 @@ export function createAccountEmailSender(environment:Environment=process.env,dep
   const transport=dependencies.fetchImpl??globalThis.fetch;
   return {async send(message,budget={}){
     if(!message||typeof message.idempotencyKey!=='string'||!message.idempotencyKey.startsWith('folio-account-email/')||!uuid.safeParse(message.idempotencyKey.slice('folio-account-email/'.length)).success||
-      !email.safeParse(message.to).success||!['Reset your Folio password','Your Folio password was changed'].includes(message.subject)||typeof message.text!=='string'||message.text.length<1||Buffer.byteLength(message.text)>4096){
+      !email.safeParse(message.to).success||!['Reset your Folio password','Your Folio password was changed','Verify your Folio email'].includes(message.subject)||typeof message.text!=='string'||message.text.length<1||Buffer.byteLength(message.text)>4096){
       throw new AccountEmailError('invalid_message',false);
     }
     const body=JSON.stringify({from:settings.from,to:[message.to],subject:message.subject,text:message.text});
