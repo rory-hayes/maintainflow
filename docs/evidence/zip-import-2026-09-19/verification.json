@@ -1,0 +1,824 @@
+{
+  "recordedAt": "2026-09-19T22:54:23.496563+00:00",
+  "parentHead": "bf209069863ce9f2440fe8a9690ba59fda4f91e7",
+  "scope": "Guarded local ZIP import acceptance; hosted activation and provider proof are separate.",
+  "node": "24.13.0",
+  "sourceCount": 266,
+  "sourceFingerprint": "c454e4cb64e1034183db4dd3cc16aae59fff59b25704e3fd6be2a0a3de5f17fc",
+  "testCounts": {
+    "tests": 594,
+    "pass": 594,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0,
+    "durationMs": 184941.586791
+  },
+  "phases": {
+    "build": {
+      "startedAt": "2026-09-19T22:48:33.254146+00:00",
+      "completedAt": "2026-09-19T22:48:34.868553+00:00",
+      "seconds": 1.614388833,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "package": {
+      "startedAt": "2026-09-19T22:48:44.829174+00:00",
+      "completedAt": "2026-09-19T22:48:49.841873+00:00",
+      "seconds": 5.012650584,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "bundle": {
+      "startedAt": "2026-09-19T22:48:49.919950+00:00",
+      "completedAt": "2026-09-19T22:48:58.115557+00:00",
+      "seconds": 8.195531083999999,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "suite": {
+      "startedAt": "2026-09-19T22:50:42.116600+00:00",
+      "completedAt": "2026-09-19T22:53:47.167158+00:00",
+      "seconds": 185.048852833,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    }
+  },
+  "migration": {
+    "localOnly": true,
+    "database": "folio",
+    "schema": "public",
+    "port": 55432,
+    "migration": "migrations/032_archive_imports.sql",
+    "sha256": "b341019f5485aa3d044fe743e3b178faf4526975b655f88800cb5bb3cf8109fb",
+    "beforeCount": 22,
+    "afterCount": 23,
+    "added": [
+      "032_archive_imports.sql"
+    ],
+    "constraintVerified": true
+  },
+  "backendFocused": {
+    "file": "tests/archive-import-intake.test.ts",
+    "passed": 19,
+    "failed": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "durationMs": 19553.124542,
+    "exitCode": 0,
+    "log": ".local/zip-import-2026-09-19/intake-final.log",
+    "coverage": [
+      "Actual ZIP preview, explicit selected import, exact original/leaf bytes, original central-record ordinals, local page numbering, pinned jobs and selected-page charges",
+      "Duplicate leaf bytes preserve archive identity while ordinary deduplication stays independent",
+      "Bound receipt replay at exhausted quota and after parser policy/archive changes",
+      "All finite archive validation reasons, typed durable rejections and retryable unexpected decoder faults",
+      "Concurrent identical requests, competing quota, commit-time policy change and atomic rollback",
+      "Lost COMMIT acknowledgement preserves committed originals and recovers receipt",
+      "Signed preview/confirm/finalize, immutable selection across staging and multipart, missing PUT restaging at last page credit",
+      "Changed upload lease owners fence preview success and final acceptance",
+      "Role, tenant, origin, API scopes and multipart limits",
+      "Attachment source route, sibling retention, whole-group deletion, tombstones and physical deletion status",
+      "Shared PDF/ZIP active attempts, byte budgets, direct staging byte/object accounting through expiry, queued deletion and failed physical removal",
+      "Late writes and archive reservations survive failed deletion until confirmed physical removal",
+      "Filesystem and remote reconciliation preserve referenced originals",
+      "Forced tenant RLS, composite ownership constraints, finite rejection catalogue and PDF/archive lineage separation"
+    ]
+  },
+  "backendPreservation": {
+    "evidence": "Test process exited 0 after its after hook; test-owned workspaces/users and test-owned filesystem directories deleted, in-memory objects cleared, storage/fetch seams restored, pools closed. Local DB identity was checked for both admin/app pools before mutation. Scope-specific preservation assertions passed for referenced archive originals, sibling retention, lost COMMIT acknowledgement, failed cleanup reservations and tombstone replay.",
+    "globalBeforeAfterSnapshot": "No independent full-database before/after fingerprint was produced by this focused test run; preservation claims are limited to scoped cleanup and explicit test invariants.",
+    "externalFetchAssertions": "afterEach asserted intercepted external fetch count 0; no provider calls permitted",
+    "localOnly": true
+  },
+  "independentDecoderCorpus": {
+    "recordedAt": "2026-09-19T22:20:34.090Z",
+    "passed": 79,
+    "total": 79,
+    "sourceHashes": {
+      "server/core/zip-reader.ts": "a2966907fcc0e9edd66527542afcbdaff373298051ec86f5dd03a46e86184f19",
+      "server/core/archive-engine.ts": "ba4f5985b840ff098db8cfce6314e94a523e7d18bc63f3720552e61057eec323",
+      "shared/archive-import.ts": "6425ab5f7cdeec8cb5d01bbd7f557f08705649ea4b3e4e07a443c1d6ce1d73b6",
+      "server/core/decoder-input.ts": "e232d27c40877f91d1ea63aac6da5f234ec96b4550a586b501de67a311a40744"
+    },
+    "scope": "Actual pure scanner/decoder/envelope. No DB, network, providers or application mutations.",
+    "currentSourceClaim": "Earlier focused corpus; final 20 tracked decoder tests are included in the full suite."
+  },
+  "browser": {
+    "runId": "268aaf1d-e24f-43e0-8ac8-a9dd2156b51b",
+    "startedAt": "2026-09-19T22:49:16.652Z",
+    "completedAt": "2026-09-19T22:49:59.663Z",
+    "origin": "http://127.0.0.1:4337",
+    "node": "24.13.0",
+    "browserAvailability": "Browser plugin unavailable; installed Playwright fallback",
+    "flow": "Generated mixed ZIP -> selective server preview -> atomic import -> controlled extraction -> review -> approve -> exact exports and originals",
+    "controlledOnly": true,
+    "rateLimits": "isolated browser store; rate limiting is outside this review fixture",
+    "checks": {
+      "RealMixedArchiveAllRegularEntriesVisibleNineFormatsAtomicOfficeAndNoPreviewCharges": true,
+      "TabletAndMobileKeyboardSelectionLongPathsTotalsAndRetentionFit": true,
+      "DelayedFileAndServerPreviewCannotOverwriteReplacementSource": true,
+      "ParserWorkspaceChangeAndMalformedArchiveLeaveNoStaleConfirmationOrPartialImport": true,
+      "RepeatedSubmitLostCommittedResponseAndReloadRecoverOnceWithExactSelection": true,
+      "ElevenDistinctChildrenNineFormatsExactBytesLocalPagesControlledExtractionReviewApprovalAndExports": true,
+      "ExcludedAndDeletedBytesRemainUntilWholeImportDeletionAndViewerCannotMutate": true,
+      "InterruptedSignedTransferRestagesSameRequestThenConfirmsAndRecoversWithoutExternalCalls": true,
+      "ExistingPdfSplitKeepsSingleSourcePanelAcrossPollingApprovalAndExport": true,
+      "ZIPHelpAndApiAnchorsFitDesktopAndMobile": true,
+      "NoExternalProvidersOrUnexplainedErrorsAndExactOwnedCleanup": true
+    },
+    "screenshots": [
+      {
+        "file": "desktop-mixed-selectable-preview.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "selection-keyboard-long-path-820.png",
+        "width": 820,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 820,
+          "body": 820,
+          "document": 820
+        }
+      },
+      {
+        "file": "selection-credit-retention-820.png",
+        "width": 820,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 820,
+          "body": 820,
+          "document": 820
+        }
+      },
+      {
+        "file": "selection-keyboard-long-path-390.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      },
+      {
+        "file": "selection-credit-retention-390.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      },
+      {
+        "file": "desktop-invalid-archive-no-partial-import.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "desktop-interrupted-confirmation-saved-selection.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "mobile-interrupted-confirmation-visible-recovery.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      },
+      {
+        "file": "desktop-recovered-receipt-original-indices.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "desktop-archive-pdf-whole-child-lineage.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "desktop-exact-approved-export.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "mobile-long-archive-path-lineage.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      },
+      {
+        "file": "desktop-delete-retained-import.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "desktop-signed-transfer-interrupted.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "desktop-signed-recovered-same-selection.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "desktop-existing-pdf-split-lineage-single.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "zip-guide-1440.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "zip-guide-390.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      },
+      {
+        "file": "zip-api-1440.png",
+        "width": 1440,
+        "height": 1000,
+        "dimensions": {
+          "viewport": 1440,
+          "body": 1440,
+          "document": 1440
+        }
+      },
+      {
+        "file": "zip-api-390.png",
+        "width": 390,
+        "height": 844,
+        "dimensions": {
+          "viewport": 390,
+          "body": 390,
+          "document": 390
+        }
+      }
+    ],
+    "realProviderCalls": 0,
+    "controlledExtractionCalls": 12,
+    "children": [
+      {
+        "index": 1,
+        "mimeType": "application/pdf",
+        "pageCount": 2,
+        "path": "invoices/source.pdf",
+        "childSha256": "f2237defa3296f66c1738f27a0095617210a73e19c226b6b2a5b29fcf7a57df9",
+        "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+        "approved": true,
+        "json": true,
+        "csv": true,
+        "xlsx": true
+      },
+      {
+        "index": 2,
+        "mimeType": "image/png",
+        "pageCount": 1,
+        "path": "images/source.png",
+        "childSha256": "53422c01f82896a2b196e16ba8e8ab0732fd42c0e61bc29b126a696020430f7e",
+        "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+        "approved": true,
+        "json": true
+      },
+      {
+        "index": 3,
+        "mimeType": "image/jpeg",
+        "pageCount": 1,
+        "path": "images/source.jpeg",
+        "childSha256": "2e54925218423faa08ed5f0ec1143f4df296aa40c7ceb3f873fe2a162c64931a",
+        "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+        "approved": true,
+        "json": true
+      },
+      {
+        "index": 4,
+        "mimeType": "text/plain",
+        "pageCount": 1,
+        "path": "first/reference.txt",
+        "childSha256": "7758a2e7df417093dbd8f6af9d3095e057c966882a7940aff8ac0538869e4ac5",
+        "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+        "approved": true,
+        "json": true
+      },
+      {
+        "index": 5,
+        "mimeType": "text/csv",
+        "pageCount": 1,
+        "path": "source.csv",
+        "childSha256": "4582da677c8e5f0a42b1131c12aa59edf65006c3dda8cd3b234ea2f649c954f6",
+        "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+        "approved": true,
+        "json": true
+      },
+      {
+        "index": 6,
+        "mimeType": "text/html",
+        "pageCount": 1,
+        "path": "source.html",
+        "childSha256": "f99ad6719e818898c15b6312d0f57b899a97c7283135089fc3fae3fe00151924",
+        "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+        "approved": true,
+        "json": true
+      },
+      {
+        "index": 7,
+        "mimeType": "message/rfc822",
+        "pageCount": 1,
+        "path": "source.eml",
+        "childSha256": "53c58eace03092ba3803d92211e523ede5970f51a1b6dac80ed4858a3e8f283d",
+        "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+        "approved": true,
+        "json": true
+      },
+      {
+        "index": 8,
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pageCount": 1,
+        "path": "word-renamed.bin",
+        "childSha256": "1cf70d1c532af16c5bb76c4104a70bec563f43819cea5c9a3e5f273162146891",
+        "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+        "approved": true,
+        "json": true
+      },
+      {
+        "index": 9,
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pageCount": 2,
+        "path": "excel-renamed.txt",
+        "childSha256": "6d1a752efdfbd3923e23b5af2dac0885c3051f12ba77f9a38b22212adbf4e59e",
+        "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+        "approved": true,
+        "json": true
+      },
+      {
+        "index": 10,
+        "mimeType": "text/plain",
+        "pageCount": 1,
+        "path": "second/reference.txt",
+        "childSha256": "7758a2e7df417093dbd8f6af9d3095e057c966882a7940aff8ac0538869e4ac5",
+        "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+        "approved": true,
+        "json": true
+      },
+      {
+        "index": 15,
+        "mimeType": "text/plain",
+        "pageCount": 1,
+        "path": "r\u00e9sum\u00e9/\u5e33\u7968-long-folder-name-long-folder-name-long-folder-name-long-folder-name-/reference.txt",
+        "childSha256": "a6e4f95414345845388f4862c97c05ce72a9ca399eca4928168fc64c1c06e793",
+        "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+        "approved": true,
+        "json": true
+      }
+    ],
+    "acceptedDocuments": 13,
+    "explicitlyDeletedDocuments": 11,
+    "fixture": {
+      "sourceSha256": "c74b7e730baab102fcd1d164a3b0837afec483ffe4462a4e5c4631f32846b69e",
+      "entries": 15,
+      "selectedIndices": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        15
+      ],
+      "selectedPageCredits": 13,
+      "generatedMixedNineFormats": true,
+      "controlledExtractionOnly": true,
+      "noOCRClaims": true,
+      "signedTransport": "intercepted in-memory private storage, actual local routes"
+    },
+    "passed": true,
+    "cleanedOwnedFixtures": {
+      "accounts": 2,
+      "workspaces": 2,
+      "documents": 2
+    },
+    "cleanedInMemoryStorageObjects": 3,
+    "sourceUnchanged": true,
+    "buildIndexSha256": "f44334d604d9e8d8e37cd5b80e823ac41a1d4b03851e9acad80127d859fbf901",
+    "errorVisibility": {
+      "desktop": {
+        "alertBounds": {
+          "x": 340,
+          "y": 49.984375,
+          "width": 760,
+          "height": 67
+        },
+        "modalBounds": {
+          "x": 310,
+          "y": 50,
+          "width": 820,
+          "height": 900
+        }
+      },
+      "mobile": {
+        "alertBounds": {
+          "x": 34,
+          "y": 33.75,
+          "width": 322,
+          "height": 106
+        },
+        "modalBounds": {
+          "x": 16,
+          "y": 33.765625,
+          "width": 358,
+          "height": 776.46875
+        }
+      }
+    },
+    "pageErrors": 0,
+    "unexpectedConsole": 0,
+    "expectedConsole": 11,
+    "publicScreenshots": [
+      "desktop-mixed-selectable-preview.png",
+      "selection-credit-retention-390.png",
+      "desktop-archive-pdf-whole-child-lineage.png",
+      "desktop-signed-recovered-same-selection.png",
+      "desktop-interrupted-confirmation-saved-selection.png",
+      "mobile-interrupted-confirmation-visible-recovery.png"
+    ],
+    "visualReview": {
+      "runId": "268aaf1d-e24f-43e0-8ac8-a9dd2156b51b",
+      "reviewedAt": "2026-09-19T22:53:50.913091+00:00",
+      "sourceFingerprint": "c454e4cb64e1034183db4dd3cc16aae59fff59b25704e3fd6be2a0a3de5f17fc",
+      "sourceFileCount": 266,
+      "buildIndexSha256": "f44334d604d9e8d8e37cd5b80e823ac41a1d4b03851e9acad80127d859fbf901",
+      "method": "Every retained image individually viewed with view_image at its native viewport; no contact-sheet-only review.",
+      "viewports": [
+        {
+          "width": 1440,
+          "height": 1000
+        },
+        {
+          "width": 820,
+          "height": 1000
+        },
+        {
+          "width": 390,
+          "height": 844
+        }
+      ],
+      "frames": [
+        {
+          "file": "desktop-mixed-selectable-preview.png",
+          "sha256": "72168fb66b2d2d259f81d203e2b2522c1bad5256bfeae6ce0442c26ba4eac49b",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "Server preview shows atomic XLSX file, selected/unselected entries and unavailable nested ZIP. Remaining rows are in a bounded vertical list; the modal scrolls to confirmation."
+        },
+        {
+          "file": "selection-keyboard-long-path-820.png",
+          "sha256": "c43b26f846265ffb1c53842b587d85b040991365e4c0467f4375242834094695",
+          "width": 820,
+          "height": 1000,
+          "reviewed": true,
+          "note": "Tablet focus ring, full Unicode relative path, unavailable format and macOS metadata reasons wrap within the list."
+        },
+        {
+          "file": "selection-credit-retention-820.png",
+          "sha256": "88ef6d734f27350db5500e1d2f2a2fb1a42d443a2e161b99b7c8465bce54607d",
+          "width": 820,
+          "height": 1000,
+          "reviewed": true,
+          "note": "Tablet selected count/page credits and complete original ZIP retention disclosure are visible beside import action."
+        },
+        {
+          "file": "selection-keyboard-long-path-390.png",
+          "sha256": "86e21a93ff6ab56d752763b4b5c5af16062181a32e072ae1794fa942d9261c84",
+          "width": 390,
+          "height": 844,
+          "reviewed": true,
+          "note": "Mobile keyboard focus remains visible on wrapped Unicode path. List and modal use intentional vertical scrolling."
+        },
+        {
+          "file": "selection-credit-retention-390.png",
+          "sha256": "d9f46b7862d0898155440381ce7aa218bdea1540de39e913f7df5e47e3a5d1fc",
+          "width": 390,
+          "height": 844,
+          "reviewed": true,
+          "note": "Mobile selection count, credits, original retention disclosure and full-width import action fit without horizontal scrolling."
+        },
+        {
+          "file": "desktop-invalid-archive-no-partial-import.png",
+          "sha256": "872d50ed35fb642f8054ff4c4e0d9ca1f791b1dc3925b390f1575ff883920269",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "Fixed customer-safe ZIP error visible, preview absent and import action disabled."
+        },
+        {
+          "file": "desktop-interrupted-confirmation-saved-selection.png",
+          "sha256": "0c021dced1bdd41c41aea86d7b1ce505425d0230e20480c1c7fa0c357c5de532",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "The connection failure and saved-selection recovery explanation are brought into view automatically. Resume and Check import result controls remain visible without a manual scroll."
+        },
+        {
+          "file": "mobile-interrupted-confirmation-visible-recovery.png",
+          "sha256": "c1e2a9cbb7c1008390acd303f1e2643c50565c6de2dd9bdf6b270a95f5e20695",
+          "width": 390,
+          "height": 844,
+          "reviewed": true,
+          "note": "The finite status-unavailable error and saved-request guidance are visible automatically on mobile, with Resume and Check import result controls. Retry keeps the same request and selection."
+        },
+        {
+          "file": "desktop-recovered-receipt-original-indices.png",
+          "sha256": "1f1307b06183219bbae9bd2b57752eeb5f0ee0b8fa8afcda75f382ac343e59a4",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "Recovered existing import states no duplicate page credits; links preserve original path and entry ordinal, including excluded-index gaps."
+        },
+        {
+          "file": "desktop-archive-pdf-whole-child-lineage.png",
+          "sha256": "16b2db1be7db86a141ca57ea4840d276e0418fd458728cbd456f780d34c8c9fa",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "One ZIP lineage panel; whole two-page child PDF appears with child-local page numbering and typed review values."
+        },
+        {
+          "file": "desktop-exact-approved-export.png",
+          "sha256": "e9bf85a4a9aae9f5f9aa4e464ae73c6c538a382de2889ba2b7ef865832216134",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "Custom CSV/XLSX column mapping, exact selected-approval note and downloaded-success confirmation readable."
+        },
+        {
+          "file": "mobile-long-archive-path-lineage.png",
+          "sha256": "d85f6926da5f633c9e3d4abb6388f035e00cd718bc723ce4082bef8066368fc5",
+          "width": 390,
+          "height": 844,
+          "reviewed": true,
+          "note": "Single wrapped long-path lineage and retention disclosure fit mobile; review fields and sticky approval controls remain usable."
+        },
+        {
+          "file": "desktop-delete-retained-import.png",
+          "sha256": "e133d00a0dd27ce6cda87f4f8649cc137ef77bebd040cd8a64bc029620175be5",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "Destructive dialog states ten retained documents, results/exports and queued original deletion, with clear keep/delete actions."
+        },
+        {
+          "file": "desktop-signed-transfer-interrupted.png",
+          "sha256": "6d46df9214f9babab7f56418ccb52f55896ffa998fb92e70f8d503fc3e78a8e7",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "Failed controlled PUT gives actionable same-file retry message; import remains disabled pending a preview."
+        },
+        {
+          "file": "desktop-signed-recovered-same-selection.png",
+          "sha256": "5f0cefe05cbe69167fafb746b71c77a152adc10abbf7fe956d6638a8fb7a9ef6",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "Single-file existing receipt preserves entry4, one page and no repeated credits."
+        },
+        {
+          "file": "desktop-existing-pdf-split-lineage-single.png",
+          "sha256": "ffaca21d4d1d896931e786077ce2e29d823dcbfb48ce458212619e64c157b2c9",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "Existing PDF source panel remains single after polling/approval/export, with original pages1-2 and child-local page controls."
+        },
+        {
+          "file": "zip-guide-1440.png",
+          "sha256": "d18251021499ea8a1d9d9c82304e8468edc88a5253eee8d2a45f7391bb7b6afb",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "Guide describes selection, atomic Office, limits, retained excluded bytes and request recovery in readable width."
+        },
+        {
+          "file": "zip-guide-390.png",
+          "sha256": "029f2491034881a5325f9179fe022312afbcfa861c0802befcb0e3758ed9691a",
+          "width": 390,
+          "height": 844,
+          "reviewed": true,
+          "note": "Mobile guide wraps limits and original retention disclosure without page-wide overflow."
+        },
+        {
+          "file": "zip-api-1440.png",
+          "sha256": "446c55805c2fa83f7e75e582f5721de1db132e2cb1fe8980f3a139bb7664b31b",
+          "width": 1440,
+          "height": 1000,
+          "reviewed": true,
+          "note": "API preview/selection/signed/recovery sections remain readable; code examples stay within guide column."
+        },
+        {
+          "file": "zip-api-390.png",
+          "sha256": "bf8475ce49cb946fb0a33c52420586759b1cf42a5fd595ca600c5af413004609",
+          "width": 390,
+          "height": 844,
+          "reviewed": true,
+          "note": "Mobile API paths and source-bound options wrap; no page-wide overflow."
+        }
+      ],
+      "findings": [],
+      "resolvedFindings": [
+        {
+          "name": "Duplicate source lineage after polling and export",
+          "resolution": "Distinct stable sibling keys for ZIP lineage, PDF lineage and export dialog. Final browser asserts one source panel through polling, approval and export for both ZIP and PDF."
+        },
+        {
+          "name": "Lost-confirmation alert above scrolled viewport",
+          "resolution": "Scoped notice layout effect scrolls the new error into view. Final desktop and mobile failures verify visible alert and recovery actions without manual scrolling."
+        },
+        {
+          "name": "Technical fetch error shown to customer",
+          "resolution": "ZIP confirmation network failures show a fixed connection/retry message followed by saved-request guidance; finite API errors remain meaningful."
+        }
+      ],
+      "errorVisibility": {
+        "desktop": {
+          "alertBounds": {
+            "x": 340,
+            "y": 49.984375,
+            "width": 760,
+            "height": 67
+          },
+          "modalBounds": {
+            "x": 310,
+            "y": 50,
+            "width": 820,
+            "height": 900
+          }
+        },
+        "mobile": {
+          "alertBounds": {
+            "x": 34,
+            "y": 33.75,
+            "width": 322,
+            "height": 106
+          },
+          "modalBounds": {
+            "x": 16,
+            "y": 33.765625,
+            "width": 358,
+            "height": 776.46875
+          }
+        }
+      },
+      "visibilityTolerance": "One CSS pixel tolerance accounts for the measured 1/64-pixel difference between alert and dialog top edges. Individually viewed desktop/mobile frames show no content clipping.",
+      "limits": [
+        "Controlled extraction adapter verifies workflow and exact export values; no OCR/AI-provider accuracy claim.",
+        "Signed upload uses real local route/persistence logic with intercepted in-memory storage transport; no live Supabase claim.",
+        "Representative PDF and text review screenshots; all eleven selected children across nine supported formats were exercised by rendered review and byte-exact download assertions."
+      ]
+    }
+  },
+  "compiledLimits": {
+    "v8HeapMiB": 192,
+    "mixedDocuments": 20,
+    "expandedOuterMiB": 20,
+    "actualPdfPages": 600,
+    "bundleLog": [
+      "PASS packaged decoder invoice-multipage.pdf",
+      "PASS packaged decoder receipt-scan.png",
+      "PASS packaged decoder receipt.docx",
+      "PASS packaged decoder receipt.xlsx",
+      "PASS packaged decoder lead.eml",
+      "PASS packaged decoder freeform-receipt.txt",
+      "PASS packaged PDF splitting and derived PDF decoding",
+      "PASS packaged marker boundaries, preserved prefix and rejected changed preview",
+      "PASS packaged 20-document mixed ZIP 576 ms",
+      "PASS packaged full 20 MiB expanded ZIP 1003 ms",
+      "PASS packaged full 600-page ZIP 484 ms",
+      "PASS packaged API and preview invitation guard"
+    ]
+  },
+  "retainedFailures": [
+    {
+      "attempt": "initial migration032",
+      "outcome": "Policy SQL quoting failed and transaction rolled back; corrected migration applied locally."
+    },
+    {
+      "attempt": "first browser fixture",
+      "outcome": "Free plan one-parser limit rejected second parser; owned fixtures cleaned; harness uses two separate one-parser workspaces."
+    },
+    {
+      "attempt": "browser review polling",
+      "outcome": "Duplicate source panel from reused sibling keys; scoped keys corrected; exact owned fixtures cleaned after interrupted teardown."
+    },
+    {
+      "attempt": "browser export assertion",
+      "outcome": "Dialog hid background landmark; assertion now closes export dialog before checking visible single lineage."
+    },
+    {
+      "attempt": "error visibility candidate",
+      "outcome": "Strict geometry assertion rejected a 1/64-pixel rounding difference; screenshot and exact bounds confirmed visibility. Final assertions retain a one-pixel rounding tolerance and verify desktop/mobile recovery."
+    },
+    {
+      "attempt": "sandbox full suite",
+      "outcome": "Local PostgreSQL socket denied with connect EPERM; not product acceptance. Final guarded escalated suite recorded separately."
+    }
+  ],
+  "release": {
+    "hostedMigrationsPending": "021-032",
+    "hostedActivation": false,
+    "realProviderAcceptance": false,
+    "freePlansUnchanged": true,
+    "billingMockUnchanged": true,
+    "remainingC10": [
+      "AI boundaries",
+      "TIFF",
+      "existing-document resplitting/reversal",
+      "broader archive formats"
+    ]
+  },
+  "knownSecretScan": {
+    "recordedAt": "2026-09-19T22:54:23.786075+00:00",
+    "filesScanned": 776,
+    "knownValuesCompared": 12,
+    "matches": [],
+    "passed": true
+  },
+  "all47OriginalCapabilityCriteriaPreserved": true
+}
