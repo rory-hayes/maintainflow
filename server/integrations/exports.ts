@@ -6,8 +6,8 @@ import {withWorkspace,audit,badRequest,notFound,camel} from '../core/db.js';
 import {appendDocumentEvent} from '../core/document-events.js';
 import {renderExport,type ExportRecord} from './export-format.js';
 
-import {exportColumns as columns,exportMappingInput} from './export-input.js';
-const optionsSchema = z.object({format:z.enum(['csv','xlsx','json']),columns:columns.optional(),lineItems:z.string().max(100).optional()});
+import {exportColumns as columns,exportMappingInput,exportLineItems} from './export-input.js';
+const optionsSchema = z.object({format:z.enum(['csv','xlsx','json']),columns:columns.optional(),lineItems:exportLineItems.optional()});
 const exportSchema = optionsSchema.extend({documentIds:z.array(z.uuid()).min(1).max(100),revisions:z.array(z.object({documentId:z.uuid(),approvalId:z.uuid()})).max(100).optional()});
 const hostedExportMaxBytes=4*1024*1024;
 class HostedExportSizeError extends Error {

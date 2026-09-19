@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Actor, ParserSchema } from '../shared/types.js';
+import { maximumExportFieldPathLength } from '../shared/export-contract.js';
 import { buildApp } from '../server/app.js';
 import { adminPool, appPool, databaseSchema, closeDatabase } from '../server/core/db.js';
 import { config } from '../server/core/config.js';
@@ -304,7 +305,7 @@ test('mapping validation preserves stale and metadata paths but rejects malforme
   const invalid = [
     { name: '', columns: [] }, { name: 'X'.repeat(101), columns: [] }, { columns: {} },
     { columns: [{ source: '', label: 'Empty source' }] }, { columns: [{ source: 'reference', label: '' }] },
-    { columns: Array.from({ length: 101 }, () => ({ source: 'reference', label: 'Ref' })) }, { columns: [], lineItems: 'x'.repeat(101) },
+    { columns: Array.from({ length: 101 }, () => ({ source: 'reference', label: 'Ref' })) }, { columns: [], lineItems: 'x'.repeat(maximumExportFieldPathLength + 1) },
   ];
   for (const entry of invalid) {
     const id = randomUUID(); await adminPool.query('insert into export_mappings(id,workspace_id,parser_id,name,columns,line_items) values($1,$2,$3,$4,$5,$6)', [id, item.account.workspace.id, item.parserId, 'name' in entry ? entry.name : 'Owned invalid mapping', JSON.stringify(entry.columns), 'lineItems' in entry ? entry.lineItems : null]);

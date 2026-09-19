@@ -1,0 +1,292 @@
+{
+  "recordedAt": "2026-09-19T21:19:32.381821+00:00",
+  "parentHead": "1a8f83269c0a27fb43db9e115191a62a1edd9f5c",
+  "sourceCount": 249,
+  "sourceFingerprint": "8d94c9e343e0db8e921f5bb61db9bb7def28da8937faa3a49ea973ef39258f90",
+  "node": "24.13.0",
+  "testCounts": {
+    "tests": 544,
+    "pass": 544,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0,
+    "duration_ms": 139575.003333
+  },
+  "phases": {
+    "build": {
+      "phase": "build",
+      "nodeRuntime": "/Users/rory/Documents/Ideation/maintainflow-folio-release/.local/email-verification-2026-09-19/runtime/node-v24.13.0-darwin-arm64/bin/node",
+      "startedAt": "2026-09-19T21:15:45.397980+00:00",
+      "completedAt": "2026-09-19T21:15:47.106427+00:00",
+      "seconds": 1.708423042,
+      "exitCode": 0,
+      "sourceCount": 249,
+      "sourceFingerprint": "8d94c9e343e0db8e921f5bb61db9bb7def28da8937faa3a49ea973ef39258f90",
+      "sourceUnchanged": true,
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ]
+    },
+    "package": {
+      "phase": "package",
+      "nodeRuntime": "/Users/rory/Documents/Ideation/maintainflow-folio-release/.local/email-verification-2026-09-19/runtime/node-v24.13.0-darwin-arm64/bin/node",
+      "startedAt": "2026-09-19T21:15:53.798670+00:00",
+      "completedAt": "2026-09-19T21:15:58.722297+00:00",
+      "seconds": 4.923563124999999,
+      "exitCode": 0,
+      "sourceCount": 249,
+      "sourceFingerprint": "8d94c9e343e0db8e921f5bb61db9bb7def28da8937faa3a49ea973ef39258f90",
+      "sourceUnchanged": true,
+      "command": [
+        "/Users/rory/Documents/Ideation/maintainflow-folio-release/.local/email-verification-2026-09-19/runtime/node-v24.13.0-darwin-arm64/bin/node",
+        "scripts/build-vercel.mjs"
+      ]
+    },
+    "bundle": {
+      "phase": "bundle",
+      "nodeRuntime": "/Users/rory/Documents/Ideation/maintainflow-folio-release/.local/email-verification-2026-09-19/runtime/node-v24.13.0-darwin-arm64/bin/node",
+      "startedAt": "2026-09-19T21:16:27.091525+00:00",
+      "completedAt": "2026-09-19T21:16:32.228970+00:00",
+      "seconds": 5.137380584000001,
+      "exitCode": 0,
+      "sourceCount": 249,
+      "sourceFingerprint": "8d94c9e343e0db8e921f5bb61db9bb7def28da8937faa3a49ea973ef39258f90",
+      "sourceUnchanged": true,
+      "command": [
+        "/Users/rory/Documents/Ideation/maintainflow-folio-release/.local/email-verification-2026-09-19/runtime/node-v24.13.0-darwin-arm64/bin/node",
+        "scripts/verify-vercel-bundle.mjs"
+      ]
+    },
+    "suite": {
+      "phase": "suite",
+      "nodeRuntime": "/Users/rory/Documents/Ideation/maintainflow-folio-release/.local/email-verification-2026-09-19/runtime/node-v24.13.0-darwin-arm64/bin/node",
+      "startedAt": "2026-09-19T21:16:57.307906+00:00",
+      "completedAt": "2026-09-19T21:19:16.992562+00:00",
+      "seconds": 139.68292425,
+      "exitCode": 0,
+      "sourceCount": 249,
+      "sourceFingerprint": "8d94c9e343e0db8e921f5bb61db9bb7def28da8937faa3a49ea973ef39258f90",
+      "sourceUnchanged": true,
+      "command": [
+        "/Users/rory/Documents/Ideation/maintainflow-folio-release/.local/email-verification-2026-09-19/runtime/node-v24.13.0-darwin-arm64/bin/node",
+        "--require",
+        "/Users/rory/Documents/Ideation/maintainflow-folio-release/.local/email-verification-2026-09-19/local-test-env.cjs",
+        "--import",
+        "tsx",
+        "--import",
+        "./tests/test-environment.ts",
+        "--test",
+        "--test-concurrency=1",
+        "tests/account-email-dispatch.test.ts",
+        "tests/account-email-worker.test.ts",
+        "tests/account-email.test.ts",
+        "tests/account-recovery-ui.test.ts",
+        "tests/account-recovery.test.ts",
+        "tests/account-registration.test.ts",
+        "tests/ai-availability-ui.test.ts",
+        "tests/ai-worker.test.ts",
+        "tests/api-key-expiry.test.ts",
+        "tests/api-workflow.test.ts",
+        "tests/auth-login.test.ts",
+        "tests/automations.test.ts",
+        "tests/core.test.ts",
+        "tests/csv-values.test.ts",
+        "tests/database-schema.test.ts",
+        "tests/decoder-reconciliation.test.ts",
+        "tests/defensive-regressions.test.ts",
+        "tests/direct-uploads.test.ts",
+        "tests/email-verification-ui.test.ts",
+        "tests/email-verification.test.ts",
+        "tests/export-lifecycle.test.ts",
+        "tests/extraction-approval.test.ts",
+        "tests/extraction-sources.test.ts",
+        "tests/extraction.test.ts",
+        "tests/frontend-values.test.ts",
+        "tests/hosted-auth.test.ts",
+        "tests/hosted-worker.test.ts",
+        "tests/intake-policy.test.ts",
+        "tests/intake-source-rejection.test.ts",
+        "tests/integrations.test.ts",
+        "tests/invitation-email.test.ts",
+        "tests/invitation-members-ui.test.ts",
+        "tests/invitation-ui.test.ts",
+        "tests/lifecycle.test.ts",
+        "tests/membership-audit.test.ts",
+        "tests/mock-billing-ui.test.ts",
+        "tests/mock-billing.test.ts",
+        "tests/nested-corrections.test.ts",
+        "tests/nested-values.test.ts",
+        "tests/openai-provider.test.ts",
+        "tests/openai-schema-suggestions.test.ts",
+        "tests/parser-copy.test.ts",
+        "tests/parser-format-policy.test.ts",
+        "tests/parser-setup.test.ts",
+        "tests/pdf-split-decoder.test.ts",
+        "tests/pdf-split-intake.test.ts",
+        "tests/pdf-split-lineage.test.ts",
+        "tests/pdfjs-render-errors.test.ts",
+        "tests/preview.test.ts",
+        "tests/private-storage.test.ts",
+        "tests/providers.test.ts",
+        "tests/request-rate-limit.test.ts",
+        "tests/resend-format-policy.test.ts",
+        "tests/resend-managed.test.ts",
+        "tests/retention-notifications.test.ts",
+        "tests/run-model-usage-ui.test.ts",
+        "tests/schema-suggestions.test.ts",
+        "tests/signup-plan.test.ts",
+        "tests/source-formats.test.ts",
+        "tests/source-type-policy.test.ts",
+        "tests/source-validation.test.ts",
+        "tests/static-serving.test.ts",
+        "tests/storage-error-response.test.ts",
+        "tests/template-precedence.test.ts",
+        "tests/template-selection.test.ts",
+        "tests/written-date.test.ts"
+      ]
+    }
+  },
+  "focused": {
+    "recordedAt": "2026-09-19T21:09:40.649543+00:00",
+    "log": ".local/nested-review-backend-2026-09-19/focused-final.log",
+    "counts": {
+      "tests": "21",
+      "pass": "21",
+      "fail": "0",
+      "cancelled": "0",
+      "skipped": "0",
+      "todo": "0",
+      "duration_ms": "4098.470375"
+    },
+    "initialFailure": "Prototype payload was rejected earlier by Fastify JSON parser; expected error adjusted, no product source change",
+    "sourceFinalBuild": "593b2a20e2579329de6992a460783e419ea97521b7e4629c8942fe1bb3cccb8a"
+  },
+  "focusedParserCopyBoundary": {
+    "tests": "19",
+    "pass": "19",
+    "fail": "0",
+    "skipped": "0",
+    "cancelled": "0",
+    "todo": "0",
+    "duration_ms": "4537.272"
+  },
+  "browser": {
+    "runId": "d5c88d50-300d-44e0-9e42-aca378266397",
+    "startedAt": "2026-09-19T21:16:23.853Z",
+    "completedAt": "2026-09-19T21:16:35.900Z",
+    "origin": "http://127.0.0.1:4337",
+    "browserAvailability": "Browser plugin unavailable; installed Playwright fallback",
+    "flow": "Controlled extraction -> four-level nested review and row edits -> save/reload/stale draft -> approve pinned revisions -> JSON/CSV/XLSX",
+    "checks": {
+      "InitialTypedValuesAndControlledRunRender": true,
+      "RestoredCookieEmptyWorkspaceStorageOriginalPdfLoads": true,
+      "FourSupportedLevelsFitDesktopTabletAndMobilePane": true,
+      "TopLevelRowAddRemoveKeyboardFocusAndTypedCells": true,
+      "NestedTableAndObjectStructuralEditsPreserveOriginalRowSources": true,
+      "SaveReloadRetainsExactNumbersBooleansNullsLeadingZerosAndNestedValues": true,
+      "KeyboardSourceNavigationUsesImmutableOriginalEvidenceAfterStructuralEdits": true,
+      "TwoTabStaleDraftRevertHasExplicitLoadLatestRecovery": true,
+      "JsonCsvXlsxDownloadsExactlyMatchSelectedApprovalDespiteNewerApproval": true,
+      "ViewerNestedControlsDisabledAndApprovedExportAllowed": true,
+      "LateCorrectionAndApprovalAfterRunSwitchCannotApproveOrOpenOtherRun": true,
+      "ClosingExportDuringMetadataOrFileRequestPreventsLateDownload": true,
+      "OriginalRunUnchangedNoExternalCallsOrUnexplainedBrowserErrors": true
+    },
+    "paneWidths": [
+      {
+        "viewport": 1440,
+        "clientWidth": 598,
+        "scrollWidth": 598
+      },
+      {
+        "viewport": 820,
+        "clientWidth": 426,
+        "scrollWidth": 426
+      },
+      {
+        "viewport": 390,
+        "clientWidth": 390,
+        "scrollWidth": 390
+      }
+    ],
+    "exportProof": {
+      "jsonSha256": "a1214343443afbac2bb00b8e4452a8c3a2d5a795720b9ca0a85522be514110d5",
+      "csvSha256": "a29773554dfaa188b8b3b4502e3f0fc40e475bed64a7ae0915f9f2b3fda6bd46",
+      "xlsxSha256": "c73aac19ce53b24a714f61afe911802e552dfb40d43bd886ab30aa71a3f70854",
+      "rows": 2,
+      "columns": 10,
+      "pinnedAcrossFormats": true,
+      "customMappingEnteredInBrowser": true
+    },
+    "immutableProof": {
+      "rawValues": true,
+      "normalizedValues": true,
+      "evidence": true,
+      "documentDigest": true
+    },
+    "cleanedOwnedFixtures": {
+      "accounts": 2,
+      "workspaces": 2,
+      "documents": 1
+    },
+    "seededWorkspace": false,
+    "realProviderCalls": 0,
+    "controlledExtractionCalls": 2,
+    "pageErrors": [],
+    "console": [],
+    "blockedNetwork": [],
+    "sourceUnchanged": true,
+    "buildIndexSha256": "e2f34b3c27f0d23db5fdb470c377a1eb26574101205bc35706c28017e27f6666"
+  },
+  "visual": {
+    "reviewedAt": "2026-09-19T21:17:22.446Z",
+    "findings": [],
+    "retainedFrames": 12,
+    "publishedScreenshots": [
+      {
+        "file": "four-level-nesting-390.png",
+        "sha256": "1f91b75a058bfb3d4b13704a13189a59a7f0b06ed99e38be68ecd9244161e6a9"
+      },
+      {
+        "file": "four-level-nesting-820.png",
+        "sha256": "882fde47f0a66a0174b6e809283c2e9a1fce4cb09e36c1c737001533956d47f3"
+      },
+      {
+        "file": "nested-structural-edit-desktop.png",
+        "sha256": "3a778c1fd94cccc0873bbc1185183a84047dacf4e6bf3cfba1875540148ceef2"
+      },
+      {
+        "file": "desktop-pinned-approved-export.png",
+        "sha256": "d61fc35760f5f7644c0ac98512d787b18ad58c0044b5c53f702a85eecaa5e2c7"
+      }
+    ]
+  },
+  "originalCriteriaPreserved": 47,
+  "limits": [
+    "Controlled local Chromium and supported four-level fixture shapes only; not arbitrary nesting or real provider extraction quality.",
+    "No delayed document-navigation case; delayed correction and already-dispatched approval were tested across extraction-run changes.",
+    "Hosted migrations 021\u2013030 and matching runtime activation remain pending.",
+    "Controlled providers only; no new real AI, email, Sheets or Stripe acceptance.",
+    "Explicit dotted object/table paths; no wildcard or recursive array flattening."
+  ],
+  "baselineRuns": [
+    "d26f7b32-3191-413e-8d15-c01d27722013",
+    "003c6640-35ef-480e-8740-c41f8c4965c4"
+  ],
+  "priorFullSuite": {
+    "passed": 543,
+    "total": 544,
+    "sourceFingerprint": "593b2a20e2579329de6992a460783e419ea97521b7e4629c8942fe1bb3cccb8a",
+    "reason": "Parser-copy boundary fixture still used101 rather than new259 maximum; test updated to shared maximum plus one, no product source change"
+  },
+  "knownSecretScan": {
+    "recordedAt": "2026-09-19T21:19:45.875522+00:00",
+    "filesScanned": 742,
+    "knownValuesCompared": 12,
+    "matches": [],
+    "passed": true
+  }
+}

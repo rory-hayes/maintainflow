@@ -1,6 +1,12 @@
 # Verification ledger
 
-## Current invitation email — 19 September 2026
+## Current nested review acceptance — 19 September 2026
+
+Nested document review and approved exports are locally verified: **544/544 tests** passed in **139.575 seconds**, and **13/13 browser groups** passed at **1440×1000, 820×1000 and 390×844**. Build, hosted packaging and isolated runtime/decoder checks passed on the same **249 source files**, fingerprint **`8d94c9e343e0db8e921f5bb61db9bb7def28da8937faa3a49ea973ef39258f90`**. Row focus/layout, stale recovery, fresh-tab file access, selected-approval downloads and nested schema/path validation are fixed. Two controlled extraction calls occurred; no real provider calls or browser errors were recorded, and both owned accounts, both owned workspaces and the test document were cleaned up. Hosted **021–030** and matching runtime activation remain pending. Free plans and mock billing are unchanged. All 47 original capability criteria remain intact.
+
+[Contract](NESTED-REVIEW.md) · [Dated evidence](evidence/nested-review-2026-09-19/verification.json) · [Source manifest](evidence/nested-review-2026-09-19/source-manifest.json).
+
+## Earlier invitation email — 19 September 2026
 
 W07 invitation email is implemented and locally verified with controlled senders. Owners and administrators can explicitly queue email or create a manual link, inspect delivery status, resend with token rotation, and revoke invitations. The recipient reviews the workspace and role after normal sign-in; new accounts complete required email verification before joining. Expiry, role preservation, delayed responses, lost responses and mobile layout are covered. **536/536 serial tests** passed on **Node 24.13.0** in **139.208 seconds**, with no failures or skips. Build, hosted packaging and isolated runtime/decoder checks passed on the same **246 source files**, fingerprint **`5e0b5fba4dfc5b0eaf14cafe0b8abce57c5e287ec4d06c3a210546167ef51778`**. **13/13 desktop/mobile browser groups** passed; six invitation and one verification email were captured locally, zero real provider calls occurred, and all 13 owned accounts/workspaces were cleaned while preservation checks passed. Migration **030 is local only**, with 21 local migrations; hosted **021–030** and actual authentication sender/inbox acceptance remain pending. Free plans and mocked billing are unchanged. All 47 original capability criteria remain preserved.
 

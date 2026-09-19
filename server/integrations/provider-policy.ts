@@ -3,15 +3,16 @@ import { Webhook } from 'svix';
 import { z } from 'zod';
 import type { GetReceivingEmailResponseSuccess, GetDomainResponseSuccess } from 'resend';
 import { PLANS } from '../../shared/plans.js';
+import {maximumExportFieldPathLength,maximumExportColumnSourceLength} from '../../shared/export-contract.js';
 
 export type PaidPlanId = 'standard' | 'team';
 export type PriceMap = Partial<Record<PaidPlanId,string>>;
 export const SHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
-export const columnSchema=z.object({source:z.string().min(1).max(100),label:z.string().min(1).max(100)}).strict();
+export const columnSchema=z.object({source:z.string().min(1).max(maximumExportColumnSourceLength),label:z.string().min(1).max(100)}).strict();
 export const sheetConfigSchema=z.object({
  spreadsheetId:z.string().regex(/^[A-Za-z0-9_-]{15,150}$/),
  sheetName:z.string().min(1).max(80).refine(s=>!/[\[\]:*?\/\\\u0000-\u001f]/.test(s),'Use a valid worksheet title'),
- columns:z.array(columnSchema).min(1).max(50), lineItems:z.string().min(1).max(100).optional(),
+ columns:z.array(columnSchema).min(1).max(50), lineItems:z.string().min(1).max(maximumExportFieldPathLength).optional(),
 }).strict();
 export type SheetConfig=z.infer<typeof sheetConfigSchema>;
 export type ApprovalPayload={id:string;document:{id:string;name:string};runId:string;revision:number;values:Record<string,unknown>};
