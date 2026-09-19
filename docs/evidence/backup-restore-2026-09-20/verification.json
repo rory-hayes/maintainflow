@@ -1,0 +1,65 @@
+{
+  "status": "passed",
+  "recordedAt": "2026-09-19T23:35:52.414776+00:00",
+  "source": {
+    "count": 278,
+    "fingerprint": "7a5a878d331c87bb591c3959ae18f132c065bdd33a64f3f07380fc8217cf7a7a",
+    "unchanged": true
+  },
+  "node": "24.13.0",
+  "tests": {
+    "passed": 610,
+    "failed": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "seconds": 187.22189783299999
+  },
+  "phases": {
+    "suite": {
+      "startedAt": "2026-09-19T23:32:41.226033+00:00",
+      "completedAt": "2026-09-19T23:35:48.543783+00:00",
+      "seconds": 187.316025417,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "build": {
+      "startedAt": "2026-09-19T23:31:45.370230+00:00",
+      "completedAt": "2026-09-19T23:31:47.107272+00:00",
+      "seconds": 1.7370250829999998,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "package": {
+      "startedAt": "2026-09-19T23:31:47.193275+00:00",
+      "completedAt": "2026-09-19T23:31:52.240263+00:00",
+      "seconds": 5.046937791,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "bundle": {
+      "startedAt": "2026-09-19T23:31:52.324549+00:00",
+      "completedAt": "2026-09-19T23:32:00.718507+00:00",
+      "seconds": 8.393879167,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    }
+  },
+  "operatorAcceptance": "acceptance.json",
+  "focusedDatabaseChecks": 25,
+  "archiveTestsIncludedInSuite": 11,
+  "runtimeTestsIncludedInSuite": 5,
+  "originalCapabilityCriteriaPreserved": 47,
+  "priorAttempts": [
+    "Initial helper SQL aliases, built-in type allowlist and policy-array decoding were corrected; failed outputs remain in private evidence.",
+    "First 610-test pass occurred while the acceptance harness and lock metadata were finalized; the unchanged-source final run supersedes it.",
+    "Earlier successful restore drills are retained separately from final source acceptance."
+  ],
+  "releaseLimits": [
+    "Local PostgreSQL17/filesystem proof only; hosted database/storage disaster recovery is not covered.",
+    "Explicit quiescence and operator activation are required; no automatic backups or service restart are claimed.",
+    "Synthetic native-text rules extraction and injected webhook transport verify restored workflow state; no live provider delivery or OCR accuracy claim.",
+    "Current build migrations only; compatibility with older/newer schema versions is rejected, not migrated during restore.",
+    "Hosted migrations 021-032 and corresponding runtime activation remain pending.",
+    "Off-host storage, key custody, schedules, retention, power-loss durability and actual-deployment recovery require separate evidence."
+  ]
+}

@@ -1,6 +1,7 @@
 import {createHash,timingSafeEqual} from 'node:crypto';
 import type {FastifyInstance} from 'fastify';
 import type {WorkBudget} from './core/work-budget.js';
+import {assertStorageRestoreReady} from './core/restore-state.js';
 
 // Vercel Fluid is configured for 300s. Stop claiming before 210s, keeping a
 // separate grace window for bounded IO and durable lease/retry updates.
@@ -108,6 +109,8 @@ async function productionServices():Promise<HostedWorkerServices>{
 let initialization:Promise<void>|undefined;
 /** Pass this promise to Vercel waitUntil after a successful mutation or watchdog wake. */
 export async function wakeHostedWorker(){
+  const {config}=await import('./core/config.js');
+  await assertStorageRestoreReady(config.storageDir,process.env.STORAGE_DRIVER||'filesystem');
   if(!defaultWorker){
     initialization??=(async()=>{
       const services=await productionServices();

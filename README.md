@@ -1,6 +1,7 @@
 # MaintainFlow document workspace (Folio)
 
-Latest local acceptance: selective ZIP imports pass 594 tests and 11 desktop/tablet/mobile workflow groups. Preview the archive, choose supported files, then review and approve each imported document independently. [Contract, screenshots and limits](docs/ZIP-IMPORTS.md). Hosted activation remains pending; free plans and mock billing are unchanged.
+Latest local acceptance: encrypted operator backup and isolated restore pass 610 tests and 11 restore groups, preserving all 54 tables, private originals, approvals and queued work. Restored services stay inactive until verification and explicit activation. [Commands, proof and limits](docs/BACKUP-RESTORE.md). Hosted disaster recovery remains a separate gate; free plans and mock billing are unchanged.
+
 
 Earlier local acceptance: text-marker PDF splitting passes 555 tests, nine desktop/mobile workflow groups and five tablet preview/control groups. [Contract, screenshots and limits](docs/PDF-MARKER-SPLITTING.md). Hosted activation remains pending.
 

@@ -9,6 +9,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {registerCore} from './core/index.js';
 import {config} from './core/config.js';
+import {assertStorageRestoreReady} from './core/restore-state.js';
 import {setExtractionProvider} from './core/worker.js';
 import {registerExports} from './integrations/exports.js';
 import {registerIntegrations} from './integrations/webhooks.js';
@@ -20,6 +21,7 @@ import {accountEmailStatus} from './integrations/account-email.js';
 import {emailVerificationStatus} from './core/email-verification.js';
 
 export async function buildApp(options: {rateLimitStore?: FastifyRateLimitStoreCtor} = {}){
+  await assertStorageRestoreReady(config.storageDir,process.env.STORAGE_DRIVER||'filesystem');
   validatePreviewConfiguration();
   // Vercel overwrites x-forwarded-for at its edge; local installs use socket IPs.
   const app=Fastify({trustProxy:process.env.VERCEL==='1',logger:{level:process.env.LOG_LEVEL||'warn',redact:['req.headers.authorization','req.headers.cookie','res.headers.set-cookie']},bodyLimit:1024*1024,requestTimeout:60_000,disableRequestLogging:true});

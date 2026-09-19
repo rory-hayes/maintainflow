@@ -1,11 +1,30 @@
 import { randomBytes, createCipheriv, createDecipheriv, createHmac } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync,openSync,fstatSync,closeSync,constants } from 'node:fs';
+import { resolve,isAbsolute } from 'node:path';
+
+function configuredFileKey(filename:string){
+ let descriptor:number|undefined;
+ try{
+  if(!isAbsolute(filename))throw new Error('Invalid key file.');
+  descriptor=openSync(filename,constants.O_RDONLY|constants.O_NOFOLLOW);
+  const stat=fstatSync(descriptor);
+  if(!stat.isFile()||(stat.mode&0o077)!==0||stat.size>256)throw new Error('Invalid key file.');
+  const bytes=readFileSync(descriptor);
+  if(bytes.length===32)return bytes;
+  const value=bytes.toString('utf8').trim(),decoded=Buffer.from(value,'base64');
+  if(decoded.length!==32||decoded.toString('base64')!==value)throw new Error('Invalid key file.');
+  return decoded;
+ }catch{throw new Error('INTEGRATION_ENCRYPTION_KEY_FILE must be an absolute path to an owner-only regular file containing 32 raw bytes or their canonical base64 encoding.');}
+ finally{if(descriptor!==undefined)closeSync(descriptor);}
+}
 
 let key: Buffer | undefined;
 function encryptionKey() {
-  if (key) return key;
   const configured = process.env.INTEGRATION_ENCRYPTION_KEY;
+  const filename=process.env.INTEGRATION_ENCRYPTION_KEY_FILE;
+  if(configured&&filename)throw new Error('Configure only one of INTEGRATION_ENCRYPTION_KEY and INTEGRATION_ENCRYPTION_KEY_FILE.');
+  if (key) return key;
+  if(filename){key=configuredFileKey(filename);return key;}
   if (configured) {
     const decoded = Buffer.from(configured, 'base64');
     if (decoded.length !== 32 || decoded.toString('base64').replace(/=+$/, '') !== configured.replace(/=+$/, '')) {
@@ -17,10 +36,10 @@ function encryptionKey() {
   if (process.env.NODE_ENV === 'production') throw new Error('INTEGRATION_ENCRYPTION_KEY is required in production.');
   const directory = resolve('.local/secrets');
   mkdirSync(directory, {recursive: true, mode: 0o700});
-  const filename = resolve(directory, 'integration-key');
-  try { writeFileSync(filename, randomBytes(32), {mode: 0o600, flag: 'wx'}); }
+  const fallbackFilename = resolve(directory, 'integration-key');
+  try { writeFileSync(fallbackFilename, randomBytes(32), {mode: 0o600, flag: 'wx'}); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-  const stored = readFileSync(filename);
+  const stored = readFileSync(fallbackFilename);
   if (stored.length !== 32) throw new Error('The local integration key is invalid. Restore the original key from your private backup.');
   key = stored;
   return key;

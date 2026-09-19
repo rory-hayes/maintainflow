@@ -75,3 +75,14 @@ jobs:
         run: npm run build:vercel
       - name: Verify the isolated function runtime and document decoders
         run: node scripts/verify-vercel-bundle.mjs
+      - name: Install PostgreSQL 17 for the isolated restore drill
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --location --silent --show-error --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-17
+      - name: Restore and activate an independently encrypted synthetic backup
+        env:
+          FOLIO_BACKUP_QA_PG_BIN: /usr/lib/postgresql/17/bin
+        run: npm run verify:backup
