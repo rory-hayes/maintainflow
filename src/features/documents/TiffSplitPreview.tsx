@@ -16,7 +16,7 @@ export default function TiffSplitPreview(props:Props){
    setMedia({page,request,url});callbacks.current.onReady(result.pageCount);callbacks.current.onRendered(page);
   }catch(cause){if(!disposed){if(url){URL.revokeObjectURL(url);url='';}setFailed(true);callbacks.current.onError(cause instanceof Error?cause.message:'This TIFF page could not be previewed. Try again.');}}})();
   return()=>{disposed=true;version.current++;controller.abort();if(url)URL.revokeObjectURL(url);};
- },[binding.userId,binding.workspaceId,binding.parserId,binding.requestId,binding.sha256,binding.uploadId,file,documentId,expectedPages,page,retry]);
+ },[binding.userId,binding.workspaceId,binding.parserId,binding.requestId,binding.sha256,binding.uploadId,binding.suggestionId,file,documentId,expectedPages,page,retry]);
  const current=media?.page===page?media:null;
  return <div className="tiff-split-preview" ref={panel} tabIndex={-1} aria-busy={!current&&!failed}>
   <p className="small muted">TIFF page preview · Source page {page}</p>

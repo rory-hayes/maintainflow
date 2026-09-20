@@ -37,6 +37,17 @@ if(phase==='seed'){
 const db=await import('../../server/core/db.js');
 const {buildApp}=await import('../../server/app.js');
 const worker=await import('../../server/core/worker.js');
+const splitSuggestions=await import('../../server/core/split-suggestions.js');
+let controlledSplitCalls=0;
+function configureControlledSplitSuggestions(){
+ splitSuggestions.setSplitSuggestionProvider({configured:()=>true,suggest:async input=>{
+  controlledSplitCalls++;assert.ok(input.pages.length>=1);
+  if(input.mimeType==='image/tiff'){assert.equal(input.visualDocument?.sourceSha256,hash(input.bytes));assert.equal(input.visualDocument?.pageCount,input.pages.length);assert.equal(input.visualDocument?.mimeType,'application/pdf');}
+  return {startPages:input.pages.length>1?[1,input.pages.length]:[1],model:'controlled-backup-split-model',promptVersion:'controlled-backup-split-v1',tokenUsage:{inputTokens:100,outputTokens:10,totalTokens:110},costUsd:0.000123};
+ }});
+}
+const suggestionPath=(parserId:string)=>`/api/parsers/${parserId}/split-suggestions`;
+async function suggestionRows(workspaceId:string){return JSON.parse(JSON.stringify((await db.adminPool.query('select * from split_suggestions where workspace_id=$1 order by id',[workspaceId])).rows));}
 const {encryptSecret,decryptSecret}=await import('../../server/integrations/secrets.js');
 let app:Awaited<ReturnType<typeof buildApp>>|undefined;
 const checks:Record<string,boolean>={};
@@ -60,6 +71,10 @@ try{
   const isPending=(error:any)=>{assert.equal(error?.code,'FOLIO_RESTORE_PENDING');assert.equal(error?.message,pendingMessage);return true;};
   await assert.rejects(async()=>{app=await buildApp();await app.ready();},isPending);apiRefused=true;
   await assert.rejects(worker.processOneCoreJob(randomUUID()),isPending);
+  await assert.rejects(splitSuggestions.processOneSplitSuggestion(randomUUID()),isPending);
+  await assert.rejects(splitSuggestions.reconcileExpiredSplitSuggestions(),isPending);
+  const {processOneSchemaSuggestion}=await import('../../server/core/schema-suggestions.js');
+  await assert.rejects(processOneSchemaSuggestion(randomUUID()),isPending);
   // If a regression starts the loop, stop it promptly and fail rather than hanging or advancing further jobs.
   const timeout=setTimeout(()=>process.emit('SIGINT'),1000);
   try{await assert.rejects(worker.startWorker(),isPending);workerRefused=true;}finally{clearTimeout(timeout);}
@@ -104,6 +119,36 @@ try{
   const {default:JSZip}=await import('jszip');const zip=new JSZip();zip.file('docs/deleted.txt',sourceText.replace('000042','ZIP-DELETED'));zip.file('docs/live.txt',sourceText.replace('000042','ZIP-LIVE'));zip.file('excluded.txt','EXCLUDED ORIGINAL CANARY');const zipBytes=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'}),zipRequestId=randomUUID();
   const previewData=multipart(zipBytes,'retained.zip',{requestId:zipRequestId});const preview=ok(await request(owner,'POST',`/api/parsers/${parser.id}/archive-imports/preview`,previewData.payload,previewData.headers));const zipOptions={mode:'zip',version:1,sourceSha256:hash(zipBytes),entries:preview.entries.filter((e:any)=>e.path==='docs/deleted.txt'||e.path==='docs/live.txt').map((e:any)=>e.index)};
   const archive=await upload(owner,parser.id,zipBytes,'retained.zip',{requestId:zipRequestId,options:JSON.stringify(zipOptions)},'archive-imports');ok(await request(owner,'DELETE',`/api/documents/${archive.documents[0].id}`));
+  configureControlledSplitSuggestions();
+  const suggestionBefore={usage:await ledger(),documents:(await db.adminPool.query('select count(*)::int n from documents where workspace_id=$1',[owner.workspace.id])).rows[0].n};
+  const suggestions:Record<string,any>={};
+  // Real local PDF/TIFF decoding with a controlled provider result. Suggestions
+  // copy sources without accepting pages; only explicit Create charges children.
+  for(const label of ['ready','applied','undone','expired','queued']){
+   const stored=label==='applied'||label==='undone',bytes=stored||label==='expired'?tiffBytes:pdfBytes;
+   const suggestionRequestId=randomUUID();
+   const response=stored
+    ?ok(await request(owner,'POST',suggestionPath(parser.id),{requestId:suggestionRequestId,documentId:tiffOriginal.document.id,sourceSha256:hash(bytes)}),202)
+    :await upload(owner,parser.id,bytes,label==='expired'?'expired-draft.tiff':'draft.pdf',{requestId:suggestionRequestId,sourceSha256:hash(bytes)},'split-suggestions');
+   const suggestion=response.suggestion;
+   if(label!=='queued'){
+    assert.equal(await splitSuggestions.processOneSplitSuggestion(suggestion.id),true);
+    assert.equal(ok(await request(owner,'GET',`${suggestionPath(parser.id)}/${suggestion.id}`)).suggestion.state,'ready');
+   }
+   suggestions[label]={id:suggestion.id,requestId:suggestionRequestId,sha256:hash(bytes)};
+  }
+  assert.deepEqual(await ledger(),suggestionBefore.usage);
+  assert.equal((await db.adminPool.query('select count(*)::int n from documents where workspace_id=$1',[owner.workspace.id])).rows[0].n,suggestionBefore.documents);
+  for(const label of ['applied','undone']){
+   const entry=suggestions[label],createRequestId=randomUUID(),options={mode:'ranges',ranges:[{start:1,end:1},{start:2,end:2}]};
+   const receipt=ok(await request(owner,'POST',`${suggestionPath(parser.id)}/${entry.id}/create`,{requestId:createRequestId,options}),202);
+   assert.equal(receipt.split.aiSuggestion.suggestionId,entry.id);assert.deepEqual(receipt.split.aiSuggestion.startPages,[1,2]);
+   Object.assign(entry,{createRequestId,options,receipt});
+   if(label==='undone')assert.ok(ok(await request(owner,'POST',`/api/pdf-splits/${receipt.split.id}/undo`,{})).receipt.split.undoneAt);
+  }
+  await db.adminPool.query("update split_suggestions set expires_at=now()-interval '1 second' where id=$1",[suggestions.expired.id]);
+  const splitSuggestionRows=await suggestionRows(owner.workspace.id),splitSuggestionObjects=[];
+  for(const row of splitSuggestionRows){assert.ok(row.source_storage_key);const bytes=await fs.readFile(path.join(cfg.storageDir,row.source_storage_key));assert.equal(hash(bytes),row.source_sha256);splitSuggestionObjects.push({key:row.source_storage_key,sha256:hash(bytes),bytes:bytes.length});}
   const integrationId=randomUUID(),canary=randomBytes(32).toString('base64url');
   // Direct canaries are fixture-only rows: no provider is configured or contacted.
   await db.adminPool.query("insert into integrations(id,workspace_id,parser_id,name,kind,config,secret_ciphertext,enabled) values($1,$2,$3,'Synthetic encryption canary','webhook',$4,$5,true)",[integrationId,owner.workspace.id,parser.id,JSON.stringify({url:'https://backup-fixture.invalid/webhook'}),encryptSecret(canary)]);
@@ -111,9 +156,9 @@ try{
   const deletionKey=owner.workspace.id+'/'+randomUUID();await fs.writeFile(path.join(cfg.storageDir,deletionKey),Buffer.from('SYNTHETIC PENDING DELETION'));await db.adminPool.query('insert into file_deletions(workspace_id,storage_key) values($1,$2)',[owner.workspace.id,deletionKey]);
   const emailCanary=encryptSecret(JSON.stringify({to:owner.email,subject:'Synthetic restore message',text:'Controlled fixture only'}));await db.adminPool.query("insert into account_email_outbox(user_id,kind,payload_ciphertext,expires_at) values($1,'password_changed',$2,now()+interval '1 day')",[owner.user.id,emailCanary]);
   const originals=[];for(const row of(await db.adminPool.query('select id,storage_key,sha256,workspace_id from documents order by id')).rows)originals.push({...row,actualSha256:hash(await fs.readFile(path.join(cfg.storageDir,row.storage_key)))});
-  const fixture={accounts,parserId:parser.id,otherParserId:otherParser.id,ordinary,queued,otherDoc,runId:runDetail.id,approvalId:approval.id,corrected,normalized:runDetail.normalizedValues,raw:runDetail.rawValues,exports,template,mapping,schema2,split,splitRequestId,splitOptions,pdfSha256:hash(pdfBytes),storedSourceId,storedSourceSha256,storedOptions,storedRequestId,storedSplit,undoneRequestId,undoneSplit,tiffOriginal,tiffOptions,tiffRequestId,tiffUndoneId,tiffSplit,tiffUndone,tiffSha256:hash(tiffBytes),archive,zipRequestId,zipOptions,zipSha256:hash(zipBytes),originals,integrationId,canarySha256:hash(canary),deliveryId,deletionKey,usage:await ledger()};
+  const fixture={accounts,parserId:parser.id,otherParserId:otherParser.id,ordinary,queued,otherDoc,runId:runDetail.id,approvalId:approval.id,corrected,normalized:runDetail.normalizedValues,raw:runDetail.rawValues,exports,template,mapping,schema2,split,splitRequestId,splitOptions,pdfSha256:hash(pdfBytes),storedSourceId,storedSourceSha256,storedOptions,storedRequestId,storedSplit,undoneRequestId,undoneSplit,tiffOriginal,tiffOptions,tiffRequestId,tiffUndoneId,tiffSplit,tiffUndone,tiffSha256:hash(tiffBytes),suggestions,splitSuggestionRows,splitSuggestionObjects,archive,zipRequestId,zipOptions,zipSha256:hash(zipBytes),originals,integrationId,canarySha256:hash(canary),deliveryId,deletionKey,usage:await ledger()};
   await fs.writeFile(path.join(run,'source.pdf'),pdfBytes,{mode:0o600});await fs.writeFile(path.join(run,'source.zip'),zipBytes,{mode:0o600});await write('fixture-private.json',fixture);
-  await write('runtime-seed.json',{accounts:2,workspaces:2,documents:originals.length,exports:3,schemaVersions:3,syntheticCanaries:['encrypted integration','pending webhook','pending account email','pending file deletion'],forbiddenNetwork});
+  await write('runtime-seed.json',{accounts:2,workspaces:2,documents:originals.length,exports:3,schemaVersions:3,splitSuggestions:{queued:1,ready:1,applied:1,undone:1,expired:1,controlledProviderCalls:controlledSplitCalls},syntheticCanaries:['encrypted integration','pending webhook','pending account email','pending file deletion'],forbiddenNetwork});
  }else{
   const f=JSON.parse(await fs.readFile(path.join(run,'fixture-private.json'),'utf8'));
   const owner=await login(f.accounts[0]),other=await login(f.accounts[1]);checks.login=true;
@@ -147,12 +192,44 @@ try{
   checks.restoredTiffMimeOriginalPreviewAndSplitReplay=true;
   const tiffUndoneReplay=ok(await request(owner,'POST',`/api/documents/${f.tiffOriginal.document.id}/pdf-splits`,{requestId:f.tiffUndoneId,sourceSha256:f.tiffSha256,options:f.tiffOptions}),202);
   assert.equal(tiffUndoneReplay.split.sourceMimeType,'image/tiff');assert.ok(tiffUndoneReplay.split.undoneAt);assert.ok(tiffUndoneReplay.documents.every((d:any)=>!d.available));assert.deepEqual(await ledger(),f.usage);checks.restoredTiffUndoKeepsPageLedgerAndTombstones=true;
+  assert.deepEqual(await suggestionRows(owner.workspace.id),f.splitSuggestionRows);
+  for(const object of f.splitSuggestionObjects){const bytes=await fs.readFile(path.join(cfg.storageDir,object.key));assert.equal(bytes.length,object.bytes);assert.equal(hash(bytes),object.sha256);}
+  checks.splitSuggestionExactRowsSourcesAndConfirmationNonces=true;
+  for(const label of ['queued','ready','applied','undone','expired']){
+   const entry=f.suggestions[label],endpoint=`${suggestionPath(f.parserId)}/${entry.id}`;
+   const current=ok(await request(owner,'GET',`${suggestionPath(f.parserId)}/requests/${entry.requestId}`)).suggestion;
+   assert.equal(current.id,entry.id);assert.equal(current.sourceSha256,entry.sha256);
+   assert.equal((await request(other,'GET',endpoint)).statusCode,404);
+   if(label==='expired'){assert.equal(current.creationClosed,true);assert.equal((await request(owner,'GET',endpoint+'/source')).statusCode,410);}
+   else assert.equal(hash(await download(owner,endpoint+'/source')),entry.sha256);
+   if(label==='applied'||label==='undone'){
+    assert.equal(current.confirmedRequestId,entry.createRequestId);assert.deepEqual(current.confirmedOptions,entry.options);assert.equal(current.acceptedSplitId,entry.receipt.split.id);
+    const replay=ok(await request(owner,'POST',endpoint+'/create',{requestId:entry.createRequestId,options:entry.options}),202);
+    assert.equal(replay.replayed,true);assert.equal(replay.split.id,entry.receipt.split.id);assert.deepEqual(replay.split.aiSuggestion,entry.receipt.split.aiSuggestion);
+    if(label==='undone'){assert.ok(replay.split.undoneAt);assert.ok(replay.documents.every((document:any)=>!document.available));}
+    else for(const child of replay.documents){assert.equal(child.available,true);const detail=ok(await request(owner,'GET',`/api/documents/${child.id}`));assert.deepEqual(detail.split.aiSuggestion,replay.split.aiSuggestion);}
+    assert.equal((await request(owner,'POST',endpoint+'/create',{requestId:randomUUID(),options:entry.options})).statusCode,409);
+   }
+  }
+  assert.deepEqual(await ledger(),f.usage);checks.splitSuggestionRestoreIsolationSourceExpiryAndAppliedUndoReplays=true;
+  configureControlledSplitSuggestions();
+  assert.equal(await splitSuggestions.processOneSplitSuggestion(f.suggestions.queued.id),true);
+  assert.equal(await splitSuggestions.processOneSplitSuggestion(f.suggestions.queued.id),false);
+  const restoredSuggestion=ok(await request(owner,'GET',`${suggestionPath(f.parserId)}/${f.suggestions.queued.id}`)).suggestion;
+  assert.equal(restoredSuggestion.state,'ready');assert.equal(restoredSuggestion.attempts,1);assert.deepEqual(restoredSuggestion.startPages,[1,3]);assert.equal(controlledSplitCalls,1);assert.deepEqual(await ledger(),f.usage);
+  checks.queuedSplitSuggestionResumesOnceWithoutAcceptingOrChargingPages=true;
+  const expiredRow=f.splitSuggestionRows.find((row:any)=>row.id===f.suggestions.expired.id);
+  assert.deepEqual(await splitSuggestions.reconcileExpiredSplitSuggestions(owner.workspace.id),{removed:1});
+  assert.equal(await fs.stat(path.join(cfg.storageDir,expiredRow.source_storage_key)).then(()=>true,()=>false),false);
+  const cleaned=(await db.adminPool.query('select * from split_suggestions where id=$1',[expiredRow.id])).rows[0];
+  assert.equal(cleaned.source_storage_key,null);assert.equal(cleaned.source_reserved_bytes,0);assert.deepEqual(cleaned.start_pages,expiredRow.start_pages);assert.equal(cleaned.model,expiredRow.model);assert.equal(cleaned.prompt_version,expiredRow.prompt_version);
+  assert.deepEqual(await ledger(),f.usage);checks.expiredSplitSuggestionSourceCleanupPreservesDraftAndLedger=true;
   const cipher=(await db.adminPool.query('select secret_ciphertext from integrations where id=$1',[f.integrationId])).rows[0].secret_ciphertext;assert.equal(hash(decryptSecret(cipher)),f.canarySha256);checks.encryptionKeyCanary=true;
   assert.equal(await worker.processOneCoreJob(f.queued.jobId),true);assert.equal(await worker.processOneCoreJob(f.queued.jobId),false);const queued=ok(await request(owner,'GET',`/api/documents/${f.queued.document.id}`));assert.equal(queued.runs.length,1);assert.equal(queued.jobs[0].attempts,1);assert.equal(queued.jobs[0].state,'completed');assert.equal(queued.runs[0].effectiveValues.reference,'QUEUED-42');assert.deepEqual(await ledger(),f.usage);checks.deterministicQueuedJobOnceWithoutRecharging=true;
   const {deleteStoredFile}=await import('../../server/core/retention.js');assert.equal(await deleteStoredFile(owner.workspace.id,f.deletionKey),'complete');assert.equal(await deleteStoredFile(owner.workspace.id,f.deletionKey),'complete');assert.equal(await fs.stat(path.join(cfg.storageDir,f.deletionKey)).then(()=>true,()=>false),false);checks.pendingDeletionResumed=true;
   const {processOneDelivery,signDelivery}=await import('../../server/integrations/webhooks.js');let deliveries=0;await processOneDelivery({workspaceId:owner.workspace.id,transport:async(_url,options:any)=>{deliveries++;const body=options.body;assert.equal(options.headers['X-Folio-Signature'],'v1='+signDelivery(decryptSecret(cipher),options.headers['X-Folio-Timestamp'],body));return{status:204,body:'',headers:{}} as any;}});await processOneDelivery({workspaceId:owner.workspace.id,transport:async()=>{deliveries++;throw new Error('No duplicate fixture delivery');}});assert.equal(deliveries,1);assert.equal((await db.adminPool.query('select status from webhook_deliveries where id=$1',[f.deliveryId])).rows[0].status,'delivered');checks.pendingOutboxControlledDeliveryOnce=true;
   assert.equal((await db.adminPool.query("select count(*)::int n from account_email_outbox where state='pending'")).rows[0].n,1);checks.pendingEmailPreservedWithoutSending=true;
-  await write('runtime-verification.json',{checks,forbiddenNetwork,realProviderCalls:0,controlledWebhookDeliveries:deliveries,verifiedLiveOriginals:f.originals.length,savedExports:3,accounts:2});
+  await write('runtime-verification.json',{checks,forbiddenNetwork,realProviderCalls:0,controlledSplitProviderCalls:controlledSplitCalls,restoredSplitSuggestions:f.splitSuggestionRows.length,controlledWebhookDeliveries:deliveries,verifiedLiveOriginals:f.originals.length,savedExports:3,accounts:2});
  }
  }
  assert.equal(forbiddenNetwork,0);

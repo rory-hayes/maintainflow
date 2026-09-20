@@ -14,6 +14,9 @@ export async function purgeDocument(c: PoolClient, workspaceId: string, document
     [documentId, workspaceId],
   );
   if (!document) return undefined;
+  // Invalidate drafts atomically with removing their stored original. Their own
+  // reserved copies are released by the suggestion cleanup lane after leases end.
+  await c.query("update split_suggestions set state='cancelled',lease_owner=null,lease_until=null,error=null,updated_at=clock_timestamp() where workspace_id=$1 and source_document_id=$2 and accepted_split_id is null and state<>'cancelled'",[workspaceId,documentId]);
   if(document.pdf_split_id)await c.query('select id from pdf_splits where id=$1 and workspace_id=$2 for update',[document.pdf_split_id,workspaceId]);
   if(document.archive_import_id)await c.query('select id from archive_imports where id=$1 and workspace_id=$2 for update',[document.archive_import_id,workspaceId]);
   await c.query('select id from documents where id=$1 and workspace_id=$2 for update',[documentId,workspaceId]);

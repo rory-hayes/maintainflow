@@ -2,6 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import type {PoolClient} from 'pg';
 import {z} from 'zod';
 import type {Actor} from '../../shared/types.js';
+import type {SplitSuggestionProvenance} from '../../shared/split-suggestions.js';
 import {templatePolicy} from '../../shared/template-selection.js';
 import {canonicalPdfSplitSpec,PdfSplitValidationError,isPdfSplitValidationReason,pdfSplitLimits,planPdfSplit,verifyPdfMarkerRanges,type PdfSplitSpec,type PdfSplitReceipt,type PdfSplitRootLineage} from '../../shared/pdf-split.js';
 import {decoderLimits} from './decoder-limits.js';
@@ -11,7 +12,7 @@ import {isTiffHeader,inspectTiffStructure} from './tiff-engine.js';
 import {SourceValidationError,isSourceValidationReason} from './source-validation.js';
 import {ParserFormatNotAllowedError,SourceIntakeRejectedError} from './intake-policy.js';
 import {privateStorage,safeDownloadName} from './storage.js';
-import {findPdfSplitByRequest,readPdfSplitReceipt,assertUploadedSplitBinding} from './pdf-split-records.js';
+import {findPdfSplitByRequest,readPdfSplitReceipt,assertUploadedSplitBinding,assertSplitSuggestionBinding} from './pdf-split-records.js';
 
 type SplitSource=typeof splitPdfSource;
 export type SplitDirectUpload={id:string;owner:string};
@@ -20,7 +21,13 @@ export type StoredPdfSplitContext={
  transaction:<T>(fn:(c:PoolClient)=>Promise<T>)=>Promise<T>;
  assertSource:(c:PoolClient)=>Promise<void>;
 };
-type Options={splitSource?:SplitSource;timeoutMs?:number;directUpload?:SplitDirectUpload;storedSource?:StoredPdfSplitContext};
+export type SplitSuggestionContext={
+ provenance:SplitSuggestionProvenance;
+ transaction:<T>(fn:(c:PoolClient)=>Promise<T>)=>Promise<T>;
+ assertSource:(c:PoolClient)=>Promise<void>;
+ complete:(c:PoolClient,splitId:string,accepted:boolean)=>Promise<void>;
+};
+type Options={splitSource?:SplitSource;timeoutMs?:number;directUpload?:SplitDirectUpload;storedSource?:StoredPdfSplitContext;suggestion?:SplitSuggestionContext};
 type WrittenObject={id:string;key:string;bytes:Buffer;attempted:boolean;completed:boolean};
 const sha=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex');
 const unavailable=()=>Object.assign(new Error('Document splitting took too long. Retry the same upload.'),{statusCode:503});
@@ -51,8 +58,8 @@ export async function addSplitDocuments(actor:Actor,parserId:string,bytes:Buffer
  const sourceMimeType=isTiffHeader(bytes)?'image/tiff':'application/pdf',format=sourceMimeType==='image/tiff'?'tiff':'pdf';
  if(options.storedSource?.mimeType&&options.storedSource.mimeType!==sourceMimeType)badRequest('The stored document format could not be verified.',409);
  if(options.storedSource&&options.directUpload)throw new Error('Stored splits cannot adopt direct uploads');
- const runTransaction=options.storedSource?.transaction??(<T>(fn:(c:PoolClient)=>Promise<T>)=>withWorkspace(actor.workspaceId,fn));
- const assertSource=async(c:PoolClient)=>{await options.storedSource?.assertSource(c);};
+ const runTransaction=options.suggestion?.transaction??options.storedSource?.transaction??(<T>(fn:(c:PoolClient)=>Promise<T>)=>withWorkspace(actor.workspaceId,fn));
+ const assertSource=async(c:PoolClient)=>{await options.storedSource?.assertSource(c);await options.suggestion?.assertSource(c);};
  const lineageValues=()=>options.storedSource?[options.storedSource.documentId,options.storedSource.root.kind,options.storedSource.root.id,options.storedSource.root.sha256,options.storedSource.root.pageCount,options.storedSource.root.pageStart]:[null,null,null,null,null,null];
  const timeoutMs=options.timeoutMs??120_000;
  if(!Number.isFinite(timeoutMs)||timeoutMs<=0||timeoutMs>120_000)throw new Error('Split deadline must be positive and at most 120 seconds');
@@ -68,7 +75,8 @@ export async function addSplitDocuments(actor:Actor,parserId:string,bytes:Buffer
  const attemptId=randomUUID(),splitId=randomUUID();
  let files:WrittenObject[]=[],heartbeat:ReturnType<typeof setInterval>|undefined;
  async function prior(c:PoolClient){
-  const row=options.storedSource?await findPdfSplitByRequest(c,actor.workspaceId,requestId):await assertUploadedSplitBinding(c,actor.workspaceId,parserId,requestId,sourceSha,canonical);
+  await assertSplitSuggestionBinding(c,actor.workspaceId,requestId,options.suggestion?.provenance.suggestionId);
+  const row=options.storedSource?await findPdfSplitByRequest(c,actor.workspaceId,requestId):await assertUploadedSplitBinding(c,actor.workspaceId,parserId,requestId,sourceSha,canonical,options.suggestion?.provenance.suggestionId);
   const binding=(await c.query('select source_document_id,parser_id,source_sha256,spec_hash from stored_pdf_split_requests where workspace_id=$1 and request_id=$2',[actor.workspaceId,requestId])).rows[0];
   if(binding&&(!options.storedSource||binding.source_document_id!==options.storedSource.documentId||binding.parser_id!==parserId||binding.source_sha256!==sourceSha||binding.spec_hash!==specHash))badRequest('This split request was already used for a different source or page selection.',409);
   if(options.storedSource&&!binding)badRequest('The stored document split request is not bound to its source.',409);
@@ -101,6 +109,7 @@ export async function addSplitDocuments(actor:Actor,parserId:string,bytes:Buffer
    requireReady(parser);await direct(c);await assertSource(c);check();
    await c.query("insert into pdf_splits(id,workspace_id,parser_id,request_id,source_sha256,canonical_spec,spec_hash,state,rejection_code,rejection_reason,source_byte_size,created_by,source_document_id,root_kind,root_id,root_sha256,root_page_count,root_page_start,source_mime_type) values($1,$2,$3,$4,$5,$6,$7,'rejected',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)",[splitId,actor.workspaceId,parserId,requestId,sourceSha,canonical,specHash,reason.code,reason.reason,bytes.length,actor.userId,...lineageValues(),sourceMimeType]);
    await audit(c,actor.workspaceId,actor.userId,'document.split_rejected',splitId,{parserId,code:reason.code,reason:reason.reason});check();
+   await options.suggestion?.complete(c,splitId,false);
    return {error:error instanceof SourceValidationError?new SourceIntakeRejectedError(parserId,error.reason):error};
   });
   if('receipt' in result)return result.receipt!;
@@ -124,6 +133,7 @@ export async function addSplitDocuments(actor:Actor,parserId:string,bytes:Buffer
   catch(error){return await saveRejection(error);}
   // This also defends internal adapters against accidentally dropping/reordering parts.
   const planned=planPdfSplit(JSON.parse(canonical),decoded.sourcePageCount);
+  if(options.suggestion&&decoded.sourcePageCount!==options.suggestion.provenance.sourcePageCount)badRequest('The suggestion source page count could not be verified.',409);
   if(options.storedSource&&decoded.sourcePageCount!==options.storedSource.pageCount)badRequest('The stored document page count could not be verified.',409);
   if(decoded.parts.length!==planned.ranges.length||decoded.selectedPages!==planned.selectedPages||decoded.parts.some((part,i)=>part.range.start!==planned.ranges[i]!.start||part.range.end!==planned.ranges[i]!.end||part.source.mimeType!==sourceMimeType||part.source.pageCount!==part.range.end-part.range.start+1||!Buffer.isBuffer(part.bytes)||!part.bytes.length||part.bytes.length>pdfSplitLimits.maxBytes)||decoded.parts.reduce((n,p)=>n+p.bytes.length,0)>pdfSplitLimits.maxDerivedBytes)throw Object.assign(new Error('The document splitter returned an invalid result. Retry shortly.'),{statusCode:503});
   if(format==='tiff'){
@@ -150,7 +160,8 @@ export async function addSplitDocuments(actor:Actor,parserId:string,bytes:Buffer
    requireReady(parser);requireFormat(parser,format);await direct(c);await assertSource(c);await quota(c,decoded.sourcePageCount,decoded.selectedPages,decoded.parts);check();
    const active=(await c.query('select count(distinct coalesce(split_attempt_id,archive_attempt_id)) filter(where lease_expires_at>now())::int attempts,coalesce(sum(reserved_bytes),0)::bigint bytes from intake_files where workspace_id=$1 and (split_attempt_id is not null or archive_attempt_id is not null)',[actor.workspaceId])).rows[0];
    const staging=(await c.query("select coalesce(sum(case when state='complete' then expected_bytes else 10485760 end),0)::bigint bytes from direct_uploads u where workspace_id=$1 and (state<>'cleaned' or exists(select 1 from file_deletions f where f.workspace_id=u.workspace_id and f.storage_key=u.storage_key))",[actor.workspaceId])).rows[0];
-   if(active.attempts>=2||Number(active.bytes)+Number(staging.bytes)+files.reduce((sum,file)=>sum+file.bytes.length,0)>250*1024*1024)badRequest('Too many pending document uploads. Finish them or retry after their cleanup window.',429);
+   const suggestions=(await c.query('select coalesce(sum(source_reserved_bytes+staging_reserved_bytes),0)::bigint bytes from split_suggestions where workspace_id=$1',[actor.workspaceId])).rows[0];
+   if(active.attempts>=2||Number(active.bytes)+Number(staging.bytes)+Number(suggestions.bytes)+files.reduce((sum,file)=>sum+file.bytes.length,0)>250*1024*1024)badRequest('Too many pending document uploads. Finish them or retry after their cleanup window.',429);
    for(const file of files)await c.query('insert into intake_files(id,workspace_id,storage_key,split_attempt_id,reserved_bytes) values($1,$2,$3,$4,$5)',[file.id,actor.workspaceId,file.key,attemptId,file.bytes.length]);
    check();return undefined;
   }).catch(error=>{if(rejection(error))return saveRejection(error);throw error;});
@@ -186,6 +197,7 @@ export async function addSplitDocuments(actor:Actor,parserId:string,bytes:Buffer
    }
    await audit(c,actor.workspaceId,actor.userId,'document.split',splitId,{parserId,sourcePages:decoded.sourcePageCount,selectedPages:decoded.selectedPages,children:decoded.parts.length});
    await completeDirect(c,splitId);
+   await options.suggestion?.complete(c,splitId,true);
    await c.query('delete from intake_files where workspace_id=$1 and split_attempt_id=$2',[actor.workspaceId,attemptId]);
    const result=await readPdfSplitReceipt(c,actor.workspaceId,splitId,false);check();return result;
   });}catch(error){return await saveRejection(error);}

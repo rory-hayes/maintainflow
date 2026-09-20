@@ -61,6 +61,8 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   setExtractionProvider(createOpenAIProvider());
   const [{setSchemaSuggestionProvider},{createOpenAISchemaSuggestionProvider}]=await Promise.all([import('./core/schema-suggestions.js'),import('./core/openai-schema-suggestions.js')]);
   setSchemaSuggestionProvider(createOpenAISchemaSuggestionProvider());
+  const [{setSplitSuggestionProvider},{createOpenAISplitSuggestionProvider}]=await Promise.all([import('./core/split-suggestions.js'),import('./core/openai-split-suggestions.js')]);
+  setSplitSuggestionProvider(createOpenAISplitSuggestionProvider());
   const host=process.env.HOST||(config.production?'0.0.0.0':'127.0.0.1');
   const app=await buildApp();await app.listen({port:config.port,host});console.log(`Folio API ready on http://${host}:${config.port}`);
   const stop=async()=>{await app.close();process.exit(0);};process.on('SIGINT',stop);process.on('SIGTERM',stop);

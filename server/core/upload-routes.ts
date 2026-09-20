@@ -49,7 +49,8 @@ export async function reserveDirectUpload(actor:Actor,parserId:string,input:z.in
     // Their object/active-slot limits still count every physical reservation.
     if(usage.used+reserved.page_reservations+1>workspace.plan.monthlyPages)badRequest('Monthly page quota reached. Complete pending uploads or update the plan.',429);
     const splitIntents=(await c.query('select coalesce(sum(reserved_bytes),0)::bigint bytes from intake_files where workspace_id=$1 and (split_attempt_id is not null or archive_attempt_id is not null)',[actor.workspaceId])).rows[0];
-    if(reserved.active>=20||reserved.total>=100||Number(reserved.bytes)+Number(splitIntents.bytes)+config.maxBytes>250*1024*1024)badRequest('Too many recent uploads. Finish pending uploads or retry after their cleanup window.',429);
+    const suggestions=(await c.query('select coalesce(sum(source_reserved_bytes+staging_reserved_bytes),0)::bigint bytes from split_suggestions where workspace_id=$1',[actor.workspaceId])).rows[0];
+    if(reserved.active>=20||reserved.total>=100||Number(reserved.bytes)+Number(splitIntents.bytes)+Number(suggestions.bytes)+config.maxBytes>250*1024*1024)badRequest('Too many recent uploads. Finish pending uploads or retry after their cleanup window.',429);
     const {rows:[row]}=await c.query('insert into direct_uploads(id,workspace_id,parser_id,created_by,storage_key,filename,expected_bytes,expected_sha256,pdf_split_spec,pdf_split_request_id,archive_spec,archive_request_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning expires_at,cleanup_after',[id,actor.workspaceId,parserId,actor.userId,key,safeDownloadName(body.filename),body.size,body.sha256,body.pdfSplit?.options?canonicalPdfSplitSpec(body.pdfSplit.options):null,body.pdfSplit?.requestId??null,body.archiveImport?.options?canonicalArchiveImportSpec(body.archiveImport.options):null,body.archiveImport?.requestId??null]);
     return row;
   });

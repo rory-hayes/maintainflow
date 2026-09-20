@@ -6,8 +6,8 @@ import type {Actor} from '../../shared/types.js';
 import {canonicalPdfSplitSpec,pdfSplitLimits,type PdfSplitSpec,type PdfSplitReceipt,type PdfSplitRootLineage,type StoredPdfSplitBatches,type StoredPdfSplitUndo} from '../../shared/pdf-split.js';
 import {adminPool,transaction,badRequest,notFound,audit} from './db.js';
 import {hashToken,editors} from './auth.js';
-import {addSplitDocuments,type StoredPdfSplitContext} from './pdf-split-intake.js';
-import {findPdfSplitByRequest,pdfSplitDetail,readPdfSplitReceipt} from './pdf-split-records.js';
+import {addSplitDocuments,type StoredPdfSplitContext,type SplitSuggestionContext} from './pdf-split-intake.js';
+import {findPdfSplitByRequest,pdfSplitDetail,readPdfSplitReceipt,assertSplitSuggestionBinding} from './pdf-split-records.js';
 import {readStoredObject,validateStorageKey} from './storage.js';
 import {purgePdfSplit} from './retention.js';
 
@@ -67,7 +67,7 @@ async function sourceDescriptor(c:PoolClient,workspaceId:string,documentId:strin
  return {...row,root:lineage?.root??{kind:'document',id:row.id,sha256:row.sha256,pageCount:row.page_count,pageStart:1,pageEnd:row.page_count}};
 }
 
-export type StoredPdfSplitOptions={readSource?:typeof readStoredObject;splitSource?:NonNullable<Parameters<typeof addSplitDocuments>[6]>['splitSource'];timeoutMs?:number};
+export type StoredPdfSplitOptions={readSource?:typeof readStoredObject;splitSource?:NonNullable<Parameters<typeof addSplitDocuments>[6]>['splitSource'];timeoutMs?:number;suggestion?:SplitSuggestionContext};
 /** A stored source is identified by its document, never by a caller supplied URL/key. */
 export async function splitStoredPdf(authorization:StoredPdfAuthorization,documentId:string,requestId:string,sourceSha256:string,spec:PdfSplitSpec,options:StoredPdfSplitOptions={}):Promise<PdfSplitReceipt>{
  documentId=uuid.parse(documentId);requestId=uuid.parse(requestId);sourceSha256=digest.parse(sourceSha256);
@@ -81,11 +81,13 @@ export async function splitStoredPdf(authorization:StoredPdfAuthorization,docume
  try{
  const admitted=await runTransaction(async c=>{
   await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[actor.workspaceId]);
+  await assertSplitSuggestionBinding(c,actor.workspaceId,requestId,options.suggestion?.provenance.suggestionId);
   const prior=await findPdfSplitByRequest(c,actor.workspaceId,requestId);
   if(prior){
    if(prior.source_document_id!==documentId||prior.source_sha256!==sourceSha256||prior.spec_hash!==specHash)conflict();
    return {receipt:await readPdfSplitReceipt(c,actor.workspaceId,prior.id,true)};
   }
+  await options.suggestion?.assertSource(c);
   const bound=(await c.query('select * from stored_pdf_split_requests where workspace_id=$1 and request_id=$2',[actor.workspaceId,requestId])).rows[0];
   if(bound&&(bound.source_document_id!==documentId||bound.source_sha256!==sourceSha256||bound.spec_hash!==specHash))conflict();
   if((await c.query('select 1 from direct_uploads where workspace_id=$1 and pdf_split_request_id=$2 limit 1',[actor.workspaceId,requestId])).rowCount)conflict();
@@ -113,7 +115,7 @@ export async function splitStoredPdf(authorization:StoredPdfAuthorization,docume
    if(current.mime_type!==source.mime_type||current.parser_id!==source.parser_id||current.sha256!==source.sha256||current.storage_key!==source.storage_key||current.page_count!==source.page_count||Number(current.byte_size)!==Number(source.byte_size)||JSON.stringify(current.root)!==JSON.stringify(source.root))badRequest('The original document changed. Reload it before splitting.',409);
   },
  };
- return await addSplitDocuments(actor,source.parser_id,bytes,source.name,requestId,JSON.parse(canonical),{splitSource:options.splitSource,timeoutMs:remaining(),storedSource});
+ return await addSplitDocuments(actor,source.parser_id,bytes,source.name,requestId,JSON.parse(canonical),{splitSource:options.splitSource,timeoutMs:remaining(),storedSource,suggestion:options.suggestion});
  }finally{clearTimeout(timer);}
 }
 

@@ -42,7 +42,7 @@ test('one warm instance shares in-flight work, drains every lane, then stops wit
   for(const lane of ['core','suggestion','delivery','provider','deletion','email'] as const)services[lane]=async()=>remaining[lane]-->0;
   const wake=createHostedWorker(services);
   const first=wake(),second=wake();assert.equal(first,second);unblock();
-  assert.deepEqual(await first,{core:2,suggestion:2,delivery:1,provider:1,deletion:1,email:1,stopped:'idle',errors:0});
+  assert.deepEqual(await first,{core:2,suggestion:2,splitSuggestion:0,delivery:1,provider:1,deletion:1,email:1,stopped:'idle',errors:0});
   assert.equal(enqueued,1);assert.equal(maintenance,1);
   assert.notEqual(wake(),first);await wake();
 });
@@ -122,4 +122,54 @@ test('approval enqueue work cannot hold up account email and enqueue failure ret
   services.delivery=async()=>deliveries++===0;
   const result=await createHostedWorker(services)();
   assert.equal(result.email,1);assert.equal(result.delivery,1);assert.equal(result.errors,1);
+});
+
+const aiLanes=['core','suggestion','splitSuggestion'] as const;
+for(const order of [
+ ['core','suggestion','splitSuggestion'],['core','splitSuggestion','suggestion'],
+ ['suggestion','core','splitSuggestion'],['suggestion','splitSuggestion','core'],
+ ['splitSuggestion','core','suggestion'],['splitSuggestion','suggestion','core'],
+] as const){
+ test(`one wake drains three shared-capacity lanes in ${order.join(', ')} order`,async()=>{
+  const queued:string[]=[...order],completed:string[]=[];
+  let active=false;const services=idle();
+  for(const lane of aiLanes)services[lane]=async()=>{
+   if(active||queued[0]!==lane)return false;
+   active=true;
+   await new Promise<void>(resolve=>setImmediate(resolve));
+   assert.equal(queued.shift(),lane);completed.push(lane);active=false;return true;
+  };
+  const result=await createHostedWorker(services)();
+  assert.deepEqual(completed,order);assert.deepEqual(queued,[]);
+  for(const lane of aiLanes)assert.equal(result[lane],1);
+  assert.equal(result.errors,0);assert.equal(result.stopped,'idle');
+ });
+}
+
+test('a held split suggestion leaves account email available and failed split work cannot block other lanes',async()=>{
+ const services=idle();let release!:()=>void,started=false,emails=0;
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ services.splitSuggestion=async()=>{if(started)return false;started=true;await gate;return true;};
+ services.email=async()=>{if(emails++)return false;assert.equal(started,true);release();return true;};
+ const result=await createHostedWorker(services)();
+ assert.equal(result.splitSuggestion,1);assert.equal(result.email,1);
+ const failed=idle();let calls=0,cores=0,fields=0;
+ failed.splitSuggestion=async()=>{calls++;throw new Error('controlled split lane outage');};
+ failed.core=async()=>cores++<2;failed.suggestion=async()=>fields++<2;
+ const errors:string[]=[];
+ const after=await createHostedWorker(failed,{onError:lane=>errors.push(lane)})();
+ assert.equal(calls,1);assert.deepEqual(errors,['splitSuggestion']);assert.equal(after.core,2);assert.equal(after.suggestion,2);
+});
+
+test('split suggestions obey the provider reserve and receive the hosted deadline abort',async()=>{
+ const reserved=idle();let claims=0;
+ reserved.splitSuggestion=async()=>{claims++;return true;};
+ const stopped=await createHostedWorker(reserved,{budgetMs:110_000})();
+ assert.equal(claims,0);assert.equal(stopped.splitSuggestion,0);assert.equal(stopped.stopped,'budget');
+ const active=idle();let aborted=false;
+ active.splitSuggestion=async budget=>{
+  claims++;await new Promise<void>(resolve=>budget.signal!.addEventListener('abort',()=>{aborted=true;resolve();},{once:true}));return true;
+ };
+ const result=await createHostedWorker(active,{budgetMs:20,reserveMs:{splitSuggestion:0}})();
+ assert.equal(aborted,true);assert.equal(claims,1);assert.equal(result.splitSuggestion,1);assert.equal(result.stopped,'budget');
 });

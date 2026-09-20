@@ -1,0 +1,264 @@
+{
+  "recordedAt": "2026-09-20T03:05:33.744832+00:00",
+  "scope": "Reviewed AI split suggestions for uploaded and stored PDFs/TIFFs",
+  "source": {
+    "count": 317,
+    "fingerprint": "03494c0c7616ff8ec327644c80b89322986763837e995cb4cf684503bb703628",
+    "unchangedAcrossAllChecks": true
+  },
+  "node": "24.13.0",
+  "suite": {
+    "tests": 763,
+    "passed": 763,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "phases": {
+    "suite": {
+      "startedAt": "2026-09-20T02:59:16.966253+00:00",
+      "completedAt": "2026-09-20T03:05:03.748764+00:00",
+      "seconds": 346.78198425,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "build": {
+      "startedAt": "2026-09-20T02:52:49.650955+00:00",
+      "completedAt": "2026-09-20T02:52:51.394410+00:00",
+      "seconds": 1.743453708,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "package": {
+      "startedAt": "2026-09-20T02:59:08.955019+00:00",
+      "completedAt": "2026-09-20T02:59:14.212552+00:00",
+      "seconds": 5.257533458,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "bundle": {
+      "startedAt": "2026-09-20T03:00:00.114635+00:00",
+      "completedAt": "2026-09-20T03:00:11.775381+00:00",
+      "seconds": 11.660747916,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "backup": {
+      "startedAt": "2026-09-20T02:59:18.488282+00:00",
+      "completedAt": "2026-09-20T02:59:41.544302+00:00",
+      "seconds": 23.056025792,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    }
+  },
+  "browser": {
+    "runId": "4e138956-3180-4222-922d-44f59cadb09c",
+    "passed": true,
+    "recordedMode": "early",
+    "designation": "Completed unchanged candidate selected as final browser evidence; original early-run receipt retained without relabeling.",
+    "startedAt": "2026-09-20T02:53:21.891Z",
+    "completedAt": "2026-09-20T02:54:16.971Z",
+    "elapsedSeconds": 55.08,
+    "checks": {
+      "pageIdentity": {
+        "passed": true,
+        "evidence": "Exact loopback parser URL, Folio title and owned parser heading asserted at entry."
+      },
+      "notBlank": {
+        "passed": true,
+        "evidence": "Meaningful parser, source preview, split controls, receipt and document review content throughout eleven groups."
+      },
+      "frameworkOverlay": {
+        "passed": true,
+        "evidence": "No vite-error-overlay at entry; no error overlay in all twenty individually reviewed frames."
+      },
+      "consoleHealth": {
+        "passed": true,
+        "unexpectedConsole": [],
+        "pageErrors": [],
+        "expectedResponses": [
+          {
+            "status": 400,
+            "routeGroup": "split receipt lookup",
+            "count": 1,
+            "reason": "Durable uploaded marker rejection is intentionally replayed before matching job closed-state recovery."
+          },
+          {
+            "status": 404,
+            "routeGroup": "signed finalize",
+            "count": 1,
+            "reason": "First controlled PUT failed, so no staged source exists; explicit retry retains the same AI UUID."
+          },
+          {
+            "status": 404,
+            "routeGroup": "split receipt lookup",
+            "count": 4,
+            "reason": "Unknown, expired or not-yet-accepted frozen request has no completed receipt; identity remains saved."
+          },
+          {
+            "status": 404,
+            "routeGroup": "suggestion request preflight",
+            "count": 11,
+            "reason": "Fresh AI request identity has no prior job before its explicit submission."
+          },
+          {
+            "status": 410,
+            "routeGroup": "expired suggestion Create",
+            "count": 1,
+            "reason": "Owned ready job deliberately expired before explicit Create; no admission or page charge."
+          },
+          {
+            "status": 503,
+            "routeGroup": "controlled signed PUT",
+            "count": 1,
+            "reason": "First signed source transfer intentionally failed in fully intercepted in-memory transport."
+          },
+          {
+            "status": 503,
+            "routeGroup": "split receipt lookup",
+            "count": 1,
+            "reason": "Receipt lookup intentionally unavailable after a real accepted Create response was dropped."
+          },
+          {
+            "networkError": "net::ERR_FAILED",
+            "reason": "Actual committed Create response deliberately dropped after server acceptance; one batch recovered."
+          }
+        ],
+        "serverWarning": "Existing Fastify FSTDEP023 rate-limit fixture logging-option deprecation; no product error."
+      },
+      "screenshotEvidence": {
+        "passed": true,
+        "count": 20,
+        "allIndividuallyViewed": true,
+        "receipt": "Private visual-review.json retained with the original browser run"
+      },
+      "interactionProof": {
+        "passed": true,
+        "count": 11,
+        "groups": {
+          "ExplicitRequestQueuedProcessingManualEditsReplacementAndThreeViewportCosts": true,
+          "LostAiCreateResponsePersistsEditedProvenanceAndReplaysOneChargedBatch": true,
+          "QueuedTiffPrivateSourceReloadRealPreviewAndIndependentPixelExactChildren": true,
+          "StoredAiTiffProvenanceExactCsvXlsxJsonOriginalHistoryAndUndoIsolation": true,
+          "InterruptedSignedSuggestionUsesIndependentStagingSameAiUuidAndSplitRecovery": true,
+          "FailedAndExpiredSuggestionsRequireExplicitNewRequestsOrFreshManualSplit": true,
+          "TerminalUploadedDecoderRejectionChecksClosedJobAfterReceiptError": true,
+          "ServerConfirmedQuotaNonceRecoversWithoutLocalPendingOrFreshCreateUuid": true,
+          "CancellationLateSourceAndWorkspaceResultsNeverApplyOrCreate": true,
+          "UnappliedExpiredTiffSuggestionKeepsIndependentOriginalPagePreview": true,
+          "ViewerCannotSuggestAndUnavailableAiKeepsManualPdfMarkerAvailable": true
+        }
+      }
+    },
+    "fixture": {
+      "pdfPageCount": 6,
+      "tiffPageCount": 6,
+      "exactChildPixels": true,
+      "originalHistoricalExports": 3,
+      "originalPreserved": true,
+      "exactCsvXlsxJson": true,
+      "signedPuts": 2
+    },
+    "controlledSuggestionCalls": 10,
+    "controlledExtractionCalls": 2,
+    "realProviderCalls": 0,
+    "cleanup": {
+      "accounts": 3,
+      "workspaces": 3,
+      "documents": 11,
+      "completed": true
+    },
+    "limitations": [
+      "Controlled deterministic suggestion and extraction providers prove workflow/recovery, not real AI boundary quality.",
+      "Fresh Chromium only; no Safari/Firefox or hosted deployment claim.",
+      "Rate-limit store is isolated in this browser harness; capacity and real worker deadline checks are separate backend evidence.",
+      "Terminal rejection and quota cases use real API-created owned states, then the browser recovers those exact bindings; these are not ordinary successful UI admission claims.",
+      "Viewport frames include deliberate scrolling; no all-controls-in-one-viewport claim."
+    ]
+  },
+  "backup": {
+    "runId": "ef4060c7-b37b-4504-bee7-602b7151d132",
+    "passed": true,
+    "checks": {
+      "NewIsolatedPostgres17ClusterRestrictedRolesAndDistinctDatabases": true,
+      "SyntheticSourceFixtureAndEveryTableSnapshotAfterRuntimeShutdown": true,
+      "RealEncryptedCreateAndInspectAfterQuiescedSourceShutdown": true,
+      "MissingRequiredSourceFileRefusesCaptureWithoutDatabaseChanges": true,
+      "EveryTableAndSequenceExactlyRestoredBeforeRuntimeMutation": true,
+      "FreshApiAndWorkerRefusePendingRestoreBeforeActivation": true,
+      "ActivationRequiresExplicitOutboundFlagAndExactRestoredObjectBytes": true,
+      "ActivationReceiptCrashRecoveryAndRepeatDoNotStartServicesOrChangeData": true,
+      "FreshRestoredRuntimeLoginTenantIsolationOriginalsExportsKeyAndQueueOnce": true,
+      "DistinctEmptyTargetsRejectMalformedTruncatedWrongIdentityMissingPayloadAndRequiredObjectOmissionOrDowngrade": true,
+      "ExistingTargetDatabaseStorageAndKeyRemainUnchangedAfterRefusedRestore": true
+    },
+    "tables": 56,
+    "rows": 219,
+    "objects": 31,
+    "runtime": {
+      "checks": {
+        "login": true,
+        "tenantIsolation": true,
+        "correctionApprovalRawProvenance": true,
+        "exactSavedCsvXlsxJsonBytesAndTypedValues": true,
+        "schemasTemplateMapping": true,
+        "exactEveryLiveOriginal": true,
+        "retainedPdfAndZipLineage": true,
+        "replaysTombstonesUnchangedPageUsage": true,
+        "storedSplitRootLineageAndSourceCopy": true,
+        "storedUndoAndAdmissionIdentitySurviveRestore": true,
+        "restoredTiffMimeOriginalPreviewAndSplitReplay": true,
+        "restoredTiffUndoKeepsPageLedgerAndTombstones": true,
+        "splitSuggestionExactRowsSourcesAndConfirmationNonces": true,
+        "splitSuggestionRestoreIsolationSourceExpiryAndAppliedUndoReplays": true,
+        "queuedSplitSuggestionResumesOnceWithoutAcceptingOrChargingPages": true,
+        "expiredSplitSuggestionSourceCleanupPreservesDraftAndLedger": true,
+        "encryptionKeyCanary": true,
+        "deterministicQueuedJobOnceWithoutRecharging": true,
+        "pendingDeletionResumed": true,
+        "pendingOutboxControlledDeliveryOnce": true,
+        "pendingEmailPreservedWithoutSending": true
+      },
+      "forbiddenNetwork": 0,
+      "realProviderCalls": 0,
+      "controlledSplitProviderCalls": 1,
+      "restoredSplitSuggestions": 5,
+      "controlledWebhookDeliveries": 1,
+      "verifiedLiveOriginals": 12,
+      "savedExports": 3,
+      "accounts": 2
+    },
+    "cleanup": {
+      "clusterRemoved": true,
+      "socketRemoved": true,
+      "sourceAndRestoredStorageRemoved": true,
+      "privateKeysAndCredentialFixtureRemoved": true,
+      "ownedAccountsPerPopulatedDatabase": 2,
+      "populatedDatabases": 2,
+      "normalDevelopmentDatabaseTouched": false
+    },
+    "sourceUnchanged": true
+  },
+  "review": {
+    "allTwentyBrowserFramesIndividuallyInspected": true,
+    "reactReviewPassed": true,
+    "finalTargetedRecoveryReview": "No actionable regressions found"
+  },
+  "scopePreserved": {
+    "originalCriteria": 47,
+    "firstFourColumnsUnchanged": true
+  },
+  "releaseBoundary": {
+    "localOnly": true,
+    "realProviderQualityVerified": false,
+    "realProviderBillingVerified": false,
+    "hostedMigrationActivationPerformed": false,
+    "hostedMigrationsPending": "021-036",
+    "canonicalDomainVerifiedForThisRevision": false,
+    "billing": "mock",
+    "plan": "free",
+    "githubCi": "Separate PR checks; not part of this local evidence capture",
+    "fullGoalComplete": false
+  }
+}

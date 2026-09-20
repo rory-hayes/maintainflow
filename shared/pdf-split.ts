@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type {SplitSuggestionProvenance} from './split-suggestions.js';
 
 /** Shared upload limits; PDF parsing still happens inside the isolated decoder. */
 export const pdfSplitLimits = Object.freeze({
@@ -153,6 +154,7 @@ export interface PdfSplitReceipt {
     sourceAvailable: boolean; createdAt: string; sourceMimeType?: 'application/pdf' | 'image/tiff';
     origin?: 'upload' | 'stored'; sourceDocumentId?: string | null;
     sourceDocumentAvailable?: boolean; sourceSha256?: string; undoneAt?: string | null;
+    aiSuggestion?: SplitSuggestionProvenance;
   };
   documents: Array<{
     id: string; jobId: string; name: string | null; pageCount: number;
@@ -170,6 +172,7 @@ export interface PdfSplitLineage {
   origin?: 'upload' | 'stored'; sourceDocumentId?: string | null;
   sourceDocumentAvailable?: boolean; requestId?: string; parserId?: string;
   undoneAt?: string | null; root?: PdfSplitRootLineage;
+  aiSuggestion?: SplitSuggestionProvenance;
 }
 
 /** Root means the PDF or TIFF asset. An archive itself never supplies page numbers. */
@@ -188,5 +191,6 @@ export interface StoredPdfSplitRejected {
   rejected: {
     id: string; requestId: string; parserId: string; sourceDocumentId: string;
     sourceSha256: string; sourceMimeType?: 'application/pdf' | 'image/tiff'; options: PdfSplitSpec; code: string; reason: string; message: string;
+    aiSuggestion?: SplitSuggestionProvenance;
   };
 }

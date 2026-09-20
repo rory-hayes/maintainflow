@@ -2,25 +2,25 @@ import type {PDFDocumentProxy} from 'pdfjs-dist';
 import {api,ApiError,workspaceId} from './api';
 import {pdfSplitSpecSchema,planPdfSplit,nativePdfPageText,canonicalPdfSplitSpec,isPdfSplitValidationReason,pdfSplitValidationReasons,type PdfSplitSpec,type PdfSplitReceipt} from '../../shared/pdf-split';
 
-export type PendingPdfSplit={version:1;workspaceId:string;parserId:string;requestId:string;sha256:string;options:PdfSplitSpec;uploadId?:string;userId?:string;sourceMimeType?:'image/tiff'|'application/pdf'};
+export type PendingPdfSplit={version:1;workspaceId:string;parserId:string;requestId:string;sha256:string;options:PdfSplitSpec;uploadId?:string;userId?:string;sourceMimeType?:'image/tiff'|'application/pdf';suggestionId?:string};
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const key=(workspace:string,parser:string,userId?:string)=>`folio.pdf-split.v1:${workspace}:${parser}${userId?`:${userId}`:''}`;
 export function readPendingPdfSplit(workspace:string,parser:string,userId?:string):PendingPdfSplit|null{
   try{
     const value=JSON.parse((userId?sessionStorage.getItem(key(workspace,parser,userId)):null)||sessionStorage.getItem(key(workspace,parser))||'null');
-    if(!value||value.version!==1||value.userId!==undefined&&(!uuid.test(value.userId)||value.userId!==userId)||value.workspaceId!==workspace||value.parserId!==parser||!uuid.test(value.requestId)||!(/^[a-f0-9]{64}$/).test(value.sha256)||value.uploadId&&!uuid.test(value.uploadId)||value.sourceMimeType!==undefined&&!['application/pdf','image/tiff'].includes(value.sourceMimeType))return null;
-    return {version:1,workspaceId:workspace,parserId:parser,requestId:value.requestId,sha256:value.sha256,options:pdfSplitSpecSchema.parse(value.options),...(value.uploadId?{uploadId:value.uploadId}:{}),...(value.sourceMimeType?{sourceMimeType:value.sourceMimeType}:{}),...(value.userId?{userId:value.userId}:{})};
+    if(!value||value.version!==1||value.userId!==undefined&&(!uuid.test(value.userId)||value.userId!==userId)||value.workspaceId!==workspace||value.parserId!==parser||!uuid.test(value.requestId)||!(/^[a-f0-9]{64}$/).test(value.sha256)||value.uploadId&&!uuid.test(value.uploadId)||value.suggestionId!==undefined&&!uuid.test(value.suggestionId)||value.sourceMimeType!==undefined&&!['application/pdf','image/tiff'].includes(value.sourceMimeType))return null;
+    return {version:1,workspaceId:workspace,parserId:parser,requestId:value.requestId,sha256:value.sha256,options:pdfSplitSpecSchema.parse(value.options),...(value.uploadId?{uploadId:value.uploadId}:{}),...(value.sourceMimeType?{sourceMimeType:value.sourceMimeType}:{}),...(value.userId?{userId:value.userId}:{}),...(value.suggestionId?{suggestionId:value.suggestionId}:{})};
   }catch{return null;}
 }
 export function savePendingPdfSplit(value:PendingPdfSplit){
   // Deliberately exclude file bytes, filenames, signed URLs and receipt contents.
-  try{sessionStorage.setItem(key(value.workspaceId,value.parserId,value.userId),JSON.stringify(value));}
+  try{sessionStorage.setItem(key(value.workspaceId,value.parserId,value.userId),JSON.stringify({version:1,workspaceId:value.workspaceId,parserId:value.parserId,requestId:value.requestId,sha256:value.sha256,options:pdfSplitSpecSchema.parse(value.options),...(value.uploadId?{uploadId:value.uploadId}:{}),...(value.userId?{userId:value.userId}:{}),...(value.sourceMimeType?{sourceMimeType:value.sourceMimeType}:{}),...(value.suggestionId?{suggestionId:value.suggestionId}:{})}));}
   catch{throw new Error('Recovery information could not be saved. Enable browser session storage before uploading.');}
 }
 /** A late staging response may only enrich its own saved request, never replace a newer split. */
 export function saveMatchingPendingPdfSplit(value:PendingPdfSplit){
   const current=readPendingPdfSplit(value.workspaceId,value.parserId,value.userId);
-  if(current?.requestId===value.requestId&&current.sha256===value.sha256&&(current.sourceMimeType||'application/pdf')===(value.sourceMimeType||'application/pdf')&&canonicalPdfSplitSpec(current.options)===canonicalPdfSplitSpec(value.options))savePendingPdfSplit(value);
+  if(current?.requestId===value.requestId&&current.suggestionId===value.suggestionId&&current.sha256===value.sha256&&(current.sourceMimeType||'application/pdf')===(value.sourceMimeType||'application/pdf')&&canonicalPdfSplitSpec(current.options)===canonicalPdfSplitSpec(value.options))savePendingPdfSplit(value);
 }
 /** Same PDF.js item assembly as the isolated decoder; text is held only in this page's memory. */
 export async function readPdfSplitNativeText(pdf:PDFDocumentProxy,isCurrent:()=>boolean):Promise<string[]>{
@@ -39,7 +39,7 @@ export async function readPdfSplitNativeText(pdf:PDFDocumentProxy,isCurrent:()=>
 }
 export function clearPendingPdfSplit(workspace:string,parser:string,userId?:string){sessionStorage.removeItem(userId&&sessionStorage.getItem(key(workspace,parser,userId))?key(workspace,parser,userId):key(workspace,parser));}
 export async function pdfSha256(bytes:ArrayBuffer){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),value=>value.toString(16).padStart(2,'0')).join('');}
-export type TiffSplitPreviewBinding={userId:string;workspaceId:string;parserId:string;requestId:string;sha256:string;uploadId?:string;options?:PdfSplitSpec};
+export type TiffSplitPreviewBinding={userId:string;workspaceId:string;parserId:string;requestId:string;sha256:string;uploadId?:string;options?:PdfSplitSpec;suggestionId?:string};
 /** Magic identifies the preview format; the server still validates the full source. */
 export function isTiffSplitSource(bytes:ArrayBuffer){const head=new Uint8Array(bytes,0,Math.min(4,bytes.byteLength));return head.length===4&&(head[0]===73&&head[1]===73&&(head[2]===42||head[2]===43)&&head[3]===0||head[0]===77&&head[1]===77&&head[2]===0&&(head[3]===42||head[3]===43));}
 async function assertPreviewActor(value:TiffSplitPreviewBinding,isCurrent:()=>boolean,signal:AbortSignal){
@@ -69,7 +69,8 @@ export async function prepareTiffSplitPreview(value:TiffSplitPreviewBinding,file
 export async function readTiffSplitPreview(value:TiffSplitPreviewBinding,page:number,isCurrent:()=>boolean,signal:AbortSignal,file?:File,documentId?:string,expectedPages?:number){
   await assertPreviewActor(value,isCurrent,signal);
   const headers={'X-Workspace-Id':value.workspaceId};let path:string,options:RequestInit;
-  if(documentId){path=`/api/documents/${documentId}/preview?page=${page}`;options={headers};}
+  if(value.suggestionId){path=`/api/parsers/${value.parserId}/split-suggestions/${value.suggestionId}/preview?page=${page}`;options={headers};}
+  else if(documentId){path=`/api/documents/${documentId}/preview?page=${page}`;options={headers};}
   else if(value.uploadId){path=`/api/uploads/${value.uploadId}/split-preview`;options={method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({page})};}
   else{if(!file)throw new Error('Reselect the same TIFF to preview its pages.');const form=new FormData();form.append('page',String(page));form.append('file',file);path=`/api/parsers/${value.parserId}/pdf-splits/preview`;options={method:'POST',headers,body:form};}
   const response=await fetch(path,{...options,signal,credentials:'same-origin',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer'});
@@ -95,9 +96,11 @@ const scopedPost=<T>(value:PendingPdfSplit,path:string,body:unknown={})=>scopedR
 export function confirmPdfSplitReceipt(value:PendingPdfSplit,receipt:PdfSplitReceipt):PdfSplitReceipt{
   const fail=()=>{throw new Error('The split result could not be confirmed. Check this saved request again before starting another split.');};
   if(!receipt?.split||!Array.isArray(receipt.documents)||receipt.split.requestId!==value.requestId||receipt.split.parserId!==value.parserId||!uuid.test(receipt.split.id)||typeof receipt.replayed!=='boolean'||(receipt.split.sourceMimeType||'application/pdf')!==(value.sourceMimeType||'application/pdf'))return fail();
+  if(value.suggestionId&&(receipt.split.aiSuggestion?.suggestionId!==value.suggestionId||receipt.split.aiSuggestion.sourceSha256!==value.sha256||receipt.split.aiSuggestion.sourcePageCount!==receipt.split.sourcePageCount))return fail();
   let plan:ReturnType<typeof planPdfSplit>;
   try{plan=planPdfSplit(value.options,receipt.split.sourcePageCount);}catch{return fail();}
   if(receipt.split.selectedPages!==plan.selectedPages||receipt.split.childCount!==plan.ranges.length||receipt.documents.length!==plan.ranges.length||typeof receipt.split.sourceAvailable!=='boolean')return fail();
+  if(value.suggestionId){const confirmed=receipt.split.aiSuggestion?.confirmedRanges;if(!Array.isArray(confirmed)||confirmed.length!==plan.ranges.length||confirmed.some((range,index)=>range?.start!==plan.ranges[index].start||range?.end!==plan.ranges[index].end))return fail();}
   const ids=new Set<string>();
   for(let index=0;index<plan.ranges.length;index++){
     const document=receipt.documents[index],range=plan.ranges[index];
@@ -108,11 +111,13 @@ export function confirmPdfSplitReceipt(value:PendingPdfSplit,receipt:PdfSplitRec
 }
 export async function findPdfSplitReceipt(value:PendingPdfSplit,isCurrent:()=>boolean=()=>true):Promise<PdfSplitReceipt|null>{
   assertWorkspace(value,isCurrent);
-  try{return confirmPdfSplitReceipt(value,await scopedRequest<PdfSplitReceipt>(value,`/api/parsers/${value.parserId}/pdf-splits/requests/${value.requestId}`));}
+  if(value.suggestionId&&value.userId)await assertPreviewActor({...value,userId:value.userId},isCurrent,new AbortController().signal);
+  try{const result=await scopedRequest<PdfSplitReceipt>(value,`/api/parsers/${value.parserId}/pdf-splits/requests/${value.requestId}`);assertWorkspace(value,isCurrent);return confirmPdfSplitReceipt(value,result);}
   catch(error){if(error instanceof ApiError&&error.status===404)return null;throw error;}
 }
 /** Every retry retains the original request binding, even if a new staging reservation is needed. */
 export async function uploadPdfSplit(value:PendingPdfSplit,file:File,save:(value:PendingPdfSplit)=>void,isCurrent:()=>boolean=()=>true):Promise<PdfSplitReceipt>{
+  if(value.suggestionId)throw new Error('This split uses a saved AI suggestion. Resume it through the original suggestion.');
   assertWorkspace(value,isCurrent);
   if(value.userId)await assertPreviewActor({...value,userId:value.userId},isCurrent,new AbortController().signal);
   if(await pdfSha256(await file.arrayBuffer())!==value.sha256)throw new Error('Choose the same file used for this split. Its contents must match the original file.');
