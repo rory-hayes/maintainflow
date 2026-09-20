@@ -22,7 +22,7 @@ import {requireTestStripeKey,verifyStripePayload,verifyResendPayload,deliveredRe
 const suffix=randomUUID();
 const stripeSecret='whsec_controlled_fixture';
 const svixSecret=`whsec_${randomBytes(32).toString('base64')}`;
-const environmentKeys=['FOLIO_BILLING_MOCK','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_PRICE_STANDARD','STRIPE_PRICE_TEAM','RESEND_API_KEY','RESEND_WEBHOOK_SECRET','RESEND_INBOUND_ENABLED','GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REDIRECT_URI'];
+const environmentKeys=['FOLIO_BILLING_MOCK','STRIPE_MODE','STRIPE_ACCOUNT_ID','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_PRICE_STANDARD','STRIPE_PRICE_TEAM','RESEND_API_KEY','RESEND_WEBHOOK_SECRET','RESEND_INBOUND_ENABLED','GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REDIRECT_URI'];
 const originalEnv=Object.fromEntries(environmentKeys.map(key=>[key,process.env[key]]));
 const fixtureEvents:string[]=[];
 let app:FastifyInstance,account:any,other:any,parser:any;
@@ -33,7 +33,7 @@ async function request(method:any,url:string,payload?:unknown,actor=account){ret
 async function signup(name:string){const response=await app.inject({method:'POST',url:'/api/auth/register',payload:{name,email:`${name}-${suffix}@example.test`,password:'controlled fixture password',workspaceName:`Provider ${name}`},headers:{origin:config.origin}});assert.equal(response.statusCode,201,response.body);const value=response.json();workspaceIds.push(value.workspace.id);userIds.push(value.user.id);return {...value,cookie:response.cookies.map(c=>`${c.name}=${c.value}`).join('; ')};}
 async function event(provider:'stripe'|'resend',id:string,payload:unknown){fixtureEvents.push(`${provider}:${id}`);return storeProviderEvent(provider,id,payload);}
 before(async()=>{
- delete process.env.FOLIO_BILLING_MOCK; // This suite verifies the real adapter with controlled transport fixtures.
+ delete process.env.FOLIO_BILLING_MOCK; delete process.env.STRIPE_MODE; delete process.env.STRIPE_ACCOUNT_ID; // This suite verifies the real adapter with controlled transport fixtures.
  process.env.STRIPE_SECRET_KEY='sk_test_controlled_fixture';process.env.STRIPE_WEBHOOK_SECRET=stripeSecret;
  process.env.STRIPE_PRICE_STANDARD='price_fixture_standard';process.env.STRIPE_PRICE_TEAM='price_fixture_team';
  delete process.env.RESEND_API_KEY;process.env.RESEND_INBOUND_ENABLED='false';process.env.RESEND_WEBHOOK_SECRET=svixSecret;
@@ -75,7 +75,7 @@ test('signed provider HTTP endpoints persist exactly once and preserve raw signa
  const first=await app.inject({method:'POST',url:'/api/billing/webhook',payload:raw,headers});assert.equal(first.statusCode,202,first.body);assert.equal(first.json().duplicate,false);
  const repeat=await app.inject({method:'POST',url:'/api/billing/webhook',payload:raw,headers});assert.equal(repeat.statusCode,202);assert.equal(repeat.json().duplicate,true);
  assert.equal((await app.inject({method:'POST',url:'/api/billing/webhook',payload:raw+' ',headers})).statusCode,400);
- const row=(await adminPool.query('select payload from provider_events where id=$1',[`stripe:${id}`])).rows[0];assert.deepEqual(Object.keys(row.payload).sort(),['created','customerId','id','type']);
+ const row=(await adminPool.query('select payload from provider_events where id=$1',[`stripe:${id}`])).rows[0];assert.deepEqual(Object.keys(row.payload).sort(),['created','customerId','id','mode','type']);
  const messageId=`msg_${randomUUID()}`;fixtureEvents.push(`resend:${messageId}`);const timestamp=new Date();
  const emailRaw=JSON.stringify({type:'email.received',data:{email_id:randomUUID(),received_for:['in-fixture@example.test'],subject:'DO NOT PERSIST BODY'}});
  const signed={'svix-id':messageId,'svix-timestamp':String(Math.floor(timestamp.getTime()/1000)),'svix-signature':new Webhook(svixSecret).sign(messageId,timestamp,emailRaw)};
@@ -87,9 +87,9 @@ test('signed provider HTTP endpoints persist exactly once and preserve raw signa
 test('an old Stripe event reconciles current subscription state and cannot restore stale access',async()=>{
  const customer=`cus_${suffix}`;await adminPool.query('insert into subscriptions(workspace_id,customer_id) values($1,$2)',[account.workspace.id,customer]);
  const newer={id:`evt_new_${suffix}`,type:'customer.subscription.updated',created:200,customerId:customer};await event('stripe',newer.id,newer);
- let current=subscription();const client={subscriptions:{list:async()=>({data:[current],has_more:false})}} as unknown as Stripe;
+ let current=subscription({customer});const client={subscriptions:{list:async()=>({data:[current],has_more:false})}} as unknown as Stripe;
  await reconcileStripeCustomer(newer,client);assert.equal((await adminPool.query('select plan from workspaces where id=$1',[account.workspace.id])).rows[0].plan.id,'standard');
- const older={...newer,id:`evt_old_${suffix}`,created:100};await event('stripe',older.id,older);current=subscription({status:'canceled'});
+ const older={...newer,id:`evt_old_${suffix}`,created:100};await event('stripe',older.id,older);current=subscription({status:'canceled',customer});
  await reconcileStripeCustomer(older,client);assert.equal((await adminPool.query('select plan from workspaces where id=$1',[account.workspace.id])).rows[0].plan.id,'explore');
  assert.equal(Number((await adminPool.query('select event_created from subscriptions where workspace_id=$1',[account.workspace.id])).rows[0].event_created),200);
 });

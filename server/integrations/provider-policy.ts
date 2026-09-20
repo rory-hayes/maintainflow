@@ -18,14 +18,61 @@ export type SheetConfig=z.infer<typeof sheetConfigSchema>;
 export type ApprovalPayload={id:string;document:{id:string;name:string};runId:string;revision:number;values:Record<string,unknown>};
 export type SheetCells=(string|number|boolean)[][];
 
-export function requireTestStripeKey(key:string|undefined):string {
- if(!key?.startsWith('sk_test_')) throw new Error('Stripe test mode requires STRIPE_SECRET_KEY beginning sk_test_. Live keys are disabled.');
+export type StripeMode = 'test' | 'live';
+/** Credentials never implicitly opt an installation into charging real customers. */
+export function stripeMode(environment:Record<string,string|undefined>=process.env):StripeMode {
+ const mode=environment.STRIPE_MODE??'test';
+ if(mode!=='test'&&mode!=='live')throw new Error('STRIPE_MODE must be test or live.');
+ return mode;
+}
+export function requireStripeKey(key:string|undefined,mode:StripeMode):string {
+ if(!key||!new RegExp(`^(sk|rk)_${mode}_[A-Za-z0-9_]+$`).test(key))throw new Error(`Stripe ${mode} mode requires a matching server-side Stripe key.`);
  return key;
 }
-export function verifyStripePayload(raw:Buffer,signature:string,secret:string) {
+/** Retained for callers deliberately restricted to the test environment. */
+export function requireTestStripeKey(key:string|undefined):string {return requireStripeKey(key,'test');}
+export function assertStripeMode(object:{livemode?:boolean},mode:StripeMode) {
+ if(object.livemode!==(mode==='live'))throw new Error('Live/test Stripe object does not match the configured billing mode.');
+}
+export function stripeConfiguration(environment:Record<string,string|undefined>=process.env,origin=environment.APP_ORIGIN||'http://localhost'): {mode:StripeMode;key:string;prices:PriceMap;accountId?:string;portalConfigurationId?:string;webhookSecret:string} {
+ const mode=stripeMode(environment),key=requireStripeKey(environment.STRIPE_SECRET_KEY,mode);
+ const prices:PriceMap={standard:environment.STRIPE_PRICE_STANDARD,team:environment.STRIPE_PRICE_TEAM};
+ const ids=Object.values(prices).filter((value):value is string=>!!value);
+ if(!ids.length||ids.some(id=>!/^price_[A-Za-z0-9_]+$/.test(id))||new Set(ids).size!==ids.length)throw new Error('Configure distinct Stripe price IDs for the supported plans.');
+ if(!environment.STRIPE_WEBHOOK_SECRET?.startsWith('whsec_'))throw new Error('Configure the Stripe webhook signing secret for this billing mode.');
+ if(mode==='live'){
+  if(environment.FOLIO_BILLING_MOCK==='true'||environment.FOLIO_PREVIEW_MODE==='true')throw new Error('Live Stripe billing is unavailable in mock or preview mode.');
+  const url=new URL(origin);
+  if(url.protocol!=='https:'||url.username||url.password||url.pathname!=='/'||url.search||url.hash||['localhost','127.0.0.1','::1','[::1]'].includes(url.hostname))throw new Error('Live Stripe billing requires the production HTTPS application origin.');
+  if(!/^acct_[A-Za-z0-9]+$/.test(environment.STRIPE_ACCOUNT_ID||''))throw new Error('Live Stripe billing requires the approved STRIPE_ACCOUNT_ID.');
+  if(!prices.standard||!prices.team)throw new Error('Live Stripe billing requires both approved plan prices.');
+  if(!/^bpc_[A-Za-z0-9]+$/.test(environment.STRIPE_PORTAL_CONFIGURATION_ID||''))throw new Error('Live Stripe billing requires STRIPE_PORTAL_CONFIGURATION_ID.');
+ }
+ return {mode,key,prices,accountId:environment.STRIPE_ACCOUNT_ID,portalConfigurationId:environment.STRIPE_PORTAL_CONFIGURATION_ID,webhookSecret:environment.STRIPE_WEBHOOK_SECRET};
+}
+export function verifyStripePayload(raw:Buffer,signature:string,secret:string,mode:StripeMode='test') {
  const event=Stripe.webhooks.constructEvent(raw,signature,secret);
- if(event.livemode) throw new Error('Live Stripe events are disabled.');
+ assertStripeMode(event,mode);
+ // This is an account billing endpoint, not a Stripe Connect destination.
+ if(event.account)throw new Error('Connected-account Stripe events are not supported.');
  return event;
+}
+export function stripePriceMatches(price:Stripe.Price,planId:PaidPlanId,prices:PriceMap,mode:StripeMode,requireActive=false):boolean {
+ const plan=PLANS.find(p=>p.id===planId)!;
+ return price.id===prices[planId]&&price.livemode===(mode==='live')&&(!requireActive||price.active)
+  &&price.currency==='eur'&&price.unit_amount===plan.monthlyPrice*100
+  &&price.recurring?.interval==='month'&&price.recurring.interval_count===1
+  &&(!price.recurring.usage_type||price.recurring.usage_type==='licensed')
+  &&(!price.billing_scheme||price.billing_scheme==='per_unit')&&!price.transform_quantity;
+}
+export function assertStripePortalConfiguration(configuration:Stripe.BillingPortal.Configuration,prices:PriceMap,mode:StripeMode) {
+ assertStripeMode(configuration,mode);
+ if(!configuration.active||!configuration.features.subscription_cancel.enabled)throw new Error('The Stripe portal must be active and allow subscription cancellation.');
+ const update=configuration.features.subscription_update;
+ if(update.enabled){
+  const approved=new Set(Object.values(prices));
+  if(update.default_allowed_updates.some(value=>value!=='price')||!update.products?.length||update.products.some(product=>!product.prices.length||product.prices.some(id=>!approved.has(id))))throw new Error('The Stripe portal may only offer the approved Folio plan prices without quantity changes.');
+ }
 }
 export const resendEventSchema=z.object({type:z.literal('email.received'),data:z.object({
  email_id:z.string().uuid(),received_for:z.array(z.string()).max(50),
@@ -87,16 +134,16 @@ export function verifiedManagedReceivingProbe(email:unknown,probe:ManagedReceivi
  return message.id.toLowerCase()===probe.emailId && recipients.length===1 && recipients[0]===probe.recipient
   && message.subject===expected && message.text.trim()===expected;
 }
-export function stripePlan(subscription:Stripe.Subscription,prices:PriceMap):PaidPlanId|null {
- if(subscription.livemode||!['active','trialing'].includes(subscription.status)||subscription.items.data.length!==1)return null;
+export function stripePlan(subscription:Stripe.Subscription,prices:PriceMap,mode:StripeMode='test'):PaidPlanId|null {
+ if(subscription.livemode!==(mode==='live')||!['active','trialing'].includes(subscription.status)||subscription.items.data.length!==1)return null;
  const item=subscription.items.data[0]!;
  if(item.quantity!==1)return null;
  const plan=PLANS.find(p=>p.id!=='explore'&&prices[p.id as PaidPlanId]===item.price.id);
- if(!plan||item.price.livemode||item.price.currency!=='eur'||item.price.unit_amount!==plan.monthlyPrice*100||item.price.recurring?.interval!=='month'||item.price.recurring.interval_count!==1)return null;
+ if(!plan||!stripePriceMatches(item.price,plan.id as PaidPlanId,prices,mode))return null;
  return plan.id as PaidPlanId;
 }
-export function selectStripeSubscription(subscriptions:Stripe.Subscription[],prices:PriceMap) {
- return subscriptions.filter(s=>stripePlan(s,prices)).sort((a,b)=>b.created-a.created||a.id.localeCompare(b.id))[0]
+export function selectStripeSubscription(subscriptions:Stripe.Subscription[],prices:PriceMap,mode:StripeMode='test') {
+ return subscriptions.filter(s=>stripePlan(s,prices,mode)).sort((a,b)=>b.created-a.created||a.id.localeCompare(b.id))[0]
   || subscriptions.slice().sort((a,b)=>b.created-a.created||a.id.localeCompare(b.id))[0] || null;
 }
 export function sheetColumn(index:number) {

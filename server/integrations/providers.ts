@@ -16,18 +16,37 @@ import {encryptSecret,decryptSecret} from './secrets.js';
 import {publicRequest} from './network.js';
 import {mockBillingEnabled,mockBillingStatus,registerMockBilling,requireRealBilling} from './mock-billing.js';
 import {
- SHEETS_SCOPE,requireTestStripeKey,verifyStripePayload,verifyResendPayload,
+ SHEETS_SCOPE,stripeMode,stripeConfiguration,assertStripeMode,stripePriceMatches,assertStripePortalConfiguration,verifyStripePayload,verifyResendPayload,
  publicProviderError,emailAddress,deliveredRecipients,verifiedReceivingDomain,managedReceivingProbe,verifiedManagedReceivingProbe,
  stripePlan,selectStripeSubscription,sheetConfigSchema,sheetRows,sheetRanges,
- writeSheetRange,receivedEmailBody,type PriceMap,type PaidPlanId,type ApprovalPayload,
+ writeSheetRange,receivedEmailBody,type PaidPlanId,type ApprovalPayload,type StripeMode,
 } from './provider-policy.js';
 
 type Integration={id:string;workspace_id:string;parser_id:string|null;kind:string;config:Record<string,unknown>;secret_ciphertext:string|null;enabled:boolean};
-type StripePointer={id:string;type:string;created:number;customerId:string};
+type StripePointer={id:string;type:string;created:number;customerId:string;mode?:StripeMode};
 type ResendPointer={emailId:string;recipients:string[]};
 const uuid=z.string().uuid();
-const priceMap=():PriceMap=>({standard:process.env.STRIPE_PRICE_STANDARD,team:process.env.STRIPE_PRICE_TEAM});
-const stripeClient=()=>{requireRealBilling();return new Stripe(requireTestStripeKey(process.env.STRIPE_SECRET_KEY),{timeout:15_000,maxNetworkRetries:2});};
+type BillingConfiguration=ReturnType<typeof stripeConfiguration>;
+function billingConfiguration():BillingConfiguration {requireRealBilling();try{return stripeConfiguration(process.env,config.origin);}catch{badRequest('Stripe billing configuration is incomplete or does not match the selected mode.',503);}}
+const stripeClient=(settings:BillingConfiguration)=>new Stripe(settings.key,{timeout:15_000,maxNetworkRetries:2});
+async function verifyBillingAccount(client:Stripe,settings:BillingConfiguration,acceptPayments=false){
+ if(settings.mode!=='live'&&!settings.accountId)return;
+ const account=await client.accounts.retrieve(null);
+ if(account.id!==settings.accountId)badRequest('Stripe credentials do not belong to the approved billing account.',503);
+ if(acceptPayments&&(!account.charges_enabled||!account.payouts_enabled||!account.details_submitted))badRequest('The Stripe account is not ready to accept payments.',503);
+}
+async function verifyBillingCustomer(client:Stripe,customerId:string,workspaceId:string,mode:StripeMode){
+ const customer=await client.customers.retrieve(customerId);
+ if(customer.deleted)badRequest('The Stripe billing customer is no longer available.',409);
+ assertStripeMode(customer,mode);
+ if(customer.metadata.folio_workspace!==workspaceId)badRequest('The Stripe customer does not match this workspace.',409);
+ return customer;
+}
+function verifySubscriptionModes(subscriptions:Stripe.Subscription[],mode:StripeMode,customerId?:string){
+ for(const subscription of subscriptions){assertStripeMode(subscription,mode);for(const item of subscription.items.data)assertStripeMode(item.price,mode);
+  if(customerId&&(typeof subscription.customer==='string'?subscription.customer:subscription.customer?.id)!==customerId)throw new Error('Stripe returned a subscription for a different customer.');
+ }
+}
 class TimedResend extends Resend {
  override fetchRequest<T>(path:string,options:object={}){return super.fetchRequest<T>(path,{...options,signal:AbortSignal.timeout(15_000)});}
 }
@@ -40,7 +59,7 @@ function googleClient(){
 }
 const header=(req:FastifyRequest,name:string)=>typeof req.headers[name]==='string'?req.headers[name] as string:'';
 async function sessionAdmin(request:FastifyRequest){const actor=await requireActor(request,{roles:admins});requireSession(actor);return actor;}
-function stripeConfigured(){return process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_')&&!!process.env.STRIPE_WEBHOOK_SECRET&&Object.values(priceMap()).some(p=>p?.startsWith('price_'));}
+function stripeConfigured(){try{stripeConfiguration(process.env,config.origin);return true;}catch{return false;}}
 function sheetsConfigured(){return !!(process.env.GOOGLE_CLIENT_ID&&process.env.GOOGLE_CLIENT_SECRET&&process.env.GOOGLE_REDIRECT_URI);}
 let domainCache:{key:string;at:number;verified:boolean}|undefined;
 type ReceivingStatus={configured:boolean;verified:boolean;mode:'custom'|'managed'|'invalid';verification:'custom-mx'|'managed-probe'|null;deliveryVerified:false;providerDomainId?:string;reason:string|null};
@@ -92,25 +111,31 @@ function stripePointer(event:Stripe.Event):StripePointer|null {
  if(!['customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','checkout.session.completed','checkout.session.async_payment_succeeded','invoice.paid','invoice.payment_failed','invoice.payment_action_required'].includes(event.type))return null;
  const object=event.data.object as unknown as {customer?:string|{id:string}};
  const customerId=typeof object.customer==='string'?object.customer:object.customer?.id;
- return customerId?{id:event.id,type:event.type,created:event.created,customerId}:null;
+ return customerId?{id:event.id,type:event.type,created:event.created,customerId,mode:event.livemode?'live':'test'}:null;
 }
 
 /** Reconcile current provider state under the customer lock, including older event deliveries. */
-export async function reconcileStripeCustomer(pointer:StripePointer,client:Stripe=stripeClient()) {
+export async function reconcileStripeCustomer(pointer:StripePointer,controlledClient?:Stripe) {
  requireRealBilling();
+ // Pre-migration durable pointers were exclusively test mode. Never reinterpret them.
+ const mode=stripeMode();if((pointer.mode??'test')!==mode)return;
+ const settings=billingConfiguration(),client=controlledClient??stripeClient(settings);
+ await verifyBillingAccount(client,settings);
  await transaction(adminPool,async c=>{
-  const {rows:[local]}=await c.query('select * from subscriptions where customer_id=$1 for update',[pointer.customerId]);
+  const {rows:[local]}=await c.query('select * from subscriptions where customer_id=$1 and billing_mode=$2 for update',[pointer.customerId,mode]);
   if(!local)return; // Never trust workspace/plan metadata from an incoming event.
   await c.query('insert into provider_event_workspaces(event_id,workspace_id) values($1,$2) on conflict do nothing',[`stripe:${pointer.id}`,local.workspace_id]);
   const current=await client.subscriptions.list({customer:pointer.customerId,status:'all',limit:100});
   if(current.has_more)throw new Error('Subscription reconciliation exceeded the supported customer subscription limit.');
-  const subscription=selectStripeSubscription(current.data,priceMap());
-  const planId=subscription?stripePlan(subscription,priceMap()):null;
+  verifySubscriptionModes(current.data,mode,pointer.customerId);
+  const subscription=selectStripeSubscription(current.data,settings.prices,mode);
+  const planId=subscription?stripePlan(subscription,settings.prices,mode):null;
   const plan=PLANS.find(p=>p.id===(planId||'explore'))!;
-  const limits={id:plan.id,name:plan.name,monthlyPages:plan.monthlyPages,maxParsers:plan.maxParsers,maxConcurrent:plan.maxConcurrent,maxBytes:config.maxBytes,maxPages:config.maxPages};
-  await c.query('update subscriptions set subscription_id=$2,status=$3,price_id=$4,event_created=greatest(event_created,$5),updated_at=now() where workspace_id=$1',[local.workspace_id,subscription?.id||null,subscription?.status||'inactive',subscription?.items.data[0]?.price.id||null,pointer.created]);
+  const limits={id:plan.id,name:plan.name,monthlyPages:plan.monthlyPages,maxParsers:plan.maxParsers,maxConcurrent:plan.maxConcurrent,maxBytes:config.maxBytes,maxPages:config.maxPages,billingMode:mode};
+  if(stripeMode()!==mode)throw new Error('Billing mode changed during reconciliation.');
+  await c.query('update subscriptions set subscription_id=$3,status=$4,price_id=$5,event_created=greatest(event_created,$6),updated_at=now() where workspace_id=$1 and billing_mode=$2',[local.workspace_id,mode,subscription?.id||null,subscription?.status||'inactive',subscription?.items.data[0]?.price.id||null,pointer.created]);
   await c.query('update workspaces set plan=$2 where id=$1',[local.workspace_id,JSON.stringify(limits)]);
-  await audit(c,local.workspace_id,null,'billing.reconciled',null,{providerEvent:pointer.id,plan:plan.id,mode:'test'});
+  await audit(c,local.workspace_id,null,'billing.reconciled',null,{providerEvent:pointer.id,plan:plan.id,mode});
  });
 }
 
@@ -280,13 +305,15 @@ export async function sendGoogleSheets(integration:Integration,delivery:{id:stri
  }catch(error){throw Object.assign(new Error(publicProviderError('Google Sheets',error)),{status:(error as {status?:number}).status});}
 }
 
-export async function registerProviders(app:FastifyInstance){
+/** Optional client is an internal controlled-transport seam; configuration/authorization still run. */
+export async function registerProviders(app:FastifyInstance,dependencies:{stripeClient?:(settings:BillingConfiguration)=>Stripe}={}){
+ const billingClient=(settings:BillingConfiguration)=>dependencies.stripeClient?.(settings)??stripeClient(settings);
  await registerMockBilling(app);
  app.get('/api/providers/status',async request=>{
   const actor=await requireActor(request);requireSession(actor);
   const receiving=await receivingStatus();
   return {
-   stripe:mockBillingEnabled()?await mockBillingStatus(actor.workspaceId):{configured:!!stripeConfigured(),mode:'test',verified:false,reason:stripeConfigured()?'Test credentials configured; Checkout and subscription-event verification still require test-mode evidence.':'Set a sk_test_ key, webhook signing secret and server-mapped STRIPE_PRICE_STANDARD / STRIPE_PRICE_TEAM.'},
+   stripe:mockBillingEnabled()?await mockBillingStatus(actor.workspaceId):{configured:stripeConfigured(),mode:process.env.STRIPE_MODE==='live'?'live':'test',verified:false,reason:stripeConfigured()?'Stripe configuration is present. Checkout, payment and subscription delivery require separate end-to-end verification.':'Configure the selected Stripe mode, matching server key, webhook secret and approved plan prices. Live mode also requires the approved account, portal configuration and production HTTPS origin.'},
    resend:{...receiving,addressAvailable:receiving.verified,reason:receiving.reason||'Domain receiving is verified. End-to-end delivery is a separate release check.'},
    googleSheets:{configured:sheetsConfigured(),verified:false,reason:sheetsConfigured()?'Google OAuth configured; connect a workspace account and verify a delivery.':'Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI.'},
   };
@@ -321,51 +348,73 @@ export async function registerProviders(app:FastifyInstance){
   const actor=await sessionAdmin(request);
   requireRealBilling();
   const {planId}=z.object({planId:z.enum(['standard','team'])}).strict().parse(request.body);
-  if(!stripeConfigured())badRequest('Stripe test-mode Checkout is not configured',503);
-  const client=stripeClient(),priceId=priceMap()[planId];if(!priceId)badRequest('This plan has no configured Stripe test price',503);
-  const price=await client.prices.retrieve(priceId),plan=PLANS.find(p=>p.id===planId)!;
-  if(price.livemode||!price.active||price.currency!=='eur'||price.unit_amount!==plan.monthlyPrice*100||price.recurring?.interval!=='month'||price.recurring.interval_count!==1)badRequest('Configured Stripe price does not match the Folio monthly plan',503);
+  const settings=billingConfiguration(),mode=settings.mode,client=billingClient(settings),priceId=settings.prices[planId];
+  if(!priceId)badRequest('This plan has no configured Stripe price.',503);
+  await verifyBillingAccount(client,settings,true);
+  const price=await client.prices.retrieve(priceId);
+  if(!stripePriceMatches(price,planId,settings.prices,mode,true))badRequest('Configured Stripe price does not match the Folio monthly plan.',503);
   const reservation=await transaction(adminPool,async c=>{
    await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`billing:${actor.workspaceId}`]);
-   let {rows:[subscription]}=await c.query('select * from subscriptions where workspace_id=$1 for update',[actor.workspaceId]);
+   let {rows:[subscription]}=await c.query('select * from subscriptions where workspace_id=$1 and billing_mode=$2 for update',[actor.workspaceId,mode]);
    if(!subscription?.customer_id){
-    const customer=await client.customers.create({metadata:{folio_workspace:actor.workspaceId}},{idempotencyKey:`folio-customer:${actor.workspaceId}`});
-    await c.query('insert into subscriptions(workspace_id,customer_id) values($1,$2) on conflict(workspace_id) do update set customer_id=excluded.customer_id',[actor.workspaceId,customer.id]);
+    const customer=await client.customers.create({metadata:{folio_workspace:actor.workspaceId}},{idempotencyKey:`folio-customer:${mode}:${actor.workspaceId}`});
+    assertStripeMode(customer,mode);
+    if(customer.metadata.folio_workspace!==actor.workspaceId)throw new Error('Stripe customer creation did not preserve the workspace binding.');
+    await c.query('insert into subscriptions(workspace_id,billing_mode,customer_id) values($1,$2,$3) on conflict(workspace_id,billing_mode) do update set customer_id=excluded.customer_id',[actor.workspaceId,mode,customer.id]);
     subscription={customer_id:customer.id,status:'inactive'};
-   }
+   }else await verifyBillingCustomer(client,subscription.customer_id,actor.workspaceId,mode);
    const active=await client.subscriptions.list({customer:subscription.customer_id,status:'all',limit:100});
+   verifySubscriptionModes(active.data,mode,subscription.customer_id);
    if(active.has_more||active.data.some(s=>!['canceled','incomplete_expired'].includes(s.status)))badRequest('Use the billing portal to manage the existing subscription',409);
-   let {rows:[checkout]}=await c.query('select * from billing_checkouts where workspace_id=$1',[actor.workspaceId]);
-   if(checkout?.session_id){const existing=await client.checkout.sessions.retrieve(checkout.session_id);if(existing.status==='open'&&checkout.plan_id===planId)return {url:existing.url};if(existing.status==='open')await client.checkout.sessions.expire(existing.id);checkout=null;}
+   let {rows:[checkout]}=await c.query('select * from billing_checkouts where workspace_id=$1 and billing_mode=$2',[actor.workspaceId,mode]);
+   if(checkout?.session_id){
+    const existing=await client.checkout.sessions.retrieve(checkout.session_id);assertStripeMode(existing,mode);
+    const customer=typeof existing.customer==='string'?existing.customer:existing.customer?.id;
+    if(customer!==subscription.customer_id||existing.client_reference_id!==actor.workspaceId)throw new Error('Stripe Checkout does not match this workspace.');
+    if(existing.status==='open'&&checkout.plan_id===planId)return {url:existing.url};
+    if(existing.status==='open')await client.checkout.sessions.expire(existing.id);checkout=null;
+   }
    if(checkout&&checkout.plan_id!==planId)badRequest('A different Checkout is being prepared. Retry that plan before changing plans.',409);
    if(checkout&&Date.now()-new Date(checkout.created_at).getTime()>23*60*60*1000)badRequest('An unresolved Checkout reservation requires operator reconciliation before another Checkout can be created.',409);
-   if(!checkout){const result=await c.query('insert into billing_checkouts(workspace_id,plan_id) values($1,$2) on conflict(workspace_id) do update set request_id=gen_random_uuid(),session_id=null,plan_id=excluded.plan_id,created_at=now() returning *',[actor.workspaceId,planId]);checkout=result.rows[0];}
-   return {requestId:checkout.request_id as string,customerId:subscription.customer_id as string};
+   if(!checkout){const result=await c.query('insert into billing_checkouts(workspace_id,billing_mode,plan_id) values($1,$2,$3) on conflict(workspace_id,billing_mode) do update set request_id=gen_random_uuid(),session_id=null,plan_id=excluded.plan_id,idempotency_version=2,created_at=now() returning *',[actor.workspaceId,mode,planId]);checkout=result.rows[0];}
+   return {requestId:checkout.request_id as string,customerId:subscription.customer_id as string,idempotencyVersion:checkout.idempotency_version as number};
   });
-  if('url' in reservation)return {url:reservation.url,mode:'test'};
-  // The idempotency key is committed before the external side effect. A process crash
-  // after Stripe creates the Session can safely recover that same Session on retry.
-  const session=await client.checkout.sessions.create({customer:reservation.customerId,mode:'subscription',line_items:[{price:priceId,quantity:1}],success_url:`${config.origin}/app/usage?checkout=returned`,cancel_url:`${config.origin}/app/usage?checkout=canceled`,client_reference_id:actor.workspaceId},{idempotencyKey:`folio-checkout:${reservation.requestId}`});
+  if('url' in reservation)return {url:reservation.url,mode};
+  // Persist the nonce before external creation; retry the same mode-bound Session after a lost response.
+  const session=await client.checkout.sessions.create({customer:reservation.customerId,mode:'subscription',line_items:[{price:priceId,quantity:1}],success_url:`${config.origin}/app/usage?checkout=returned`,cancel_url:`${config.origin}/app/usage?checkout=canceled`,client_reference_id:actor.workspaceId},{idempotencyKey:reservation.idempotencyVersion===1?`folio-checkout:${reservation.requestId}`:`folio-checkout:${mode}:${reservation.requestId}`});
+  assertStripeMode(session,mode);
+  if((typeof session.customer==='string'?session.customer:session.customer?.id)!==reservation.customerId||session.client_reference_id!==actor.workspaceId)throw new Error('Stripe Checkout does not match this workspace.');
   await withWorkspace(actor.workspaceId,async c=>{
-   const result=await c.query('update billing_checkouts set session_id=$3 where workspace_id=$1 and request_id=$2',[actor.workspaceId,reservation.requestId,session.id]);if(!result.rowCount)throw new Error('Checkout reservation changed.');
-   await audit(c,actor.workspaceId,actor.userId,'billing.checkout_created',null,{planId,mode:'test'});
+   const result=await c.query('update billing_checkouts set session_id=$4 where workspace_id=$1 and billing_mode=$2 and request_id=$3',[actor.workspaceId,mode,reservation.requestId,session.id]);if(!result.rowCount)throw new Error('Checkout reservation changed.');
+   await audit(c,actor.workspaceId,actor.userId,'billing.checkout_created',null,{planId,mode});
   });
-  return {url:session.url,mode:'test'};
+  return {url:session.url,mode};
  });
  app.post('/api/billing/portal',async request=>{
-  const actor=await sessionAdmin(request);requireRealBilling();if(!stripeConfigured())badRequest('Stripe test-mode billing is not configured',503);
-  const local=await withWorkspace(actor.workspaceId,async c=>(await c.query('select customer_id from subscriptions where workspace_id=$1',[actor.workspaceId])).rows[0]);
-  if(!local?.customer_id)badRequest('No Stripe test customer exists for this workspace',409);
-  const session=await stripeClient().billingPortal.sessions.create({customer:local.customer_id,return_url:`${config.origin}/app/usage`});return {url:session.url,mode:'test'};
+  const actor=await sessionAdmin(request);const settings=billingConfiguration(),mode=settings.mode,client=billingClient(settings);
+  z.object({}).strict().parse(request.body??{});
+  await verifyBillingAccount(client,settings);
+  const local=await withWorkspace(actor.workspaceId,async c=>(await c.query('select customer_id from subscriptions where workspace_id=$1 and billing_mode=$2',[actor.workspaceId,mode])).rows[0]);
+  if(!local?.customer_id)badRequest('No Stripe customer exists for this workspace in the selected billing mode.',409);
+  await verifyBillingCustomer(client,local.customer_id,actor.workspaceId,mode);
+  if(settings.portalConfigurationId){
+   const configuration=await client.billingPortal.configurations.retrieve(settings.portalConfigurationId);
+   assertStripePortalConfiguration(configuration,settings.prices,mode);
+   for(const plan of ['standard','team'] as const){const id=settings.prices[plan];if(id&&!stripePriceMatches(await client.prices.retrieve(id),plan,settings.prices,mode,true))badRequest('Configured Stripe price does not match the Folio monthly plan.',503);}
+  }
+  const session=await client.billingPortal.sessions.create({customer:local.customer_id,return_url:`${config.origin}/app/usage`,...(settings.portalConfigurationId?{configuration:settings.portalConfigurationId}:{})});
+  assertStripeMode(session,mode);
+  if(session.customer!==local.customer_id)throw new Error('Stripe portal does not match this workspace.');
+  return {url:session.url,mode};
  });
  await app.register(async raw=>{
   raw.removeContentTypeParser('application/json');
   raw.addContentTypeParser('application/json',{parseAs:'buffer'},(_request,body,done)=>done(null,body));
   raw.post('/api/billing/webhook',{bodyLimit:1024*1024,config:{providerWebhook:true}},async(request,reply)=>{
    requireRealBilling();
-   if(!process.env.STRIPE_WEBHOOK_SECRET||!process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_'))badRequest('Stripe test webhooks are not configured',503);
+   const settings=billingConfiguration();
    let pointer:StripePointer|null;
-   try{pointer=stripePointer(verifyStripePayload(request.body as Buffer,header(request,'stripe-signature'),process.env.STRIPE_WEBHOOK_SECRET));}catch{badRequest('Invalid Stripe test webhook signature or payload',400);}
+   try{pointer=stripePointer(verifyStripePayload(request.body as Buffer,header(request,'stripe-signature'),settings.webhookSecret,settings.mode));}catch{badRequest('Invalid Stripe webhook signature, mode or payload.',400);}
    if(!pointer!)return {received:true,ignored:true};
    return reply.code(202).send(await storeProviderEvent('stripe',pointer!.id,pointer!));
   });

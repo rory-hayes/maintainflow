@@ -8,7 +8,7 @@ export type ReceivingStatus = {
 };
 
 export type ProviderStatus = {
-  stripe: { configured: boolean; mode: 'test' | 'mock'; verified: boolean; reason: string; mockPlan?: { id: string; name: string; status: 'active' | 'canceled' } | null };
+  stripe: { configured: boolean; mode: 'test' | 'live' | 'mock'; verified: boolean; reason: string; mockPlan?: { id: string; name: string; status: 'active' | 'canceled' } | null };
   resend: ReceivingStatus & { addressAvailable: boolean };
   googleSheets: { configured: boolean; verified: boolean; reason: string };
 };

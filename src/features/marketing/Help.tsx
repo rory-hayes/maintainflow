@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, BookOpen, Code2, FileText, Settings2 } from 'lucide-react';
 import { MarketingFooter, MarketingHeader } from './MarketingShell';
 import { useAiAvailability } from '../../lib/ai';
+import { useData } from '../../lib/api';
+import type { PublicInstallation } from '../../../shared/installation';
 import './marketing.css';
 
 type GuideLayoutProps = { title: string; introduction: string; children: ReactNode };
@@ -258,17 +260,34 @@ export function ApiDocs() {
   );
 }
 
+export function OperatorDetails({details,pending=false,unavailable=false}:{details?:PublicInstallation;pending?:boolean;unavailable?:boolean}) {
+  return <section aria-label="Service operator and policies">
+    <h2>Service operator and policies</h2>
+    {pending ? <p>Checking this installation’s operator details…</p> : unavailable ? <p>Operator details could not be loaded. Try again before submitting sensitive documents.</p> : <>
+      {details?.operatorName ? <p><strong>Operator:</strong> {details.operatorName}</p> : <p>The operator’s identity has not been configured for this installation.</p>}
+      {details?.supportEmail ? <p><strong>Support:</strong> <a href={`mailto:${encodeURIComponent(details.supportEmail)}`}>{details.supportEmail}</a></p> : <p>A support contact has not been provided.</p>}
+      {details?.privacyEmail ? <p><strong>Privacy requests:</strong> <a href={`mailto:${encodeURIComponent(details.privacyEmail)}`}>{details.privacyEmail}</a></p> : <p>A privacy-request contact has not been provided.</p>}
+      {details?.privacyUrl ? <p><a href={details.privacyUrl} rel="noopener noreferrer">Read the operator’s privacy notice</a></p> : <p>The operator’s full privacy notice has not been provided.</p>}
+      {details?.termsUrl ? <p><a href={details.termsUrl} rel="noopener noreferrer">Read the operator’s service terms</a></p> : <p>The operator’s service terms have not been provided.</p>}
+      {details?.subprocessorsUrl ? <p><a href={details.subprocessorsUrl} rel="noopener noreferrer">Review the operator’s subprocessors</a></p> : null}
+    </>}
+  </section>;
+}
+
 export function Privacy() {
   const ai = useAiAvailability();
+  const installation=useData<{publicService:PublicInstallation}>('/api/config');
+  const details=installation.data?.publicService;
   return (
-    <GuideLayout title="Privacy & data handling." introduction="What the development preview stores, and what needs to be settled before the production service launches.">
+    <GuideLayout title="Privacy & data handling." introduction="How the application handles documents, with contacts and policies supplied by this installation’s operator.">
+      <OperatorDetails details={details} pending={installation.isPending} unavailable={!!installation.error}/>
       <section>
-        <h2>Current status</h2>
-        <p>Folio is currently a development preview for testing. This page describes the preview; a final privacy notice will accompany the production release.</p>
+        <h2>About this page</h2>
+        <p>These notes describe application behavior. The operator’s privacy notice explains the legal basis for processing, who receives data and how to exercise your rights. Configured contacts and links do not by themselves verify those arrangements.</p>
       </section>
       <section>
         <h2>Data in your workspace</h2>
-        <p>The application stores account information, workspace membership, parser schemas, uploaded documents, processing results, corrections, approvals, exports, integration configuration, usage and audit events. The hosted preview stores records in a separate PostgreSQL schema and original files in private Supabase storage. Local installations use their own database and private file directory.</p>
+        <p>The application stores account information, workspace membership, parser schemas, uploaded documents, processing results, corrections, approvals, exports, integration configuration, usage and audit events. Records use PostgreSQL; original files use the installation’s configured private storage. The operator’s notice identifies the actual hosting arrangements.</p>
         <p>Passwords are stored as password hashes. Session tokens and API keys are stored as token hashes. Integration secrets use the server's secret-storage configuration. Workspace roles control access to documents and settings.</p>
       </section>
       <section>
@@ -278,34 +297,39 @@ export function Privacy() {
       </section>
       <section>
         <h2>Retention and deletion</h2>
-        <p>Use workspace controls to delete documents and configure supported retention behavior. Operational audit records and independent downloaded exports may have different lifecycles. Before storing sensitive production data, verify deletion and backup behavior for the actual deployment.</p>
+        <p>Workspace administrators can choose a document-retention period in Settings. Deletion removes document records and queues removal of private files; an interrupted deletion is retried. Downloaded exports and copies already delivered to another service are outside those controls.</p>
+        <p>Retained original PDF, TIFF and ZIP bundles can contain pages or files excluded from an import, or files from a deleted child, while another child still needs that original. Use the batch deletion controls to remove the retained batch.</p>
+        <p>{details?.retentionNotice||'The operator has not yet published a retention notice covering backups, audit records and provider copies. Confirm those periods before submitting sensitive production data.'}</p>
       </section>
       <section>
-        <h2>Before public availability</h2>
-        <p>A public launch requires the operator's identity and contact details, applicable lawful bases, subprocessors, retention periods, data-location decisions and rights-request process to be documented. Those details will be documented before the production release.</p>
+        <h2>Data location</h2>
+        <p>{details?.dataLocationNotice||'The operator has not yet published the data locations and transfer arrangements for this installation. A storage provider’s name alone does not establish where every copy is processed or retained.'}</p>
       </section>
     </GuideLayout>
   );
 }
 
 export function Terms() {
+  const installation=useData<{publicService:PublicInstallation}>('/api/config');
+  const details=installation.data?.publicService;
   return (
-    <GuideLayout title="Development preview terms." introduction="The current application is a test preview. Public subscription terms have not been activated.">
+    <GuideLayout title="Service terms & usage." introduction="Review the operator’s service terms and the workflow limits before using this installation.">
+      <OperatorDetails details={details} pending={installation.isPending} unavailable={!!installation.error}/>
       <section>
-        <h2>Use the preview with suitable documents</h2>
+        <h2>Use suitable documents</h2>
         <p>The synthetic samples are provided to explore the workflow. Only upload documents you are entitled to process, and review the result before relying on it or sending it to another system.</p>
       </section>
       <section>
         <h2>Extraction and review</h2>
-        <p>Document extraction can omit or misread information. The workflow includes source review, corrections and approval so you can check values. No numerical accuracy guarantee or suitability for a regulated decision is represented by the preview.</p>
+        <p>Document extraction can omit or misread information. The workflow includes source review, corrections and approval so you can check values. These application notes make no numerical accuracy guarantee or assurance of suitability for a regulated decision.</p>
       </section>
       <section>
         <h2>Pricing and providers</h2>
-        <p>The public pricing page contains configurable launch assumptions. No subscription is activated by viewing a plan. Billing integration, where configured, is limited to test mode in this build. External services require their own configuration and account permissions.</p>
+        <p>No subscription is activated by viewing a plan. Billing settings identify mock, test or live mode before you open Checkout. Review the displayed price and the operator’s payment and cancellation terms before confirming a live subscription. External services require their own configuration and account permissions.</p>
       </section>
       <section>
-        <h2>Before a public launch</h2>
-        <p>Final service terms, an identified operator, support and cancellation arrangements, payment terms and the applicable legal framework must be settled before making this a public paid service. This development page is not a substitute for those launch requirements.</p>
+        <h2>Operator terms apply separately</h2>
+        <p>{details?.termsUrl?'Use the linked operator terms for the applicable service, payment, cancellation and legal arrangements. These workflow notes do not replace that document.':'Service, payment, cancellation and legal arrangements have not been supplied for this installation. These workflow notes are not a substitute for completed operator terms.'}</p>
       </section>
       <Link className="marketing-text-link" to="/privacy">Read the current data-handling notes <ArrowRight size={17} /></Link>
     </GuideLayout>

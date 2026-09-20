@@ -138,6 +138,13 @@ BEGIN
   END IF;
  END LOOP;
 END $folio_policies$;`);
+ // The scheduler helper is owner-only. Broad runtime function grants above must
+ // not reopen it on later migration runs after the watchdog was installed.
+ parts.push(`DO $folio_watchdog_permissions$ BEGIN
+ IF to_regprocedure(${literal(`${schema}.worker_has_runnable_work()`)}) IS NOT NULL THEN
+  REVOKE ALL ON FUNCTION ${s}.worker_has_runnable_work() FROM PUBLIC,${a},${u};
+ END IF;
+END $folio_watchdog_permissions$;`);
  if(options.transaction!==false)parts.push('COMMIT;');return parts.join('\n\n')+'\n';
 }
 
