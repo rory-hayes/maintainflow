@@ -27,6 +27,7 @@ function supportedFormats(configured: boolean | undefined) {
   const imageStatus = configured === true ? 'AI is configured; select AI mode in parser settings.' : configured === false ? 'AI is not configured in this installation.' : 'Check parser settings for current AI availability.';
   return [
     ['PDF', `Up to 30 pages. Readable text can use text-anchor extraction. Scanned pages need AI mode. ${imageStatus}`],
+    ['TIFF', `Up to 30 pages, 40 megapixels per page and 300 megapixels total. Review and AI use resized page images; download the unchanged original at any time. Image extraction requires AI mode. ${imageStatus}`],
     ['PNG and JPEG', `One page per image; up to 40 megapixels. Image extraction requires AI mode. ${imageStatus}`],
     ['TXT, CSV, HTML and EML', 'UTF-8 text. EML upload extracts the email body; provider-based inbound attachments are a separate intake path.'],
     ['DOCX', 'Text is read as one extraction page. The original Word layout is not a page-coordinate model.'],

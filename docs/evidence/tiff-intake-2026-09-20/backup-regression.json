@@ -1,0 +1,55 @@
+{
+  "passed": true,
+  "startedAt": "2026-09-20T00:05:01.258Z",
+  "completedAt": "2026-09-20T00:05:14.942Z",
+  "checks": {
+    "NewIsolatedPostgres17ClusterRestrictedRolesAndDistinctDatabases": true,
+    "SyntheticSourceFixtureAndEveryTableSnapshotAfterRuntimeShutdown": true,
+    "RealEncryptedCreateAndInspectAfterQuiescedSourceShutdown": true,
+    "MissingRequiredSourceFileRefusesCaptureWithoutDatabaseChanges": true,
+    "EveryTableAndSequenceExactlyRestoredBeforeRuntimeMutation": true,
+    "FreshApiAndWorkerRefusePendingRestoreBeforeActivation": true,
+    "ActivationRequiresExplicitOutboundFlagAndExactRestoredObjectBytes": true,
+    "ActivationReceiptCrashRecoveryAndRepeatDoNotStartServicesOrChangeData": true,
+    "FreshRestoredRuntimeLoginTenantIsolationOriginalsExportsKeyAndQueueOnce": true,
+    "DistinctEmptyTargetsRejectMalformedTruncatedWrongIdentityMissingPayloadAndRequiredObjectOmissionOrDowngrade": true,
+    "ExistingTargetDatabaseStorageAndKeyRemainUnchangedAfterRefusedRestore": true
+  },
+  "runtime": {
+    "checks": {
+      "login": true,
+      "tenantIsolation": true,
+      "correctionApprovalRawProvenance": true,
+      "exactSavedCsvXlsxJsonBytesAndTypedValues": true,
+      "schemasTemplateMapping": true,
+      "exactEveryLiveOriginal": true,
+      "retainedPdfAndZipLineage": true,
+      "replaysTombstonesUnchangedPageUsage": true,
+      "encryptionKeyCanary": true,
+      "deterministicQueuedJobOnceWithoutRecharging": true,
+      "pendingDeletionResumed": true,
+      "pendingOutboxControlledDeliveryOnce": true,
+      "pendingEmailPreservedWithoutSending": true
+    },
+    "forbiddenNetwork": 0,
+    "realProviderCalls": 0,
+    "controlledWebhookDeliveries": 1,
+    "verifiedLiveOriginals": 6,
+    "savedExports": 3,
+    "accounts": 2
+  },
+  "tables": 54,
+  "rows": 117,
+  "sequences": 1,
+  "cleanup": {
+    "clusterRemoved": true,
+    "socketRemoved": true,
+    "sourceAndRestoredStorageRemoved": true,
+    "privateKeysAndCredentialFixtureRemoved": true,
+    "ownedAccountsPerPopulatedDatabase": 2,
+    "populatedDatabases": 2,
+    "normalDevelopmentDatabaseTouched": false
+  },
+  "sourceUnchanged": true,
+  "fixtureScope": "Existing synthetic PostgreSQL/filesystem backup contract rerun against migration033; no TIFF-specific recovery accuracy claim."
+}

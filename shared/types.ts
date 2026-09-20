@@ -8,5 +8,6 @@ export interface Actor { userId: string; workspaceId: string; role: Role; authTy
 export type DocumentStatus = 'received'|'queued'|'processing'|'needs_review'|'processed'|'exporting'|'exported'|'failed';
 export interface PageText { page: number; text: string; }
 export interface ExtractionResult { rawValues: Record<string, unknown>; normalizedValues: Record<string, unknown>; evidence: Record<string, Evidence[]>; issues: ValidationIssue[]; model: string; engine: string; promptVersion?: string; tokenUsage?: unknown; costUsd?: number; }
-export interface ProviderInput { bytes: Buffer; mimeType: string; pages: PageText[]; schema: ParserSchema; instructions: string; locale: string; signal?: AbortSignal; }
+export interface VisualDocument {bytes:Buffer;mimeType:'application/pdf';pageCount:number;sourceSha256:string;renderVersion:string;}
+export interface ProviderInput { bytes: Buffer; mimeType: string; pages: PageText[]; schema: ParserSchema; instructions: string; locale: string; signal?: AbortSignal; visualDocument?:VisualDocument; }
 export interface ExtractionProvider { configured(): boolean; extract(input: ProviderInput): Promise<ExtractionResult>; }

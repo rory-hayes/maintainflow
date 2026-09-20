@@ -1,12 +1,13 @@
 import path from 'node:path';
 import type {PageText} from '../../shared/types.js';
+import {isTiffHeader} from './tiff-engine.js';
 import {nativePdfPageText} from '../../shared/pdf-split.js';
 import {decoderError,decoderLimits as config} from './decoder-limits.js';
 import {SourceValidationError,type SourceValidationReason} from './source-validation.js';
 const invalid=(reason:SourceValidationReason):never=>{throw new SourceValidationError(reason);};
-type SourceFormat = 'pdf'|'png'|'jpeg'|'docx'|'xlsx'|'txt'|'csv'|'eml'|'html';
+type SourceFormat = 'pdf'|'png'|'jpeg'|'tiff'|'docx'|'xlsx'|'txt'|'csv'|'eml'|'html';
 const textExtensions:Record<string,SourceFormat>={'.txt':'txt','.csv':'csv','.eml':'eml','.html':'html','.htm':'html'};
-const binaryExtensions:Record<string,SourceFormat>={'.pdf':'pdf','.png':'png','.jpg':'jpeg','.jpeg':'jpeg','.docx':'docx','.xlsx':'xlsx'};
+const binaryExtensions:Record<string,SourceFormat>={'.pdf':'pdf','.png':'png','.jpg':'jpeg','.jpeg':'jpeg','.docx':'docx','.xlsx':'xlsx','.tif':'tiff','.tiff':'tiff'};
 const begins=(bytes:Buffer,signature:number[]|string)=>{const prefix=typeof signature==='string'?Buffer.from(signature):Buffer.from(signature);return bytes.subarray(0,prefix.length).equals(prefix);};
 
 /** Read bounded directory metadata without inflating or writing archive entries. */
@@ -55,9 +56,10 @@ function binaryFormat(bytes:Buffer):SourceFormat|undefined{
   if(begins(bytes,'%PDF-'))return 'pdf';
   if(begins(bytes,[0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]))return 'png';
   if(begins(bytes,[0xff,0xd8,0xff]))return 'jpeg';
+  if(isTiffHeader(bytes))return 'tiff';
   if([[0x50,0x4b,3,4],[0x50,0x4b,5,6],[0x50,0x4b,7,8]].some(signature=>begins(bytes,signature)))return officeFormat(bytes);
   const unsupported=(['GIF87a','GIF89a','OggS','fLaC','ID3','%!PS-Adobe','SQLite format 3'].some(signature=>begins(bytes,signature)))||
-    [[0x1f,0x8b],[0x37,0x7a,0xbc,0xaf,0x27,0x1c],[0x52,0x61,0x72,0x21,0x1a,0x07],[0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1],[0x7f,0x45,0x4c,0x46],[0,0x61,0x73,0x6d],[0x49,0x49,0x2a,0],[0x4d,0x4d,0,0x2a],[0x49,0x49,0x2b,0],[0x4d,0x4d,0,0x2b],[0xfe,0xed,0xfa,0xce],[0xce,0xfa,0xed,0xfe],[0xfe,0xed,0xfa,0xcf],[0xcf,0xfa,0xed,0xfe],[0xca,0xfe,0xba,0xbe]].some(signature=>begins(bytes,signature))||
+    [[0x1f,0x8b],[0x37,0x7a,0xbc,0xaf,0x27,0x1c],[0x52,0x61,0x72,0x21,0x1a,0x07],[0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1],[0x7f,0x45,0x4c,0x46],[0,0x61,0x73,0x6d],[0xfe,0xed,0xfa,0xce],[0xce,0xfa,0xed,0xfe],[0xfe,0xed,0xfa,0xcf],[0xcf,0xfa,0xed,0xfe],[0xca,0xfe,0xba,0xbe]].some(signature=>begins(bytes,signature))||
     begins(bytes,'RIFF')||bytes.subarray(4,8).equals(Buffer.from('ftyp'));
   if(unsupported)invalid('binary_format_unsupported');
 }
@@ -172,6 +174,7 @@ export async function decodeSource(bytes:Buffer,filename:string):Promise<{mimeTy
       throw error;
     }finally{await loading.destroy();}
   }
+  if(format==='tiff'){const {decodeTiffSource}=await import('./tiff-engine.js');return decodeTiffSource(bytes);}
   if(['png','jpeg'].includes(format)){
     const sharp=(await import('sharp')).default;
     try{

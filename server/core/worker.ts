@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {adminPool,appPool,transaction,withWorkspace} from './db.js';
 import {config} from './config.js';
 import {assertStorageRestoreReady} from './restore-state.js';
+import {prepareVisualDocument,visualRenderingMetadata} from './visual-source.js';
 import {lockParserForDocument} from './parser-setup.js';
 import {extractRules} from './extraction.js';
 import {selectTemplateExtraction} from './template-selection.js';
@@ -84,7 +85,10 @@ const attempt=await extractWithDeadline(async signal=>{
  else if(job.config.mode==='ai'){
   const activeProvider=provider;if(!activeProvider?.configured())throw Object.assign(new Error('AI extraction is not configured. Configure the server provider or choose text-anchor rules.'),{permanent:true});
   const bytes=await readStoredObject(data.doc.storage_key);signal.throwIfAborted();
-  result=await activeProvider.extract({bytes,mimeType:data.doc.mime_type,pages:data.doc.source_text,schema:data.schema,instructions:job.config.instructions,locale:job.config.locale,signal});
+  const input={bytes,mimeType:data.doc.mime_type,pages:data.doc.source_text,schema:data.schema,instructions:job.config.instructions,locale:job.config.locale,signal};
+  const visualDocument=await prepareVisualDocument(input,{signal,expectedSha256:data.doc.sha256});signal.throwIfAborted();
+  result=await activeProvider.extract({...input,...(visualDocument?{visualDocument}:{})});
+  if(visualDocument)result={...result,tokenUsage:{...(result.tokenUsage&&typeof result.tokenUsage==='object'&&!Array.isArray(result.tokenUsage)?result.tokenUsage:{}),sourceRendering:visualRenderingMetadata(visualDocument)}};
  }else{
   if(!data.doc.source_text.some((p:any)=>p.text.trim()))throw Object.assign(new Error('This document has no readable text. Scans and images require a configured OCR/AI provider.'),{permanent:true});
   result=extractRules(data.doc.source_text,data.schema,job.config.locale,decision?[]:job.config.templates||[]);

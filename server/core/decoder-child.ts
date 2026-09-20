@@ -1,4 +1,5 @@
 import { decodeSource } from './decoder-engine.js';
+import {tiffLimits} from '../../shared/tiff.js';
 import { decoderLimits } from './decoder-limits.js';
 import { SourceValidationError, isSourceValidationReason } from './source-validation.js';
 import { pdfSplitLimits, PdfSplitValidationError, isPdfSplitValidationReason } from '../../shared/pdf-split.js';
@@ -14,6 +15,7 @@ const chunks: Buffer[] = [];
 let size = 0;
 const splitting = process.argv[3] === '--pdf-split';
 const archiving = process.argv[3] === '--zip-import';
+const tiff=process.argv[3]==='--tiff-page'||process.argv[3]==='--tiff-pdf';
 try {
   for await (const chunk of process.stdin) {
     const bytes = Buffer.from(chunk);
@@ -32,6 +34,10 @@ try {
     const {bytes,spec} = decodeArchiveInput(Buffer.concat(chunks));
     const {decodeArchive} = await import('./archive-engine.js');
     json = JSON.stringify({ok:true,archive:await decodeArchive(bytes,process.argv[2] || 'archive.zip',spec)});
+  } else if(tiff){
+    const {decodeTiffPage,decodeTiffForAI}=await import('./tiff-engine.js');
+    const rendered=process.argv[3]==='--tiff-page'?await decodeTiffPage(Buffer.concat(chunks),Number(process.argv[4])):await decodeTiffForAI(Buffer.concat(chunks));
+    const {bytes,...metadata}=rendered;json=JSON.stringify({ok:true,tiff:{...metadata,data:bytes.toString('base64')}});
   } else {
     const source = await decodeSource(Buffer.concat(chunks), process.argv[2] || 'document');
     if (source.pages.reduce((total, page) => total + Buffer.byteLength(page.text), 0) > decoderLimits.maxTextBytes) {
@@ -39,7 +45,7 @@ try {
     }
     json = JSON.stringify({ ok: true, source });
   }
-  if (Buffer.byteLength(json) > (splitting ? pdfSplitLimits.maxOutputBytes : archiving ? archiveImportLimits.maxOutputBytes : decoderLimits.maxOutputBytes)) throw Object.assign(new Error('Decoded source response exceeds the limit'), { statusCode: 413 });
+  if (Buffer.byteLength(json) > (splitting ? pdfSplitLimits.maxOutputBytes : archiving ? archiveImportLimits.maxOutputBytes : tiff&&process.argv[3]==='--tiff-pdf'?tiffLimits.maxOutputBytes:decoderLimits.maxOutputBytes)) throw Object.assign(new Error('Decoded source response exceeds the limit'), { statusCode: 413 });
   process.stdout.write(json);
 } catch (error) {
   // Neither arbitrary statuses nor dependency diagnostics can authorize a

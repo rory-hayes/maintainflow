@@ -2,6 +2,7 @@ export const sourceFormats = [
   {id:'pdf',label:'PDF',mimeType:'application/pdf'},
   {id:'png',label:'PNG',mimeType:'image/png'},
   {id:'jpeg',label:'JPEG',mimeType:'image/jpeg'},
+  {id:'tiff',label:'TIFF',mimeType:'image/tiff'},
   {id:'txt',label:'Text',mimeType:'text/plain'},
   {id:'eml',label:'Email (EML)',mimeType:'message/rfc822'},
   {id:'csv',label:'CSV',mimeType:'text/csv'},

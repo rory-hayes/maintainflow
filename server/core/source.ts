@@ -11,6 +11,8 @@ import { canonicalPdfSplitSpec, planPdfSplit, verifyPdfMarkerRanges, pdfSplitLim
 import {encodeSplitInput,encodeArchiveInput} from './decoder-input.js';
 import {archiveImportLimits,archiveEntryReasons,canonicalArchiveImportSpec,ArchiveImportValidationError,isArchiveImportValidationReason,type ArchiveImportSpec,type ArchiveImportValidationReason} from '../../shared/archive-import.js';
 import {sourceFormats} from '../../shared/source-formats.js';
+import {tiffLimits,tiffRenderVersion,type TiffPageRenderMetadata,type TiffAiDocumentMetadata} from '../../shared/tiff.js';
+import {inspectTiffStructure} from './tiff-engine.js';
 import {scanZip,zipCrc32,isMacArchiveMetadataPath,isMacArchiveMetadata} from './zip-reader.js';
 import {detectSourceFormat} from './decoder-engine.js';
 import type {DecodedArchive} from './archive-engine.js';
@@ -60,11 +62,11 @@ const runtimeRoot = fileURLToPath(new URL('../../', import.meta.url));
 let activeDecoders = 0;
 
 /** This subprocess is a resource boundary, not an OS-level security sandbox. */
-export function decoderLaunchSpec(filename: string, split?: PdfSplitSpec, archive?:{spec?:ArchiveImportSpec}) {
+export function decoderLaunchSpec(filename: string, split?: PdfSplitSpec, archive?:{spec?:ArchiveImportSpec},tiff?:{page?:number}) {
   const sourceEntry = childFilename.endsWith('.ts');
   return {
     command: process.execPath,
-    args: [`--max-old-space-size=${sourceEntry ? decoderLimits.sourceHeapMb : decoderLimits.heapMb}`, ...(sourceEntry ? ['--import', 'tsx'] : []), childFilename, archive ? 'archive.zip' : path.basename(filename), ...(split ? ['--pdf-split'] : archive ? ['--zip-import'] : [])],
+    args: [`--max-old-space-size=${sourceEntry ? decoderLimits.sourceHeapMb : decoderLimits.heapMb}`, ...(sourceEntry ? ['--import', 'tsx'] : []), childFilename, tiff ? 'source.tiff' : archive ? 'archive.zip' : path.basename(filename), ...(split ? ['--pdf-split'] : archive ? ['--zip-import'] : tiff ? tiff.page===undefined?['--tiff-pdf']:['--tiff-page',String(tiff.page)]:[])],
     options: {
       cwd: runtimeRoot,
       env: { NODE_ENV: 'production', TZ: 'UTC', LANG: 'en_US.UTF-8', TSX_DISABLE_CACHE: '1' },
@@ -74,7 +76,7 @@ export function decoderLaunchSpec(filename: string, split?: PdfSplitSpec, archiv
 }
 
 type DecoderSpawn = (command: string, args: string[], options: ReturnType<typeof decoderLaunchSpec>['options']) => ChildProcessWithoutNullStreams;
-type DecoderOptions = { spawnChild?: DecoderSpawn; timeoutMs?: number };
+export type DecoderOptions = { spawnChild?: DecoderSpawn; timeoutMs?: number;signal?:AbortSignal };
 async function runIsolated<T>(
   bytes: Buffer,
   filename: string,
@@ -82,14 +84,16 @@ async function runIsolated<T>(
   options: DecoderOptions,
   split?: PdfSplitSpec,
   archive?:{spec?:ArchiveImportSpec},
+  tiff?:{page?:number},
 ): Promise<T> {
+  options.signal?.throwIfAborted();
   if (!bytes.length) throw new SourceValidationError('empty');
   if (bytes.length > decoderLimits.maxBytes) throw new SourceValidationError('file_too_large');
   if (activeDecoders >= decoderLimits.concurrency) decoderError('Document decoding is busy. Retry shortly.', 429);
   activeDecoders++;
   try {
     return await new Promise((resolve, reject) => {
-      const spec = decoderLaunchSpec(filename, split, archive);
+      const spec = decoderLaunchSpec(filename, split, archive,tiff);
       let child: ChildProcessWithoutNullStreams;
       try { child = (options.spawnChild || spawn)(spec.command, spec.args, spec.options); }
       catch { reject(Object.assign(new Error('The isolated document decoder could not start'), { statusCode: 503 })); return; }
@@ -100,6 +104,7 @@ async function runIsolated<T>(
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        options.signal?.removeEventListener('abort',abort);
         if (error) reject(error);
         else resolve(value!);
       };
@@ -109,11 +114,12 @@ async function runIsolated<T>(
         clearTimeout(timer);
         child.kill('SIGKILL');
       };
+      const abort=()=>fail(Object.assign(new Error('Document decoding was cancelled'),{name:'AbortError'}));
       const timer = setTimeout(() => fail(Object.assign(new Error('Document decoding exceeded the 30-second time limit'), { statusCode: 422 })), options.timeoutMs || decoderLimits.timeoutMs);
       child.stdout.on('data', (chunk: Buffer) => {
         if (settled || pendingFailure) return;
         outputBytes += chunk.length;
-        if (outputBytes > (split ? pdfSplitLimits.maxOutputBytes : archive ? archiveImportLimits.maxOutputBytes : decoderLimits.maxOutputBytes)) {
+        if (outputBytes > (split ? pdfSplitLimits.maxOutputBytes : archive ? archiveImportLimits.maxOutputBytes : tiff&&tiff.page===undefined ? tiffLimits.maxOutputBytes:decoderLimits.maxOutputBytes)) {
           fail(Object.assign(new Error('Decoded source response exceeds the output limit'), { statusCode: 413 }));
           return;
         }
@@ -140,6 +146,8 @@ async function runIsolated<T>(
         } catch { finish(Object.assign(new Error('The document decoder returned an invalid response'), { statusCode: 422 })); }
       });
       child.stdin.on('error', () => {});
+      options.signal?.addEventListener('abort',abort,{once:true});
+      if(options.signal?.aborted)abort();
       child.stdin.end(split ? encodeSplitInput(bytes, split) : archive ? encodeArchiveInput(bytes,archive.spec) : bytes);
     });
   } finally { activeDecoders--; }
@@ -151,6 +159,7 @@ export function runDecoder(bytes: Buffer, filename: string, options: DecoderOpti
     const result = responseSchema.parse(value);
     if (!result.ok) throw new Error('Expected decoder source');
     if (result.source.pages.reduce((total, page) => total + Buffer.byteLength(page.text), 0) > decoderLimits.maxTextBytes) throw new Error('Decoder text limit exceeded');
+    if(result.source.mimeType==='image/tiff'){const directory=inspectTiffStructure(bytes);if(result.source.pageCount!==directory.pages.length||result.source.pages.length!==directory.pages.length||result.source.pages.some((p,i)=>p.page!==i+1||p.text!==''))throw new Error('Invalid TIFF source page response');}
     return result.source;
   }, options);
 }
@@ -217,6 +226,7 @@ function runArchive(bytes:Buffer,filename:string,spec:ArchiveImportSpec|undefine
       if(!entry||!record||entry.status!=='ready'||part.index!==entry.index||part.path!==entry.path||part.format!==entry.format||part.sha256!==entry.sha256||part.source.pageCount!==entry.pageCount||part.source.pages.length!==entry.pageCount||sourceFormats.find(format=>format.id===part.format)?.mimeType!==part.source.mimeType)throw new Error('Archive part mismatch');
       const childBytes=Buffer.from(part.data,'base64');
       if(childBytes.length!==entry.byteSize||childBytes.toString('base64')!==part.data||createHash('sha256').update(childBytes).digest('hex')!==part.sha256||zipCrc32(childBytes)!==record.crc32||detectSourceFormat(childBytes,entry.path)!==part.format||isMacArchiveMetadata(entry.path,childBytes))throw new Error('Archive bytes mismatch');
+      if(part.format==='tiff'&&(inspectTiffStructure(childBytes).pages.length!==part.source.pageCount||part.source.pages.some(p=>p.text!=='')))throw new Error('Archive TIFF page mismatch');
       byteTotal+=childBytes.length;totalPages+=part.source.pageCount;
       for(const [index,page] of part.source.pages.entries()){
         if(page.page!==index+1)throw new Error('Archive page numbering mismatch');
@@ -232,4 +242,27 @@ function runArchive(bytes:Buffer,filename:string,spec:ArchiveImportSpec|undefine
 export function previewArchiveSource(bytes:Buffer,filename:string,options:DecoderOptions={}):Promise<DecodedArchive>{return runArchive(bytes,filename,undefined,options);}
 export function importArchiveSource(bytes:Buffer,filename:string,value:ArchiveImportSpec,options:DecoderOptions={}):Promise<DecodedArchive>{
   return runArchive(bytes,filename,JSON.parse(canonicalArchiveImportSpec(value)),options);
+}
+
+
+const tiffBaseSchema=z.object({pageCount:z.number().int().min(1).max(tiffLimits.maxPages),sourceSha256:z.string().regex(/^[0-9a-f]{64}$/),renderVersion:z.literal(tiffRenderVersion)});
+const tiffPageSchema=z.object({ok:z.literal(true),tiff:tiffBaseSchema.extend({mimeType:z.literal('image/jpeg'),page:z.number().int().min(1).max(tiffLimits.maxPages),width:z.number().int().min(1).max(tiffLimits.maxEdge),height:z.number().int().min(1).max(tiffLimits.maxEdge),data:z.string().min(1).max(4*Math.ceil(tiffLimits.maxJpegBytes/3))}).strict()}).strict();
+const tiffPdfSchema=z.object({ok:z.literal(true),tiff:tiffBaseSchema.extend({mimeType:z.literal('application/pdf'),data:z.string().min(1).max(4*Math.ceil(tiffLimits.maxPdfBytes/3))}).strict()}).strict();
+export async function renderTiffPage(bytes:Buffer,page:number,options:DecoderOptions={}):Promise<TiffPageRenderMetadata&{bytes:Buffer}>{
+ options.signal?.throwIfAborted();const structure=inspectTiffStructure(bytes);if(!Number.isInteger(page)||page<1||page>structure.pages.length)throw new SourceValidationError('tiff_page_bounds');
+ const sourceSha256=createHash('sha256').update(bytes).digest('hex'),descriptor=structure.pages[page-1];
+ return runIsolated(bytes,'source.tiff',value=>{
+  const {data,...result}=tiffPageSchema.parse(value).tiff,output=Buffer.from(data,'base64');
+  const swap=descriptor.orientation>=5,width=swap?descriptor.height:descriptor.width,height=swap?descriptor.width:descriptor.height,scale=Math.min(1,tiffLimits.maxEdge/Math.max(width,height));
+  if(result.sourceSha256!==sourceSha256||result.page!==page||result.pageCount!==structure.pages.length||Math.abs(result.width-width*scale)>1||Math.abs(result.height-height*scale)>1||output.length>tiffLimits.maxJpegBytes||output.toString('base64')!==data||!output.subarray(0,3).equals(Buffer.from([255,216,255])))throw new Error('Invalid TIFF page response');
+  return {...result,bytes:output};
+ },options,undefined,undefined,{page});
+}
+export async function convertTiffForAI(bytes:Buffer,options:DecoderOptions={}):Promise<TiffAiDocumentMetadata&{bytes:Buffer}>{
+ options.signal?.throwIfAborted();const structure=inspectTiffStructure(bytes),sourceSha256=createHash('sha256').update(bytes).digest('hex');
+ return runIsolated(bytes,'source.tiff',value=>{
+  const {data,...result}=tiffPdfSchema.parse(value).tiff,output=Buffer.from(data,'base64');
+  if(result.sourceSha256!==sourceSha256||result.pageCount!==structure.pages.length||output.length>tiffLimits.maxPdfBytes||output.toString('base64')!==data||!output.subarray(0,5).equals(Buffer.from('%PDF-')))throw new Error('Invalid TIFF PDF response');
+  return {...result,bytes:output};
+ },options,undefined,undefined,{});
 }
