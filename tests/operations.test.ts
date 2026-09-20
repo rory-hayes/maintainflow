@@ -8,9 +8,21 @@ import rateLimit from '@fastify/rate-limit';
 import type {Pool} from 'pg';
 import {createReadinessProbe,probeDatabase,probePrivateStorage,registerOperationalHealth,type OperationalServices} from '../server/core/operations.js';
 import {installationConfiguration} from '../server/core/installation.js';
+import {registerHostedWorker} from '../server/hosted-worker.js';
 
 const secret='owned-readonly-diagnostics-0123456789abcdef';
 const idle=():OperationalServices=>({database:async()=>{},storage:async()=>{},restore:async()=>{},queues:async()=>[]});
+
+test('dedicated monitor bearer permits diagnostics but cannot wake hosted workers',async()=>{
+  const monitorSecret='owned-monitor-only-0123456789abcdef';let wakes=0;
+  const app=Fastify();registerOperationalHealth(app,{services:idle(),secret:()=>secret,monitorSecret:()=>monitorSecret});
+  registerHostedWorker(app,{secret:()=>secret,waitUntil:()=>{},wake:async()=>{wakes++;}});
+  try{
+    assert.equal((await app.inject({url:'/api/internal/diagnostics',headers:{authorization:`Bearer ${monitorSecret}`}})).statusCode,200);
+    assert.equal((await app.inject({method:'POST',url:'/api/internal/worker',headers:{authorization:`Bearer ${monitorSecret}`}})).statusCode,401);
+    assert.equal(wakes,0);
+  }finally{await app.close();}
+});
 
 test('operational routes bypass the actual global database limiter before probes and bearer authentication',async()=>{
   let increments=0,probeCalls=0;

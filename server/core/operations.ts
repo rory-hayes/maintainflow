@@ -115,7 +115,7 @@ function productionServices():OperationalServices{
   };
 }
 
-export function registerOperationalHealth(app:FastifyInstance,options:{services?:OperationalServices;secret?:()=>string|undefined;deadlineMs?:number;cacheMs?:number}={}){
+export function registerOperationalHealth(app:FastifyInstance,options:{services?:OperationalServices;secret?:()=>string|undefined;monitorSecret?:()=>string|undefined;deadlineMs?:number;cacheMs?:number}={}){
   const services=options.services??productionServices(),readiness=createReadinessProbe(services,options);
   const queueSnapshot=cached(()=>bounded(services.queues,options.deadlineMs),options.cacheMs??15_000);
   // The global limiter persists counters in PostgreSQL. These probes must reach
@@ -127,8 +127,12 @@ export function registerOperationalHealth(app:FastifyInstance,options:{services?
   app.get('/api/internal/diagnostics',{config:{rateLimit:false}},async(request,reply)=>{
     reply.header('Cache-Control','private, no-store');
     const secret=options.secret?.()??process.env.FOLIO_WORKER_SECRET;
-    if(!secret||secret.length<32)return reply.code(503).send({error:'diagnostics_unconfigured'});
-    if(!acceptsWorkerBearer(request.headers.authorization,secret))return reply.code(401).send({error:'unauthorized'});
+    // A monitor can inspect health without receiving permission to wake workers.
+    // Only this read-only route recognizes FOLIO_MONITOR_SECRET.
+    const monitorSecret=options.monitorSecret?.()??process.env.FOLIO_MONITOR_SECRET;
+    const configured=[secret,monitorSecret].filter((value):value is string=>Boolean(value&&value.length>=32));
+    if(!configured.length)return reply.code(503).send({error:'diagnostics_unconfigured'});
+    if(!configured.some(value=>acceptsWorkerBearer(request.headers.authorization,value)))return reply.code(401).send({error:'unauthorized'});
     const [dependencies,queues]=await Promise.all([readiness(),queueSnapshot().catch(()=>null)]);
     const status=dependencies.status==='ready'&&queues!==null?'available':'unavailable';
     return reply.code(status==='available'?200:503).send({status,dependencies,worker:{observation:'durable_queue_snapshot',heartbeatVerified:false,queueEligibilityVerified:false,queues},operator:installationConfiguration().readiness,backup:{hostedRecoveryVerified:false,scheduledBackupVerified:false},alerts:{deliveryVerified:false}});
