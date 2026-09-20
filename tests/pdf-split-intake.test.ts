@@ -288,15 +288,16 @@ test('failed split writes retain summed byte reservations until removal, boundin
  await split(f,every,retryId,{splitSource:controlled});assert.equal((await counts(f)).pages,4);assert.equal(await reserved(),baseline);
 });
 
-test('same-bound staging retry works at the final page credit while changed bindings retain provisional quota',async()=>{
+test('same-bound staging retry works at the final page credit while conflicting identities reject before quota',async()=>{
  const f=await fixture('last-credit');await adminPool.query("update workspaces set plan=jsonb_set(plan,'{monthlyPages}','1') where id=$1",[f.account.workspace.id]);
  const id=randomUUID(),options:PdfSplitSpec={mode:'every',pagesPerDocument:1},input={filename:'one.pdf',size:onePage.length,sha256:hash(onePage),pdfSplit:{requestId:id,options}};
  const interrupted=await reserveDirectUpload(actor(f.account),f.parserId,input);
  await assert.rejects(finalizeDirectUpload(actor(f.account),interrupted.uploadId),status(404));
- // A missing PUT leaves its signed reservation pending. Changed bytes or options
- // are distinct provisional work and must not receive the same-request exclusion.
- await assert.rejects(reserveDirectUpload(actor(f.account),f.parserId,{...input,sha256:hash(Buffer.from('different source'))}),status(429));
- await assert.rejects(reserveDirectUpload(actor(f.account),f.parserId,{...input,pdfSplit:{requestId:id,options:{mode:'ranges',ranges:[{start:1,end:1}]}}}),status(429));
+ // A missing PUT leaves its physical reservation pending. The request identity
+ // cannot change its source/plan; a new UUID still consumes provisional quota.
+ await assert.rejects(reserveDirectUpload(actor(f.account),f.parserId,{...input,sha256:hash(Buffer.from('different source'))}),status(409));
+ await assert.rejects(reserveDirectUpload(actor(f.account),f.parserId,{...input,pdfSplit:{requestId:id,options:{mode:'ranges',ranges:[{start:1,end:1}]}}}),status(409));
+ await assert.rejects(reserveDirectUpload(actor(f.account),f.parserId,{...input,pdfSplit:{requestId:randomUUID(),options}}),status(429));
  const fresh=await reserveDirectUpload(actor(f.account),f.parserId,input);assert.notEqual(fresh.uploadId,interrupted.uploadId);
  objects.set(`${f.account.workspace.id}/${fresh.uploadId}`,onePage);
  const accepted=await finalizeDirectUpload(actor(f.account),fresh.uploadId);assert.equal(accepted.split.selectedPages,1);assert.equal(accepted.split.requestId,id);
@@ -357,7 +358,8 @@ test('marker signed-upload retry preserves canonical binding at the final page c
  const id=randomUUID(),options:PdfSplitSpec={mode:'marker',marker:'Reference: OWNED-PAGE-1',ranges:[{start:1,end:1}]};
  const input={filename:'owned-marker.pdf',size:onePage.length,sha256:hash(onePage),pdfSplit:{requestId:id,options}};
  const interrupted=await reserveDirectUpload(actor(f.account),f.parserId,input);await assert.rejects(finalizeDirectUpload(actor(f.account),interrupted.uploadId),status(404));
- await assert.rejects(reserveDirectUpload(actor(f.account),f.parserId,{...input,pdfSplit:{requestId:id,options:{...options,marker:'changed marker'}}}),status(429));
+ await assert.rejects(reserveDirectUpload(actor(f.account),f.parserId,{...input,pdfSplit:{requestId:id,options:{...options,marker:'changed marker'}}}),status(409));
+ await assert.rejects(reserveDirectUpload(actor(f.account),f.parserId,{...input,pdfSplit:{requestId:randomUUID(),options}}),status(429));
  const fresh=await reserveDirectUpload(actor(f.account),f.parserId,{...input,pdfSplit:{requestId:id,options:{...options,marker:' Reference:\tOWNED-PAGE-1 '}}});
  objects.set(`${f.account.workspace.id}/${fresh.uploadId}`,onePage);
  const result=await finalizeDirectUpload(actor(f.account),fresh.uploadId);assert.equal(result.split.requestId,id);assert.equal(result.split.selectedPages,1);assert.equal(result.documents.length,1);

@@ -39,19 +39,19 @@ app.get('/api/documents/:id/original-url',async req=>{const a=await requireActor
 app.get('/api/documents/:id/bundle-original',async(req,reply)=>{
  const a=await requireActor(req,{scope:'documents:read'}),id=idFrom(req.params);
  const source=await withWorkspace(a.workspaceId,c=>retainedPdfSource(c,a.workspaceId,id));
- if(!source)notFound('The original PDF bundle is unavailable');
+ if(!source)notFound('The original bundle is unavailable');
  validateStorageKey(source.storage_key,a.workspaceId);const storage=privateStorage();
  reply.header('Cache-Control','private, no-store').header('Referrer-Policy','no-referrer');
  if(storage.signDownload)return reply.redirect(await storage.signDownload(source.storage_key,source.name));
- const bytes=await readStoredObject(source.storage_key).catch(()=>notFound('The original PDF bundle is unavailable'));
- reply.header('Content-Type','application/pdf').header('Content-Disposition',`inline; filename*=UTF-8''${encodeURIComponent(safeDownloadName(source.name))}`)
+ const bytes=await readStoredObject(source.storage_key).catch(()=>notFound('The original bundle is unavailable'));
+ reply.header('Content-Type',source.mime_type==='image/tiff'?'image/tiff':'application/pdf').header('Content-Disposition',`${source.mime_type==='image/tiff'?'attachment':'inline'}; filename*=UTF-8''${encodeURIComponent(safeDownloadName(source.name))}`)
   .header('X-Content-Type-Options','nosniff').header('Content-Security-Policy',"sandbox; default-src 'none'");
  return reply.send(bytes);
 });
 app.get('/api/documents/:id/bundle-original-url',async req=>{
  const a=await requireActor(req,{scope:'documents:read'}),id=idFrom(req.params);
  const source=await withWorkspace(a.workspaceId,c=>retainedPdfSource(c,a.workspaceId,id));
- if(!source)notFound('The original PDF bundle is unavailable');
+ if(!source)notFound('The original bundle is unavailable');
  validateStorageKey(source.storage_key,a.workspaceId);const storage=privateStorage();
  return storage.signDownload?{url:await storage.signDownload(source.storage_key,source.name),external:true}:{url:`/api/documents/${id}/bundle-original`,external:false};
 });

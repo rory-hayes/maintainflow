@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readStoredPdfSplit,saveStoredPdfSplit,clearStoredPdfSplit,findStoredPdfSplit,submitStoredPdfSplit,type StoredPendingPdfSplit} from '../src/lib/stored-pdf-split.js';
+import {readPendingPdfSplit,savePendingPdfSplit,confirmPdfSplitReceipt,prepareTiffSplitPreview,readTiffSplitPreview,pdfSha256,uploadPdfSplit} from '../src/lib/pdf-split.js';
 
 class MemoryStorage implements Storage{
  values=new Map<string,string>();get length(){return this.values.size;}key(index:number){return [...this.values.keys()][index]??null;}
@@ -36,4 +37,50 @@ test('a receipt with the wrong source digest or source ID cannot consume the sav
 test('only a fully bound authoritative rejection resolves a stored request; ordinary errors remain unknown',async()=>{const env=environment();try{saveStoredPdfSplit(base);const rejected={id:receipt.split.id,requestId:base.requestId,parserId:base.parserId,sourceDocumentId:base.sourceDocumentId,sourceSha256:base.sha256,options:base.options,code:'rejected',reason:'format_not_allowed',message:'PDF is not allowed by this parser.'};globalThis.fetch=async(input)=>String(input)==='/api/auth/me'?json(actor):json({rejected});const found=await findStoredPdfSplit(base,()=>true);assert.ok(found&&'rejected'in found);assert.equal(found.rejected.requestId,base.requestId);
  for(const mutation of[{sourceSha256:'b'.repeat(64)},{requestId:'99999999-9999-4999-8999-999999999999'},{options:{mode:'ranges',ranges:[{start:2,end:2}]}}]){globalThis.fetch=async(input)=>String(input)==='/api/auth/me'?json(actor):json({rejected:{...rejected,...mutation}});await assert.rejects(findStoredPdfSplit(base,()=>true),/does not match/);}
  globalThis.fetch=async(input)=>String(input)==='/api/auth/me'?json(actor):json({message:'PDF not allowed'},415);await assert.rejects(findStoredPdfSplit(base,()=>true),/PDF not allowed/);globalThis.fetch=async(input)=>String(input)==='/api/auth/me'?json(actor):json({message:'not found'},404);assert.equal(await findStoredPdfSplit(base,()=>true),null);assert.deepEqual(readStoredPdfSplit(base,base.sourceDocumentId),base);
+ }finally{env.restore();}});
+
+test('TIFF pending binds accepted and terminal-rejected MIME while legacy PDF records remain valid',async()=>{const env=environment();try{
+ const value={...base,sourceMimeType:'image/tiff' as const};saveStoredPdfSplit(value);assert.equal(readStoredPdfSplit(base,base.sourceDocumentId)?.sourceMimeType,'image/tiff');
+ assert.throws(()=>saveStoredPdfSplit(base),/Another saved split/);
+ savePendingPdfSplit(value);assert.equal(readPendingPdfSplit(base.workspaceId,base.parserId,base.userId)?.sourceMimeType,'image/tiff');assert.equal(readPendingPdfSplit(base.workspaceId,base.parserId,'99999999-9999-4999-8999-999999999999'),null);savePendingPdfSplit({...value,userId:'99999999-9999-4999-8999-999999999999'});assert.equal(readPendingPdfSplit(base.workspaceId,base.parserId,base.userId)?.requestId,base.requestId);
+ const tiffReceipt={...receipt,split:{...receipt.split,sourceMimeType:'image/tiff'}};
+ globalThis.fetch=async(input)=>String(input)==='/api/auth/me'?json(actor):json(tiffReceipt);assert.equal(receiptId(await submitStoredPdfSplit(value,()=>true)),receipt.split.id);
+ globalThis.fetch=async(input)=>String(input)==='/api/auth/me'?json(actor):json(receipt);await assert.rejects(findStoredPdfSplit(value,()=>true),/could not be confirmed/);
+ const rejected={id:receipt.split.id,requestId:base.requestId,parserId:base.parserId,sourceDocumentId:base.sourceDocumentId,sourceSha256:base.sha256,sourceMimeType:'image/tiff',options:base.options,code:'parser_format_not_allowed',reason:'tiff',message:'TIFF is not allowed.'};
+ globalThis.fetch=async(input)=>String(input)==='/api/auth/me'?json(actor):json({rejected});assert.ok('rejected'in (await findStoredPdfSplit(value,()=>true))!);
+ globalThis.fetch=async(input)=>String(input)==='/api/auth/me'?json(actor):json({rejected:{...rejected,sourceMimeType:undefined}});await assert.rejects(findStoredPdfSplit(value,()=>true),/does not match/);
+ assert.equal(confirmPdfSplitReceipt(base,receipt as any).split.id,receipt.split.id);
+ }finally{env.restore();}});
+
+test('TIFF preview requires exact source, page, bounded page count and JPEG MIME',async()=>{const env=environment();try{
+ const headers={'content-type':'image/jpeg','X-Folio-Source-Sha256':base.sha256,'X-Folio-Preview-Page':'2','X-Folio-Page-Count':'3'};
+ globalThis.fetch=async(input)=>String(input)==='/api/auth/me'?json(actor):new Response(new Uint8Array([255,216,255]),{headers});
+ const result=await readTiffSplitPreview(base,2,()=>true,new AbortController().signal,undefined,base.sourceDocumentId,3);assert.equal(result.pageCount,3);assert.equal(result.blob.type,'image/jpeg');
+ for(const change of[{'X-Folio-Source-Sha256':'b'.repeat(64)},{'X-Folio-Preview-Page':'1'},{'X-Folio-Page-Count':'4'},{'X-Folio-Page-Count':'31'},{'content-type':'image/tiff'}]){
+  globalThis.fetch=async(input)=>String(input)==='/api/auth/me'?json(actor):new Response(new Uint8Array([255,216,255]),{headers:{...headers,...change}});
+  await assert.rejects(readTiffSplitPreview(base,2,()=>true,new AbortController().signal,undefined,base.sourceDocumentId,3),/preview/);
+ }
+ globalThis.fetch=async(input)=>String(input)==='/api/auth/me'?json(actor):new Response(new Uint8Array(2*1024*1024+1),{headers});await assert.rejects(readTiffSplitPreview(base,2,()=>true,new AbortController().signal,undefined,base.sourceDocumentId,3),/could not be previewed/);
+ }finally{env.restore();}});
+
+test('signed TIFF preview stages once without options and submit confirms the persisted UUID and selection before finalize',async()=>{const env=environment();try{
+ const file=new File([new Uint8Array([73,73,42,0])],'source.tiff',{type:'image/tiff'}),sha256=await pdfSha256(await file.arrayBuffer());
+ const value={...base,sha256},uploadId='99999999-9999-4999-8999-999999999999',calls:string[]=[];
+ const tiffReceipt={...receipt,split:{...receipt.split,sourceSha256:sha256,sourceMimeType:'image/tiff'}};
+ globalThis.fetch=async(input,init)=>{const path=String(input);calls.push(`${init?.method||'GET'} ${path}`);
+  if(path==='/api/auth/me')return json(actor);if(path==='/api/uploads/config')return json({strategy:'signed',maxBytes:10*1024*1024});
+  if(path.endsWith('/uploads')){assert.deepEqual(JSON.parse(String(init?.body)).pdfSplit,{requestId:base.requestId});return json({uploadId,uploadUrl:'https://controlled.supabase.co/upload'});}
+  if(init?.method==='PUT')return new Response(null,{status:200});if(path.includes('/requests/'))return json({message:'Not found'},404);
+  if(path.endsWith('/split-confirm')){const pending=readPendingPdfSplit(base.workspaceId,base.parserId,base.userId);assert.equal(pending?.requestId,base.requestId);assert.deepEqual(pending?.options,base.options);assert.deepEqual(JSON.parse(String(init?.body)),{options:base.options});return json({ok:true});}
+  if(path.endsWith('/finalize'))return json(tiffReceipt,202);throw new Error('Unexpected controlled request');
+ };
+ const staged=await prepareTiffSplitPreview({...value,options:undefined},file,()=>true,new AbortController().signal);assert.equal(staged.uploadId,uploadId);assert.ok(!calls.some(call=>call.includes('/finalize')||call.includes('/split-confirm')));
+ const pending={...value,sourceMimeType:'image/tiff' as const,uploadId};savePendingPdfSplit(pending);assert.equal((await uploadPdfSplit(pending,file,savePendingPdfSplit,()=>true)).split.id,receipt.split.id);
+ assert.equal(calls.filter(call=>call.startsWith('PUT ')).length,1);assert.ok(calls.indexOf(`POST /api/uploads/${uploadId}/split-confirm`)<calls.indexOf(`POST /api/uploads/${uploadId}/finalize`));
+ }finally{env.restore();}});
+
+test('TIFF preparation stops before reservation or PUT after account or view changes',async()=>{const env=environment();try{
+ const file=new File([new Uint8Array([73,73,42,0])],'source.tiff',{type:'image/tiff'}),value={...base,sha256:await pdfSha256(await file.arrayBuffer())};let current=true,writes=0;
+ globalThis.fetch=async(input,init)=>{if(init?.method==='POST'||init?.method==='PUT')writes++;if(String(input)==='/api/auth/me')return json(actor);current=false;return json({strategy:'signed',maxBytes:10*1024*1024});};await assert.rejects(prepareTiffSplitPreview(value,file,()=>current,new AbortController().signal),/view changed/);assert.equal(writes,0);
+ current=true;globalThis.fetch=async(input,init)=>{if(init?.method==='PUT')writes++;if(String(input)==='/api/auth/me')return json(actor);if(String(input)==='/api/uploads/config')return json({strategy:'signed',maxBytes:10*1024*1024});current=false;return json({uploadId:'99999999-9999-4999-8999-999999999999',uploadUrl:'https://controlled.supabase.co/upload'});};await assert.rejects(prepareTiffSplitPreview(value,file,()=>current,new AbortController().signal),/view changed/);assert.equal(writes,0);
  }finally{env.restore();}});

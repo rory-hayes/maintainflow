@@ -7,6 +7,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import { ZodError } from 'zod';
+import ExcelJS from 'exceljs';
 import { registerCore } from '../server/core/index.js';
 import { adminPool, closeDatabase, transaction, withWorkspace } from '../server/core/db.js';
 import { config } from '../server/core/config.js';
@@ -88,6 +89,48 @@ after(async () => {
     await adminPool.query('delete from users where id=$1', [account.user.id]);
   }
   await closeDatabase();
+});
+
+test('mixed-case document identities de-duplicate while every export preserves requested order and selected revisions', async () => {
+  const first = await fixture({ reference: 'ORDER-FIRST' }), second = await fixture({ reference: 'ORDER-SECOND' });
+  const descending = [first, second].sort((a, b) => b.id.localeCompare(a.id));
+  const renderedOrders: string[][] = [];
+  const instance = await makeApp(async (records, options) => {
+    renderedOrders.push(records.map(record => record.documentId));
+    return renderExport(records, options);
+  });
+  const uppercaseOnly = await request('POST', '/api/exports', { documentIds: descending.map(document => document.id.toUpperCase()), format: 'json' }, owner, instance);
+  assert.equal(uppercaseOnly.statusCode, 200, uppercaseOnly.body);
+  assert.deepEqual(uppercaseOnly.json().revisions.map((revision: any) => revision.documentId), descending.map(document => document.id));
+  for (const selected of [descending, [...descending].reverse()]) {
+    const ids = selected.map(document => document.id), references = selected.map(document => document.values.reference);
+    for (const format of ['csv', 'xlsx', 'json'] as const) {
+      const response = await request('POST', '/api/exports', {
+        documentIds: [ids[0].toUpperCase(), ids[1], ids[0], ids[1].toUpperCase()], format,
+        columns: [{ source: 'reference', label: 'Reference' }],
+        revisions: [...selected].reverse().map(document => ({ documentId: document.id.toUpperCase(), approvalId: document.approvalId.toUpperCase() })),
+      }, owner, instance);
+      assert.equal(response.statusCode, 200, response.body);
+      const result = response.json();
+      assert.equal(result.documentCount, 2);
+      assert.deepEqual(renderedOrders.at(-1), ids);
+      assert.deepEqual(result.revisions, selected.map(document => ({ documentId: document.id, approvalId: document.approvalId, runId: document.runId })));
+      const saved = (await adminPool.query('select document_ids,run_ids,records,bytes from export_snapshots where id=$1 and workspace_id=$2', [result.id, owner.workspace.id])).rows[0];
+      assert.deepEqual(saved.document_ids, ids);
+      assert.deepEqual(saved.run_ids, selected.map(document => document.runId));
+      assert.deepEqual(saved.records.map((record: any) => ({ documentId: record.documentId, approvalId: record.approvalId, runId: record.runId, reference: record.values.reference })), selected.map(document => ({ documentId: document.id, approvalId: document.approvalId, runId: document.runId, reference: document.values.reference })));
+      const download = await request('GET', result.downloadUrl);
+      assert.equal(download.statusCode, 200);
+      assert.deepEqual(download.rawPayload, saved.bytes);
+      if (format === 'json') assert.deepEqual(download.json().documents.map((document: any) => document.documentId), ids);
+      else if (format === 'csv') assert.equal(download.rawPayload.toString('utf8'), '\uFEFF"Reference"\r\n' + references.map(value => `"${value}"\r\n`).join(''));
+      else {
+        const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(download.rawPayload as any);
+        assert.deepEqual([workbook.worksheets[0].getCell('A2').value, workbook.worksheets[0].getCell('A3').value], references);
+      }
+    }
+  }
+  assert.equal(renderedOrders.length, 7);
 });
 
 test('export phases surround actual rendering and preserve an approved historical revision with newer review work', async () => {

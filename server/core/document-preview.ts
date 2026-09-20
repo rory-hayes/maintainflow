@@ -34,7 +34,7 @@ export function registerDocumentPreview(app:FastifyInstance,renderPage=renderTif
    const current=await read();if(!current||current.storage_key!==document.storage_key||current.sha256!==document.sha256||current.page_count!==document.page_count||current.mime_type!=='image/tiff')notFound();
    return reply.header('Content-Type','image/jpeg').header('Content-Length',result.bytes.length).header('Cache-Control','private, no-store')
     .header('Content-Disposition','inline').header('X-Content-Type-Options','nosniff').header('Referrer-Policy','no-referrer')
-    .header('Content-Security-Policy',"sandbox; default-src 'none'").header('X-Folio-Preview-Page',String(page)).header('X-Folio-Source-Sha256',document.sha256).send(result.bytes);
+    .header('Content-Security-Policy',"sandbox; default-src 'none'").header('X-Folio-Page-Count',String(result.pageCount)).header('X-Folio-Preview-Page',String(page)).header('X-Folio-Source-Sha256',document.sha256).send(result.bytes);
   }finally{req.raw.off('aborted',disconnect);reply.raw.off('close',disconnect);}
  });
 }
