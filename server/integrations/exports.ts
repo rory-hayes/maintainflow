@@ -8,7 +8,8 @@ import {renderExport,type ExportRecord} from './export-format.js';
 
 import {exportColumns as columns,exportMappingInput,exportLineItems} from './export-input.js';
 const optionsSchema = z.object({format:z.enum(['csv','xlsx','json']),columns:columns.optional(),lineItems:exportLineItems.optional()});
-const exportSchema = optionsSchema.extend({documentIds:z.array(z.uuid()).min(1).max(100),revisions:z.array(z.object({documentId:z.uuid(),approvalId:z.uuid()})).max(100).optional()});
+const canonicalUuid=z.uuid().transform(value=>value.toLowerCase());
+const exportSchema = optionsSchema.extend({documentIds:z.array(canonicalUuid).min(1).max(100),revisions:z.array(z.object({documentId:canonicalUuid,approvalId:canonicalUuid})).max(100).optional()});
 const hostedExportMaxBytes=4*1024*1024;
 class HostedExportSizeError extends Error {
   statusCode=413;
@@ -29,7 +30,9 @@ export async function registerExports(app:FastifyInstance, services:{render?:typ
       const found=await client.query(`SELECT d.id,d.name,d.approved_run_id FROM documents d WHERE d.id=ANY($1::uuid[]) AND d.workspace_id=$2 ORDER BY d.id FOR UPDATE OF d`,[uniqueIds,actor.workspaceId]);
       if(found.rows.length!==uniqueIds.length) notFound('One or more documents were not found.');
       const records:ExportRecord[]=[];
-      for(const document of found.rows) {
+      // Lock order prevents deadlocks; rendering follows the caller's selection.
+      const byId=new Map(found.rows.map(document=>[document.id,document]));
+      for(const document of uniqueIds.map(id=>byId.get(id)!)) {
         const selection=revisions?.find(r=>r.documentId===document.id);
         if(revisions&&!selection)badRequest('Select an approval revision for every exported document.');
         if(!selection&&!document.approved_run_id) badRequest('Approve every selected document before exporting.');

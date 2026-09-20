@@ -28,13 +28,15 @@ export type PdfSplitSpec = z.infer<typeof pdfSplitSpecSchema>;
 export type PdfPageRange = { start: number; end: number };
 
 export const pdfSplitValidationReasons = Object.freeze({
+  tiff_marker_unsupported: { message: 'TIFFs do not contain searchable text. Use a page count or custom page ranges.', statusCode: 400 },
+  tiff_repack_unsupported: { message: 'This TIFF cannot be split without changing its image data. Try exporting a standard TIFF from the source application.', statusCode: 415 },
   invalid_spec: { message: 'Choose a page count, valid page ranges, or a text marker of 1–200 characters.', statusCode: 400 },
   invalid_ranges: { message: 'Enter page ranges in order, without overlaps, such as 1-2, 5, 7-9.', statusCode: 400 },
-  page_bounds: { message: 'Page ranges must stay within this PDF.', statusCode: 400 },
-  document_limit: { message: 'A PDF can be split into at most 20 documents at once.', statusCode: 413 },
-  pdf_required: { message: 'Choose a PDF to split.', statusCode: 400 },
+  page_bounds: { message: 'Page ranges must stay within this document.', statusCode: 400 },
+  document_limit: { message: 'A document can be split into at most 20 documents at once.', statusCode: 413 },
+  pdf_required: { message: 'Choose a PDF or TIFF to split.', statusCode: 400 },
   child_size_limit: { message: 'A split document exceeds the 10 MB file limit. Choose smaller page ranges.', statusCode: 413 },
-  derived_size_limit: { message: 'The split PDFs exceed the 20 MB combined limit. Select fewer pages or larger groups.', statusCode: 413 },
+  derived_size_limit: { message: 'The split documents exceed the 20 MB combined limit. Select fewer pages or larger groups.', statusCode: 413 },
   text_limit: { message: 'The PDF contains more text than the supported 2 MB limit.', statusCode: 413 },
   marker_no_text: { message: 'This PDF has no searchable text. Use a page count or custom page ranges instead.', statusCode: 400 },
   marker_not_found: { message: 'The text marker was not found on any page. Check its spelling and case, or use custom page ranges.', statusCode: 400 },
@@ -148,7 +150,7 @@ export interface PdfSplitReceipt {
   split: {
     id: string; requestId: string; parserId: string; sourceName: string | null;
     sourcePageCount: number; selectedPages: number; childCount: number;
-    sourceAvailable: boolean; createdAt: string;
+    sourceAvailable: boolean; createdAt: string; sourceMimeType?: 'application/pdf' | 'image/tiff';
     origin?: 'upload' | 'stored'; sourceDocumentId?: string | null;
     sourceDocumentAvailable?: boolean; sourceSha256?: string; undoneAt?: string | null;
   };
@@ -164,13 +166,13 @@ export interface PdfSplitLineage {
   id: string; index: number; childCount: number;
   originalPageStart: number; originalPageEnd: number;
   sourcePageCount: number; sourceName: string | null;
-  sourceAvailable: boolean; retainedDocuments: number;
+  sourceAvailable: boolean; retainedDocuments: number; sourceMimeType?: 'application/pdf' | 'image/tiff';
   origin?: 'upload' | 'stored'; sourceDocumentId?: string | null;
   sourceDocumentAvailable?: boolean; requestId?: string; parserId?: string;
   undoneAt?: string | null; root?: PdfSplitRootLineage;
 }
 
-/** Root means a PDF asset. An archive itself never supplies PDF page numbers. */
+/** Root means the PDF or TIFF asset. An archive itself never supplies page numbers. */
 export interface PdfSplitRootLineage {
   kind: 'document' | 'pdf-split'; id: string; sha256: string;
   pageCount: number; pageStart: number; pageEnd: number;
@@ -185,6 +187,6 @@ export interface StoredPdfSplitUndo {
 export interface StoredPdfSplitRejected {
   rejected: {
     id: string; requestId: string; parserId: string; sourceDocumentId: string;
-    sourceSha256: string; options: PdfSplitSpec; code: string; reason: string; message: string;
+    sourceSha256: string; sourceMimeType?: 'application/pdf' | 'image/tiff'; options: PdfSplitSpec; code: string; reason: string; message: string;
   };
 }

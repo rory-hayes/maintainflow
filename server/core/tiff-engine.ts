@@ -4,10 +4,11 @@ import {SourceValidationError,type SourceValidationReason} from './source-valida
 function invalid(reason:SourceValidationReason='tiff_invalid'):never{throw new SourceValidationError(reason);}
 const sizes:Record<number,number>={1:1,2:1,3:2,4:4,5:8,6:1,7:1,8:2,9:4,10:8,11:4,12:8,13:4,16:8,17:8,18:8};
 export function isTiffHeader(bytes:Buffer){return bytes.length>=4&&((bytes[0]===0x49&&bytes[1]===0x49&&[42,43].includes(bytes[2])&&bytes[3]===0)||(bytes[0]===0x4d&&bytes[1]===0x4d&&bytes[2]===0&&[42,43].includes(bytes[3])));}
-type Field={type:number;count:number;offset:number};
-type Ifd={offset:number;next:number;fields:Map<number,Field>;edges:number[];image?:Omit<TiffPageDescriptor,'page'>};
+export type TiffField={type:number;count:number;offset:number};
+export type TiffIfd={offset:number;next:number;fields:Map<number,TiffField>;edges:number[];image?:Omit<TiffPageDescriptor,'page'>};
+type Field=TiffField;type Ifd=TiffIfd;
 /** Validates every referenced IFD/value/data extent before native image code sees the bytes. */
-export function inspectTiffStructure(bytes:Buffer):TiffDirectory{
+export function inspectTiffGraph(bytes:Buffer):{directory:TiffDirectory;nodes:Map<number,TiffIfd>}{
  if(!bytes.length)invalid('empty');if(bytes.length>tiffLimits.maxBytes)invalid('file_too_large');if(!isTiffHeader(bytes))invalid();
  const littleEndian=bytes[0]===0x49,bigTiff=(littleEndian?bytes[2]:bytes[3])===43,header=bigTiff?16:8,alignment=2,countSize=bigTiff?8:2,entrySize=bigTiff?20:12,offsetSize=bigTiff?8:4,inlineSize=bigTiff?8:4;
  const range=(offset:number,size:number)=>{if(!Number.isSafeInteger(offset)||!Number.isSafeInteger(size)||offset<0||size<0||offset>bytes.length-size)invalid();};
@@ -25,7 +26,7 @@ export function inspectTiffStructure(bytes:Buffer):TiffDirectory{
   const offset=pending.pop()!;if(nodes.has(offset))continue;if(nodes.size>=tiffLimits.maxIfds)invalid('tiff_structure_limit');
   if(offset<header||offset%alignment)invalid();range(offset,countSize);
   const count=uint(offset,countSize,tiffLimits.maxIfdEntries);if(count<1)invalid();const length=countSize+count*entrySize+offsetSize;range(offset,length);ifdRanges.push([offset,offset+length]);
-  const fields=new Map<number,Field>();let previous=0;
+  const fields=new Map<number,Field>();let previous=-1;
   for(let i=0;i<count;i++){
    const position=offset+countSize+i*entrySize,tag=uint(position,2),type=uint(position+2,2),unit=sizes[type];if(tag<=previous||!unit||(!bigTiff&&type>=16))invalid();previous=tag;
    const number=uint(position+4,bigTiff?8:4,bytes.length);if(number<1)invalid();const size=number*unit;if(!Number.isSafeInteger(size)||size>bytes.length)invalid();
@@ -75,8 +76,9 @@ export function inspectTiffStructure(bytes:Buffer):TiffDirectory{
  while(cursor){const node=nodes.get(cursor)!;if(!node.image)invalid();if(pages.length>=tiffLimits.maxPages)invalid('tiff_page_limit');pages.push({page:pages.length+1,...node.image});cursor=node.next;}
  ifdRanges.sort((a,b)=>a[0]-b[0]);for(let i=1;i<ifdRanges.length;i++)if(ifdRanges[i][0]<ifdRanges[i-1][1])invalid();
  for(const [start,end]of blocks)for(const [ifdStart,ifdEnd]of ifdRanges){if(ifdStart>=end)break;if(ifdEnd>start)invalid();}
- return {bigTiff,littleEndian,pages,totalPixels};
+ return {directory:{bigTiff,littleEndian,pages,totalPixels},nodes};
 }
+export function inspectTiffStructure(bytes:Buffer):TiffDirectory{return inspectTiffGraph(bytes).directory;}
 
 async function renderPage(bytes:Buffer,descriptor:TiffPageDescriptor,pageCount:number){
  // Native imports/initialization remain operational failures, never permanent input rejections.

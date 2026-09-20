@@ -12,7 +12,7 @@ import {encodeSplitInput,encodeArchiveInput} from './decoder-input.js';
 import {archiveImportLimits,archiveEntryReasons,canonicalArchiveImportSpec,ArchiveImportValidationError,isArchiveImportValidationReason,type ArchiveImportSpec,type ArchiveImportValidationReason} from '../../shared/archive-import.js';
 import {sourceFormats} from '../../shared/source-formats.js';
 import {tiffLimits,tiffRenderVersion,type TiffPageRenderMetadata,type TiffAiDocumentMetadata} from '../../shared/tiff.js';
-import {inspectTiffStructure} from './tiff-engine.js';
+import {inspectTiffStructure,isTiffHeader} from './tiff-engine.js';
 import {scanZip,zipCrc32,isMacArchiveMetadataPath,isMacArchiveMetadata} from './zip-reader.js';
 import {detectSourceFormat} from './decoder-engine.js';
 import type {DecodedArchive} from './archive-engine.js';
@@ -52,7 +52,7 @@ const splitResponseSchema = z.union([
     parts: z.array(z.object({
       range: z.object({ start: z.number().int(), end: z.number().int() }).strict(),
       data: z.string().min(1).max(4 * Math.ceil(pdfSplitLimits.maxBytes / 3)),
-      source: sourceSchema.extend({ mimeType: z.literal('application/pdf') }).strict(),
+      source: sourceSchema.extend({ mimeType: z.enum(['application/pdf','image/tiff']) }).strict(),
     }).strict()).min(1).max(pdfSplitLimits.maxDocuments),
   }).strict() }).strict(), failureSchema,
 ]);
@@ -167,23 +167,28 @@ export function runDecoder(bytes: Buffer, filename: string, options: DecoderOpti
 export interface SplitPdfSource {
   sourcePageCount: number;
   selectedPages: number;
-  parts: Array<{ range: PdfPageRange; bytes: Buffer; source: { mimeType: 'application/pdf'; pageCount: number; pages: PageText[] } }>;
+  parts: Array<{ range: PdfPageRange; bytes: Buffer; source: { mimeType: 'application/pdf' | 'image/tiff'; pageCount: number; pages: PageText[] } }>;
 }
 
 export function splitPdfSource(bytes: Buffer, filename: string, value: PdfSplitSpec, options: DecoderOptions = {}): Promise<SplitPdfSource> {
   // Validate/copy before spawning; caller mutation cannot change IPC interpretation.
   const spec: PdfSplitSpec = JSON.parse(canonicalPdfSplitSpec(value));
+  const isTiff=isTiffHeader(bytes),mimeType=isTiff?'image/tiff':'application/pdf';
+  if(isTiff&&spec.mode==='marker')throw new PdfSplitValidationError('tiff_marker_unsupported');
+  const directory=isTiff?inspectTiffStructure(bytes):undefined;
   return runIsolated(bytes, filename, output => {
     const response = splitResponseSchema.parse(output);
     if (!response.ok) throw new Error('Expected PDF split');
     const result = response.split, plan = planPdfSplit(spec, result.sourcePageCount);
+    if(directory&&directory.pages.length!==result.sourcePageCount)throw new Error('TIFF source count mismatch');
     if (result.selectedPages !== plan.selectedPages || result.parts.length !== plan.ranges.length) throw new Error('Split plan mismatch');
     let totalBytes = 0, totalText = 0;
     const parts = result.parts.map((part, index) => {
       const range = plan.ranges[index], count = range.end - range.start + 1;
       if (part.range.start !== range.start || part.range.end !== range.end || part.source.pageCount !== count || part.source.pages.length !== count) throw new Error('Split range mismatch');
       const childBytes = Buffer.from(part.data, 'base64');
-      if (!childBytes.length || childBytes.length > pdfSplitLimits.maxBytes || childBytes.toString('base64') !== part.data || !childBytes.subarray(0, 5).equals(Buffer.from('%PDF-'))) throw new Error('Split bytes invalid');
+      if (!childBytes.length || childBytes.length > pdfSplitLimits.maxBytes || childBytes.toString('base64') !== part.data || part.source.mimeType!==mimeType || (isTiff ? !isTiffHeader(childBytes) : !childBytes.subarray(0, 5).equals(Buffer.from('%PDF-')))) throw new Error('Split bytes invalid');
+      if(isTiff){const child=inspectTiffStructure(childBytes);if(child.pages.length!==count||child.pages.some((p,i)=>{const original=directory!.pages[range.start-1+i];return p.width!==original.width||p.height!==original.height||p.orientation!==original.orientation;})||part.source.pages.some(p=>p.text!==''))throw new Error('TIFF split structure mismatch');}
       totalBytes += childBytes.length;
       for (const [i, page] of part.source.pages.entries()) {
         if (page.page !== i + 1) throw new Error('Split page numbering mismatch');

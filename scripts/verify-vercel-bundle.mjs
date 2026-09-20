@@ -39,7 +39,9 @@ try{
       const source=await inspectSource(bytes,'misleading.txt');assert.deepEqual(source,{mimeType:'image/tiff',pageCount:2,pages:[{page:1,text:''},{page:2,text:''}]});
       const rendered=await renderTiffPage(bytes,2);assert.equal(rendered.page,2);assert.equal(rendered.pageCount,2);assert.equal(rendered.width,64);assert.equal(rendered.height,96);assert.equal(rendered.mimeType,'image/jpeg');assert.equal(rendered.sourceSha256,sourceSha256);assert.equal(rendered.renderVersion,tiffRenderVersion);
       const converted=await convertTiffForAI(bytes),pdf=await PDFDocument.load(converted.bytes);assert.equal(converted.pageCount,2);assert.equal(converted.sourceSha256,sourceSha256);assert.equal(converted.renderVersion,tiffRenderVersion);assert.equal(pdf.getPageCount(),2);assert.deepEqual(pdf.getPages().map(page=>page.getSize()),[{width:80,height:120},{width:64,height:96}]);
-      console.log('PASS packaged TIFF full inspection, oriented JPEG preview and all-page PDF '+filename);
+      const split=await splitPdfSource(bytes,filename,{mode:'every',pagesPerDocument:1});assert.equal(split.parts.length,2);assert.equal(split.selectedPages,2);
+      for(const [i,part]of split.parts.entries()){assert.equal(part.source.mimeType,'image/tiff');assert.equal(part.source.pageCount,1);const decoded=await inspectSource(part.bytes,'child.tiff');assert.deepEqual(decoded,{mimeType:'image/tiff',pageCount:1,pages:[{page:1,text:''}]});const childPreview=await renderTiffPage(part.bytes,1);const originalPreview=await renderTiffPage(bytes,i+1);assert.deepEqual(childPreview.bytes,originalPreview.bytes);}
+      console.log('PASS packaged TIFF full inspection, oriented preview, all-page PDF and lossless splitting '+filename);
     }
     const html=await inspectSource(Buffer.from('<h1>Owned bundle fixture</h1><p>Total: 12.50</p>'),'fixture.html');
     assert.match(html.pages[0].text,/12.50/);

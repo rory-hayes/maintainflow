@@ -60,8 +60,8 @@ async function sourceDescriptor(c:PoolClient,workspaceId:string,documentId:strin
  if(!parser)notFound('Original document not found');
  const row=(await c.query('select id,parser_id,sha256,storage_key,name,byte_size,page_count,mime_type from documents where id=$1 and workspace_id=$2 for update',[documentId,workspaceId])).rows[0];
  if(!row)notFound('Original document not found');
- if(row.mime_type!=='application/pdf')badRequest('Choose a stored PDF to split.',415);
- if(Number(row.byte_size)>pdfSplitLimits.maxBytes||row.page_count>pdfSplitLimits.maxPages)badRequest('The stored PDF exceeds the split file or page limit.',413);
+ if(!['application/pdf','image/tiff'].includes(row.mime_type))badRequest('Choose a stored document or TIFF to split.',415);
+ if(Number(row.byte_size)>pdfSplitLimits.maxBytes||row.page_count>pdfSplitLimits.maxPages)badRequest('The stored document exceeds the split file or page limit.',413);
  validateStorageKey(row.storage_key,workspaceId);
  const lineage=await pdfSplitDetail(c,workspaceId,documentId,true);
  return {...row,root:lineage?.root??{kind:'document',id:row.id,sha256:row.sha256,pageCount:row.page_count,pageStart:1,pageEnd:row.page_count}};
@@ -76,7 +76,7 @@ export async function splitStoredPdf(authorization:StoredPdfAuthorization,docume
  if(!Number.isFinite(timeoutMs)||timeoutMs<=0||timeoutMs>120_000)throw new Error('Split deadline must be positive and at most 120 seconds');
  const deadline=Date.now()+timeoutMs,controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),timeoutMs);timer.unref();
- const remaining=()=>{const value=deadline-Date.now();if(controller.signal.aborted||value<=0)badRequest('PDF splitting took too long. Retry the same request.',503);return value;};
+ const remaining=()=>{const value=deadline-Date.now();if(controller.signal.aborted||value<=0)badRequest('Document splitting took too long. Retry the same request.',503);return value;};
  const runTransaction=<T>(fn:(c:PoolClient)=>Promise<T>)=>withStoredPdfAuthorization(authorization,async c=>{remaining();const result=await fn(c);remaining();return result;});
  try{
  const admitted=await runTransaction(async c=>{
@@ -99,18 +99,18 @@ export async function splitStoredPdf(authorization:StoredPdfAuthorization,docume
  const source=admitted.source!;
  let bytes:Buffer;
  try{bytes=await new Promise<Buffer>((resolve,reject)=>{
-  const abort=()=>reject(Object.assign(new Error('PDF splitting took too long. Retry the same request.'),{statusCode:503}));
+  const abort=()=>reject(Object.assign(new Error('Document splitting took too long. Retry the same request.'),{statusCode:503}));
   controller.signal.addEventListener('abort',abort,{once:true});
   Promise.resolve().then(()=>{remaining();return (options.readSource??readStoredObject)(source.storage_key,pdfSplitLimits.maxBytes);})
    .then(resolve,reject).finally(()=>controller.signal.removeEventListener('abort',abort));
   if(controller.signal.aborted)abort();
  });remaining();}
  catch(error){if((error as {code?:string}).code==='ENOENT'||(error as {statusCode?:number}).statusCode===404)notFound('Original file is unavailable');throw error;}
- if(!Buffer.isBuffer(bytes)||bytes.length!==Number(source.byte_size)||sha(bytes)!==source.sha256)badRequest('The stored PDF could not be verified. Reload the document before retrying.',409);
- const storedSource:StoredPdfSplitContext={documentId,pageCount:source.page_count,root:source.root,transaction:runTransaction,
+ if(!Buffer.isBuffer(bytes)||bytes.length!==Number(source.byte_size)||sha(bytes)!==source.sha256)badRequest('The stored document could not be verified. Reload the document before retrying.',409);
+ const storedSource:StoredPdfSplitContext={documentId,pageCount:source.page_count,mimeType:source.mime_type,root:source.root,transaction:runTransaction,
   async assertSource(c){
    const current=await sourceDescriptor(c,actor.workspaceId,documentId);
-   if(current.parser_id!==source.parser_id||current.sha256!==source.sha256||current.storage_key!==source.storage_key||current.page_count!==source.page_count||Number(current.byte_size)!==Number(source.byte_size)||JSON.stringify(current.root)!==JSON.stringify(source.root))badRequest('The original document changed. Reload it before splitting.',409);
+   if(current.mime_type!==source.mime_type||current.parser_id!==source.parser_id||current.sha256!==source.sha256||current.storage_key!==source.storage_key||current.page_count!==source.page_count||Number(current.byte_size)!==Number(source.byte_size)||JSON.stringify(current.root)!==JSON.stringify(source.root))badRequest('The original document changed. Reload it before splitting.',409);
   },
  };
  return await addSplitDocuments(actor,source.parser_id,bytes,source.name,requestId,JSON.parse(canonical),{splitSource:options.splitSource,timeoutMs:remaining(),storedSource});
@@ -138,9 +138,9 @@ export async function undoStoredPdfSplit(authorization:StoredPdfAuthorization,sp
  return withStoredPdfAuthorization(authorization,async c=>{
   await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[actor.workspaceId]);
   const row=(await c.query("select * from pdf_splits where id=$1 and workspace_id=$2 and state='accepted' for update",[splitId,actor.workspaceId])).rows[0];
-  if(!row)notFound('PDF split not found');
-  if(!row.source_document_id)badRequest('Undo is available for batches split from a stored PDF.',409);
-  const result=await purgePdfSplit(c,actor.workspaceId,splitId);if(!result)notFound('PDF split not found');
+  if(!row)notFound('Split not found');
+  if(!row.source_document_id)badRequest('Undo is available for batches split from a stored document.',409);
+  const result=await purgePdfSplit(c,actor.workspaceId,splitId);if(!result)notFound('Split not found');
   if(!row.undone_at){
    await c.query('update pdf_splits set undone_at=clock_timestamp() where id=$1 and workspace_id=$2',[splitId,actor.workspaceId]);
    await audit(c,actor.workspaceId,actor.userId,'document.split_undone',splitId,{sourceDocumentId:row.source_document_id,documents:result.removedDocuments});

@@ -14,6 +14,7 @@ export default function UndoPdfSplit({receipt,onChanged}:{receipt:PdfSplitReceip
  return <UndoAction key={`${scope.userId}:${scope.workspaceId}:${session.workspace.role}:${receipt.split.id}:${receipt.split.undoneAt||''}`} scope={scope} receipt={receipt} onChanged={onChanged}/>;
 }
 function UndoAction({scope,receipt,onChanged}:{scope:StoredSplitScope;receipt:PdfSplitReceipt;onChanged?:(receipt:PdfSplitReceipt)=>void}){
+ const kind=receipt.split.sourceMimeType==='image/tiff'?'TIFF':'PDF';
  const [open,setOpen]=useState(false),[busy,setBusy]=useState(false),[uncertain,setUncertain]=useState(false),[error,setError]=useState(''),[latest,setLatest]=useState(receipt);
  const mounted=useRef(false),running=useRef(false),controller=useRef(new AbortController()),client=useQueryClient();
  useLayoutEffect(()=>{mounted.current=true;controller.current=new AbortController();return()=>{mounted.current=false;controller.current.abort();};},[]);
@@ -25,7 +26,7 @@ function UndoAction({scope,receipt,onChanged}:{scope:StoredSplitScope;receipt:Pd
   finally{running.current=false;if(mounted.current)setBusy(false);}
  }
  if(latest.split.undoneAt)return <p className="small pdf-split-undone" role="status">Split undone · source and used page credits unchanged</p>;
- return <><Button type="button" variant="ghost" onClick={()=>setOpen(true)}><Undo2/>Undo this split</Button><Modal title="Undo this split?" description="This removes this batch’s created documents, their results, and exports containing those documents. The source PDF, its earlier original-only exports, sibling splits and nested batches remain. Used page credits are unchanged. File deletion is queued." open={open} onOpenChange={value=>{if(!running.current)setOpen(value);}}><Notice error={error}/><div className="actions"><Button type="button" variant={uncertain?'secondary':'danger'} disabled={busy} onClick={()=>void act(uncertain)}>{busy?'Checking split…':uncertain?'Check undo status':'Undo this split'}</Button><Button type="button" variant="ghost" disabled={busy} onClick={()=>setOpen(false)}>Keep split</Button></div></Modal></>;
+ return <><Button type="button" variant="ghost" onClick={()=>setOpen(true)}><Undo2/>Undo this split</Button><Modal title="Undo this split?" description={`This removes this batch’s created documents, their results, and exports containing those documents. The source ${kind}, its earlier original-only exports, sibling splits and nested batches remain. Used page credits are unchanged. File deletion is queued.`} open={open} onOpenChange={value=>{if(!running.current)setOpen(value);}}><Notice error={error}/><div className="actions"><Button type="button" variant={uncertain?'secondary':'danger'} disabled={busy} onClick={()=>void act(uncertain)}>{busy?'Checking split…':uncertain?'Check undo status':'Undo this split'}</Button><Button type="button" variant="ghost" disabled={busy} onClick={()=>setOpen(false)}>Keep split</Button></div></Modal></>;
 }
 
 export function StoredBatchUndo({parserId,requestId,onChanged}:{parserId:string;requestId:string;onChanged?:(receipt:PdfSplitReceipt)=>void}){

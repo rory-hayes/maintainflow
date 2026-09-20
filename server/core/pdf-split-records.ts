@@ -1,5 +1,5 @@
 import type {PoolClient} from 'pg';
-import {notFound} from './db.js';
+import {notFound,badRequest} from './db.js';
 import {ParserFormatNotAllowedError,SourceIntakeRejectedError} from './intake-policy.js';
 import {isSourceValidationReason} from './source-validation.js';
 import {canonicalPdfSplitSpec,PdfSplitValidationError,isPdfSplitValidationReason,type PdfSplitReceipt,type PdfSplitRootLineage,type StoredPdfSplitRejected} from '../../shared/pdf-split.js';
@@ -18,7 +18,7 @@ export function splitRootPages(row:any,start:number,end:number):PdfSplitRootLine
 
 /** Reconstruct only finite application-owned errors; never persist error messages. */
 export function splitReceiptError(row:any):Error{
- if(row.rejection_code==='parser_format_not_allowed'&&row.rejection_reason==='pdf')return new ParserFormatNotAllowedError(row.parser_id,'pdf');
+ if(row.rejection_code==='parser_format_not_allowed'&&['pdf','tiff'].includes(row.rejection_reason))return new ParserFormatNotAllowedError(row.parser_id,row.rejection_reason);
  if(row.rejection_code==='source_validation_failed'&&isSourceValidationReason(row.rejection_reason))return new SourceIntakeRejectedError(row.parser_id,row.rejection_reason);
  if(row.rejection_code==='pdf_split_validation_failed'&&isPdfSplitValidationReason(row.rejection_reason))return new PdfSplitValidationError(row.rejection_reason);
  return new Error('The PDF split receipt could not be read.');
@@ -29,7 +29,7 @@ export function storedPdfSplitRejection(row:any):StoredPdfSplitRejected{
  if(row.state!=='rejected'||!row.source_document_id)throw new Error('Expected a stored PDF rejection');
  const error=splitReceiptError(row);
  return {rejected:{id:row.id,requestId:row.request_id,parserId:row.parser_id,sourceDocumentId:row.source_document_id,
-  sourceSha256:row.source_sha256,options:JSON.parse(canonicalPdfSplitSpec(row.canonical_spec)),code:row.rejection_code,reason:row.rejection_reason,message:error.message}};
+  sourceSha256:row.source_sha256,...(row.source_mime_type==='image/tiff'?{sourceMimeType:'image/tiff' as const}:{}),options:JSON.parse(canonicalPdfSplitSpec(row.canonical_spec)),code:row.rejection_code,reason:row.rejection_reason,message:error.message}};
 }
 
 export async function readPdfSplitReceipt(c:PoolClient,workspaceId:string,splitId:string,replayed=false):Promise<PdfSplitReceipt>{
@@ -44,7 +44,7 @@ export async function readPdfSplitReceipt(c:PoolClient,workspaceId:string,splitI
   where m.split_id=$1 and m.workspace_id=$2 order by m.child_index`,[splitId,workspaceId])).rows;
  return {
   split:{id:row.id,requestId:row.request_id,parserId:row.parser_id,sourceName:row.source_name,
-   sourcePageCount:row.source_page_count,selectedPages:row.selected_pages,childCount:row.child_count,
+   ...(row.source_mime_type==='image/tiff'?{sourceMimeType:'image/tiff' as const}:{}),sourcePageCount:row.source_page_count,selectedPages:row.selected_pages,childCount:row.child_count,
    sourceAvailable:Boolean(row.source_storage_key)&&children.some(child=>Boolean(child.live_id)),createdAt:new Date(row.created_at).toISOString(),
    ...(row.source_document_id?{origin:'stored' as const,sourceDocumentId:row.source_document_id,
    sourceDocumentAvailable:row.source_document_available,sourceSha256:row.source_sha256,
@@ -57,7 +57,7 @@ export async function readPdfSplitReceipt(c:PoolClient,workspaceId:string,splitI
 
 export async function pdfSplitDetail(c:PoolClient,workspaceId:string,documentId:string,includeUploadRoot=false){
  const row=(await c.query(`select s.id,s.child_count,s.source_page_count,s.source_name,s.source_storage_key,
-  s.source_sha256,s.source_document_id,s.request_id,s.parser_id,s.undone_at,
+  s.source_mime_type,s.source_sha256,s.source_document_id,s.request_id,s.parser_id,s.undone_at,
   s.root_kind,s.root_id,s.root_sha256,s.root_page_count,s.root_page_start,
   exists(select 1 from documents origin where origin.id=s.source_document_id and origin.workspace_id=s.workspace_id and origin.parser_id=s.parser_id) source_document_available,
   m.child_index,m.start_page,m.end_page,
@@ -67,15 +67,15 @@ export async function pdfSplitDetail(c:PoolClient,workspaceId:string,documentId:
   join pdf_splits s on s.id=m.split_id and s.workspace_id=m.workspace_id and s.parser_id=m.parser_id
   where d.id=$1 and d.workspace_id=$2 and s.state='accepted'`,[documentId,workspaceId])).rows[0];
  return row?{id:row.id,index:row.child_index,childCount:row.child_count,originalPageStart:row.start_page,originalPageEnd:row.end_page,
-  sourcePageCount:row.source_page_count,sourceName:row.source_name,sourceAvailable:Boolean(row.source_storage_key),retainedDocuments:row.retained_documents,
+  ...(row.source_mime_type==='image/tiff'?{sourceMimeType:'image/tiff' as const}:{}),sourcePageCount:row.source_page_count,sourceName:row.source_name,sourceAvailable:Boolean(row.source_storage_key),retainedDocuments:row.retained_documents,
   ...(row.source_document_id||includeUploadRoot?{origin:row.source_document_id?'stored':'upload',sourceDocumentId:row.source_document_id??null,
   sourceDocumentAvailable:row.source_document_available,requestId:row.request_id,parserId:row.parser_id,
   undoneAt:row.undone_at?new Date(row.undone_at).toISOString():null,root:splitRootPages(row,row.start_page,row.end_page)}:{})}:null;
 }
 
 /** Internal storage descriptor, available only through a currently live owned child. */
-export async function retainedPdfSource(c:PoolClient,workspaceId:string,documentId:string):Promise<{storage_key:string;name:string}|undefined>{
- return (await c.query(`select s.source_storage_key storage_key,s.source_name name from documents d
+export async function retainedPdfSource(c:PoolClient,workspaceId:string,documentId:string):Promise<{storage_key:string;name:string;mime_type:string}|undefined>{
+ return (await c.query(`select s.source_storage_key storage_key,s.source_name name,s.source_mime_type mime_type from documents d
   join pdf_split_children m on m.document_id=d.id and m.workspace_id=d.workspace_id and m.parser_id=d.parser_id
    and m.split_id=d.pdf_split_id and m.child_index=d.pdf_split_index
   join pdf_splits s on s.id=m.split_id and s.workspace_id=m.workspace_id and s.parser_id=m.parser_id
@@ -87,4 +87,17 @@ export async function storedObjectReferenced(c:PoolClient,workspaceId:string,sto
  return Boolean((await c.query(`select 1 from documents where workspace_id=$1 and storage_key=$2
   union all select 1 from pdf_splits where workspace_id=$1 and source_storage_key=$2
   union all select 1 from archive_imports where workspace_id=$1 and source_storage_key=$2 limit 1`,[workspaceId,storageKey])).rowCount);
+}
+
+/** All upload reservations for a request share one source and one confirmed plan.
+ * Call only while holding the workspace admission lock, including multipart intake.
+ */
+export async function assertUploadedSplitBinding(c:PoolClient,workspaceId:string,parserId:string,requestId:string,sha256:string,canonical?:string){
+ const conflict=()=>badRequest('This split request already belongs to a different source or page selection. Retry its original request.',409);
+ if((await c.query('select 1 from stored_pdf_split_requests where workspace_id=$1 and request_id=$2',[workspaceId,requestId])).rowCount)conflict();
+ const prior=await findPdfSplitByRequest(c,workspaceId,requestId);
+ if(prior&&(prior.source_document_id||prior.parser_id!==parserId||prior.source_sha256!==sha256||canonical!==undefined&&canonicalPdfSplitSpec(prior.canonical_spec)!==canonical))conflict();
+ const reservations=(await c.query('select parser_id,expected_sha256,pdf_split_spec from direct_uploads where workspace_id=$1 and pdf_split_request_id=$2',[workspaceId,requestId])).rows;
+ for(const row of reservations)if(row.parser_id!==parserId||row.expected_sha256!==sha256||canonical!==undefined&&row.pdf_split_spec&&canonicalPdfSplitSpec(row.pdf_split_spec)!==canonical)conflict();
+ return prior;
 }

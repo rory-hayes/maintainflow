@@ -28,8 +28,15 @@ try {
   let json: string;
   if (splitting) {
     const {bytes,spec} = decodeSplitInput(Buffer.concat(chunks));
-    const { decodePdfSplit } = await import('./pdf-split-engine.js');
-    json = JSON.stringify({ ok: true, split: await decodePdfSplit(bytes, process.argv[2] || 'document.pdf', spec) });
+    const {isTiffHeader}=await import('./tiff-engine.js');
+    if(isTiffHeader(bytes)){
+      const {decodeSplitTiffSource}=await import('./tiff-split-engine.js');
+      const split=await decodeSplitTiffSource(bytes,spec);
+      json=JSON.stringify({ok:true,split:{...split,parts:split.parts.map(({bytes,...part})=>({...part,data:bytes.toString('base64')}))}});
+    }else{
+      const { decodePdfSplit } = await import('./pdf-split-engine.js');
+      json = JSON.stringify({ ok: true, split: await decodePdfSplit(bytes, process.argv[2] || 'document.pdf', spec) });
+    }
   } else if (archiving) {
     const {bytes,spec} = decodeArchiveInput(Buffer.concat(chunks));
     const {decodeArchive} = await import('./archive-engine.js');
