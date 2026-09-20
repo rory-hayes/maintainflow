@@ -6,11 +6,12 @@ import {adminPool,appPool,transaction,withWorkspace} from './db.js';
 import {config} from './config.js';
 import {assertStorageRestoreReady} from './restore-state.js';
 import {prepareVisualDocument,visualRenderingMetadata} from './visual-source.js';
-import {lockParserForDocument} from './parser-setup.js';
+import {lockParserForDocument,runnableAiWorkSql} from './parser-setup.js';
 import {extractRules} from './extraction.js';
 import {selectTemplateExtraction} from './template-selection.js';
 import {templatePolicy,type TemplateSelection} from '../../shared/template-selection.js';
 import {hasWorkspaceExtractionCapacity,processOneSchemaSuggestion,setSchemaSuggestionProvider} from './schema-suggestions.js';
+import {processOneSplitSuggestion,reconcileExpiredSplitSuggestions,setSplitSuggestionProvider} from './split-suggestions.js';
 import {reconcileInterruptedIntake} from './object-reconciliation.js';
 import {purgeDocument,deleteStoredFiles,processOneFileDeletion} from './retention.js';
 import type {ExtractionProvider,ExtractionResult} from '../../shared/types.js';
@@ -66,7 +67,20 @@ if(options.signal?.aborted)return false;
 await recoverExpiredCoreJobs(onlyJobId);
 if(options.signal?.aborted)return false;
 const job=await transaction(adminPool,async c=>{
-const {rows}=await c.query("select j.* from jobs j join workspaces w on w.id=j.workspace_id where j.state='queued' and not j.waiting_for_schema and j.available_at<=now() and ($1::uuid is not null or not exists(select 1 from schema_suggestions earlier where earlier.workspace_id=j.workspace_id and earlier.state='queued' and earlier.available_at<=now() and earlier.created_at<j.created_at)) and ($1::uuid is null or j.id=$1) and ((select count(*) from jobs running where running.workspace_id=j.workspace_id and running.state='processing')+(select count(*) from schema_suggestions s where s.workspace_id=j.workspace_id and s.state='processing')) < coalesce((w.plan->>'maxConcurrent')::int,2) order by j.created_at for update of j,w skip locked limit 1",[onlyJobId||null]);if(!rows[0])return null;const selected=rows[0];/* Never wait for an intake/setup/delete lock while holding the claimed job. */if(!(await c.query('select pg_try_advisory_xact_lock(hashtextextended($1,0)) acquired',[selected.workspace_id])).rows[0].acquired)return null;if(!await hasWorkspaceExtractionCapacity(c,selected.workspace_id))return null;await c.query("update jobs set state='processing',attempts=attempts+1,lease_owner=$2,lease_until=now()+interval '120 seconds',updated_at=now() where id=$1",[selected.id,owner]);await c.query("update documents set status='processing',error=null,updated_at=now() where id=$1",[selected.document_id]);return {...selected,attempts:selected.attempts+1};});
+const {rows}=await c.query(`select j.* from jobs j join workspaces w on w.id=j.workspace_id
+ where j.state='queued' and not j.waiting_for_schema and j.available_at<=now() and j.attempts<j.max_attempts
+ and ($1::uuid is not null or not exists(select 1 from (${runnableAiWorkSql}) earlier where earlier.workspace_id=j.workspace_id and (earlier.created_at,earlier.id,earlier.lane)<(j.created_at,j.id,0)))
+ and ($1::uuid is null or j.id=$1)
+ and ((select count(*) from jobs running where running.workspace_id=j.workspace_id and running.state='processing')+(select count(*) from schema_suggestions s where s.workspace_id=j.workspace_id and s.state='processing')+(select count(*) from split_suggestions s where s.workspace_id=j.workspace_id and s.state='processing'))<coalesce((w.plan->>'maxConcurrent')::int,2)
+ order by j.created_at,j.id for update of j,w skip locked limit 1`,[onlyJobId||null]);
+if(!rows[0])return null;
+const selected=rows[0];
+// Never wait for an intake/setup/delete lock while holding the claimed job.
+if(!(await c.query('select pg_try_advisory_xact_lock(hashtextextended($1,0)) acquired',[selected.workspace_id])).rows[0].acquired)return null;
+if(!await hasWorkspaceExtractionCapacity(c,selected.workspace_id,onlyJobId?undefined:{id:selected.id,createdAt:selected.created_at,lane:0})||options.signal?.aborted)return null;
+await c.query("update jobs set state='processing',attempts=attempts+1,lease_owner=$2,lease_until=now()+interval '120 seconds',updated_at=now() where id=$1",[selected.id,owner]);
+await c.query("update documents set status='processing',error=null,updated_at=now() where id=$1",[selected.document_id]);
+return {...selected,attempts:selected.attempts+1};});
 if(!job)return false;
 try{
 const attempt=await extractWithDeadline(async signal=>{
@@ -103,7 +117,7 @@ return true;
 export async function enforceRetention(onlyWorkspaceId?:string,options:{signal?:AbortSignal;limit?:number}={}){
  const limit=Math.max(1,Math.min(100,Math.floor(options.limit??100)));
  if(options.signal?.aborted)return {removed:0};
- const {rows}=await adminPool.query("select d.id,d.workspace_id from documents d join workspaces w on w.id=d.workspace_id where ($1::uuid is null or d.workspace_id=$1) and d.created_at < now()-((w.settings->>'retentionDays')::integer*interval '1 day') and not exists(select 1 from jobs j where j.document_id=d.id and j.state in('queued','processing')) and not exists(select 1 from schema_suggestions s where s.document_id=d.id and s.state in('queued','processing')) order by d.created_at,d.id limit $2",[onlyWorkspaceId||null,limit]);
+ const {rows}=await adminPool.query("select d.id,d.workspace_id from documents d join workspaces w on w.id=d.workspace_id where ($1::uuid is null or d.workspace_id=$1) and d.created_at < now()-((w.settings->>'retentionDays')::integer*interval '1 day') and not exists(select 1 from jobs j where j.document_id=d.id and j.state in('queued','processing')) and not exists(select 1 from schema_suggestions s where s.document_id=d.id and s.state in('queued','processing')) and not exists(select 1 from split_suggestions s where s.source_document_id=d.id and s.state in('queued','processing')) order by d.created_at,d.id limit $2",[onlyWorkspaceId||null,limit]);
  let removed=0;
  for(const candidate of rows){
   if(options.signal?.aborted)break;
@@ -111,7 +125,7 @@ export async function enforceRetention(onlyWorkspaceId?:string,options:{signal?:
    // Recheck under the same workspace/parser/document ordering as intake and setup.
    await lockParserForDocument(c,candidate.workspace_id,candidate.id);
    await c.query('select id from documents where id=$1 for update',[candidate.id]);
-   const eligible=await c.query("select d.id from documents d join workspaces w on w.id=d.workspace_id where d.id=$1 and d.created_at < now()-((w.settings->>'retentionDays')::integer*interval '1 day') and not exists(select 1 from jobs j where j.document_id=d.id and j.state in('queued','processing')) and not exists(select 1 from schema_suggestions s where s.document_id=d.id and s.state in('queued','processing'))",[candidate.id]);
+   const eligible=await c.query("select d.id from documents d join workspaces w on w.id=d.workspace_id where d.id=$1 and d.created_at < now()-((w.settings->>'retentionDays')::integer*interval '1 day') and not exists(select 1 from jobs j where j.document_id=d.id and j.state in('queued','processing')) and not exists(select 1 from schema_suggestions s where s.document_id=d.id and s.state in('queued','processing')) and not exists(select 1 from split_suggestions s where s.source_document_id=d.id and s.state in('queued','processing'))",[candidate.id]);
    return eligible.rowCount?purgeDocument(c,candidate.workspace_id,candidate.id):undefined;
   });
   if(document){await deleteStoredFiles(candidate.workspace_id,document.storageKeys);removed++;}
@@ -130,13 +144,21 @@ export async function startWorker(tick?:()=>Promise<unknown>){
   try{
     while(!shutdown.signal.aborted){
       try{
-        const worked=await processOneCoreJob(undefined,{signal:shutdown.signal});
-        const suggested=await processOneSchemaSuggestion(undefined,{signal:shutdown.signal});
+        const lanes=['extraction','field suggestion','split suggestion'] as const;
+        const work=await Promise.allSettled([
+          processOneCoreJob(undefined,{signal:shutdown.signal}),
+          processOneSchemaSuggestion(undefined,{signal:shutdown.signal}),
+          processOneSplitSuggestion(undefined,{signal:shutdown.signal}),
+        ]);
+        work.forEach((result,index)=>{if(result.status==='rejected')console.error(`Worker ${lanes[index]} failed; durable work remains queued.`);});
         if(shutdown.signal.aborted)break;
         await processOneFileDeletion();
         if(tick)await tick();
-        if(++cycles%120===0){await enforceRetention();await reconcileInterruptedIntake();}
-        if(!worked&&!suggested)await new Promise(r=>setTimeout(r,1000));
+        if(++cycles%120===0){
+          const maintenance=await Promise.allSettled([enforceRetention(undefined,{signal:shutdown.signal}),reconcileInterruptedIntake(undefined,{signal:shutdown.signal}),reconcileExpiredSplitSuggestions(undefined,{signal:shutdown.signal})]);
+          if(maintenance.some(result=>result.status==='rejected'))console.error('Worker maintenance failed; durable cleanup remains queued.');
+        }
+        if(!work.some(result=>result.status==='fulfilled'&&result.value))await new Promise(r=>setTimeout(r,1000));
       }catch(e){
         console.error('Worker tick failed:',e instanceof Error?e.message:'unknown error');
         if(!shutdown.signal.aborted)await new Promise(r=>setTimeout(r,2000));
@@ -154,5 +176,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   setExtractionProvider(createOpenAIProvider());
   const {createOpenAISchemaSuggestionProvider}=await import('./openai-schema-suggestions.js');
   setSchemaSuggestionProvider(createOpenAISchemaSuggestionProvider());
+  const {createOpenAISplitSuggestionProvider}=await import('./openai-split-suggestions.js');
+  setSplitSuggestionProvider(createOpenAISplitSuggestionProvider());
   await startWorker();
 }

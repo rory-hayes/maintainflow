@@ -202,7 +202,7 @@ export function splitPdfSource(bytes: Buffer, filename: string, value: PdfSplitS
   }, options, spec);
 }
 
-export const inspectSource = (bytes: Buffer, filename: string) => runDecoder(bytes, filename);
+export const inspectSource = (bytes: Buffer, filename: string, options:DecoderOptions={}) => runDecoder(bytes, filename,options);
 
 function runArchive(bytes:Buffer,filename:string,spec:ArchiveImportSpec|undefined,options:DecoderOptions):Promise<DecodedArchive>{
   const sourceSha256=createHash('sha256').update(bytes).digest('hex');

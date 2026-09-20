@@ -118,7 +118,8 @@ export async function addArchiveDocuments(actor:Actor,parserId:string,bytes:Buff
    requireReady(parser);requireFormats(parser,decoded.parts);await direct(c);await quota(c,decoded.totalPages,decoded.parts);check();
    const active=(await c.query('select count(distinct coalesce(split_attempt_id,archive_attempt_id)) filter(where lease_expires_at>now())::int attempts,coalesce(sum(reserved_bytes),0)::bigint bytes from intake_files where workspace_id=$1 and (split_attempt_id is not null or archive_attempt_id is not null)',[actor.workspaceId])).rows[0];
    const staging=(await c.query("select coalesce(sum(case when state='complete' then expected_bytes else 10485760 end),0)::bigint bytes from direct_uploads u where workspace_id=$1 and (state<>'cleaned' or exists(select 1 from file_deletions f where f.workspace_id=u.workspace_id and f.storage_key=u.storage_key))",[actor.workspaceId])).rows[0];
-   if(active.attempts>=2||Number(active.bytes)+Number(staging.bytes)+files.reduce((sum,file)=>sum+file.bytes.length,0)>250*1024*1024)badRequest('Too many pending document imports. Finish them or retry after their cleanup window.',429);
+   const suggestions=(await c.query('select coalesce(sum(source_reserved_bytes+staging_reserved_bytes),0)::bigint bytes from split_suggestions where workspace_id=$1',[actor.workspaceId])).rows[0];
+   if(active.attempts>=2||Number(active.bytes)+Number(staging.bytes)+Number(suggestions.bytes)+files.reduce((sum,file)=>sum+file.bytes.length,0)>250*1024*1024)badRequest('Too many pending document imports. Finish them or retry after their cleanup window.',429);
    for(const file of files)await c.query('insert into intake_files(id,workspace_id,storage_key,archive_attempt_id,reserved_bytes) values($1,$2,$3,$4,$5)',[file.id,actor.workspaceId,file.key,attemptId,file.bytes.length]);
    check();return undefined;
   }).catch(error=>{if(rejection(error))return saveRejection(error);throw error;});

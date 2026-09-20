@@ -7,10 +7,25 @@ import {audit,badRequest,notFound} from './db.js';
 
 /** Call under the workspace advisory lock, shared with all suggestion creation. */
 export async function requireSuggestionCapacity(c:PoolClient,workspaceId:string){
- const {rows:[counts]}=await c.query("select (select count(*)::int from audit_events where workspace_id=$1 and action='schema.suggestion_requested' and created_at>now()-interval '24 hours') recent,(select count(*)::int from schema_suggestions where workspace_id=$1 and state in('queued','processing')) pending",[workspaceId]);
- if(counts.recent>=schemaSuggestionLimits.perDay)badRequest('This workspace has used its 10 field suggestions for the last 24 hours. Try again later.',429);
- if(counts.pending>=schemaSuggestionLimits.pendingPerWorkspace)badRequest('This workspace already has three field suggestions in progress. Wait for one to finish.',429);
+ const {rows:[counts]}=await c.query(`select
+  (select count(*)::int from audit_events where workspace_id=$1 and action in('schema.suggestion_requested','split.suggestion_requested') and created_at>clock_timestamp()-interval '24 hours') recent,
+  (select count(*)::int from schema_suggestions where workspace_id=$1 and state in('queued','processing'))+
+  (select count(*)::int from split_suggestions where workspace_id=$1 and state in('uploading','queued','processing')) pending`,[workspaceId]);
+ if(counts.recent>=schemaSuggestionLimits.perDay)badRequest('This workspace has used its 10 AI suggestions for the last 24 hours. Field and split suggestions share this limit. Try again later.',429);
+ if(counts.pending>=schemaSuggestionLimits.pendingPerWorkspace)badRequest('This workspace already has three AI suggestions in progress. Wait for a field or split suggestion to finish.',429);
 }
+
+/** Application-owned SQL only. All lanes use the same readiness and total order.
+ * The lane resolves an otherwise identical timestamp/UUID across distinct tables.
+ */
+export const runnableAiWorkSql=`
+ select workspace_id,id,created_at,0 lane from jobs
+  where state='queued' and not waiting_for_schema and available_at<=now() and attempts<max_attempts
+ union all select workspace_id,id,created_at,1 lane from schema_suggestions
+  where state='queued' and available_at<=now() and attempts<max_attempts
+ union all select workspace_id,id,created_at,2 lane from split_suggestions
+  where state='queued' and available_at<=now() and attempts<max_attempts and expires_at>now() and (write_until is null or write_until<=now())`;
+export type AiWorkCandidate={id:string;createdAt:Date|string;lane:0|1|2};
 
 export async function parserSetupStatus(c:PoolClient,parser:any,available:boolean){
  const {rows:[source]}=await c.query('select s.id,s.document_id,d.name,s.error from schema_suggestions s join documents d on d.id=s.document_id where s.id=$1 and s.parser_id=$2',[parser.field_setup_suggestion_id,parser.id]);

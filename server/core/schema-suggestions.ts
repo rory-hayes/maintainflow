@@ -8,8 +8,10 @@ import {adminPool,transaction,withWorkspace,audit,badRequest,notFound} from './d
 import {requireActor,editors} from './auth.js';
 import {readStoredObject} from './storage.js';
 import {prepareVisualDocument,visualRenderingMetadata} from './visual-source.js';
+import {config} from './config.js';
+import {assertStorageRestoreReady} from './restore-state.js';
 import {parserSchema} from './schema.js';
-import {requireSuggestionCapacity,finishInitialSetup,failInitialSetup} from './parser-setup.js';
+import {requireSuggestionCapacity,finishInitialSetup,failInitialSetup,runnableAiWorkSql,type AiWorkCandidate} from './parser-setup.js';
 import {SchemaSuggestionProviderError} from './schema-suggestion-errors.js';
 
 let provider:SchemaSuggestionProvider|undefined;
@@ -119,6 +121,7 @@ async function recoverExpiredSuggestions(onlyId?:string){
 }
 
 export async function processOneSchemaSuggestion(onlyId?:string,options:{signal?:AbortSignal;providerTimeoutMs?:number}={}){
+ await assertStorageRestoreReady(config.storageDir,process.env.STORAGE_DRIVER||'filesystem');
  if(options.providerTimeoutMs!==undefined&&(!Number.isFinite(options.providerTimeoutMs)||options.providerTimeoutMs<=0||options.providerTimeoutMs>90_000))throw new Error('Suggestion deadline must be positive and at most 90 seconds');
  if(options.signal?.aborted)return false;
  await recoverExpiredSuggestions(onlyId);
@@ -127,12 +130,14 @@ export async function processOneSchemaSuggestion(onlyId?:string,options:{signal?
  const job=await transaction(adminPool,async c=>{
   const {rows:[selected]}=await c.query(`select s.* from schema_suggestions s join workspaces w on w.id=s.workspace_id
    where s.state='queued' and s.available_at<=now() and s.attempts<s.max_attempts
-   and ($1::uuid is not null or not exists(select 1 from jobs earlier where earlier.workspace_id=s.workspace_id and earlier.state='queued' and not earlier.waiting_for_schema and earlier.available_at<=now() and earlier.created_at<s.created_at)) and ($1::uuid is null or s.id=$1)
+   and ($1::uuid is not null or not exists(select 1 from (${runnableAiWorkSql}) earlier where earlier.workspace_id=s.workspace_id and (earlier.created_at,earlier.id,earlier.lane)<(s.created_at,s.id,1))) and ($1::uuid is null or s.id=$1)
    and ((select count(*) from jobs j where j.workspace_id=s.workspace_id and j.state='processing')+
-        (select count(*) from schema_suggestions running where running.workspace_id=s.workspace_id and running.state='processing'))<coalesce((w.plan->>'maxConcurrent')::int,2)
+        (select count(*) from schema_suggestions running where running.workspace_id=s.workspace_id and running.state='processing')+
+        (select count(*) from split_suggestions running where running.workspace_id=s.workspace_id and running.state='processing'))<coalesce((w.plan->>'maxConcurrent')::int,2)
    order by s.created_at,s.id for update of s,w skip locked limit 1`,[onlyId??null]);
   if(!selected)return null;
-  if(!await hasWorkspaceExtractionCapacity(c,selected.workspace_id))return null;
+  if(!(await c.query('select pg_try_advisory_xact_lock(hashtextextended($1,0)) acquired',[selected.workspace_id])).rows[0].acquired)return null;
+  if(!await hasWorkspaceExtractionCapacity(c,selected.workspace_id,onlyId?undefined:{id:selected.id,createdAt:selected.created_at,lane:1})||options.signal?.aborted)return null;
   await c.query("update schema_suggestions set state='processing',attempts=attempts+1,lease_owner=$2,lease_until=now()+interval '120 seconds',error=null,updated_at=now() where id=$1",[selected.id,owner]);
   return {...selected,attempts:selected.attempts+1};
  });
@@ -180,9 +185,11 @@ export async function processOneSchemaSuggestion(onlyId?:string,options:{signal?
 }
 
 /** Recheck in a fresh statement after locking the workspace row during a claim. */
-export async function hasWorkspaceExtractionCapacity(c:PoolClient,workspaceId:string){
+export async function hasWorkspaceExtractionCapacity(c:PoolClient,workspaceId:string,candidate?:AiWorkCandidate){
  const {rows:[row]}=await c.query(`select ((select count(*) from jobs where workspace_id=$1 and state='processing')+
-  (select count(*) from schema_suggestions where workspace_id=$1 and state='processing'))<coalesce((plan->>'maxConcurrent')::int,2) allowed
-  from workspaces where id=$1`,[workspaceId]);
+  (select count(*) from schema_suggestions where workspace_id=$1 and state='processing')+
+  (select count(*) from split_suggestions where workspace_id=$1 and state='processing'))<coalesce((plan->>'maxConcurrent')::int,2)
+  and ($3::uuid is null or not exists(select 1 from (${runnableAiWorkSql}) earlier where earlier.workspace_id=$1 and (earlier.created_at,earlier.id,earlier.lane)<($2::timestamptz,$3::uuid,$4::int))) allowed
+  from workspaces where id=$1`,[workspaceId,candidate?.createdAt??null,candidate?.id??null,candidate?.lane??null]);
  return row?.allowed===true;
 }
