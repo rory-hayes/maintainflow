@@ -45,7 +45,7 @@ function scopedRequest<T>(value:PendingPdfSplit,path:string,options:RequestInit=
   return api<T>(path,{...options,headers});
 }
 const scopedPost=<T>(value:PendingPdfSplit,path:string,body:unknown={})=>scopedRequest<T>(value,path,{method:'POST',body:JSON.stringify(body)});
-function confirmReceipt(value:PendingPdfSplit,receipt:PdfSplitReceipt):PdfSplitReceipt{
+export function confirmPdfSplitReceipt(value:PendingPdfSplit,receipt:PdfSplitReceipt):PdfSplitReceipt{
   const fail=()=>{throw new Error('The split result could not be confirmed. Check this saved request again before starting another split.');};
   if(!receipt?.split||!Array.isArray(receipt.documents)||receipt.split.requestId!==value.requestId||receipt.split.parserId!==value.parserId||!uuid.test(receipt.split.id)||typeof receipt.replayed!=='boolean')return fail();
   let plan:ReturnType<typeof planPdfSplit>;
@@ -61,7 +61,7 @@ function confirmReceipt(value:PendingPdfSplit,receipt:PdfSplitReceipt):PdfSplitR
 }
 export async function findPdfSplitReceipt(value:PendingPdfSplit,isCurrent:()=>boolean=()=>true):Promise<PdfSplitReceipt|null>{
   assertWorkspace(value,isCurrent);
-  try{return confirmReceipt(value,await scopedRequest<PdfSplitReceipt>(value,`/api/parsers/${value.parserId}/pdf-splits/requests/${value.requestId}`));}
+  try{return confirmPdfSplitReceipt(value,await scopedRequest<PdfSplitReceipt>(value,`/api/parsers/${value.parserId}/pdf-splits/requests/${value.requestId}`));}
   catch(error){if(error instanceof ApiError&&error.status===404)return null;throw error;}
 }
 /** Every retry retains the original request binding, even if a new staging reservation is needed. */
@@ -76,12 +76,12 @@ export async function uploadPdfSplit(value:PendingPdfSplit,file:File,save:(value
   assertWorkspace(value,isCurrent);
   if(configuration.strategy==='multipart'){
     const form=new FormData();form.append('requestId',value.requestId);form.append('options',JSON.stringify(value.options));form.append('file',file);
-    return confirmReceipt(value,await scopedRequest<PdfSplitReceipt>(value,`/api/parsers/${value.parserId}/pdf-splits`,{method:'POST',body:form}));
+    return confirmPdfSplitReceipt(value,await scopedRequest<PdfSplitReceipt>(value,`/api/parsers/${value.parserId}/pdf-splits`,{method:'POST',body:form}));
   }
   // A saved staging ID can already contain a complete upload. A missing or
   // incomplete transfer is recovered using fresh staging, never a fresh split ID.
   if(value.uploadId){
-    try{return confirmReceipt(value,await scopedPost<PdfSplitReceipt>(value,`/api/uploads/${value.uploadId}/finalize`));}
+    try{return confirmPdfSplitReceipt(value,await scopedPost<PdfSplitReceipt>(value,`/api/uploads/${value.uploadId}/finalize`));}
     catch(error){
       const completed=await findPdfSplitReceipt(value,isCurrent);if(completed)return completed;
       if(error instanceof ApiError&&![404,410,500,502,503,504].includes(error.status))throw error;
@@ -95,5 +95,5 @@ export async function uploadPdfSplit(value:PendingPdfSplit,file:File,save:(value
   const uploaded=await fetch(destination,{method:'PUT',body:file,headers:{'Content-Type':'application/octet-stream','x-upsert':'false'},credentials:'omit',redirect:'error',referrerPolicy:'no-referrer'});
   if(!uploaded.ok){await uploaded.body?.cancel();throw new Error('The PDF transfer could not be confirmed. Check the split result or retry with the same file.');}
   await uploaded.body?.cancel();assertWorkspace(value,isCurrent);
-  return confirmReceipt(value,await scopedPost<PdfSplitReceipt>(value,`/api/uploads/${reservation.uploadId}/finalize`));
+  return confirmPdfSplitReceipt(value,await scopedPost<PdfSplitReceipt>(value,`/api/uploads/${reservation.uploadId}/finalize`));
 }

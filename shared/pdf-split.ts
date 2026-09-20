@@ -149,10 +149,13 @@ export interface PdfSplitReceipt {
     id: string; requestId: string; parserId: string; sourceName: string | null;
     sourcePageCount: number; selectedPages: number; childCount: number;
     sourceAvailable: boolean; createdAt: string;
+    origin?: 'upload' | 'stored'; sourceDocumentId?: string | null;
+    sourceDocumentAvailable?: boolean; sourceSha256?: string; undoneAt?: string | null;
   };
   documents: Array<{
     id: string; jobId: string; name: string | null; pageCount: number;
     originalPageStart: number; originalPageEnd: number; index: number; available: boolean;
+    root?: PdfSplitRootLineage;
   }>;
   replayed: boolean;
 }
@@ -162,4 +165,26 @@ export interface PdfSplitLineage {
   originalPageStart: number; originalPageEnd: number;
   sourcePageCount: number; sourceName: string | null;
   sourceAvailable: boolean; retainedDocuments: number;
+  origin?: 'upload' | 'stored'; sourceDocumentId?: string | null;
+  sourceDocumentAvailable?: boolean; requestId?: string; parserId?: string;
+  undoneAt?: string | null; root?: PdfSplitRootLineage;
+}
+
+/** Root means a PDF asset. An archive itself never supplies PDF page numbers. */
+export interface PdfSplitRootLineage {
+  kind: 'document' | 'pdf-split'; id: string; sha256: string;
+  pageCount: number; pageStart: number; pageEnd: number;
+}
+export interface StoredPdfSplitBatches {
+  batches: PdfSplitReceipt[]; nextCursor: string | null; sourceAvailable: boolean;
+}
+export interface StoredPdfSplitUndo {
+  ok: true; removedDocuments: number; storageDeletion: 'pending' | 'failed' | 'complete';
+  receipt: PdfSplitReceipt;
+}
+export interface StoredPdfSplitRejected {
+  rejected: {
+    id: string; requestId: string; parserId: string; sourceDocumentId: string;
+    sourceSha256: string; options: PdfSplitSpec; code: string; reason: string; message: string;
+  };
 }

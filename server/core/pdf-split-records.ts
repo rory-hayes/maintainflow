@@ -2,12 +2,18 @@ import type {PoolClient} from 'pg';
 import {notFound} from './db.js';
 import {ParserFormatNotAllowedError,SourceIntakeRejectedError} from './intake-policy.js';
 import {isSourceValidationReason} from './source-validation.js';
-import {PdfSplitValidationError,isPdfSplitValidationReason,type PdfSplitReceipt} from '../../shared/pdf-split.js';
+import {canonicalPdfSplitSpec,PdfSplitValidationError,isPdfSplitValidationReason,type PdfSplitReceipt,type PdfSplitRootLineage,type StoredPdfSplitRejected} from '../../shared/pdf-split.js';
 export type {PdfSplitReceipt} from '../../shared/pdf-split.js';
 
 /** Raw receipt is server-only. Call the explicit DTO reader before responding. */
 export async function findPdfSplitByRequest(c:PoolClient,workspaceId:string,requestId:string){
  return (await c.query('select * from pdf_splits where workspace_id=$1 and request_id=$2',[workspaceId,requestId])).rows[0];
+}
+
+export function splitRootPages(row:any,start:number,end:number):PdfSplitRootLineage{
+ const offset=row.root_page_start??1;
+ return {kind:row.root_kind??'pdf-split',id:row.root_id??row.id,sha256:row.root_sha256??row.source_sha256,
+  pageCount:row.root_page_count??row.source_page_count,pageStart:offset+start-1,pageEnd:offset+end-1};
 }
 
 /** Reconstruct only finite application-owned errors; never persist error messages. */
@@ -18,8 +24,18 @@ export function splitReceiptError(row:any):Error{
  return new Error('The PDF split receipt could not be read.');
 }
 
+/** A successful read of an authoritative terminal outcome, bound to its exact request. */
+export function storedPdfSplitRejection(row:any):StoredPdfSplitRejected{
+ if(row.state!=='rejected'||!row.source_document_id)throw new Error('Expected a stored PDF rejection');
+ const error=splitReceiptError(row);
+ return {rejected:{id:row.id,requestId:row.request_id,parserId:row.parser_id,sourceDocumentId:row.source_document_id,
+  sourceSha256:row.source_sha256,options:JSON.parse(canonicalPdfSplitSpec(row.canonical_spec)),code:row.rejection_code,reason:row.rejection_reason,message:error.message}};
+}
+
 export async function readPdfSplitReceipt(c:PoolClient,workspaceId:string,splitId:string,replayed=false):Promise<PdfSplitReceipt>{
- const row=(await c.query('select * from pdf_splits where id=$1 and workspace_id=$2',[splitId,workspaceId])).rows[0];
+ const row=(await c.query(`select s.*,exists(select 1 from documents d where d.id=s.source_document_id
+  and d.workspace_id=s.workspace_id and d.parser_id=s.parser_id) source_document_available
+  from pdf_splits s where s.id=$1 and s.workspace_id=$2`,[splitId,workspaceId])).rows[0];
  if(!row)notFound('PDF split not found');
  if(row.state==='rejected')throw splitReceiptError(row);
  const children=(await c.query(`select m.*,d.id live_id from pdf_split_children m
@@ -29,15 +45,21 @@ export async function readPdfSplitReceipt(c:PoolClient,workspaceId:string,splitI
  return {
   split:{id:row.id,requestId:row.request_id,parserId:row.parser_id,sourceName:row.source_name,
    sourcePageCount:row.source_page_count,selectedPages:row.selected_pages,childCount:row.child_count,
-   sourceAvailable:Boolean(row.source_storage_key)&&children.some(child=>Boolean(child.live_id)),createdAt:new Date(row.created_at).toISOString()},
+   sourceAvailable:Boolean(row.source_storage_key)&&children.some(child=>Boolean(child.live_id)),createdAt:new Date(row.created_at).toISOString(),
+   ...(row.source_document_id?{origin:'stored' as const,sourceDocumentId:row.source_document_id,
+   sourceDocumentAvailable:row.source_document_available,sourceSha256:row.source_sha256,
+   undoneAt:row.undone_at?new Date(row.undone_at).toISOString():null}:{})},
   documents:children.map(child=>({id:child.document_id,jobId:child.job_id,name:child.live_id?child.document_name:null,
    pageCount:child.end_page-child.start_page+1,originalPageStart:child.start_page,originalPageEnd:child.end_page,
-   index:child.child_index,available:Boolean(child.live_id)})),replayed,
+   index:child.child_index,available:Boolean(child.live_id),...(row.source_document_id?{root:splitRootPages(row,child.start_page,child.end_page)}:{})})),replayed,
  };
 }
 
-export async function pdfSplitDetail(c:PoolClient,workspaceId:string,documentId:string){
+export async function pdfSplitDetail(c:PoolClient,workspaceId:string,documentId:string,includeUploadRoot=false){
  const row=(await c.query(`select s.id,s.child_count,s.source_page_count,s.source_name,s.source_storage_key,
+  s.source_sha256,s.source_document_id,s.request_id,s.parser_id,s.undone_at,
+  s.root_kind,s.root_id,s.root_sha256,s.root_page_count,s.root_page_start,
+  exists(select 1 from documents origin where origin.id=s.source_document_id and origin.workspace_id=s.workspace_id and origin.parser_id=s.parser_id) source_document_available,
   m.child_index,m.start_page,m.end_page,
   (select count(*)::int from documents siblings where siblings.pdf_split_id=s.id and siblings.workspace_id=s.workspace_id) retained_documents
   from documents d join pdf_split_children m on m.document_id=d.id and m.workspace_id=d.workspace_id
@@ -45,7 +67,10 @@ export async function pdfSplitDetail(c:PoolClient,workspaceId:string,documentId:
   join pdf_splits s on s.id=m.split_id and s.workspace_id=m.workspace_id and s.parser_id=m.parser_id
   where d.id=$1 and d.workspace_id=$2 and s.state='accepted'`,[documentId,workspaceId])).rows[0];
  return row?{id:row.id,index:row.child_index,childCount:row.child_count,originalPageStart:row.start_page,originalPageEnd:row.end_page,
-  sourcePageCount:row.source_page_count,sourceName:row.source_name,sourceAvailable:Boolean(row.source_storage_key),retainedDocuments:row.retained_documents}:null;
+  sourcePageCount:row.source_page_count,sourceName:row.source_name,sourceAvailable:Boolean(row.source_storage_key),retainedDocuments:row.retained_documents,
+  ...(row.source_document_id||includeUploadRoot?{origin:row.source_document_id?'stored':'upload',sourceDocumentId:row.source_document_id??null,
+  sourceDocumentAvailable:row.source_document_available,requestId:row.request_id,parserId:row.parser_id,
+  undoneAt:row.undone_at?new Date(row.undone_at).toISOString():null,root:splitRootPages(row,row.start_page,row.end_page)}:{})}:null;
 }
 
 /** Internal storage descriptor, available only through a currently live owned child. */

@@ -1,6 +1,8 @@
 # MaintainFlow document workspace (Folio)
 
-Latest local acceptance: encrypted operator backup and isolated restore pass 610 tests and 11 restore groups, preserving all 54 tables, private originals, approvals and queued work. Restored services stay inactive until verification and explicit activation. [Commands, proof and limits](docs/BACKUP-RESTORE.md). Hosted disaster recovery remains a separate gate; free plans and mock billing are unchanged.
+Latest local acceptance: PDFs already in Review can be split into new batches, including ZIP PDF leaves and children of earlier splits. Explicit undo preserves the source, its approvals, earlier original-only exports and independent batches. **669 tests, nine desktop/tablet/mobile browser groups, build/package/runtime checks and the updated backup/restore drill pass.** [Contract, evidence and limits](docs/STORED-PDF-SPLITTING.md). Hosted activation remains pending; free plans and mock billing are unchanged.
+
+Earlier local acceptance: encrypted operator backup and isolated restore pass 610 tests and 11 restore groups, preserving all 54 tables, private originals, approvals and queued work. Restored services stay inactive until verification and explicit activation. [Commands, proof and limits](docs/BACKUP-RESTORE.md). Hosted disaster recovery remains a separate gate; free plans and mock billing are unchanged.
 
 
 Earlier local acceptance: text-marker PDF splitting passes 555 tests, nine desktop/mobile workflow groups and five tablet preview/control groups. [Contract, screenshots and limits](docs/PDF-MARKER-SPLITTING.md). Hosted activation remains pending.
