@@ -362,7 +362,7 @@ test('an owned upload to the copied parser extracts with its own template, requi
   const response = await copy(item); assert.equal(response.statusCode, 201, response.body);
   const result = response.json(), destination = asFixture(item.account, result), savedMapping = result.mappings[0];
   const source = await upload(destination, 'Reference: OWNED-341\nTotal: 24.50\nItems:\nDescription|Quantity\nWidget|2\nGadget|3');
-  const job = (await adminPool.query('select * from jobs where id=$1', [source.jobId])).rows[0]; assert.equal(job.config.templatePolicy, 'complete-v1'); assert.equal(job.schema_version_id, destination.schemaId);
+  const job = (await adminPool.query('select * from jobs where id=$1', [source.jobId])).rows[0]; assert.equal(job.config.templatePolicy, 'complete-regions-v1'); assert.equal(job.schema_version_id, destination.schemaId);
   assert.equal(await processOneCoreJob(source.jobId), true);
   const data = await document(destination, source.document.id), run = data.runs[0];
   assert.equal(data.document.parserId, destination.parserId); assert.equal(data.document.status, 'needs_review'); assert.equal(run.selection.template.id, result.templates[0].id); assert.notEqual(run.selection.template.id, originalTemplate.id);

@@ -1,3 +1,4 @@
+import {pdfRegionLimits,PdfGeometryError,isPdfGeometryErrorReason} from '../../shared/pdf-regions.js';
 import { decodeSource } from './decoder-engine.js';
 import {tiffLimits} from '../../shared/tiff.js';
 import { decoderLimits } from './decoder-limits.js';
@@ -13,6 +14,7 @@ console.error = () => {};
 
 const chunks: Buffer[] = [];
 let size = 0;
+const geometry = process.argv[3] === '--pdf-geometry';
 const splitting = process.argv[3] === '--pdf-split';
 const archiving = process.argv[3] === '--zip-import';
 const tiff=process.argv[3]==='--tiff-page'||process.argv[3]==='--tiff-pdf';
@@ -26,7 +28,10 @@ try {
     chunks.push(bytes);
   }
   let json: string;
-  if (splitting) {
+  if (geometry) {
+    const {decodePdfGeometry}=await import('./pdf-geometry.js');
+    json=JSON.stringify({ok:true,geometry:await decodePdfGeometry(Buffer.concat(chunks))});
+  } else if (splitting) {
     const {bytes,spec} = decodeSplitInput(Buffer.concat(chunks));
     const {isTiffHeader}=await import('./tiff-engine.js');
     if(isTiffHeader(bytes)){
@@ -52,12 +57,14 @@ try {
     }
     json = JSON.stringify({ ok: true, source });
   }
-  if (Buffer.byteLength(json) > (splitting ? pdfSplitLimits.maxOutputBytes : archiving ? archiveImportLimits.maxOutputBytes : tiff&&process.argv[3]==='--tiff-pdf'?tiffLimits.maxOutputBytes:decoderLimits.maxOutputBytes)) throw Object.assign(new Error('Decoded source response exceeds the limit'), { statusCode: 413 });
+  if (Buffer.byteLength(json) > (geometry ? pdfRegionLimits.maxOutputBytes : splitting ? pdfSplitLimits.maxOutputBytes : archiving ? archiveImportLimits.maxOutputBytes : tiff&&process.argv[3]==='--tiff-pdf'?tiffLimits.maxOutputBytes:decoderLimits.maxOutputBytes)) throw Object.assign(new Error('Decoded source response exceeds the limit'), { statusCode: 413 });
   process.stdout.write(json);
 } catch (error) {
   // Neither arbitrary statuses nor dependency diagnostics can authorize a
   // durable rejection. The parent reconstructs fixed messages from this code.
-  const result = error instanceof SourceValidationError && isSourceValidationReason(error.reason)
+  const result = error instanceof PdfGeometryError && isPdfGeometryErrorReason(error.reason)
+    ? {ok:false,code:'pdf_geometry_failed',reason:error.reason}
+    : error instanceof SourceValidationError && isSourceValidationReason(error.reason)
     ? { ok: false, code: 'source_validation_failed', reason: error.reason }
     : error instanceof PdfSplitValidationError && isPdfSplitValidationReason(error.reason)
       ? { ok: false, code: 'pdf_split_validation_failed', reason: error.reason }

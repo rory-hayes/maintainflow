@@ -1,6 +1,22 @@
 # Verification ledger
 
-## Current AI split suggestion acceptance — 20 September 2026
+## Current native PDF region acceptance — 20 September 2026
+
+The native searchable-PDF subset of X07 is implemented: users choose a retained original, define scalar regions relative to unique text anchors, explicitly preview an unsaved draft, and save a revision. New uploads, split children, ZIP leaves, reprocessing and initially held setup jobs pin the same versioned definitions. Complete text and region templates share field-count/creation priority; partial draft results cannot become completed worker extractions. [Contract and limits](NATIVE-PDF-REGIONS.md).
+
+Application acceptance uses **335 manifest entries**, fingerprint **`621b497001f9f05efe3b8156fe7e349771d3389a43d70edd9b96fe8b834b8e74`**. **10/10 browser groups** pass in **34.801 seconds** at **1440×1000, 820×1000 and 390×844**; all **18 frames** were individually reviewed. Coverage includes numeric/drawn regions, translated labels, duplicate/raster nonmatches, partial and disabled previews, lost-save recovery, revision conflicts, closed requests, late-response and role isolation, historical source navigation and exact approved CSV/XLSX/JSON downloads. The completed browser run retains its original `early` designation and is selected as final evidence for that application candidate. **Two controlled extraction calls and zero real provider calls** occurred; all three owned accounts, workspaces and documents were cleaned while unrelated fixtures were preserved.
+
+Build (**2.370 seconds**), hosted packaging (**5.788 seconds**) and **15 compiled runtime checks** (**13.530 seconds**) pass on that candidate. The isolated PostgreSQL/filesystem backup regression passes in **31.760 seconds**, with **11 groups and 25 restored-runtime assertions**, preserving **57 tables, 263 rows and 33 objects**. It covers region definitions, accepted/closed mutation recovery, pinned queued extraction and immutable snapshots alongside earlier workflows, using controlled transport with fixture cleanup. This does not establish hosted recovery.
+
+The final serial suite passes **821/821 tests** on **Node 24.13.0** in **459.609 seconds elapsed**, with zero failures, skips, cancellations or todo cases, on **335 unchanged final manifest entries**, fingerprint **`6c30b667c3ba30ff03e11ad242aa84cfc0007beca855734ca2ae43c453399580`**. The first suite recorded **820/821 passed**: its sole failure expected new PDF-split jobs to use `complete-v1`. Correcting that assertion to the intended `complete-regions-v1` policy was the only change. Comparison of all 335 entries confirms **334 unchanged files and identical application code**. Browser/build/package/runtime/backup/resource checks retain their earlier fingerprint and were not repeated for this test-only correction. The failed suite remains recorded. Exact-head CI is separate.
+
+Independent review also fixed a legacy compatibility regression: valid large text templates were excluded by the new native size cap despite a matching candidate. Separate **512 KiB text-definition / 520 KiB snapshot** ceilings preserve the previous per-field contract; native limits remain **64 KiB / 72 KiB**. Focused regressions prove real extraction/snapshot persistence, disabling, mutation recovery/replay and copying, including escaped disabled definitions larger than 256 KiB; native database caps remain enforced. Browser iteration corrected editor-only row metadata at the strict matcher boundary and made disabled-preview results explicitly conditional.
+
+Migration **037 is local only**, with **28 local migrations** verified. Hosted **021–037** and matching runtime activation remain pending. Image-only OCR, repeating region tables, automatic scaling, broad layout accuracy and customer use are not established. Free plans and mock billing are unchanged; all **47 original capability criteria** remain intact. Earlier sections preserve their dated evidence.
+
+[Combined acceptance receipt](evidence/native-pdf-regions-2026-09-20/verification.json) · [Final suite manifest](evidence/native-pdf-regions-2026-09-20/source-manifest.json) · [Application-check manifest](evidence/native-pdf-regions-2026-09-20/prior-checks-source-manifest.json).
+
+## Earlier AI split suggestion acceptance — 20 September 2026
 
 Reviewed AI boundary suggestions are implemented for new and stored PDFs and TIFFs, including ZIP leaves and earlier split children. Request, Apply and Create are separate actions. A proposal creates no documents, extraction jobs or page-credit charges; explicit Create uses the existing split admission and preserves proposed starts alongside confirmed ranges. Manual splitting remains available. [Contract and limits](AI-SPLIT-SUGGESTIONS.md).
 

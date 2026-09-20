@@ -5,7 +5,8 @@ import {parserSchema} from './schema.js';
 import {requireParserCapacity} from './parser-capacity.js';
 import {templateBody} from './template-input.js';
 import {templateLimits} from '../../shared/template-selection.js';
-import {compareTemplatePriority,templateRuleValidation} from './template-selection.js';
+import {compareTemplatePriority} from './template-selection.js';
+import {storedTemplateDefinition,validateTemplateDefinition} from './template-region-selection.js';
 import {exportMappingInput} from '../integrations/export-input.js';
 
 const maxMappings=100,maxConfigurationBytes=2*1024*1024;
@@ -34,9 +35,9 @@ export async function copyParser(actor:Actor,sourceId:string,name?:string){
   if(Buffer.byteLength(JSON.stringify({settings,schema:version.schema,templates,mappings}))>maxConfigurationBytes)badRequest('This parser configuration exceeds the 2 MiB copy limit. Reduce saved fields, templates or export mappings before copying it.',409);
   if(!parserSchema.safeParse(version.schema).success)badRequest('Save valid fields for this parser before copying it.',409);
   for(const template of templates){
-   const valid=templateBody.safeParse({name:template.name,matchText:template.match_text,enabled:template.enabled,rules:template.rules});
+   const valid=templateBody.safeParse(storedTemplateDefinition(template));
    if(!valid.success)badRequest('A saved template has invalid settings. Edit or delete that template before copying this parser.',409);
-   if(template.enabled&&!templateRuleValidation(version.schema,template.rules).valid)badRequest('A saved template has invalid field anchors. Fix or disable it before copying this parser.',409);
+   if(template.enabled&&!validateTemplateDefinition(version.schema,valid.data).valid)badRequest('A saved template has invalid field anchors or regions. Fix or disable it before copying this parser.',409);
   }
   for(const mapping of mappings)if(!exportMappingInput.safeParse({parserId:sourceId,name:mapping.name,columns:mapping.columns,lineItems:mapping.line_items??undefined}).success)
    badRequest('A saved export mapping has invalid settings. Edit or remove it before copying this parser.',409);
@@ -48,7 +49,7 @@ export async function copyParser(actor:Actor,sourceId:string,name?:string){
   // Copies are created now. Sorted fresh IDs retain source tie priority at that common timestamp.
   const templateIds=templates.map(()=>randomUUID()).sort(),copiedTemplates=[];
   for(const [index,template] of templates.entries()){
-   const {rows:[saved]}=await c.query('insert into templates(id,workspace_id,parser_id,name,match_text,rules,enabled) values($1,$2,$3,$4,$5,$6,$7) returning *',[templateIds[index],actor.workspaceId,parser.id,template.name,template.match_text,JSON.stringify(template.rules),template.enabled]);copiedTemplates.push(camel(saved));
+   const {rows:[saved]}=await c.query('insert into templates(id,workspace_id,parser_id,name,match_text,rules,enabled,kind,revision) values($1,$2,$3,$4,$5,$6,$7,$8,1) returning *',[templateIds[index],actor.workspaceId,parser.id,template.name,template.match_text,JSON.stringify(template.rules),template.enabled,template.kind??'text-v1']);copiedTemplates.push(camel(saved));
   }
   const copiedMappings=[];
   for(const mapping of mappings){const {rows:[saved]}=await c.query('insert into export_mappings(id,workspace_id,parser_id,name,columns,line_items) values($1,$2,$3,$4,$5,$6) returning *',[randomUUID(),actor.workspaceId,parser.id,mapping.name,JSON.stringify(mapping.columns),mapping.line_items]);copiedMappings.push(camel(saved));}

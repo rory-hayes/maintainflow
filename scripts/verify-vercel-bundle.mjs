@@ -12,6 +12,10 @@ try{
     if(!privacy||privacy.headers['Cache-Control']!=='private, no-store'||privacy.continue!==true)throw new Error('Account access privacy headers are absent from the deployment routes.');
   }
   await fs.cp('.vercel/output/functions/api.func',directory,{recursive:true});
+  // The child imports geometry lazily. Its compiled module must be traced into
+  // the deployment, not accidentally resolved from this repository at runtime.
+  const geometryModule=await fs.stat(path.join(directory,'server/core/pdf-geometry.js'));
+  if(!geometryModule.isFile())throw new Error('Compiled native PDF geometry module is missing.');
   await fs.cp('fixtures/generated',path.join(directory,'fixtures'),{recursive:true});
   const tiffPages=[{width:80,height:120,color:[30,80,150],compression:'deflate'},{width:96,height:64,orientation:6,color:[200,60,20],compression:'deflate'}];
   await fs.writeFile(path.join(directory,'fixtures/owned-classic.tiff'),makeTiff(tiffPages));
@@ -19,13 +23,14 @@ try{
   const result=spawnSync(process.execPath,['--input-type=module','-e',`
     import assert from 'node:assert/strict';
     import fs from 'node:fs/promises';
-    import {inspectSource,decoderLaunchSpec,splitPdfSource,previewArchiveSource,importArchiveSource,renderTiffPage,convertTiffForAI} from './server/core/source.js';
+    import {inspectSource,decoderLaunchSpec,splitPdfSource,previewArchiveSource,importArchiveSource,renderTiffPage,convertTiffForAI,readPdfGeometry} from './server/core/source.js';
     import {createHash} from 'node:crypto';
     import {tiffRenderVersion} from './shared/tiff.js';
     import JSZip from 'jszip';
-    import {PDFDocument,StandardFonts} from 'pdf-lib';
+    import {PDFDocument,StandardFonts,degrees} from 'pdf-lib';
+    import {pdfGeometryVersion,findPdfRegionAnchor,matchPdfRegion,PdfGeometryError} from './shared/pdf-regions.js';
     import {buildApp} from './server/app.js';
-    for (const launch of [decoderLaunchSpec('document.txt'), decoderLaunchSpec('bundle.pdf',{mode:'every',pagesPerDocument:1}),decoderLaunchSpec('archive.zip',undefined,{}),decoderLaunchSpec('private.tiff',undefined,undefined,{page:2}),decoderLaunchSpec('private.tiff',undefined,undefined,{})]) {
+    for (const launch of [decoderLaunchSpec('document.txt'), decoderLaunchSpec('bundle.pdf',{mode:'every',pagesPerDocument:1}),decoderLaunchSpec('archive.zip',undefined,{}),decoderLaunchSpec('private.tiff',undefined,undefined,{page:2}),decoderLaunchSpec('private.tiff',undefined,undefined,{}),decoderLaunchSpec('private.pdf',undefined,undefined,undefined,true)]) {
       assert.equal(launch.args.includes('tsx'),false);
       assert.ok(launch.args.includes('--max-old-space-size=192'));
       assert.equal(launch.args.includes('--max-old-space-size=256'),false);
@@ -66,6 +71,19 @@ try{
       ...markerSpec,ranges:[{start:1,end:2}],
     }),error=>error.code==='pdf_split_validation_failed'&&error.reason==='marker_plan_mismatch');
     console.log('PASS packaged marker boundaries, preserved prefix and rejected changed preview');
+    const regionPdf=await PDFDocument.create({updateMetadata:false}),regionFont=await regionPdf.embedFont(StandardFonts.Helvetica),regionPage=regionPdf.addPage([500,700]);
+    regionPage.setCropBox(20,30,440,620);regionPage.setRotation(degrees(90));regionPage.drawText('Account: 000042',{x:80,y:580,size:16,font:regionFont});
+    const regionBytes=Buffer.from(await regionPdf.save()),geometry=await readPdfGeometry(regionBytes),nativePage=geometry.pages[0];
+    assert.equal(geometry.version,pdfGeometryVersion);assert.equal(geometry.sourceSha256,createHash('sha256').update(regionBytes).digest('hex'));assert.equal(geometry.pageCount,1);assert.equal(nativePage.reason,null);
+    assert.deepEqual([nativePage.width,nativePage.height,nativePage.rotation],[620,440,90]);assert.equal(nativePage.items.length,1);
+    assert.ok(Math.abs(nativePage.items[0].rect.x-(580-30-16*.207)/620)<1e-8);assert.ok(Math.abs(nativePage.items[0].rect.y-60/440)<1e-8);
+    const anchor=findPdfRegionAnchor(nativePage,'Account');assert.ok(anchor.matched);assert.equal(anchor.anchor.capturedText,'Account: 000042');assert.deepEqual(anchor.anchor.itemIds,[1]);
+    const regionRule={field:'reference',anchor:'Account',page:1,reference:{width:620,height:440,rotation:90},offset:{x:-.001,y:-.001,width:anchor.anchor.rect.width+.002,height:anchor.anchor.rect.height+.002}};
+    const captured=matchPdfRegion(geometry,regionRule);assert.ok(captured.matched);assert.equal(captured.text,'Account: 000042');assert.deepEqual(captured.itemIds,[1]);
+    assert.deepEqual(matchPdfRegion(geometry,{...regionRule,offset:{x:0,y:0,width:anchor.anchor.rect.width/2,height:anchor.anchor.rect.height}}),{matched:false,reason:'partial_item'});
+    const oversizedGeometry=await PDFDocument.create({updateMetadata:false});oversizedGeometry.addPage([15000,700]);
+    await assert.rejects(readPdfGeometry(Buffer.from(await oversizedGeometry.save())),error=>error instanceof PdfGeometryError&&error.reason==='geometry_limit'&&error.statusCode===413);
+    console.log('PASS packaged native PDF crop/rotation geometry, whole-block region capture and fixed bound rejection');
     const archiveFiles=['invoice-multipage.pdf','receipt-scan.png','receipt.docx','receipt.xlsx','lead.eml','freeform-receipt.txt'];
     const mixedZip=new JSZip();
     for(let index=0;index<20;index++){

@@ -1,6 +1,16 @@
 # Remaining implementation and release gates
 
-## Current AI split suggestion gates — 20 September 2026
+## Current native PDF region gates — 20 September 2026
+
+Saved native-text PDF regions are implemented with explicit draft preview, versioned save/recovery, authoritative closure of unknown requests, pinned extraction definitions and exact source-region evidence. Moved anchor/value pairs are supported within unchanged reference page geometry. Existing text templates and old queued policies retain their contracts. [Contract and limits](NATIVE-PDF-REGIONS.md).
+
+**821/821 serial tests** pass in **459.609 seconds elapsed** on final fingerprint **`6c30b667c3ba30ff03e11ad242aa84cfc0007beca855734ca2ae43c453399580`**. **Ten desktop/tablet/mobile browser groups** pass in **34.801 seconds**, with **18 reviewed frames**; build, packaging, **15 compiled runtime checks**, compiled geometry resource checks and isolated backup/restore (**11 groups, 25 restored-runtime assertions; 57 tables, 263 rows, 33 objects**) pass on fingerprint **`621b497001f9f05efe3b8156fe7e349771d3389a43d70edd9b96fe8b834b8e74`**. All 335 manifest entries were compared: only one stale test-policy expectation changed for the final suite; application code and the other 334 files are identical. The first 820/821 suite remains recorded. No real provider calls occurred. Exact-head CI and deployed acceptance remain separate.
+
+Hosted **021–037** and matching activation remain pending. Real authentication/invitation and Folio receiving delivery, remaining Sheets restart/revocation acceptance, live signed object storage, actual AI boundary quality/provider billing, deployment isolation and hosted/off-host recovery remain external gates. C09 converters, broader C10 archives, image/OCR regions, X08 preprocessing and other open matrix criteria remain in scope. Free plans and mock billing are unchanged. This native region subset does not complete X07, all **47 original criteria**, or customer-use proof.
+
+[Combined acceptance receipt](evidence/native-pdf-regions-2026-09-20/verification.json) · [Final suite manifest](evidence/native-pdf-regions-2026-09-20/source-manifest.json) · [Application-check manifest](evidence/native-pdf-regions-2026-09-20/prior-checks-source-manifest.json).
+
+## Earlier AI split suggestion gates — 20 September 2026
 
 Reviewed AI suggestions for new and stored PDFs/TIFFs are implemented with separate Request, Apply and Create actions, durable source/actor/request binding, no page charge for a proposal, and retained proposed-versus-confirmed split provenance. Ordinary documents, ZIP leaves and earlier split children use the existing split/undo semantics. Manual fixed groups, custom ranges and PDF text markers remain available. [Contract and limits](AI-SPLIT-SUGGESTIONS.md).
 

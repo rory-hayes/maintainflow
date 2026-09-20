@@ -3,7 +3,7 @@ import type {PoolClient} from 'pg';
 import {z} from 'zod';
 import type {Actor} from '../../shared/types.js';
 import type {SplitSuggestionProvenance} from '../../shared/split-suggestions.js';
-import {templatePolicy} from '../../shared/template-selection.js';
+import {pinnedTemplateConfig} from './template-snapshot.js';
 import {canonicalPdfSplitSpec,PdfSplitValidationError,isPdfSplitValidationReason,pdfSplitLimits,planPdfSplit,verifyPdfMarkerRanges,type PdfSplitSpec,type PdfSplitReceipt,type PdfSplitRootLineage} from '../../shared/pdf-split.js';
 import {decoderLimits} from './decoder-limits.js';
 import {withWorkspace,badRequest,notFound,audit} from './db.js';
@@ -184,7 +184,7 @@ export async function addSplitDocuments(actor:Actor,parserId:string,bytes:Buffer
    await quota(c,decoded.sourcePageCount,decoded.selectedPages,decoded.parts);
    if(!(await c.query('select id from schema_versions where id=$1 and parser_id=$2 and workspace_id=$3',[parser.active_schema_id,parserId,actor.workspaceId])).rowCount)badRequest('Save valid parser fields before splitting a document.',409);
    const templates=(await c.query('select * from templates where parser_id=$1 order by created_at,id',[parserId])).rows;
-   const jobConfig=JSON.stringify({mode:parser.mode,instructions:parser.instructions,locale:parser.locale,timezone:parser.timezone,templates,templatePolicy});check();
+   const jobConfig=JSON.stringify(pinnedTemplateConfig(parser,templates));check();
    await c.query("insert into pdf_splits(id,workspace_id,parser_id,request_id,source_sha256,canonical_spec,spec_hash,state,source_byte_size,source_page_count,selected_pages,child_count,source_storage_key,source_name,created_by,source_document_id,root_kind,root_id,root_sha256,root_page_count,root_page_start,source_mime_type) values($1,$2,$3,$4,$5,$6,$7,'accepted',$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)",[splitId,actor.workspaceId,parserId,requestId,sourceSha,canonical,specHash,bytes.length,decoded.sourcePageCount,decoded.selectedPages,decoded.parts.length,files[0]!.key,name,actor.userId,...lineageValues(),sourceMimeType]);
    for(const [i,part] of decoded.parts.entries()){
     check();const file=files[i+1]!,jobId=randomUUID(),index=i+1,childSha=sha(part.bytes),childName=safeDownloadName(`${name.replace(/\.(pdf|tiff?)$/i,'').slice(0,190)} — pages ${part.range.start}-${part.range.end}.${format}`);

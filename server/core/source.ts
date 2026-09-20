@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import { z } from 'zod';
+import {pdfGeometrySchema,pdfRegionLimits,PdfGeometryError,isPdfGeometryErrorReason,type PdfGeometryErrorReason,type PdfGeometry} from '../../shared/pdf-regions.js';
 import { decoderLimits, decoderError } from './decoder-limits.js';
 import { SourceValidationError, isSourceValidationReason, type SourceValidationReason } from './source-validation.js';
 import type { PageText } from '../../shared/types.js';
@@ -25,6 +26,7 @@ const sourceSchema = z.object({
   pageCount: z.number().int().min(1).max(decoderLimits.maxPages),
 });
 const failureSchema = z.union([
+  z.object({ok:z.literal(false),code:z.literal('pdf_geometry_failed'),reason:z.custom<PdfGeometryErrorReason>(isPdfGeometryErrorReason)}).strict(),
   z.object({ ok: z.literal(false), code: z.literal('source_validation_failed'), reason: z.custom<SourceValidationReason>(isSourceValidationReason) }).strict(),
   z.object({ ok: z.literal(false), code: z.literal('pdf_split_validation_failed'), reason: z.custom<PdfSplitValidationReason>(isPdfSplitValidationReason) }).strict(),
   z.object({ok:z.literal(false),code:z.literal('archive_import_validation_failed'),reason:z.custom<ArchiveImportValidationReason>(isArchiveImportValidationReason)}).strict(),
@@ -62,11 +64,11 @@ const runtimeRoot = fileURLToPath(new URL('../../', import.meta.url));
 let activeDecoders = 0;
 
 /** This subprocess is a resource boundary, not an OS-level security sandbox. */
-export function decoderLaunchSpec(filename: string, split?: PdfSplitSpec, archive?:{spec?:ArchiveImportSpec},tiff?:{page?:number}) {
+export function decoderLaunchSpec(filename: string, split?: PdfSplitSpec, archive?:{spec?:ArchiveImportSpec},tiff?:{page?:number},geometry=false) {
   const sourceEntry = childFilename.endsWith('.ts');
   return {
     command: process.execPath,
-    args: [`--max-old-space-size=${sourceEntry ? decoderLimits.sourceHeapMb : decoderLimits.heapMb}`, ...(sourceEntry ? ['--import', 'tsx'] : []), childFilename, tiff ? 'source.tiff' : archive ? 'archive.zip' : path.basename(filename), ...(split ? ['--pdf-split'] : archive ? ['--zip-import'] : tiff ? tiff.page===undefined?['--tiff-pdf']:['--tiff-page',String(tiff.page)]:[])],
+    args: [`--max-old-space-size=${sourceEntry ? decoderLimits.sourceHeapMb : decoderLimits.heapMb}`, ...(sourceEntry ? ['--import', 'tsx'] : []), childFilename, geometry ? 'source.pdf' : tiff ? 'source.tiff' : archive ? 'archive.zip' : path.basename(filename), ...(geometry ? ['--pdf-geometry'] : split ? ['--pdf-split'] : archive ? ['--zip-import'] : tiff ? tiff.page===undefined?['--tiff-pdf']:['--tiff-page',String(tiff.page)]:[])],
     options: {
       cwd: runtimeRoot,
       env: { NODE_ENV: 'production', TZ: 'UTC', LANG: 'en_US.UTF-8', TSX_DISABLE_CACHE: '1' },
@@ -85,6 +87,7 @@ async function runIsolated<T>(
   split?: PdfSplitSpec,
   archive?:{spec?:ArchiveImportSpec},
   tiff?:{page?:number},
+  geometry=false,
 ): Promise<T> {
   options.signal?.throwIfAborted();
   if (!bytes.length) throw new SourceValidationError('empty');
@@ -93,7 +96,7 @@ async function runIsolated<T>(
   activeDecoders++;
   try {
     return await new Promise((resolve, reject) => {
-      const spec = decoderLaunchSpec(filename, split, archive,tiff);
+      const spec = decoderLaunchSpec(filename, split, archive,tiff,geometry);
       let child: ChildProcessWithoutNullStreams;
       try { child = (options.spawnChild || spawn)(spec.command, spec.args, spec.options); }
       catch { reject(Object.assign(new Error('The isolated document decoder could not start'), { statusCode: 503 })); return; }
@@ -119,7 +122,7 @@ async function runIsolated<T>(
       child.stdout.on('data', (chunk: Buffer) => {
         if (settled || pendingFailure) return;
         outputBytes += chunk.length;
-        if (outputBytes > (split ? pdfSplitLimits.maxOutputBytes : archive ? archiveImportLimits.maxOutputBytes : tiff&&tiff.page===undefined ? tiffLimits.maxOutputBytes:decoderLimits.maxOutputBytes)) {
+        if (outputBytes > (geometry ? pdfRegionLimits.maxOutputBytes : split ? pdfSplitLimits.maxOutputBytes : archive ? archiveImportLimits.maxOutputBytes : tiff&&tiff.page===undefined ? tiffLimits.maxOutputBytes:decoderLimits.maxOutputBytes)) {
           fail(Object.assign(new Error('Decoded source response exceeds the output limit'), { statusCode: 413 }));
           return;
         }
@@ -136,6 +139,7 @@ async function runIsolated<T>(
           if (result?.ok === false) {
             const failure = failureSchema.parse(result);
             if (failure.code === 'source_validation_failed') { finish(new SourceValidationError(failure.reason)); return; }
+            if (geometry && failure.code === 'pdf_geometry_failed') {finish(new PdfGeometryError(failure.reason));return;}
             if (split && failure.code === 'pdf_split_validation_failed') { finish(new PdfSplitValidationError(failure.reason)); return; }
             if (archive && failure.code === 'archive_import_validation_failed') {finish(new ArchiveImportValidationError(failure.reason));return;}
             if (failure.code !== 'decoder_failed') throw new Error('Unexpected decoder failure');
@@ -270,4 +274,19 @@ export async function convertTiffForAI(bytes:Buffer,options:DecoderOptions={}):P
   if(result.sourceSha256!==sourceSha256||result.pageCount!==structure.pages.length||output.length>tiffLimits.maxPdfBytes||output.toString('base64')!==data||!output.subarray(0,5).equals(Buffer.from('%PDF-')))throw new Error('Invalid TIFF PDF response');
   return {...result,bytes:output};
  },options,undefined,undefined,{});
+}
+
+/** Geometry is opt-in and isolated; normal intake remains text-only. */
+export async function readPdfGeometry(input:Buffer,options:DecoderOptions={}):Promise<PdfGeometry>{
+ options.signal?.throwIfAborted();
+ if(options.timeoutMs!==undefined&&(!Number.isFinite(options.timeoutMs)||options.timeoutMs<=0||options.timeoutMs>decoderLimits.timeoutMs))throw new Error('Geometry deadline must be positive and at most 30 seconds');
+ if(!input.length)throw new SourceValidationError('empty');
+ if(input.length>pdfRegionLimits.maxBytes)throw new SourceValidationError('file_too_large');
+ if(!input.subarray(0,5).equals(Buffer.from('%PDF-')))throw new PdfGeometryError('pdf_required');
+ const bytes=Buffer.from(input),sourceSha256=createHash('sha256').update(bytes).digest('hex');
+ return runIsolated(bytes,'source.pdf',value=>{
+  const parsed=z.object({ok:z.literal(true),geometry:pdfGeometrySchema}).strict().parse(value).geometry;
+  if(parsed.sourceSha256!==sourceSha256)throw new Error('Geometry source mismatch');
+  return parsed;
+ },options,undefined,undefined,undefined,true);
 }
