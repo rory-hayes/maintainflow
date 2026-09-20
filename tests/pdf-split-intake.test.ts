@@ -100,7 +100,7 @@ test('real PDF ranges atomically retain source lineage, selected-page usage, reb
  assert.match(rows[1].source_text[0].text,/OWNED-PAGE-3/);assert.match(rows[1].source_text[1].text,/OWNED-PAGE-4/);
  assert.deepEqual(objects.get(`${f.account.workspace.id}/${result.split.id}`),pdf);
  const jobs=(await adminPool.query('select * from jobs where workspace_id=$1',[f.account.workspace.id])).rows;
- assert.equal(jobs.length,2);assert.ok(jobs.every(j=>j.schema_version_id===f.schemaId&&!j.waiting_for_schema&&j.config.templatePolicy==='complete-v1'));assert.deepEqual(jobs[0].config,jobs[1].config);
+ assert.equal(jobs.length,2);assert.ok(jobs.every(j=>j.schema_version_id===f.schemaId&&!j.waiting_for_schema&&j.config.templatePolicy==='complete-regions-v1'));assert.deepEqual(jobs[0].config,jobs[1].config);
  assert.deepEqual(await counts(f),{pdf_splits:1,pdf_split_children:2,documents:2,jobs:2,usage_ledger:2,intake_events:0,intake_files:0,file_deletions:0,pages:3});
 });
 

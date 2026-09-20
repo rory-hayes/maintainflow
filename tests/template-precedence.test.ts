@@ -119,15 +119,17 @@ test('ranked nested and table anchors select a pinned template before a configur
   let calls = 0; setExtractionProvider({ configured: () => true, extract: async input => { calls++; return controlledResult(input); } });
   const source = await upload(item, `${sample}\nOwned exact source phrase\nTax registration: OWNED-TAX\nSKU|Count\nWidget|2\nGadget|3`);
   const acceptedLedger = await ledger(item.account), pinned = await job(source.jobId);
-  assert.equal(pinned.config.templatePolicy, 'complete-v1'); assert.equal(pinned.config.templates.length, 3);
+  assert.equal(pinned.config.templatePolicy, 'complete-regions-v1'); assert.equal(pinned.config.templates.length, 3);
   assert.equal(await processOneCoreJob(source.jobId), true); assert.equal(calls, 0);
   const data = await detail(item, source.document.id), run = data.runs[0];
   assert.equal(data.document.status, 'needs_review'); assert.equal(data.document.approvedRunId, null);
   assert.equal(run.engine, 'text-template'); assert.equal(run.model, 'deterministic-v3'); assert.equal(run.promptVersion, 'folio-text-template-v1');
   assert.deepEqual(run.normalizedValues, { reference: 'OWNED-341', total: 24.5, note: null, party: { tax: 'OWNED-TAX' }, items: [{ description: 'Widget', quantity: 2 }, { description: 'Gadget', quantity: 3 }] });
   assert.deepEqual(run.issues, []); assert.equal(Number(run.costUsd), 0);
-  assert.deepEqual(run.selection, { policy: 'complete-v1', outcome: 'template', reason: 'matched', consideredTemplates: 3, eligibleTemplates: 3,
-    template: { id: chosen.id, name: chosen.name, fieldCount: 5, tieCount: 2 } });
+  assert.deepEqual(run.selection, { policy: 'complete-regions-v1', outcome: 'template', reason: 'matched', consideredTemplates: 3, eligibleTemplates: 3,
+    template: { id: chosen.id, name: chosen.name, fieldCount: 5, tieCount: 2, kind: 'text-v1', revision: 1, definitionDigest: run.templateSnapshot.definitionDigest } });
+  assert.deepEqual(run.templateSnapshot.template, { kind: 'text-v1', id: chosen.id, revision: 1, name: chosen.name, matchText: '', enabled: true, rules });
+  assert.match(run.templateSnapshot.definitionDigest, /^[0-9a-f]{64}$/);
   assert.notEqual(run.selection.template.id, tied.id); assert.deepEqual(await ledger(item.account), acceptedLedger);
   assert.equal((await adminPool.query('select id from approvals where workspace_id=$1', [item.account.workspace.id])).rowCount, 0);
   const usage = await request(item.account, 'GET', '/api/workspace/usage');
@@ -199,7 +201,7 @@ test('job selection and completed provenance remain pinned through template edit
   assert.equal(historical.statusCode, 200, historical.body); assert.deepEqual(historical.json().run.selection, selection);
   const reprocess = await request(item.account, 'POST', `/api/documents/${source.document.id}/reprocess`);
   assert.equal(reprocess.statusCode, 200, reprocess.body);
-  const next = await job(reprocess.json().job.id); assert.equal(next.config.templatePolicy, 'complete-v1'); assert.equal(next.schema_version_id, changed.json().schema.id);
+  const next = await job(reprocess.json().job.id); assert.equal(next.config.templatePolicy, 'complete-regions-v1'); assert.equal(next.schema_version_id, changed.json().schema.id);
   assert.equal(next.config.templates[0].name, 'Current different template'); assert.equal((await ledger(item.account)).length, 2);
   assert.deepEqual((await request(item.account, 'GET', `/api/runs/${run.id}`)).json().run.selection, selection);
 });
@@ -227,7 +229,7 @@ test('both automatic initial setup and manual setup release stamp the current po
     const created = await request(a, 'POST', '/api/parsers', { name: `Owned ${release} release`, useCase: 'custom', setupMode: 'sample', mode: 'ai' });
     assert.equal(created.statusCode, 201, created.body);
     const item = { account: a, parserId: created.json().parser.id, schemaId: created.json().schema.id }, source = await upload(item);
-    assert.equal((await job(source.jobId)).config.templatePolicy, 'complete-v1'); assert.equal((await job(source.jobId)).waiting_for_schema, true);
+    assert.equal((await job(source.jobId)).config.templatePolicy, 'complete-regions-v1'); assert.equal((await job(source.jobId)).waiting_for_schema, true);
     await adminPool.query("update jobs set config=config-'templatePolicy' where id=$1", [source.jobId]);
     const before = await ledger(a);
     if (release === 'automatic') {
@@ -236,7 +238,7 @@ test('both automatic initial setup and manual setup release stamp the current po
     } else {
       const saved = await request(a, 'POST', `/api/parsers/${item.parserId}/schema`, simple); assert.equal(saved.statusCode, 200, saved.body);
     }
-    const released = await job(source.jobId); assert.equal(released.config.templatePolicy, 'complete-v1'); assert.equal(released.waiting_for_schema, false);
+    const released = await job(source.jobId); assert.equal(released.config.templatePolicy, 'complete-regions-v1'); assert.equal(released.waiting_for_schema, false);
     assert.equal(released.state, 'queued'); assert.equal(released.attempts, 0); assert.notEqual(released.schema_version_id, item.schemaId);
     assert.equal((await adminPool.query('select id from jobs where document_id=$1', [source.document.id])).rowCount, 1);
     assert.deepEqual(await ledger(a), before);

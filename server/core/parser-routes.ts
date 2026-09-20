@@ -1,5 +1,4 @@
 import type {FastifyInstance} from 'fastify';
-import type {PoolClient} from 'pg';
 import {z} from 'zod';
 import {requireActor,editors,admins} from './auth.js';
 import {withWorkspace,camel,badRequest,notFound,audit} from './db.js';
@@ -9,27 +8,16 @@ import {parserSetupStatus,queueInitialSetup,releaseInitialJobs} from './parser-s
 import {schemaSuggestionsConfigured} from './schema-suggestions.js';
 import {aiConfigured} from './worker.js';
 import {allowedFormatsInput} from './intake-policy.js';
-import {selectTemplateExtraction,templateRuleValidation} from './template-selection.js';
-import {templateLimits,templateReasonLabels} from '../../shared/template-selection.js';
-import {templateBody} from './template-input.js';
 import {requireParserCapacity} from './parser-capacity.js';
 import {copyParser} from './parser-copy.js';
+import {registerTemplateMutations} from './template-mutations.js';
+import {registerTemplateRegionRoutes} from './template-region-routes.js';
 const idFrom=(p:unknown)=>z.object({id:z.string().uuid()}).parse(p).id;
 const locale=z.string().max(35).refine(v=>{try{new Intl.NumberFormat(v);return true;}catch{return false;}},'Invalid locale');
 const timezone=z.string().max(80).refine(v=>{try{new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}},'Invalid timezone');
 const parserInput=z.object({setupMode:z.enum(['preset','sample']).default('preset'),name:z.string().trim().min(1).max(100),useCase:z.enum(['invoice','purchase_order','receipt','leads','custom']).default('custom'),mode:z.enum(['rules','ai']).default('rules'),instructions:z.string().max(8000).default(''),locale:locale.default('en-IE'),timezone:timezone.default('Europe/Dublin'),schema:parserSchema.optional(),allowedFormats:allowedFormatsInput.optional()});
 // Creation defaults must never reset settings omitted from a partial update.
 const parserPatch=z.object({name:parserInput.shape.name.optional(),mode:z.enum(['rules','ai']).optional(),instructions:z.string().max(8000).optional(),locale:locale.optional(),timezone:timezone.optional(),archived:z.boolean().optional(),allowedFormats:allowedFormatsInput.optional()});
-// The caller takes the workspace advisory lock before this parser row lock.
-async function lockTemplateParser(c:PoolClient,workspaceId:string,parserId:string){
- const {rows:[parser]}=await c.query('select p.id,s.schema from parsers p join schema_versions s on s.id=p.active_schema_id and s.parser_id=p.id and s.workspace_id=p.workspace_id where p.id=$1 and p.workspace_id=$2 for update of p',[parserId,workspaceId]);
- if(!parser)notFound('Parser not found');return parser;
-}
-function validateEnabledTemplate(parser:any,body:{enabled:boolean;rules:unknown}){
- if(!body.enabled)return;
- const validation=templateRuleValidation(parser.schema,body.rules);
- if(!validation.valid)badRequest(validation.reasons.map(reason=>templateReasonLabels[reason]??'The template field anchors are invalid.').join(' '));
-}
 export async function registerParsers(app:FastifyInstance){
 app.get('/api/presets',async()=>({presets:Object.entries(presets).map(([id,p])=>({id,...p})),providers:{setup:{configured:aiConfigured()&&schemaSuggestionsConfigured(),message:aiConfigured()&&schemaSuggestionsConfigured()?'AI-assisted setup is available.':'AI-assisted setup needs both field discovery and extraction providers.'},ai:{configured:aiConfigured(),message:aiConfigured()?'Provider configured; verify with your documents.':'AI provider is not configured. Text-anchor parsing is available.'}}}));
 app.get('/api/parsers',async req=>{const a=await requireActor(req,{scope:'parsers:read'});return withWorkspace(a.workspaceId,async c=>({parsers:(await c.query('select p.*,(select count(*)::int from documents d where d.parser_id=p.id) document_count,(select count(*)::int from documents d where d.parser_id=p.id and d.status=$2) review_count from parsers p where p.workspace_id=$1 order by p.archived,p.created_at desc',[a.workspaceId,'needs_review'])).rows.map(camel)}));});
@@ -97,52 +85,6 @@ app.post('/api/parsers/:id/schema',async req=>{
  });
 });
 
-app.post('/api/parsers/:id/templates',async req=>{
- const a=await requireActor(req,{roles:editors,scope:'parsers:write'}),id=idFrom(req.params),b=templateBody.parse(req.body);
- return withWorkspace(a.workspaceId,async c=>{
-  await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[a.workspaceId]);
-  const parser=await lockTemplateParser(c,a.workspaceId,id);validateEnabledTemplate(parser,b);
-  const {rows:[usage]}=await c.query('select count(*)::integer count from templates where parser_id=$1 and workspace_id=$2',[id,a.workspaceId]);
-  if(usage.count>=templateLimits.templates)badRequest(`This parser already has ${templateLimits.templates} templates. Delete a template before adding another.`,429);
-  const {rows:[t]}=await c.query('insert into templates(workspace_id,parser_id,name,match_text,rules,enabled) values($1,$2,$3,$4,$5,$6) returning *',[a.workspaceId,id,b.name,b.matchText,JSON.stringify(b.rules),b.enabled]);
-  await audit(c,a.workspaceId,a.userId,'template.created',t.id);return {template:camel(t)};
- });
-});
-app.patch('/api/templates/:id',async req=>{
- const a=await requireActor(req,{roles:editors,scope:'parsers:write'}),id=idFrom(req.params),b=templateBody.parse(req.body);
- return withWorkspace(a.workspaceId,async c=>{
-  await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[a.workspaceId]);
-  const {rows:[existing]}=await c.query('select parser_id from templates where id=$1 and workspace_id=$2',[id,a.workspaceId]);if(!existing)notFound();
-  const parser=await lockTemplateParser(c,a.workspaceId,existing.parser_id);validateEnabledTemplate(parser,b);
-  const {rows:[t]}=await c.query('update templates set name=$2,match_text=$3,rules=$4,enabled=$5 where id=$1 and workspace_id=$6 and parser_id=$7 returning *',[id,b.name,b.matchText,JSON.stringify(b.rules),b.enabled,a.workspaceId,existing.parser_id]);
-  if(!t)notFound();await audit(c,a.workspaceId,a.userId,'template.updated',t.id);return {template:camel(t)};
- });
-});
-app.delete('/api/templates/:id',async req=>{
- const a=await requireActor(req,{roles:editors,scope:'parsers:write'}),id=idFrom(req.params);
- return withWorkspace(a.workspaceId,async c=>{
-  await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[a.workspaceId]);
-  const {rows:[existing]}=await c.query('select parser_id from templates where id=$1 and workspace_id=$2',[id,a.workspaceId]);if(!existing)notFound();
-  await lockTemplateParser(c,a.workspaceId,existing.parser_id);
-  if(!(await c.query('delete from templates where id=$1 and workspace_id=$2 and parser_id=$3 returning id',[id,a.workspaceId,existing.parser_id])).rowCount)notFound();
-  await audit(c,a.workspaceId,a.userId,'template.deleted',id);return {ok:true};
- });
-});
-app.post('/api/parsers/:id/templates/check',async req=>{
- const a=await requireActor(req,{scope:'parsers:read'}),id=idFrom(req.params),b=z.object({documentId:z.uuid()}).strict().parse(req.body);
- if(a.authType==='api'&&!a.scopes?.includes('documents:read'))badRequest('API key requires documents:read scope',403);
- return withWorkspace(a.workspaceId,async c=>{
-  // A single statement gives the preview one current schema/template/source snapshot.
-  // It neither changes the queued job's pinned config nor reads original storage.
-  const {rows:[current]}=await c.query(`select p.mode,p.locale,s.schema,d.source_text,
-   coalesce((select jsonb_agg(t order by t.created_at,t.id) from templates t where t.parser_id=p.id and t.workspace_id=p.workspace_id),'[]'::jsonb) templates
-   from parsers p join schema_versions s on s.id=p.active_schema_id and s.parser_id=p.id and s.workspace_id=p.workspace_id
-   join documents d on d.parser_id=p.id and d.id=$3 and d.workspace_id=p.workspace_id
-   where p.id=$1 and p.workspace_id=$2`,[id,a.workspaceId,b.documentId]);
-  if(!current)notFound('Document not found in this parser');
-  const {selection,candidates,availableSourceText}=selectTemplateExtraction(current.source_text,current.schema,current.locale,current.templates,current.mode);
-  // Deliberately exclude extracted results, evidence and source values from checks.
-  return {selection,candidates,availableSourceText};
- });
-});
+registerTemplateMutations(app);
+registerTemplateRegionRoutes(app);
 }

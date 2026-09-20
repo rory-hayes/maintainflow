@@ -2,7 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import type {PoolClient} from 'pg';
 import {z} from 'zod';
 import type {Actor} from '../../shared/types.js';
-import {templatePolicy} from '../../shared/template-selection.js';
+import {pinnedTemplateConfig} from './template-snapshot.js';
 import {canonicalArchiveImportSpec,ArchiveImportValidationError,isArchiveImportValidationReason,archiveImportLimits,type ArchiveImportSpec,type ArchiveImportReceipt,type ArchivePreview} from '../../shared/archive-import.js';
 import {sourceFormats} from '../../shared/source-formats.js';
 import {withWorkspace,badRequest,notFound,audit} from './db.js';
@@ -142,7 +142,7 @@ export async function addArchiveDocuments(actor:Actor,parserId:string,bytes:Buff
    await quota(c,decoded.totalPages,decoded.parts);
    if(!(await c.query('select id from schema_versions where id=$1 and parser_id=$2 and workspace_id=$3',[parser.active_schema_id,parserId,actor.workspaceId])).rowCount)badRequest('Save valid parser fields before importing a ZIP.',409);
    const templates=(await c.query('select * from templates where parser_id=$1 order by created_at,id',[parserId])).rows;
-   const jobConfig=JSON.stringify({mode:parser.mode,instructions:parser.instructions,locale:parser.locale,timezone:parser.timezone,templates,templatePolicy});check();
+   const jobConfig=JSON.stringify(pinnedTemplateConfig(parser,templates));check();
    await c.query("insert into archive_imports(id,workspace_id,parser_id,request_id,source_sha256,canonical_spec,spec_hash,state,source_byte_size,total_pages,child_count,source_storage_key,source_name,created_by) values($1,$2,$3,$4,$5,$6,$7,'accepted',$8,$9,$10,$11,$12,$13)",[archiveId,actor.workspaceId,parserId,requestId,sourceSha,canonical,specHash,bytes.length,decoded.totalPages,decoded.parts.length,files[0]!.key,name,actor.userId]);
    for(const [i,part] of decoded.parts.entries()){
     check();const file=files[i+1]!,jobId=randomUUID(),index=part.index,childSha=sha(part.bytes),childName=safeDownloadName(part.path);

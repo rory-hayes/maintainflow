@@ -2,7 +2,9 @@ import {useId,useRef,useState} from 'react';
 import {Link} from 'react-router-dom';
 import {Plus,Trash2} from 'lucide-react';
 import {api,patch,post,useAction,useData} from '../../lib/api';
-import {Button,Field,Notice,Status} from '../../components/ui';
+import {Button,Field,Notice,Status,Tabs} from '../../components/ui';
+import NativeTemplateEditor from './NativeTemplateEditor';
+import type {SavedTemplate as VersionedSavedTemplate} from '../../../shared/template-definitions';
 import type {ParserSchema} from '../../../shared/types';
 import {templateFieldOptions,templateLimits,templateReasonLabels,type TemplateCandidate,type TemplateFieldOption,type TemplateRule,type TemplateSelection} from '../../../shared/template-selection';
 
@@ -14,15 +16,16 @@ const kindLabels={scalar:'Field',column:'Table column',table:'Table heading'};
 const templateBody=(template:SavedTemplate):TemplateBody=>({name:template.name,matchText:template.matchText,enabled:template.enabled,rules:template.rules});
 
 export default function TemplateEditor({parserId,templates,schema,mode,locale,canEdit}:{parserId:string;templates:SavedTemplate[];schema:ParserSchema;mode:'ai'|'rules';locale:string;canEdit:boolean}){
-  const options=templateFieldOptions(schema);
+  const options=templateFieldOptions(schema),[authoring,setAuthoring]=useState('Text anchors'),[nativeVisited,setNativeVisited]=useState(false);
+  const textTemplates=templates.filter(template=>(template as unknown as VersionedSavedTemplate).kind!=='native-pdf-region-v1');
   return <div className="template-editor">
-    <header><h2>Saved text templates</h2><p>Enabled templates are checked before AI. Every configured anchor and required field must have a valid source value. The complete match with the most configured fields wins; ties use the oldest template, then its ID.</p><p className="small muted">Changes apply to new documents and explicit reprocessing. Existing jobs and runs keep their saved settings.</p></header>
+    <Tabs items={['Text anchors','Native PDF regions']} value={authoring} onChange={value=>{setAuthoring(value);if(value==='Native PDF regions')setNativeVisited(true);}} label="Template authoring mode"/><div hidden={authoring!=='Text anchors'}><header><h2>Saved text templates</h2><p>Enabled templates are checked before AI. Every configured anchor and required field must have a valid source value. The complete match with the most configured fields wins; ties use the oldest template, then its ID.</p><p className="small muted">Changes apply to new documents and explicit reprocessing. Existing jobs and runs keep their saved settings.</p></header>
     <TemplateCheck key={parserId} parserId={parserId} schema={schema} templates={templates} mode={mode} locale={locale} options={options} canEdit={canEdit}/>
     <section aria-label="Saved templates" className="template-list">
-      {!templates.length&&<p className="muted">No saved templates yet. AI parsers use AI when no complete template matches. Text-anchor parsers without enabled templates use field labels.</p>}
-      {templates.map(template=><TemplateCard key={template.id} template={template} parserId={parserId} options={options} canEdit={canEdit}/>)}
+      {!textTemplates.length&&<p className="muted">No saved text templates yet. AI parsers use AI when no complete template matches. Text-anchor parsers without enabled templates use field labels.</p>}
+      {textTemplates.map(template=><TemplateCard key={template.id} template={template} parserId={parserId} options={options} canEdit={canEdit}/>)}
     </section>
-    {canEdit&&<section className="panel template-create"><h3>Create a template</h3>{templates.length>=templateLimits.templates?<p role="status">This parser has reached the limit of {templateLimits.templates} templates. Delete a template before creating another.</p>:<TemplateForm parserId={parserId} options={options}/>}</section>}
+    {canEdit&&<section className="panel template-create"><h3>Create a template</h3>{templates.length>=templateLimits.templates?<p role="status">This parser has reached the limit of {templateLimits.templates} templates. Delete a template before creating another.</p>:<TemplateForm parserId={parserId} options={options}/>}</section>}</div>{nativeVisited&&<div hidden={authoring!=='Native PDF regions'}><NativeTemplateEditor parserId={parserId} schema={schema} templates={(templates as unknown as VersionedSavedTemplate[]).filter(template=>template.kind==='native-pdf-region-v1')} canEdit={canEdit} totalTemplates={templates.length} active={authoring==='Native PDF regions'}/></div>}
   </div>;
 }
 
@@ -117,7 +120,7 @@ function TemplateCheck({parserId,schema,templates,mode,locale,options,canEdit}:{
 }
 
 function PreviewSelection({selection}:{selection:TemplateSelection}){
-  if(selection.outcome==='template'&&selection.template)return <><h4>Would use text template: {selection.template.name}</h4><p>{selection.template.fieldCount} configured field{selection.template.fieldCount===1?'':'s'} matched. AI would not be used.{selection.template.tieCount>1&&` ${selection.template.tieCount} complete templates tied on field count; the oldest template wins, then its ID.`}</p></>;
+  if(selection.outcome==='template'&&selection.template)return <><h4>Would use {selection.template.kind==='native-pdf-region-v1'?'native PDF region template':'text template'}: {selection.template.name}</h4><p>{selection.template.fieldCount} configured field{selection.template.fieldCount===1?'':'s'} matched. AI would not be used.{selection.template.tieCount>1&&` ${selection.template.tieCount} complete templates tied on field count; the oldest template wins, then its ID.`}</p></>;
   if(selection.outcome==='rules')return <><h4>Would use field-label rules</h4><p>No enabled templates are saved for this parser.</p></>;
   const reason=selection.reason==='no_templates'?'There are no enabled templates.':selection.reason==='no_readable_text'?'Template matching needs readable source text.':selection.reason==='limit'?'This document or template set exceeds the supported check limits.':'No enabled template is a complete match.';
   return <><h4>{selection.outcome==='ai'?'Would fall back to AI':'No template can be used'}</h4><p>{reason} {selection.outcome==='ai'?'Extraction requires an available AI provider.':'Edit the templates or parser fields before reprocessing.'}</p></>;
