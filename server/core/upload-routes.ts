@@ -26,6 +26,8 @@ export async function reserveDirectUpload(actor:Actor,parserId:string,input:z.in
     const parser=(await c.query('select id,field_setup_state,allowed_formats from parsers where id=$1 and workspace_id=$2 and archived=false for update',[parserId,actor.workspaceId])).rows[0];
     if(!parser)notFound('Active parser not found');
     if(body.pdfSplit){
+      if((await c.query('select 1 from stored_pdf_split_requests where workspace_id=$1 and request_id=$2',[actor.workspaceId,body.pdfSplit.requestId])).rowCount
+       ||(await c.query('select 1 from pdf_splits where workspace_id=$1 and request_id=$2 and source_document_id is not null',[actor.workspaceId,body.pdfSplit.requestId])).rowCount)badRequest('This split request was already used for a stored PDF. Use its original recovery action.',409);
       if(parser.field_setup_state!=='ready')badRequest('Finish parser setup before splitting a PDF.',409);
       if(parser.allowed_formats!==null&&!parser.allowed_formats.includes('pdf'))throw new ParserFormatNotAllowedError(parserId,'pdf');
     }

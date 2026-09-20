@@ -1,0 +1,90 @@
+{
+  "status": "passed",
+  "recordedAt": "2026-09-20T00:57:40.563098+00:00",
+  "source": {
+    "count": 297,
+    "fingerprint": "c3e39849cbb61abb187c4f938f3b71b9a7dda2baf93d8dc9f8ceac6e252d6a07",
+    "unchanged": true
+  },
+  "node": "24.13.0",
+  "tests": {
+    "passed": 669,
+    "failed": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "seconds": 278.559715084,
+    "newStoredPdfTests": 28,
+    "signInRegression": "tests/auth-login.test.ts included"
+  },
+  "phases": {
+    "suite": {
+      "startedAt": "2026-09-20T00:44:05.389666+00:00",
+      "completedAt": "2026-09-20T00:48:44.022916+00:00",
+      "seconds": 278.634468625,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "build": {
+      "startedAt": "2026-09-20T00:43:34.155800+00:00",
+      "completedAt": "2026-09-20T00:43:35.937403+00:00",
+      "seconds": 1.781608959,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "package": {
+      "startedAt": "2026-09-20T00:43:47.662048+00:00",
+      "completedAt": "2026-09-20T00:43:52.798383+00:00",
+      "seconds": 5.136356583,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "bundle": {
+      "startedAt": "2026-09-20T00:44:37.568291+00:00",
+      "completedAt": "2026-09-20T00:44:47.325563+00:00",
+      "seconds": 9.757312375,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    }
+  },
+  "backupRegression": "backup-regression.json",
+  "originalCapabilityCriteriaPreserved": 47,
+  "localMigration": {
+    "latest": "034",
+    "appliedCount": 25
+  },
+  "providerBoundary": "Real native PDF decoding and deterministic text-anchor extraction; no new real AI, email or payment requests.",
+  "hosted": {
+    "status": "pending",
+    "requiredMigrations": "021\u2013034",
+    "runtimeActivation": "pending"
+  },
+  "ci": "Outside this local acceptance receipt; consult the pull request checks for its exact commit.",
+  "browser": {
+    "receipt": "browser-verification.json",
+    "passed": 9,
+    "failed": 0,
+    "seconds": 35.582,
+    "viewports": [
+      "1440x1000",
+      "820x1000",
+      "390x844"
+    ],
+    "all16ScreenshotsInspected": true,
+    "publicScreenshots": 11,
+    "realProviderCalls": 0,
+    "unexpectedConsoleErrors": 0,
+    "ownedFixturesCleaned": true
+  },
+  "releaseLimits": [
+    "Hosted migrations021\u2013034 and matching runtime activation remain pending.",
+    "AI split boundaries, TIFF splitting and broader archive formats remain open.",
+    "Undo removes the selected batch and whole exports containing its children; used page credits remain charged.",
+    "Existing original-download authorization and signed-link lifetime retain their prior scope; write-race tests do not establish immediate revocation of issued downloads.",
+    "Free plans and mock billing remain unchanged."
+  ],
+  "priorAttempts": [
+    "Independent review found and fixed auth lock ordering, signed-upload request namespace conflicts, source-read deadlines and terminal rejection recovery.",
+    "Initial focused DB attempts stopped on sandbox socket access and then shared fixture rate limits; standard test namespace and approved socket access resolved test setup.",
+    "Two browser harness failures (marker selector collision and GET interception overwriting a POST) were corrected before the final9group run without product changes."
+  ]
+}

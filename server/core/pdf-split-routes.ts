@@ -6,12 +6,30 @@ import {requireActor,editors} from './auth.js';
 import {withWorkspace,badRequest,notFound,audit} from './db.js';
 import {config} from './config.js';
 import {addSplitDocuments} from './pdf-split-intake.js';
-import {findPdfSplitByRequest,readPdfSplitReceipt} from './pdf-split-records.js';
+import {findPdfSplitByRequest,readPdfSplitReceipt,storedPdfSplitRejection} from './pdf-split-records.js';
 import {purgePdfSplit} from './retention.js';
+import {storedPdfAuthorization,splitStoredPdf,listStoredPdfSplits,undoStoredPdfSplit,withStoredPdfAuthorization} from './stored-pdf-split.js';
 
 const uuid=z.string().uuid().transform(value=>value.toLowerCase());
 const idFrom=(params:unknown)=>z.object({id:uuid}).parse(params).id;
 export async function registerPdfSplitRoutes(app:FastifyInstance){
+ app.post('/api/documents/:id/pdf-splits',async(request,reply)=>{
+  const actor=await requireActor(request,{roles:editors,scope:'documents:write'}),documentId=idFrom(request.params);
+  const body=z.object({requestId:uuid,sourceSha256:z.string().regex(/^[0-9a-f]{64}$/),options:z.unknown()}).strict().parse(request.body);
+  const spec:PdfSplitSpec=JSON.parse(canonicalPdfSplitSpec(body.options));
+  const receipt=await splitStoredPdf(storedPdfAuthorization(request,actor),documentId,body.requestId,body.sourceSha256,spec);
+  reply.code(202);return receipt;
+ });
+ app.get('/api/documents/:id/pdf-splits',async request=>{
+  const actor=await requireActor(request,{scope:'documents:read'}),documentId=idFrom(request.params);
+  const query=z.object({before:uuid.optional()}).strict().parse(request.query);
+  return listStoredPdfSplits(storedPdfAuthorization(request,actor),documentId,query.before);
+ });
+ app.post('/api/pdf-splits/:id/undo',async request=>{
+  const actor=await requireActor(request,{roles:editors,scope:'documents:write'}),id=idFrom(request.params);
+  z.object({}).strict().parse(request.body??{});
+  return undoStoredPdfSplit(storedPdfAuthorization(request,actor),id);
+ });
  app.post('/api/parsers/:id/pdf-splits',async(request,reply)=>{
   const actor=await requireActor(request,{roles:editors,scope:'documents:write'}),parserId=idFrom(request.params);
   let file:{bytes:Buffer;filename:string}|undefined,requestId:string|undefined,spec:PdfSplitSpec|undefined;
@@ -39,11 +57,14 @@ export async function registerPdfSplitRoutes(app:FastifyInstance){
  });
  app.get('/api/parsers/:id/pdf-splits/requests/:requestId',async request=>{
   const actor=await requireActor(request,{scope:'documents:read'}),params=z.object({id:uuid,requestId:uuid}).parse(request.params);
-  return withWorkspace(actor.workspaceId,async c=>{
+  const read=async(c:import('pg').PoolClient)=>{
    const row=await findPdfSplitByRequest(c,actor.workspaceId,params.requestId);
    if(!row||row.parser_id!==params.id)notFound('PDF split request not found');
+   if(row.source_document_id&&row.state==='rejected')return storedPdfSplitRejection(row);
    return readPdfSplitReceipt(c,actor.workspaceId,row.id,true);
-  });
+  };
+  // Receipt recovery does not depend on a live source, but still needs live access.
+  return withStoredPdfAuthorization(storedPdfAuthorization(request,actor),read,false);
  });
  app.delete('/api/pdf-splits/:id',async request=>{
   const actor=await requireActor(request,{roles:editors,scope:'documents:write'}),id=idFrom(request.params);
