@@ -10,6 +10,7 @@ import {privateStorage,readStoredObject,validateStorageKey,safeDownloadName} fro
 import {registerUploadRoutes} from './upload-routes.js';
 import {registerPdfSplitRoutes} from './pdf-split-routes.js';
 import {registerArchiveImportRoutes} from './archive-import-routes.js';
+import {registerDocumentPreview} from './document-preview.js';
 import {archiveImportDetail} from './archive-import-records.js';
 import {pdfSplitDetail,retainedPdfSource} from './pdf-split-records.js';
 import {presets} from '../../shared/presets.js';
@@ -27,6 +28,7 @@ export async function registerDocuments(app:FastifyInstance){
 await registerUploadRoutes(app);
 await registerPdfSplitRoutes(app);
 await registerArchiveImportRoutes(app);
+registerDocumentPreview(app);
 const list=async(req:FastifyRequest)=>{const a=await requireActor(req,{scope:'documents:read'});const q=listQuery.parse(req.query);const scoped=(req.params as any)?.id;if(scoped)q.parserId=z.string().uuid().parse(scoped);return withWorkspace(a.workspaceId,async c=>{const where='workspace_id=$1 and ($2::uuid is null or parser_id=$2) and ($3::text is null or status=$3) and name ilike $4';const vals=[a.workspaceId,q.parserId||null,q.status||null,`%${q.search.replace(/[\\%_]/g,'\\$&')}%`];const {rows:[count]}=await c.query(`select count(*)::integer total from documents where ${where}`,vals);const {rows}=await c.query(`select d.*,p.name parser_name from documents d join parsers p on p.id=d.parser_id where d.workspace_id=$1 and ($2::uuid is null or d.parser_id=$2) and ($3::text is null or d.status=$3) and d.name ilike $4 order by d.created_at desc,d.id limit $5 offset $6`,[...vals,q.pageSize,(q.page-1)*q.pageSize]);return {documents:rows.map(camel),total:count.total,page:q.page,pageSize:q.pageSize};});};
 app.get('/api/documents',list);app.get('/api/parsers/:id/documents',list);
 app.post('/api/parsers/:id/documents',async(req,reply)=>{const a=await requireActor(req,{roles:editors,scope:'documents:write'}),id=idFrom(req.params);const files=[];for await(const part of req.parts({limits:{fileSize:config.maxBytes,files:20,fields:10,parts:30}})){if(part.type!=='file')continue;const buffer=await part.toBuffer();if(part.file.truncated)badRequest('File exceeds 10 MB limit',413);files.push({buffer,filename:part.filename,mimeType:part.mimetype});}if(!files.length)badRequest('Select at least one file');const results=[];const key=typeof req.headers['idempotency-key']==='string'?req.headers['idempotency-key']:undefined;for(const [i,file] of files.entries()){try{results.push(await addDocument(a,id,file.buffer,file.filename,file.mimeType,key?`${key}:${i}`:undefined));}catch(e){if(files.length===1)throw e;results.push({name:file.filename,error:e instanceof Error?e.message:'Upload failed'});}}reply.code(202);return results.length===1?{...results[0],results}: {results};});

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {makeTiff} from '../tests/fixtures/tiff.ts';
 
 const directory=await fs.mkdtemp(path.join(os.tmpdir(),'folio-bundle-check-'));
 try{
@@ -12,15 +13,19 @@ try{
   }
   await fs.cp('.vercel/output/functions/api.func',directory,{recursive:true});
   await fs.cp('fixtures/generated',path.join(directory,'fixtures'),{recursive:true});
+  const tiffPages=[{width:80,height:120,color:[30,80,150],compression:'deflate'},{width:96,height:64,orientation:6,color:[200,60,20],compression:'deflate'}];
+  await fs.writeFile(path.join(directory,'fixtures/owned-classic.tiff'),makeTiff(tiffPages));
+  await fs.writeFile(path.join(directory,'fixtures/owned-big.tiff'),makeTiff(tiffPages,{bigTiff:true,byteOrder:'MM'}));
   const result=spawnSync(process.execPath,['--input-type=module','-e',`
     import assert from 'node:assert/strict';
     import fs from 'node:fs/promises';
-    import {inspectSource,decoderLaunchSpec,splitPdfSource,previewArchiveSource,importArchiveSource} from './server/core/source.js';
+    import {inspectSource,decoderLaunchSpec,splitPdfSource,previewArchiveSource,importArchiveSource,renderTiffPage,convertTiffForAI} from './server/core/source.js';
     import {createHash} from 'node:crypto';
+    import {tiffRenderVersion} from './shared/tiff.js';
     import JSZip from 'jszip';
     import {PDFDocument,StandardFonts} from 'pdf-lib';
     import {buildApp} from './server/app.js';
-    for (const launch of [decoderLaunchSpec('document.txt'), decoderLaunchSpec('bundle.pdf',{mode:'every',pagesPerDocument:1}),decoderLaunchSpec('archive.zip',undefined,{})]) {
+    for (const launch of [decoderLaunchSpec('document.txt'), decoderLaunchSpec('bundle.pdf',{mode:'every',pagesPerDocument:1}),decoderLaunchSpec('archive.zip',undefined,{}),decoderLaunchSpec('private.tiff',undefined,undefined,{page:2}),decoderLaunchSpec('private.tiff',undefined,undefined,{})]) {
       assert.equal(launch.args.includes('tsx'),false);
       assert.ok(launch.args.includes('--max-old-space-size=192'));
       assert.equal(launch.args.includes('--max-old-space-size=256'),false);
@@ -28,6 +33,13 @@ try{
     for(const filename of ['invoice-multipage.pdf','receipt-scan.png','receipt.docx','receipt.xlsx','lead.eml','freeform-receipt.txt']){
       const result=await inspectSource(await fs.readFile('fixtures/'+filename),filename);
       assert.ok(result.pageCount>=1); console.log('PASS packaged decoder '+filename);
+    }
+    for(const filename of ['owned-classic.tiff','owned-big.tiff']){
+      const bytes=await fs.readFile('fixtures/'+filename),sourceSha256=createHash('sha256').update(bytes).digest('hex');
+      const source=await inspectSource(bytes,'misleading.txt');assert.deepEqual(source,{mimeType:'image/tiff',pageCount:2,pages:[{page:1,text:''},{page:2,text:''}]});
+      const rendered=await renderTiffPage(bytes,2);assert.equal(rendered.page,2);assert.equal(rendered.pageCount,2);assert.equal(rendered.width,64);assert.equal(rendered.height,96);assert.equal(rendered.mimeType,'image/jpeg');assert.equal(rendered.sourceSha256,sourceSha256);assert.equal(rendered.renderVersion,tiffRenderVersion);
+      const converted=await convertTiffForAI(bytes),pdf=await PDFDocument.load(converted.bytes);assert.equal(converted.pageCount,2);assert.equal(converted.sourceSha256,sourceSha256);assert.equal(converted.renderVersion,tiffRenderVersion);assert.equal(pdf.getPageCount(),2);assert.deepEqual(pdf.getPages().map(page=>page.getSize()),[{width:80,height:120},{width:64,height:96}]);
+      console.log('PASS packaged TIFF full inspection, oriented JPEG preview and all-page PDF '+filename);
     }
     const html=await inspectSource(Buffer.from('<h1>Owned bundle fixture</h1><p>Total: 12.50</p>'),'fixture.html');
     assert.match(html.pages[0].text,/12.50/);

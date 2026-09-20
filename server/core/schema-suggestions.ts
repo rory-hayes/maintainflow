@@ -7,6 +7,7 @@ import {schemaSuggestionLimits,type SchemaSuggestion,type SchemaSuggestionProvid
 import {adminPool,transaction,withWorkspace,audit,badRequest,notFound} from './db.js';
 import {requireActor,editors} from './auth.js';
 import {readStoredObject} from './storage.js';
+import {prepareVisualDocument,visualRenderingMetadata} from './visual-source.js';
 import {parserSchema} from './schema.js';
 import {requireSuggestionCapacity,finishInitialSetup,failInitialSetup} from './parser-setup.js';
 import {SchemaSuggestionProviderError} from './schema-suggestion-errors.js';
@@ -153,8 +154,10 @@ export async function processOneSchemaSuggestion(onlyId?:string,options:{signal?
    const bytes=await readStoredObject(data.storage_key);
    signal.throwIfAborted();
    if(createHash('sha256').update(bytes).digest('hex')!==job.document_sha256)throw new SchemaSuggestionProviderError('The sample document could not be verified. Upload it again before suggesting fields.');
-   const value=await active.suggest({bytes,mimeType:data.mime_type,pages:data.source_text,locale:job.config.locale,signal});
-   signal.throwIfAborted();return validatedResult(value);
+   const input={bytes,mimeType:data.mime_type,pages:data.source_text,locale:job.config.locale,signal};
+   const visualDocument=await prepareVisualDocument(input,{signal,expectedSha256:job.document_sha256});signal.throwIfAborted();
+   const value=await active.suggest({...input,...(visualDocument?{visualDocument}:{})});
+   signal.throwIfAborted();const checked=validatedResult(value);return visualDocument?{...checked,tokenUsage:{...checked.tokenUsage,sourceRendering:visualRenderingMetadata(visualDocument)}}:checked;
   },options);
   if(!result)return true;
   await withWorkspace(job.workspace_id,async c=>{

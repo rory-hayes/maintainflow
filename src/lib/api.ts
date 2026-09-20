@@ -57,6 +57,16 @@ export async function fetchOriginalFile(documentId:string,signal?:AbortSignal,bu
   const selectedWorkspace=workspaceId();
   return fetch(location.url,{signal,headers:selectedWorkspace?{'X-Workspace-Id':selectedWorkspace}:undefined,credentials:'same-origin',cache:'no-store'});
 }
+/** Derived TIFF pages stay on the authenticated application origin. */
+export async function fetchDocumentPagePreview(documentId:string,page:number,signal?:AbortSignal){
+  if(!/^[a-f0-9-]{36}$/i.test(documentId)||!Number.isInteger(page)||page<1)throw new Error('Choose a valid document page.');
+  const selectedWorkspace=workspaceId();
+  const response=await fetch(`/api/documents/${documentId}/preview?page=${page}`,{signal,headers:selectedWorkspace?{'X-Workspace-Id':selectedWorkspace}:undefined,credentials:'same-origin',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer'});
+  if(!response.ok||(response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase()!=='image/jpeg'){
+    await response.body?.cancel();throw new Error('This TIFF page could not be previewed. Try again or download the original TIFF.');
+  }
+  return response;
+}
 export async function downloadFile(path:string,filename:string){
   const original=/^\/api\/documents\/([a-f0-9-]{36})\/(bundle-|archive-)?original$/.exec(path);
   const selectedWorkspace=workspaceId();

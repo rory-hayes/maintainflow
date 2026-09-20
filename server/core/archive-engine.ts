@@ -1,6 +1,8 @@
 import {createHash} from 'node:crypto';
 import {decodeSource} from './decoder-engine.js';
 import {SourceValidationError} from './source-validation.js';
+import {isTiffHeader,inspectTiffStructure} from './tiff-engine.js';
+import {tiffLimits} from '../../shared/tiff.js';
 import {sourceFormats, type SourceFormat} from '../../shared/source-formats.js';
 import {archiveImportLimits as limits, ArchiveImportValidationError, canonicalArchiveImportSpec, archiveEntryReasons,
   type ArchiveImportSpec, type ArchiveEntryReason, type ArchivePreviewEntry} from '../../shared/archive-import.js';
@@ -34,10 +36,20 @@ export async function decodeArchive(bytes: Buffer, _filename: string, value?: Ar
   const records = scanZip(bytes), names = new Set(records.map(record => record.path));
   if (officeCandidate(names)) throw new ArchiveImportValidationError('office_package');
   const entries: ArchivePreviewEntry[] = [], allParts: ArchiveSourcePart[] = [];
-  let expanded = 0, officeExpanded = 0, textBytes = 0, documents = 0;
+  let expanded = 0, officeExpanded = 0, textBytes = 0, documents = 0,totalTiffPixels=0;
+  const prepared=new Map<number,Buffer>();
+  // Inspect the aggregate TIFF workload before any document enters a native decoder.
+  // The existing complete preview catalogue decodes eligible unselected leaves too,
+  // so all non-metadata TIFF pages share this one 300 MP budget.
+  for(const record of records){
+    const data=inflateZipEntry(bytes,record,Math.min(limits.maxBytes,limits.maxExpandedBytes-expanded));expanded+=data.length;prepared.set(record.index,data);
+    if(record.directory||isMacArchiveMetadata(record.path,data)||!isTiffHeader(data))continue;
+    try{totalTiffPixels+=inspectTiffStructure(data).totalPixels;}
+    catch(error){if(!(error instanceof SourceValidationError))throw error;continue;} // Invalid leaf remains visibly unsupported in the catalogue.
+    if(totalTiffPixels>tiffLimits.maxTotalPixels)throw new SourceValidationError('tiff_pixel_limit');
+  }
   for (const record of records) {
-    const data = inflateZipEntry(bytes, record, Math.min(limits.maxBytes, limits.maxExpandedBytes - expanded));
-    expanded += data.length;
+    const data = prepared.get(record.index)!;
     if (record.directory) continue;
     const entry: ArchivePreviewEntry = {index: record.index, path: record.path, byteSize: data.length,
       sha256: sha(data), status: 'unsupported', format: null, pageCount: null, reason: null};
