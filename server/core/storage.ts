@@ -54,8 +54,16 @@ function diagnosedError(code:StorageCode,message:string,operation?:StorageOperat
 }
 export function validateStorageKey(key:string,workspaceId?:string){
   const parts=key.split('/');
-  if(parts.length!==2||!parts.every(part=>uuid.test(part))||(workspaceId&&parts[0]!==workspaceId))throw storageError('Invalid private storage key',400);
+  if(parts.length!==2||!parts.every(part=>part.length===36&&uuid.test(part))||(workspaceId&&parts[0]!==workspaceId))throw storageError('Invalid private storage key',400);
   return key;
+}
+function filesystemPath(key:string){
+  validateStorageKey(key);
+  const root=path.resolve(config.storageDir),filename=path.resolve(root,key);
+  // Keep a separator boundary: a sibling with the same prefix is not inside the storage root.
+  const prefix=root.endsWith(path.sep)?root:root+path.sep;
+  if(!filename.startsWith(prefix))throw storageError('Invalid private storage key',400);
+  return filename;
 }
 export function safeDownloadName(value:string){return path.basename(value).replace(/[\u0000-\u001f\u007f]/g,'').slice(0,240)||'document';}
 export async function readBoundedResponse(response:Response,maxBytes:number):Promise<Buffer>{
@@ -69,9 +77,9 @@ export async function readBoundedResponse(response:Response,maxBytes:number):Pro
 }
 const filesystem:PrivateStorage={
   kind:'filesystem',
-  async write(key,bytes){validateStorageKey(key);if(bytes.length>config.maxBytes)throw storageError('File exceeds the 10 MB limit',413);await fs.mkdir(path.join(config.storageDir,key.split('/')[0]),{recursive:true,mode:0o700});await fs.writeFile(path.join(config.storageDir,key),bytes,{mode:0o600,flag:'wx'});},
-  async read(key,maxBytes=config.maxBytes){validateStorageKey(key);const filename=path.join(config.storageDir,key);const file=await fs.open(filename,'r');try{const stat=await file.stat();if(stat.size>maxBytes)throw storageError('File exceeds the 10 MB limit',413);const bytes=await file.readFile();if(bytes.length>maxBytes)throw storageError('File exceeds the 10 MB limit',413);return bytes;}finally{await file.close();}},
-  async remove(key){validateStorageKey(key);try{await fs.unlink(path.join(config.storageDir,key));}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}},
+  async write(key,bytes){const filename=filesystemPath(key);if(bytes.length>config.maxBytes)throw storageError('File exceeds the 10 MB limit',413);await fs.mkdir(path.dirname(filename),{recursive:true,mode:0o700});await fs.writeFile(filename,bytes,{mode:0o600,flag:'wx'});},
+  async read(key,maxBytes=config.maxBytes){const filename=filesystemPath(key);const file=await fs.open(filename,'r');try{const stat=await file.stat();if(stat.size>maxBytes)throw storageError('File exceeds the 10 MB limit',413);const bytes=await file.readFile();if(bytes.length>maxBytes)throw storageError('File exceeds the 10 MB limit',413);return bytes;}finally{await file.close();}},
+  async remove(key){const filename=filesystemPath(key);try{await fs.unlink(filename);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}},
 };
 /** Only the fixed private bucket is addressed; no user-supplied URL is fetched. */
 export function createSupabaseStorage(options:{url:string;serviceRoleKey:string;fetch?:typeof fetch}):PrivateStorage{

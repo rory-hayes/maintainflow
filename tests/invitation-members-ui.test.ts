@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import MembersPanel from '../src/features/settings/MembersPanel';
 import { SessionProvider } from '../src/lib/session';
 import type { Role } from '../shared/types';
+
+const { convert } = createRequire(import.meta.url)('html-to-text');
 
 const workspace = 'invitation-members-ui';
 const invitation = (id: string, overrides: Record<string, unknown> = {}) => ({ id, email: `${id}@example.test`, role: 'editor', expiresAt: '2099-09-19T12:00:00.000Z', acceptedAt: null, createdAt: '2026-09-19T12:00:00.000Z', delivery: 'email', emailStatus: 'accepted', retryAt: null, ...overrides });
@@ -29,7 +32,7 @@ function render(options: { role?: Role; available?: unknown; stale?: boolean; in
   }
 }
 function button(html: string, label: string) {
-  const match = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].find(item => item[2].replace(/<[^>]*>/g, '').trim() === label);
+  const match = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].find(item => convert(item[2], { wordwrap: false }).trim() === label);
   assert.ok(match, `Missing button: ${label}`); return match[1];
 }
 

@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {createSupabaseStorage,readBoundedResponse,validateStorageKey,safeDownloadName,ORIGINALS_BUCKET,storageDiagnostic} from '../server/core/storage.js';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {config} from '../server/core/config.js';
+import {createSupabaseStorage,privateStorage,readBoundedResponse,validateStorageKey,safeDownloadName,ORIGINALS_BUCKET,storageDiagnostic} from '../server/core/storage.js';
 const workspace=randomUUID(),key=`${workspace}/${randomUUID()}`,url='https://storage-fixture.supabase.co';
 const bucket={id:ORIGINALS_BUCKET,public:false,file_size_limit:10485760};
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
@@ -12,6 +16,33 @@ test('private storage accepts only two UUID key segments and an exact workspace'
  for(const invalid of ['../secret',`${workspace}/../secret`,`${workspace}/${randomUUID()}/extra`,`https://elsewhere.test/object`,`${randomUUID()}/${randomUUID()}`])assert.throws(()=>validateStorageKey(invalid,workspace));
  assert.equal(safeDownloadName('../invoice\r\nInjected.txt'),'invoiceInjected.txt');
  assert.throws(()=>createSupabaseStorage({url:'http://127.0.0.1',serviceRoleKey:'fixture'}));
+});
+test('filesystem operations reject traversal and absolute keys while preserving owned storage and outside files',async()=>{
+ const directory=await fs.mkdtemp(path.join(os.tmpdir(),'folio-storage-containment-'));
+ const previousRoot=config.storageDir,previousDriver=process.env.STORAGE_DRIVER;
+ config.storageDir=path.join(directory,'storage');process.env.STORAGE_DRIVER='filesystem';
+ const outside=path.join(directory,'storage-sibling','outside');
+ try{
+  await fs.mkdir(path.dirname(outside));await fs.writeFile(outside,'owned outside sentinel');
+  const client=privateStorage();
+  for(const invalid of ['../storage-sibling/outside',outside,`${workspace}/../../storage-sibling/outside`,`${workspace}\\..\\outside`,`${key}\n`,`${key}/extra`,`${workspace}/%2e%2e`,`${workspace}/\0`]){
+   const rejected=(error:any)=>error.statusCode===400&&error.message==='Invalid private storage key';
+   await assert.rejects(client.write(invalid,Buffer.from('must not write')),rejected);
+   await assert.rejects(client.read(invalid),rejected);
+   await assert.rejects(client.remove(invalid),rejected);
+  }
+  assert.equal(await fs.readFile(outside,'utf8'),'owned outside sentinel');
+  await client.write(key,Buffer.from('owned original'));
+  assert.equal((await client.read(key)).toString(),'owned original');
+  assert.equal(await fs.readFile(path.join(config.storageDir,key),'utf8'),'owned original');
+  await assert.rejects(client.write(key,Buffer.from('replacement')),(error:any)=>error.code==='EEXIST');
+  await client.remove(key);await client.remove(key);
+  await assert.rejects(fs.stat(path.join(config.storageDir,key)),(error:any)=>error.code==='ENOENT');
+  assert.equal(await fs.readFile(outside,'utf8'),'owned outside sentinel');
+ }finally{
+  config.storageDir=previousRoot;if(previousDriver===undefined)delete process.env.STORAGE_DRIVER;else process.env.STORAGE_DRIVER=previousDriver;
+  await fs.rm(directory,{recursive:true,force:true});
+ }
 });
 test('bounded response rejects excessive declared and streaming sizes without retaining the full object',async()=>{
  await assert.rejects(readBoundedResponse(new Response('tiny',{headers:{'Content-Length':'100'}}),16),(error:any)=>error.statusCode===413);
