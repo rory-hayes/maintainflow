@@ -1,0 +1,65 @@
+{
+  "checkedAt": "2026-09-13T10:19:28.789Z",
+  "status": "passed",
+  "scope": "Routine Google OAuth refresh after natural expiry, through one new approval revision of the existing synthetic QA invoice and one new row in the private Sheet.",
+  "targetOrigin": "https://maintainflow.io",
+  "deployedRevision": "e446f6bd74c910c8fafa8b3973239c3e216f1735",
+  "authorization": {
+    "explicitUserApproval": true,
+    "scopeUnchanged": true,
+    "newConsent": false,
+    "newOAuthClientOrProviderKey": false
+  },
+  "refresh": {
+    "naturalExpiryBefore": "2026-09-13T09:13:01.189Z",
+    "naturalExpiryConfirmedBeforeApproval": true,
+    "expiryMetadataMutated": false,
+    "persistedExpiryAfter": "2026-09-13T11:17:59.830Z",
+    "futureExpiryPersisted": true,
+    "refreshTokenUnchanged": true,
+    "accessTokenChanged": true,
+    "connectionRemainsEnabled": true
+  },
+  "application": {
+    "existingSyntheticDocument": true,
+    "newCorrectionCount": 1,
+    "newApprovalCount": 1,
+    "approvalPinsReviewedValues": true
+  },
+  "delivery": {
+    "status": "delivered",
+    "responseStatus": 200,
+    "attempts": 1,
+    "deliveredAt": "2026-09-13T10:18:01.194Z"
+  },
+  "nativeReadback": {
+    "checkedAt": "2026-09-13T10:19:28.789Z",
+    "headersMatched": true,
+    "originalDataRowPreserved": true,
+    "newApprovedRowMatched": true,
+    "newRevision": 2,
+    "totalDataRows": 2,
+    "newDataRows": 1,
+    "unexpectedRows": 0,
+    "formulaCells": 0,
+    "completeCellsChecked": 26000
+  },
+  "sessionRevoked": true,
+  "boundaries": {
+    "runtimeRestart": "not tested; canonical deployment unchanged during this check",
+    "expiryManipulation": "not performed",
+    "resendActions": "none",
+    "realStripe": "not used",
+    "customerData": "not used"
+  },
+  "privateDataOmitted": [
+    "account identity",
+    "spreadsheet and folder IDs",
+    "OAuth client ID",
+    "application resource IDs",
+    "OAuth tokens",
+    "encrypted token record",
+    "database credentials",
+    "session cookies"
+  ]
+}

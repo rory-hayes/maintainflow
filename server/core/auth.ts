@@ -3,25 +3,34 @@ import {randomBytes,createHash,scrypt as scryptCallback,timingSafeEqual} from 'n
 import {promisify} from 'node:util';
 import type {FastifyRequest,FastifyReply} from 'fastify';
 import type {Actor,Role} from '../../shared/types.js';
-import {adminPool,badRequest} from './db.js';
+import {adminPool,transaction,badRequest} from './db.js';
 import {config} from './config.js';
 const scrypt=promisify(scryptCallback);
 export const hashToken=(value:string)=>createHash('sha256').update(value).digest('hex');
 export const newToken=()=>randomBytes(32).toString('base64url');
 export async function hashPassword(password:string){const salt=randomBytes(16).toString('hex');const hash=await scrypt(password,salt,64) as Buffer;return `${salt}:${hash.toString('hex')}`;}
 export async function verifyPassword(password:string,encoded:string){const [salt,hash]=encoded.split(':');if(!salt||!hash)return false;const expected=Buffer.from(hash,'hex');const value=await scrypt(password,salt,64) as Buffer;return expected.length===value.length&&timingSafeEqual(expected,value);}
-export async function createSession(reply:FastifyReply,userId:string,workspaceId:string){const token=newToken();await adminPool.query("insert into sessions(token_hash,user_id,workspace_id,expires_at) values($1,$2,$3,now()+interval '14 days')",[hashToken(token),userId,workspaceId]);reply.setCookie('folio_session',token,{path:'/',httpOnly:true,sameSite:'lax',secure:config.production,maxAge:14*86400});}
+export async function createSession(reply:FastifyReply,userId:string,workspaceId:string,expectedPasswordHash:string){
+ const token=newToken();
+ await transaction(adminPool,async c=>{
+  const {rows:[user]}=await c.query('select password_hash,email_verified_at,email_verification_required from users where id=$1 for update',[userId]);
+  if(!user||user.password_hash!==expectedPasswordHash||user.email_verification_required&&!user.email_verified_at)badRequest('Email or password is incorrect',401);
+  if(!(await c.query('select 1 from memberships where user_id=$1 and workspace_id=$2',[userId,workspaceId])).rowCount)badRequest('Email or password is incorrect',401);
+  await c.query("insert into sessions(token_hash,user_id,workspace_id,expires_at) values($1,$2,$3,clock_timestamp()+interval '14 days')",[hashToken(token),userId,workspaceId]);
+ });
+ reply.setCookie('folio_session',token,{path:'/',httpOnly:true,sameSite:'lax',secure:config.production,maxAge:14*86400});
+}
 export async function requireActor(request:FastifyRequest,options:{roles?:Role[];scope?:string}={}):Promise<Actor>{
  const header=request.headers.authorization;let actor:Actor;
  if(header?.startsWith('Bearer ')){
   const token=header.slice(7);if(!token.startsWith('fl_'))badRequest('Invalid API key',401);
-  const {rows}=await adminPool.query('select k.*,m.role from api_keys k join memberships m on m.workspace_id=k.workspace_id and m.user_id=k.user_id where k.token_hash=$1 and k.revoked_at is null',[hashToken(token)]);const key=rows[0];if(!key)badRequest('Invalid or revoked API key',401);
+  const {rows}=await adminPool.query('select k.*,m.role from api_keys k join memberships m on m.workspace_id=k.workspace_id and m.user_id=k.user_id join users u on u.id=k.user_id where (not u.email_verification_required or u.email_verified_at is not null) and k.token_hash=$1 and k.revoked_at is null and (k.expires_at is null or k.expires_at>now())',[hashToken(token)]);const key=rows[0];if(!key)badRequest('Invalid, expired or revoked API key',401);
   if(options.scope&&!key.scopes.includes(options.scope))badRequest(`API key requires ${options.scope} scope`,403);
   actor={userId:key.user_id,workspaceId:key.workspace_id,role:key.role,authType:'api',scopes:key.scopes};
   await adminPool.query('update api_keys set last_used_at=now() where id=$1',[key.id]);
  }else{
   const token=request.cookies?.folio_session;if(!token)badRequest('Sign in to continue',401);
-  const {rows}=await adminPool.query('select * from sessions where token_hash=$1 and expires_at>now()',[hashToken(token)]);const session=rows[0];if(!session)badRequest('Your session has expired. Sign in again.',401);
+  const {rows}=await adminPool.query('select s.* from sessions s join users u on u.id=s.user_id where s.token_hash=$1 and s.expires_at>now() and (not u.email_verification_required or u.email_verified_at is not null)',[hashToken(token)]);const session=rows[0];if(!session)badRequest('Your session has expired. Sign in again.',401);
   const workspaceHeader=request.headers['x-workspace-id'];const workspaceId=typeof workspaceHeader==='string'?workspaceHeader:session.workspace_id;
   if(!/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(workspaceId))badRequest('Invalid workspace',400);
   const {rows:members}=await adminPool.query('select role from memberships where user_id=$1 and workspace_id=$2',[session.user_id,workspaceId]);if(!members[0])badRequest('Workspace access denied',403);

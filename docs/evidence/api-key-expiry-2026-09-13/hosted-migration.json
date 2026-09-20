@@ -1,0 +1,13 @@
+{
+  "observedAt": "2026-09-13T10:36:40.193004+00:00",
+  "source": "existing Supabase SQL Editor result",
+  "migration": "020_api_key_expiry.sql",
+  "migrationApplied": true,
+  "nullableExpiryColumn": true,
+  "existingKeys": 0,
+  "nonExpiringKeys": 0,
+  "applicationDeploymentChanged": false,
+  "credentialsOrPermissionsChanged": false,
+  "lockTimeoutSeconds": 5,
+  "statementTimeoutSeconds": 30
+}

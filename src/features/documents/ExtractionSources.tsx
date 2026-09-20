@@ -1,13 +1,13 @@
 import type { Evidence, SchemaField } from '../../../shared/types';
 
 type EvidenceMap = Record<string, Evidence[]>;
-type PageHandler = (page: number) => void;
+type PageHandler = (page: number, evidence?: Evidence) => void;
 
 export function SourceQuotes({ items = [], onPage }: { items?: Evidence[]; onPage: PageHandler }) {
   const quotes = Array.isArray(items) ? items : [];
   return <div className="source-quotes">{quotes.map((item, index) =>
-    <button key={index} className="evidence-link" type="button" onClick={() => onPage(item.page)}>
-      <span>{item.source === 'model-visual' ? 'AI-read source' : 'Source'} · Page {item.page}: </span>
+    <button key={index} className="evidence-link" type="button" onClick={() => onPage(item.page,item)}>
+      <span>{item.source === 'model-visual' ? 'AI-read source' : item.source === 'matched-region' ? 'Native region source' : 'Source'} · Page {item.page}: </span>
       <span className="source-quote-text">{item.text}</span>
     </button>
   )}</div>;

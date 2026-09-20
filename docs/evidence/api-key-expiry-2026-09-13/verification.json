@@ -1,0 +1,41 @@
+{
+  "baseRevision": "e446f6bd74c910c8fafa8b3973239c3e216f1735",
+  "branch": "codex/api-key-expiry",
+  "sourceState": "working tree before commit",
+  "sourceFiles": 135,
+  "sourceSha256": "ab6df0f5b943fc82aa6206863abc267c5b064d8456df9d1ce65d22ab369bfd98",
+  "checks": {
+    "fullSerialSuite": {
+      "passed": 238,
+      "failed": 0,
+      "scope": "before final dialog fixes and boundary test portability update",
+      "receipt": "tests.txt"
+    },
+    "finalExpirySuite": {
+      "passed": 8,
+      "failed": 0,
+      "receipt": "expiry-tests-final.txt"
+    },
+    "finalHostedBuildAndTypecheck": {
+      "passed": true,
+      "receipt": "build-final.txt"
+    },
+    "isolatedPackagedRuntimeAndSixDecoders": {
+      "passed": true,
+      "receipt": "bundle-final.txt"
+    },
+    "desktopAndMobileBrowser": {
+      "passed": true,
+      "checks": 14,
+      "receipt": "browser-results.json"
+    },
+    "privateSchemaExactBoundary": {
+      "passed": true,
+      "tests": 1,
+      "poolMax": 1,
+      "receipt": "private-schema-boundary.json"
+    }
+  },
+  "hostedDeployment": "not performed at this checkpoint",
+  "migration": "Applied and verified in hosted private schema before runtime promotion; see hosted-migration.json"
+}

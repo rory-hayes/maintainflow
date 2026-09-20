@@ -89,7 +89,8 @@ test('stored JPEG and image-only PDF originals remain retrievable after explicit
       assert.equal(intake.document.pageCount, 1);
       assert.equal(intake.document.sha256, createHash('sha256').update(bytes).digest('hex'));
       // This test cannot claim any other fixture or browser job.
-      assert.equal(await processOneCoreJob(intake.jobId), true);
+      assert.ok(intake.jobId);
+    assert.equal(await processOneCoreJob(intake.jobId), true);
       const detail = await app.inject({ method: 'GET', url: `/api/documents/${intake.document.id}`, headers });
       assert.equal(detail.statusCode, 200, detail.body);
       assert.equal(detail.json().document.status, 'failed');
@@ -120,7 +121,7 @@ test('HTML extraction does not wrap long scalar values, uppercase headings or ap
   const source = await inspectSource(bytes, 'receipt-long.html');
   const merchant = 'Cedar and Pine Office Supplies and Workspace Furnishings Trading Company Limited';
   assert.match(source.pages[0].text, new RegExp(`Merchant: ${merchant}`));
-  assert.ok(!source.pages[0].text.includes('https://example.test'));
+  assert.equal(source.pages[0].text, `Merchant: ${merchant}\n\nCurrency: EUR\n\nTotal: 18.60`);
   const result = extractRules(source.pages, { fields: presets.receipt.fields }, 'en-IE');
   assert.equal(result.rawValues.merchant, merchant);
   assert.equal(result.normalizedValues.merchant, merchant);
@@ -146,7 +147,7 @@ test('HTML-only EML shares extraction-oriented long-value and flat-table convers
   const merchant = 'Cedar and Pine Office Supplies and Workspace Furnishings Trading Company Limited';
   assert.match(source.pages[0].text, new RegExp(`Merchant: ${merchant}`));
   assert.match(source.pages[0].text, /Merchant \| Total\nCedar & Pine \| 18\.60/);
-  assert.ok(!source.pages[0].text.includes('https://example.test'));
+  assert.equal(source.pages[0].text, `Subject: Owned HTML-only receipt fixture\nFrom: sender@example.test\nMerchant: ${merchant}\n\nMerchant | Total\nCedar & Pine | 18.60\n\nCurrency: EUR`);
   const result = extractRules(source.pages, { fields: presets.receipt.fields }, 'en-IE');
   assert.equal(result.rawValues.merchant, merchant);
   assert.equal(result.normalizedValues.total, 18.6);

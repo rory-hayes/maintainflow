@@ -1,9 +1,9 @@
 import {createContext,useContext,useState,type ReactNode} from 'react';
 import {useQuery,useQueryClient} from '@tanstack/react-query';
-import {api,post,workspaceId} from './api';
+import {ApiError,api,post,workspaceId} from './api';
 import type {Role} from '../../shared/types';
 export type Workspace={id:string;name:string;role:Role;settings:Record<string,unknown>;plan:{name:string;monthlyPages:number;maxParsers:number;maxConcurrent:number}};
-export type Session={user:{id:string;name:string;email:string};workspace:Workspace;workspaces:Workspace[]};
+export type Session={user:{id:string;name:string;email:string;emailVerifiedAt:string|null;emailVerificationRequired:boolean};workspace:Workspace;workspaces:Workspace[]};
 type SessionValue={data?:Session;loading:boolean;refresh:()=>Promise<void>;select:(id:string)=>Promise<void>;logout:()=>Promise<void>};
 const Context=createContext<SessionValue>(null!);
 export function SessionProvider({children}:{children:ReactNode}){
@@ -24,6 +24,6 @@ export function SessionProvider({children}:{children:ReactNode}){
     client.setQueryData(['session',id],session);setSelectedWorkspace(id);
   }
   async function logout(){await post('/api/auth/logout');sessionStorage.removeItem('folio.workspace');client.clear();window.location.assign('/sign-in');}
-  return <Context.Provider value={{data:query.data,loading:query.isPending,refresh,select,logout}}>{children}</Context.Provider>;
+  return <Context.Provider value={{data:query.error instanceof ApiError&&query.error.status===401?undefined:query.data,loading:query.isPending,refresh,select,logout}}>{children}</Context.Provider>;
 }
 export const useSession=()=>useContext(Context);

@@ -1,0 +1,64 @@
+{
+  "status": "passed",
+  "runId": "b41a0779-e94d-4c5b-9555-0499f80caf79",
+  "node": "24.13.0",
+  "startedAt": "2026-09-20T00:43:21.243Z",
+  "completedAt": "2026-09-20T00:43:37.510Z",
+  "seconds": 16.267,
+  "source": {
+    "count": 297,
+    "fingerprint": "c3e39849cbb61abb187c4f938f3b71b9a7dda2baf93d8dc9f8ceac6e252d6a07",
+    "unchanged": true
+  },
+  "checks": {
+    "NewIsolatedPostgres17ClusterRestrictedRolesAndDistinctDatabases": true,
+    "SyntheticSourceFixtureAndEveryTableSnapshotAfterRuntimeShutdown": true,
+    "RealEncryptedCreateAndInspectAfterQuiescedSourceShutdown": true,
+    "MissingRequiredSourceFileRefusesCaptureWithoutDatabaseChanges": true,
+    "EveryTableAndSequenceExactlyRestoredBeforeRuntimeMutation": true,
+    "FreshApiAndWorkerRefusePendingRestoreBeforeActivation": true,
+    "ActivationRequiresExplicitOutboundFlagAndExactRestoredObjectBytes": true,
+    "ActivationReceiptCrashRecoveryAndRepeatDoNotStartServicesOrChangeData": true,
+    "FreshRestoredRuntimeLoginTenantIsolationOriginalsExportsKeyAndQueueOnce": true,
+    "DistinctEmptyTargetsRejectMalformedTruncatedWrongIdentityMissingPayloadAndRequiredObjectOmissionOrDowngrade": true,
+    "ExistingTargetDatabaseStorageAndKeyRemainUnchangedAfterRefusedRestore": true
+  },
+  "restoredRuntime": {
+    "checks": {
+      "login": true,
+      "tenantIsolation": true,
+      "correctionApprovalRawProvenance": true,
+      "exactSavedCsvXlsxJsonBytesAndTypedValues": true,
+      "schemasTemplateMapping": true,
+      "exactEveryLiveOriginal": true,
+      "retainedPdfAndZipLineage": true,
+      "replaysTombstonesUnchangedPageUsage": true,
+      "storedSplitRootLineageAndSourceCopy": true,
+      "storedUndoAndAdmissionIdentitySurviveRestore": true,
+      "encryptionKeyCanary": true,
+      "deterministicQueuedJobOnceWithoutRecharging": true,
+      "pendingDeletionResumed": true,
+      "pendingOutboxControlledDeliveryOnce": true,
+      "pendingEmailPreservedWithoutSending": true
+    },
+    "forbiddenNetwork": 0,
+    "realProviderCalls": 0,
+    "controlledWebhookDeliveries": 1,
+    "verifiedLiveOriginals": 7,
+    "savedExports": 3,
+    "accounts": 2
+  },
+  "restoredTables": 55,
+  "restoredRows": 137,
+  "storedAdmissionRows": 2,
+  "cleanup": {
+    "clusterRemoved": true,
+    "socketRemoved": true,
+    "sourceAndRestoredStorageRemoved": true,
+    "privateKeysAndCredentialFixtureRemoved": true,
+    "ownedAccountsPerPopulatedDatabase": 2,
+    "populatedDatabases": 2,
+    "normalDevelopmentDatabaseTouched": false
+  },
+  "scope": "Isolated synthetic PostgreSQL 17 cluster; includes active and undone stored-PDF batches. Does not establish hosted recovery."
+}

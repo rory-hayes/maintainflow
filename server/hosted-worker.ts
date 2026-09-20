@@ -1,6 +1,7 @@
 import {createHash,timingSafeEqual} from 'node:crypto';
 import type {FastifyInstance} from 'fastify';
 import type {WorkBudget} from './core/work-budget.js';
+import {assertStorageRestoreReady} from './core/restore-state.js';
 
 // Vercel Fluid is configured for 300s. Stop claiming before 210s, keeping a
 // separate grace window for bounded IO and durable lease/retry updates.
@@ -9,15 +10,18 @@ export const workerRoute='/api/internal/worker';
 export type HostedWorkerServices={
   enqueue:()=>Promise<unknown>;
   core:(budget:WorkBudget)=>Promise<boolean>;
+  suggestion:(budget:WorkBudget)=>Promise<boolean>;
+  splitSuggestion?:(budget:WorkBudget)=>Promise<boolean>;
   delivery:(budget:WorkBudget)=>Promise<boolean>;
   provider:(budget:WorkBudget)=>Promise<boolean>;
   deletion:(budget:WorkBudget)=>Promise<boolean>;
+  email:(budget:WorkBudget)=>Promise<boolean>;
   maintenance:(budget:WorkBudget)=>Promise<unknown>;
 };
-export type DrainResult={core:number;delivery:number;provider:number;deletion:number;stopped:'idle'|'budget';errors:number};
+export type DrainResult={core:number;suggestion:number;splitSuggestion:number;delivery:number;provider:number;deletion:number;email:number;stopped:'idle'|'budget';errors:number};
 
 /** One serial consumer per durable queue. No polling, sleeps or process lifetime dependency. */
-export function createHostedWorker(services:HostedWorkerServices,options:{budgetMs?:number;now?:()=>number;reserveMs?:Partial<Record<'core'|'delivery'|'provider'|'deletion',number>>;onError?:(lane:string,error:unknown)=>void}={}){
+export function createHostedWorker(services:HostedWorkerServices,options:{budgetMs?:number;now?:()=>number;reserveMs?:Partial<Record<'core'|'suggestion'|'splitSuggestion'|'delivery'|'provider'|'deletion'|'email',number>>;onError?:(lane:string,error:unknown)=>void}={}){
   const budgetMs=options.budgetMs??hostedWorkBudgetMs;
   if(!Number.isFinite(budgetMs)||budgetMs<=0||budgetMs>hostedWorkBudgetMs)throw new Error('Hosted worker budget must be positive and at most 210 seconds.');
   const now=options.now??Date.now;
@@ -26,10 +30,10 @@ export function createHostedWorker(services:HostedWorkerServices,options:{budget
     const controller=new AbortController();
     const budget:WorkBudget={signal:controller.signal,deadlineAt:now()+budgetMs};
     const timer=setTimeout(()=>controller.abort(),budgetMs);
-    const result:DrainResult={core:0,delivery:0,provider:0,deletion:0,stopped:'idle',errors:0};
+    const result:DrainResult={core:0,suggestion:0,splitSuggestion:0,delivery:0,provider:0,deletion:0,email:0,stopped:'idle',errors:0};
     const remaining=()=>budget.deadlineAt!-now();
     const report=(lane:string,error:unknown)=>{result.errors++;options.onError?.(lane,error);};
-    async function consume(lane:'core'|'delivery'|'provider'|'deletion',reserveMs:number){
+    async function consume(lane:'core'|'suggestion'|'delivery'|'provider'|'deletion'|'email',reserveMs:number){
       // The optional reserve override is only a controlled scheduler test seam.
       const reserve=options.reserveMs?.[lane]??reserveMs;
       try{
@@ -40,14 +44,38 @@ export function createHostedWorker(services:HostedWorkerServices,options:{budget
         result.stopped='budget';
       }catch(error){report(lane,error);}
     }
+    async function consumeExtractionWork(){
+      const failed=new Set<'core'|'suggestion'|'splitSuggestion'>();
+      async function attempt(lane:'core'|'suggestion'|'splitSuggestion'){
+        const service=services[lane];
+        if(!service||failed.has(lane))return false;
+        if(controller.signal.aborted||remaining()<=(options.reserveMs?.[lane]??110_000)){
+          result.stopped='budget';return false;
+        }
+        try{
+          const worked=await service(budget);
+          if(worked)result[lane]++;
+          return worked;
+        }catch(error){failed.add(lane);report(lane,error);return false;}
+      }
+      // FIFO and shared workspace capacity can temporarily block any extraction queue.
+      // Recheck after progress releases capacity; stop when none can work.
+      while(!controller.signal.aborted){
+        const progress=await Promise.all([attempt('core'),attempt('suggestion'),attempt('splitSuggestion')]);
+        if(!progress.some(Boolean))return;
+      }
+      result.stopped='budget';
+    }
     try{
-      await services.enqueue();
-      if(controller.signal.aborted){result.stopped='budget';return result;}
+      async function consumeDeliveries(){
+        try{await services.enqueue();}catch(error){report('enqueue',error);}
+        await consume('delivery',70_000);
+      }
       // Separate lanes prevent a backlog of extraction from starving email, delivery
       // or cleanup. Database leases fence other concurrent function instances.
       await Promise.all([
-        consume('core',110_000),consume('delivery',70_000),
-        consume('provider',140_000),consume('deletion',40_000),
+        consumeExtractionWork(),consumeDeliveries(),
+        consume('provider',140_000),consume('deletion',40_000),consume('email',40_000),
         services.maintenance(budget).catch(error=>report('maintenance',error)),
       ]);
       return result;
@@ -62,25 +90,35 @@ export function createHostedWorker(services:HostedWorkerServices,options:{budget
 
 let defaultWorker:ReturnType<typeof createHostedWorker>|undefined;
 async function productionServices():Promise<HostedWorkerServices>{
-  const [{processOneCoreJob,enforceRetention},{processOneFileDeletion},{reconcileInterruptedIntake},{enqueueApprovals,processOneDelivery},{tickProviders}]=await Promise.all([
+  const [{processOneCoreJob,enforceRetention},{processOneFileDeletion},{reconcileInterruptedIntake},{enqueueApprovals,processOneDelivery},{tickProviders},{processOneSchemaSuggestion},{processOneWorkspaceEmail},{processOneSplitSuggestion,reconcileExpiredSplitSuggestions}]=await Promise.all([
     import('./core/worker.js'),import('./core/retention.js'),import('./core/object-reconciliation.js'),
-    import('./integrations/webhooks.js'),import('./integrations/providers.js'),
+    import('./integrations/webhooks.js'),import('./integrations/providers.js'),import('./core/schema-suggestions.js'),import('./core/workspace-email.js'),import('./core/split-suggestions.js'),
   ]);
   return {
     enqueue:enqueueApprovals,
     core:budget=>processOneCoreJob(undefined,{signal:budget.signal}),
+    suggestion:budget=>processOneSchemaSuggestion(undefined,{signal:budget.signal}),
+    splitSuggestion:budget=>processOneSplitSuggestion(undefined,{signal:budget.signal}),
     delivery:budget=>processOneDelivery({signal:budget.signal}),
     provider:tickProviders,
     deletion:async budget=>budget.signal?.aborted?false:processOneFileDeletion(),
+    email:processOneWorkspaceEmail,
     maintenance:async budget=>{
-      await reconcileInterruptedIntake(undefined,{signal:budget.signal,limit:1});
-      if(!budget.signal?.aborted)await enforceRetention(undefined,{signal:budget.signal,limit:1});
+      if(budget.signal?.aborted)return;
+      const results=await Promise.allSettled([
+        reconcileInterruptedIntake(undefined,{signal:budget.signal,limit:1}),
+        enforceRetention(undefined,{signal:budget.signal,limit:1}),
+        reconcileExpiredSplitSuggestions(undefined,{signal:budget.signal,limit:1}),
+      ]);
+      if(results.some(result=>result.status==='rejected'))throw new Error('Hosted maintenance remains queued.');
     },
   };
 }
 let initialization:Promise<void>|undefined;
 /** Pass this promise to Vercel waitUntil after a successful mutation or watchdog wake. */
 export async function wakeHostedWorker(){
+  const {config}=await import('./core/config.js');
+  await assertStorageRestoreReady(config.storageDir,process.env.STORAGE_DRIVER||'filesystem');
   if(!defaultWorker){
     initialization??=(async()=>{
       const services=await productionServices();

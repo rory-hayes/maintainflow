@@ -64,6 +64,29 @@ test('fresh isolated migrations are idempotent, preserve legacy tables and never
  await assert.rejects(tenant.query(`SELECT * FROM public.${canary}`),/permission denied/);
 });
 
+test('migration replay preserves the installed watchdog owner-only execution boundary',async()=>{
+ await control.query(`CREATE FUNCTION ${schema}.worker_has_runnable_work() RETURNS boolean LANGUAGE sql STABLE SECURITY INVOKER SET search_path=pg_catalog AS 'SELECT false'`);
+ await control.query(`REVOKE ALL ON FUNCTION ${schema}.worker_has_runnable_work() FROM PUBLIC,${adminRole},${appRole}`);
+ for(let attempt=0;attempt<2;attempt++){
+  await apply(migrationSql);
+  for(const role of [adminRole,appRole])assert.equal((await control.query("SELECT has_function_privilege($1,$2,'EXECUTE') allowed",[role,`${schema}.worker_has_runnable_work()`])).rows[0].allowed,false);
+  assert.equal((await control.query(`SELECT EXISTS(SELECT 1 FROM pg_proc p,aclexplode(p.proacl) a WHERE p.oid=$1::regprocedure AND a.grantee=0 AND a.privilege_type='EXECUTE') allowed`,[`${schema}.worker_has_runnable_work()`])).rows[0].allowed,false);
+  await assert.rejects(administrator.query('SELECT worker_has_runnable_work()'),/permission denied/);
+  await assert.rejects(tenant.query('SELECT worker_has_runnable_work()'),/permission denied/);
+ }
+});
+
+test('account recovery tables preserve forced RLS and backend-only grants after private-schema migration replays',async()=>{
+ for(const table of ['account_recovery_requests','account_recovery_tokens','account_email_outbox','account_recovery_limits','account_security_events','account_registration_requests','account_registration_limits','email_verification_requests','email_verification_limits','email_verification_tokens','invitation_email_outbox','invitation_email_limits']){
+  const name=`${schema}.${table}`;
+  const flags=(await control.query('SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid=$1::regclass',[name])).rows[0];
+  assert.deepEqual(flags,{relrowsecurity:true,relforcerowsecurity:true});
+  assert.equal((await control.query("SELECT has_table_privilege($1,$2,'SELECT,INSERT,UPDATE,DELETE') allowed",[appRole,name])).rows[0].allowed,false);
+  assert.equal((await administrator.query(`SELECT * FROM ${table}`)).rowCount,0);
+  await assert.rejects(tenant.query(`SELECT * FROM ${table}`),/permission denied/);
+ }
+});
+
 test('direct pool and checked-out client queries reset schema and bounded timeouts for every transaction',async()=>{
  for(let index=0;index<3;index++){
   const result=await administrator.query("SELECT current_schema() schema,current_setting('statement_timeout') statement_timeout,current_setting('lock_timeout') lock_timeout");

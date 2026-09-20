@@ -1,0 +1,525 @@
+{
+  "startedAt": "2026-09-20T00:53:14.662Z",
+  "completedAt": "2026-09-20T00:53:50.244Z",
+  "origin": "http://127.0.0.1:4337",
+  "node": "24.13.0",
+  "browserAvailability": "Browser plugin unavailable; installed Playwright fallback",
+  "flow": "Generated six-page PDF -> real native-text rules -> original correction/approval/exports -> stored split/recovery -> child review/exports -> nested lineage/undo while preserving original",
+  "controlledOnly": true,
+  "rateLimits": "isolated browser store; rate limiting is outside this review fixture",
+  "checks": {
+    "OriginalSixPageNativePdfReviewedCorrectedApprovedAndExactCsvXlsxJsonExports": true,
+    "ReusedMarkerRangesSourcePreviewAdditionalCostsKeyboardTabletAndMobile": true,
+    "LostCommittedResponseRepeatedSubmitCloseReloadAndMinimalDurableBindingRecoverOnce": true,
+    "ChildrenReviewedAndExportedWithExactImmediateRootLineageAndOriginalSnapshotsPreserved": true,
+    "NestedSourceRootMappingAndLostUndoRecoveryPreserveOriginalNestedBatchAndCredits": true,
+    "ZipPdfLeafAndExistingUploadSplitChildReuseWorkflowWithCorrectRootPageMeaning": true,
+    "BoundDurableRejectionAllowsExplicitNewRequestWhileUnknownResultDoesNot": true,
+    "HeldSourceCloseWorkspaceReplacementAndViewerRestrictionsDoNotMutateOldScope": true,
+    "OriginalHistoricalSnapshotsRemainExactAndNoUnexplainedErrorsOrProviderCalls": true
+  },
+  "realProviderCalls": 0,
+  "controlledExtractionCalls": 0,
+  "fixture": {
+    "sixPageSourceSha256": "32769ef9b3392cb1af1b061d7365eb5640190050a4877b1308c41ad0b7a970ef",
+    "realNativeTextRules": true,
+    "controlledExtractionCalls": 0,
+    "noProviderCalls": true,
+    "originalSnapshotSha256": "3fc791fa830377b5cf336ff2a940cda433c99c0d78d500bb53717778a479efa8",
+    "originalHistoricalExports": 3,
+    "originalPreserved": true,
+    "exactCsvXlsxJson": true,
+    "nestedBatchSurvivesUndo": true
+  },
+  "cleanedOwnedFixtures": {
+    "accounts": 3,
+    "workspaces": 3,
+    "documents": 8
+  },
+  "passed": true,
+  "buildIndexSha256": "aa4b467f162b20b5e59775422c3ec608c311b9b9d2b103d5861f601e79fb8eae",
+  "sourceUnchanged": true,
+  "parentHead": "1e62dbb3bc57099b7ad63fd31b1b2c50e04d404b",
+  "finalPageCredits": 23,
+  "recordedAt": "2026-09-20T00:56:24.157433+00:00",
+  "sourceCount": 297,
+  "sourceFingerprint": "c3e39849cbb61abb187c4f938f3b71b9a7dda2baf93d8dc9f8ceac6e252d6a07",
+  "sourceBeforeFingerprint": "c3e39849cbb61abb187c4f938f3b71b9a7dda2baf93d8dc9f8ceac6e252d6a07",
+  "sourceAfterFingerprint": "c3e39849cbb61abb187c4f938f3b71b9a7dda2baf93d8dc9f8ceac6e252d6a07",
+  "sourceManifest": "source-manifest.json",
+  "groups": 9,
+  "durationSeconds": 35.582,
+  "screenshots": [
+    {
+      "file": "desktop-original-approved-history.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-stored-split-ranges-cost.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "stored-preview-page-4-820.png",
+      "width": 820,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 820,
+        "body": 820,
+        "document": 820
+      }
+    },
+    {
+      "file": "stored-confirmation-cost-820.png",
+      "width": 820,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 820,
+        "body": 820,
+        "document": 820
+      }
+    },
+    {
+      "file": "stored-preview-page-4-390.png",
+      "width": 390,
+      "height": 844,
+      "dimensions": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "file": "stored-confirmation-cost-390.png",
+      "width": 390,
+      "height": 844,
+      "dimensions": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "file": "desktop-stored-uncertain-request-recovery.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-stored-recovered-same-batch.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-stored-child-reviewed-lineage.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-nested-source-and-root-page-labels.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-undo-uncertain-keeps-source.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-undo-receipt-source-preserved.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-stored-zip-leaf-source-root.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-stored-upload-split-child-root.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-authoritative-rejection-recovery.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "mobile-viewer-source-preserved.png",
+      "width": 390,
+      "height": 844,
+      "dimensions": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    }
+  ],
+  "publicScreenshots": [
+    "desktop-stored-split-ranges-cost.png",
+    "stored-preview-page-4-820.png",
+    "stored-preview-page-4-390.png",
+    "stored-confirmation-cost-390.png",
+    "desktop-stored-uncertain-request-recovery.png",
+    "desktop-stored-recovered-same-batch.png",
+    "desktop-nested-source-and-root-page-labels.png",
+    "desktop-undo-uncertain-keeps-source.png",
+    "desktop-undo-receipt-source-preserved.png",
+    "desktop-authoritative-rejection-recovery.png",
+    "mobile-viewer-source-preserved.png"
+  ],
+  "visualReview": {
+    "reviewedAt": "2026-09-20T00:56:24.157433+00:00",
+    "runId": "22c62e91-d006-43e2-a39b-d1e2a31bf1f1",
+    "sourceFingerprint": "c3e39849cbb61abb187c4f938f3b71b9a7dda2baf93d8dc9f8ceac6e252d6a07",
+    "method": "All16 current final-run frames individually opened and inspected with view_image; no early-run images reused.",
+    "frameCount": 16,
+    "passed": true,
+    "views": [
+      {
+        "file": "desktop-original-approved-history.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Original six-page PDF and approved corrected reference are visible together; zero and false remain readable. Stored split action appears in review."
+      },
+      {
+        "file": "desktop-stored-split-ranges-cost.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Custom ranges omit page3; the additional five page credits and unchanged source history are disclosed next to the real PDF preview."
+      },
+      {
+        "file": "stored-preview-page-4-820.png",
+        "width": 820,
+        "height": 1000,
+        "passed": true,
+        "notes": "Tablet preview shows actual source page4 with document2 selected; two columns and page controls remain contained."
+      },
+      {
+        "file": "stored-confirmation-cost-820.png",
+        "width": 820,
+        "height": 1000,
+        "passed": true,
+        "notes": "Tablet confirmation shows full source-retention and undo disclosure plus the explicit two-document, five-page create button."
+      },
+      {
+        "file": "stored-preview-page-4-390.png",
+        "width": 390,
+        "height": 844,
+        "passed": true,
+        "notes": "Mobile Preview tab shows actual page4 selected by keyboard from document2; navigation and create action fit the narrow viewport."
+      },
+      {
+        "file": "stored-confirmation-cost-390.png",
+        "width": 390,
+        "height": 844,
+        "passed": true,
+        "notes": "Mobile Ranges view shows ranges, omitted page3, additional five credits, both children, retention disclosure and create action without horizontal overflow."
+      },
+      {
+        "file": "desktop-stored-uncertain-request-recovery.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Lost-response warning and Check split result are visible immediately; the frozen selection remains intact and there is no new-request action."
+      },
+      {
+        "file": "desktop-stored-recovered-same-batch.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Reopened saved operation displays the same accepted batch, no additional credit use, source link and explicit separate-new action."
+      },
+      {
+        "file": "desktop-stored-child-reviewed-lineage.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Corrected approved child shows its own two-page PDF, source/root range1-2 and source download without replacing the original result."
+      },
+      {
+        "file": "desktop-nested-source-and-root-page-labels.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Nested child visibly contains source page5, labeled local page1, immediate-source page2 of3 and root page5 of6; queued status is accurate."
+      },
+      {
+        "file": "desktop-undo-uncertain-keeps-source.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Lost undo response shows precise removal/preservation disclosure and Check undo status for the same batch; no second mutation is required."
+      },
+      {
+        "file": "desktop-undo-receipt-source-preserved.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Undone receipt marks both direct children deleted while preserving source link and stating unchanged usage; historical status is explicit."
+      },
+      {
+        "file": "desktop-stored-zip-leaf-source-root.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "ZIP PDF leaf child renders source page2; its root is the two-page PDF and no ZIP-wide page numbering is implied."
+      },
+      {
+        "file": "desktop-stored-upload-split-child-root.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Child of an uploaded split renders source page4; immediate page1 of3 and root page4 of6 are distinguished."
+      },
+      {
+        "file": "desktop-authoritative-rejection-recovery.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Authoritative policy rejection explains why no split was created. New split is disabled until PDF is restored in parser settings; subsequent reload/new request passed."
+      },
+      {
+        "file": "mobile-viewer-source-preserved.png",
+        "width": 390,
+        "height": 844,
+        "passed": true,
+        "notes": "Mobile viewer can read the preserved original and historical split section; Split and Undo actions are absent."
+      }
+    ],
+    "limitations": [
+      "Screenshots are actual scrolled viewports; the modal intentionally scrolls vertically and the mobile preview uses a separate tab.",
+      "Synthetic native-text PDFs and real local rules extraction; no hosted OCR, AI provider, production deployment or customer data involved."
+    ]
+  },
+  "pageErrors": 0,
+  "blockedExternalRequests": 0,
+  "unexpectedConsole": 0,
+  "expectedConsole": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: net::ERR_FAILED"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: net::ERR_FAILED"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 415 (Unsupported Media Type)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "errorResponses": [
+    {
+      "status": 404,
+      "path": "/api/parsers/:owned-id/pdf-splits/requests/:owned-id",
+      "count": 7
+    },
+    {
+      "status": 503,
+      "path": "/api/parsers/:owned-id/pdf-splits/requests/:owned-id",
+      "count": 2
+    },
+    {
+      "status": 404,
+      "path": "/api/parsers/:owned-id/archive-imports/requests/:owned-id",
+      "count": 1
+    },
+    {
+      "status": 415,
+      "path": "/api/documents/:owned-id/pdf-splits",
+      "count": 1
+    },
+    {
+      "status": 404,
+      "path": "/api/documents/:owned-id",
+      "count": 1
+    }
+  ],
+  "errorResponseExplanation": [
+    {
+      "status": 404,
+      "path": "/api/parsers/:owned-id/pdf-splits/requests/:owned-id",
+      "reason": "Each new immutable request is checked before submission. Seven preflight lookups returned404 because those request IDs did not yet have receipts."
+    },
+    {
+      "status": 404,
+      "path": "/api/parsers/:owned-id/archive-imports/requests/:owned-id",
+      "reason": "The existing ZIP upload workflow checked its new request before importing the synthetic PDF leaf."
+    },
+    {
+      "status": 503,
+      "path": "/api/parsers/:owned-id/pdf-splits/requests/:owned-id",
+      "reason": "Two controlled lookup failures followed deliberately lost committed split and undo responses. Both operations recovered their exact saved result without duplicate mutation."
+    },
+    {
+      "status": 415,
+      "path": "/api/documents/:owned-id/pdf-splits",
+      "reason": "Parser PDF acceptance was deliberately disabled after the stored request was held. The actual server rejected that exact source/SHA/options request; its bound terminal record permitted a deliberate new operation after policy was restored."
+    },
+    {
+      "status": 404,
+      "path": "/api/documents/:owned-id",
+      "reason": "Detail revalidation followed the deliberate workspace change before navigation completed. The new workspace cannot read the old document. The app moved to /app and the released old source response did not reopen the dialog or dispatch a split."
+    },
+    {
+      "status": "net::ERR_FAILED",
+      "count": 2,
+      "reason": "The harness discarded one actual committed split response and one actual committed undo response to prove uncertain-outcome recovery."
+    }
+  ],
+  "reactReview": {
+    "reviewedAt": "2026-09-20T00:56:24.157433+00:00",
+    "skill": "build-web-apps:react-best-practices",
+    "passed": true,
+    "rules": [
+      "rerender-dependencies",
+      "rerender-derived-state-no-effect",
+      "rerender-use-ref-transient-values",
+      "rerender-no-inline-components",
+      "async-dependencies"
+    ],
+    "findings": [],
+    "notes": [
+      "Stored and upload splitting share the same declared flow component; no second state machine or inline component was added.",
+      "Flow identity includes user, workspace, parser, role, source ID and SHA. Commit-time cleanup aborts source requests and suppresses late UI continuations.",
+      "Page plans, costs, omissions, eligibility and labels are derived. Refs hold transient request and mount guards; immutable source bytes remain in component memory.",
+      "Persistent recovery contains only the scoped request binding and split options; compare-and-set guards prevent overwriting another saved request.",
+      "Source identity reads, receipt verification and mutation order have actual data dependencies. The fresh-actor check and isCurrent barriers prevent subsequent writes after scope replacement.",
+      "The nine real browser groups include repeated clicks, accepted-response loss, close/reload, failed undo confirmation, durable rejection and held-source workspace replacement; six dedicated helper tests exercise storage and scope cases."
+    ],
+    "files": {
+      "src/features/documents/Review.tsx": "55b24dac2d0c13179a7ec04f8e3b72827751027f96411b5db6b6ceb90465e214",
+      "src/features/documents/SplitPdf.tsx": "768968ca57ada86b1966ead003cadd2044f56438598de5e539d76abefea7fa23",
+      "src/features/documents/SplitLineage.tsx": "e2aa45354048556b9260b50fc49789ae854b64f286b1ac58f975749aa0eb64b0",
+      "src/features/documents/UndoPdfSplit.tsx": "9318e065342dcdc2a59dd7a9cf6d73d3c57b5130938869d70a532e79a696eb58",
+      "src/features/documents/StoredPdfSplitHistory.tsx": "b7812fc59f2a1c406ecb304c759d8b9ac22a10210cb31cd9eee7254ec8787709",
+      "src/features/documents/DocumentPreview.tsx": "0c152e8bc52adac7a21feecd12721702c73255dd65a6ecac0fc2417c25fc9522",
+      "src/lib/stored-pdf-split.ts": "7a27031997513796b3474be32e89e068dd8e4308791a3270f8c9395a99a3e95d",
+      "src/lib/pdf-split.ts": "d249f0e3132754025d767b2e231422431ba25c544321de701440bc85715dad95",
+      "src/features/documents/pdf-split.css": "45e8545dbe7321c719cd4daf9ca53bb1c3ecc9a66a2318910a5b03635581a743"
+    }
+  },
+  "limitations": [
+    "Local compiled application and generated native-text PDFs; this is not hosted deployment or live OCR/AI provider evidence.",
+    "The normal rules extractor is used with real native PDF text. No extraction adapter supplies values and no provider is called.",
+    "The isolated browser rate-limit store avoids unrelated fixture interference; rate limiting is covered separately.",
+    "The browser covers native marker/range reuse, ordinary/ZIP/uploaded-split sources, nested lineage and source-preserving undo. Backend adversarial tests separately cover permission revocation during transactions and broader concurrency."
+  ],
+  "historicalAttempts": [
+    {
+      "groupsPassed": 1,
+      "cause": "Harness label selector matched the Text marker radio instead of the textbox; changed to an accessible textbox selector.",
+      "productDefect": false,
+      "cleanupConfirmed": true
+    },
+    {
+      "groupsPassed": 6,
+      "cause": "Harness intercepted history GET on the same path and overwrote captured POST data with null; guard now passes non-POST through and captures one POST.",
+      "productDefect": false,
+      "cleanupConfirmed": true
+    }
+  ]
+}

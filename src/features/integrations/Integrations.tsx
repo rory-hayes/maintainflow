@@ -17,6 +17,7 @@ function ProviderEvents() {
   if (query.error || !query.data) return <ErrorState error={query.error} retry={() => void query.refetch()} />;
   return <section><div className="settings-section-heading"><div><h2>Provider events</h2><p>Inbound email and subscription events associated with this workspace.</p></div></div>
     {query.data.events.length ? <div className="table-wrap"><table className="delivery-table"><thead><tr><th>Provider</th><th>Event</th><th>Status</th><th>Attempts</th><th>Received</th></tr></thead><tbody>{query.data.events.map((event) => <tr key={event.id}><td>{event.provider}</td><td><code>{event.id.slice(0, 24)}…</code>{event.error ? <p className="delivery-error">{event.error}</p> : null}</td><td><Status value={event.status} /></td><td>{event.attempts} / 5</td><td>{dateTime(event.created_at)}</td></tr>)}</tbody></table></div> : <Empty title="No provider events yet." description="Workspace-associated email and Stripe test events appear here after the provider delivers them." />}
+    <p className="small muted settings-bottom-note">Completed means event processing has finished. Individual email bodies or attachments may be rejected. View rejection reasons in <Link className="link" to="/app/settings?tab=activity">Workspace activity</Link>.</p>
   </section>;
 }
 

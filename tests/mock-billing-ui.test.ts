@@ -7,7 +7,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { SessionProvider } from '../src/lib/session';
 import BillingPanel from '../src/features/settings/BillingPanel';
 
-function renderBilling(mode: 'mock' | 'test', role = 'owner', failed = false) {
+function renderBilling(mode: 'mock' | 'test' | 'live', role = 'owner', failed = false, configured = mode !== 'mock') {
   const storage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
   const fetch = globalThis.fetch; let calls = 0;
   globalThis.fetch = (async () => { calls++; throw new Error('Network is forbidden in this component fixture'); }) as typeof fetch;
@@ -15,7 +15,7 @@ function renderBilling(mode: 'mock' | 'test', role = 'owner', failed = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } } });
   const key = ['billing-ui-fixture', '/api/providers/status'];
   client.setQueryData(['session', 'billing-ui-fixture'], { user: { id: 'owner' }, workspace: { id: 'billing-ui-fixture', role, plan: { name: 'Team (local mock)' } } });
-  client.setQueryData(key, { stripe: { mode, configured: mode === 'test', verified: false, reason: 'Owned fixture', mockPlan: { id: 'team', name: 'Team (local mock)', status: 'active' } } });
+  client.setQueryData(key, { stripe: { mode, configured, verified: false, reason: 'Owned fixture', mockPlan: { id: 'team', name: 'Team (local mock)', status: 'active' } } });
   if (failed) client.getQueryCache().find({ queryKey: key, exact: true })!.setState({ status: 'error', error: new Error('Billing status unavailable'), fetchStatus: 'idle' });
   try {
     const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(MemoryRouter, { initialEntries: ['/app/usage?checkout=returned'] }, createElement(SessionProvider, null, createElement(BillingPanel)))));
@@ -45,4 +45,10 @@ test('the separate real test-mode Checkout and portal interface is preserved whe
   assert.match(html, /Test Standard checkout/); assert.match(html, /Open test billing portal/);
   assert.match(html, /You returned from Checkout/);
   assert.doesNotMatch(html, /Use Standard mock plan|Cancel mock subscription|Mock mode · no payments/);
+});
+
+test('live billing states real payment effects before Checkout while incomplete setup and viewers cannot start it',()=>{
+  const live=renderBilling('live');assert.match(live,/Live mode · real payments/);assert.match(live,/can charge your payment method/);assert.match(live,/Choose Standard plan/);assert.match(live,/Open billing portal/);assert.doesNotMatch(live,/Live payment keys are disabled|Open test billing portal|Test Standard checkout/);
+  const missing=renderBilling('live','owner',false,false);assert.match(missing,/setup is incomplete/);assert.match(missing,/<button[^>]*disabled=""[^>]*>Choose Standard plan<\/button>/);
+  const viewer=renderBilling('live','viewer');assert.match(viewer,/<button[^>]*disabled=""[^>]*>Choose Standard plan<\/button>/);assert.match(viewer,/owner or administrator can manage billing/);
 });

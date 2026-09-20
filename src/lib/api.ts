@@ -14,7 +14,7 @@ export async function api<T=any>(path:string,options:RequestInit={}):Promise<T> 
 }
 export const post=<T=any>(path:string,body:unknown={})=>api<T>(path,{method:'POST',body:JSON.stringify(body)});
 export const patch=<T=any>(path:string,body:unknown)=>api<T>(path,{method:'PATCH',body:JSON.stringify(body)});
-export function useData<T=any>(path:string,poll=false,retainPrevious=false){return useQuery<T>({queryKey:[workspaceId(),path],queryFn:({signal})=>api<T>(path,{signal}),refetchInterval:poll?1800:false,placeholderData:retainPrevious?keepPreviousData:undefined});}
+export function useData<T=any>(path:string,poll:boolean|number=false,retainPrevious=false){return useQuery<T>({queryKey:[workspaceId(),path],queryFn:({signal})=>api<T>(path,{signal}),refetchInterval:typeof poll==='number'?poll:poll?1800:false,placeholderData:retainPrevious?keepPreviousData:undefined});}
 export function useAction(){
   const client=useQueryClient();const running=useRef(false);const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [message,setMessage]=useState('');
   async function run<T>(action:()=>Promise<T>,success='Saved.'):Promise<T|undefined>{if(running.current)return undefined;running.current=true;setBusy(true);setError('');setMessage('');try{const result=await action();await client.invalidateQueries();setMessage(success);return result;}catch(e){setError(e instanceof Error?e.message:'Something went wrong.');return undefined;}finally{running.current=false;setBusy(false);}}
@@ -45,19 +45,32 @@ export async function uploadDocuments(parserId:string,files:File[]):Promise<Uplo
   return {...(results.length===1?results[0]:{}),results};
 }
 /** Fetch the scoped URL first so workspace headers are never forwarded across origins. */
-export async function fetchOriginalFile(documentId:string,signal?:AbortSignal){
-  const location=await api<{url:string;external:boolean}>(`/api/documents/${documentId}/original-url`,{signal});
+export async function fetchOriginalFile(documentId:string,signal?:AbortSignal,bundle:boolean|'archive'=false){
+  const route=bundle==='archive'?'archive-original':bundle?'bundle-original':'original';
+  const location=await api<{url:string;external:boolean}>(`/api/documents/${documentId}/${route}-url`,{signal});
   if(location.external){
     const url=new URL(location.url);
     if(url.protocol!=='https:'||!url.hostname.endsWith('.supabase.co'))throw new Error('The private download destination is invalid.');
     return fetch(url,{signal,credentials:'omit',redirect:'error',referrerPolicy:'no-referrer',cache:'no-store'});
   }
-  if(location.url!==`/api/documents/${documentId}/original`)throw new Error('The private download destination is invalid.');
-  return fetch(location.url,{signal,headers:{'X-Workspace-Id':workspaceId()},credentials:'same-origin',cache:'no-store'});
+  if(location.url!==`/api/documents/${documentId}/${route}`)throw new Error('The private download destination is invalid.');
+  const selectedWorkspace=workspaceId();
+  return fetch(location.url,{signal,headers:selectedWorkspace?{'X-Workspace-Id':selectedWorkspace}:undefined,credentials:'same-origin',cache:'no-store'});
+}
+/** Derived TIFF pages stay on the authenticated application origin. */
+export async function fetchDocumentPagePreview(documentId:string,page:number,signal?:AbortSignal){
+  if(!/^[a-f0-9-]{36}$/i.test(documentId)||!Number.isInteger(page)||page<1)throw new Error('Choose a valid document page.');
+  const selectedWorkspace=workspaceId();
+  const response=await fetch(`/api/documents/${documentId}/preview?page=${page}`,{signal,headers:selectedWorkspace?{'X-Workspace-Id':selectedWorkspace}:undefined,credentials:'same-origin',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer'});
+  if(!response.ok||(response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase()!=='image/jpeg'){
+    await response.body?.cancel();throw new Error('This TIFF page could not be previewed. Try again or download the original TIFF.');
+  }
+  return response;
 }
 export async function downloadFile(path:string,filename:string){
-  const original=/^\/api\/documents\/([a-f0-9-]{36})\/original$/.exec(path);
-  const response=original?await fetchOriginalFile(original[1]):await fetch(path,{headers:{'X-Workspace-Id':workspaceId()},credentials:'same-origin'});
+  const original=/^\/api\/documents\/([a-f0-9-]{36})\/(bundle-|archive-)?original$/.exec(path);
+  const selectedWorkspace=workspaceId();
+  const response=original?await fetchOriginalFile(original[1],undefined,original[2]==='archive-'?'archive':Boolean(original[2])):await fetch(path,{headers:selectedWorkspace?{'X-Workspace-Id':selectedWorkspace}:undefined,credentials:'same-origin'});
   if(!response.ok)throw new Error('The download could not be completed.');
   const href=URL.createObjectURL(await response.blob());const anchor=document.createElement('a');anchor.href=href;anchor.download=filename;anchor.click();setTimeout(()=>URL.revokeObjectURL(href),5000);
 }

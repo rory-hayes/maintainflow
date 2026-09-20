@@ -1,0 +1,175 @@
+{
+  "date": "2026-09-20",
+  "status": "local_decoder_adversarial_intake_and_full_suite_passed",
+  "scope": "Synthetic local TIFF decoding and derived visual inputs; no customer data or external provider calls",
+  "runtime": {
+    "node": "24.13.0",
+    "sharp": "0.35.4"
+  },
+  "adversarial": {
+    "testFile": "tests/tiff-adversarial.test.ts",
+    "passed": 14,
+    "failed": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "durationMs": 6913.328708,
+    "checks": [
+      "Classic TIFF and BigTIFF, little and big endian, independent raw writer",
+      "All eight orientations checked against actual image pixels",
+      "Header, directory, value and strip bounds; unsafe 64-bit values",
+      "Main and auxiliary IFD cycles; shared metadata remains valid",
+      "Duplicate tags, invalid dimensions, page and pixel limits",
+      "Image data versus IFD overlap and decoded sample-byte limits",
+      "Distinct preview pages, original SHA-256 binding and unchanged input bytes",
+      "Real PDF page count/order/geometry and exact embedded JPEG identity",
+      "8/16-bit RGB and RGBA, white alpha compositing",
+      "LZW, PackBits, Deflate, JPEG and one-bit CCITT Group 4 in strips and tiles"
+    ],
+    "databaseUsed": false,
+    "externalProviderCalls": 0,
+    "typecheck": "passed_at_focused_checkpoint",
+    "diffCheck": "passed_at_focused_checkpoint"
+  },
+  "reproducedAndFixed": [
+    {
+      "issue": "Mirrored quarter-turn orientations 5 and 7 were swapped",
+      "verification": "All eight final JPEG pixel-position cases pass"
+    },
+    {
+      "issue": "Eight-byte IFD alignment rejected BigTIFF output from installed libtiff",
+      "observedIfdOffsets": {
+        "lzw": 182,
+        "deflate": 74,
+        "jpeg": 146,
+        "ccittfax4": 50
+      },
+      "verification": "Final strips/tiles compression group passes with range, integer, graph and overlap guards retained"
+    }
+  ],
+  "resourceSpikes": [
+    {
+      "execution": "isolated_source_mode_256_MiB_V8_heap",
+      "sourceBytes": 255578,
+      "totalPixels": 300000000,
+      "pages": 30,
+      "accepted": true,
+      "elapsedMs": 1824.2003339999999,
+      "pdfBytes": 3981862,
+      "pageCount": 30,
+      "fixture": "30 main IFDs share one synthetic 2500 by 4000 pixel text image; each page is fully decoded",
+      "syntheticLinesPerPage": 12
+    },
+    {
+      "execution": "isolated_source_mode_256_MiB_V8_heap",
+      "sourceBytes": 1332482,
+      "totalPixels": 300000000,
+      "pages": 30,
+      "accepted": false,
+      "elapsedMs": 1364.850666,
+      "errorType": "SourceValidationError",
+      "statusCode": 413,
+      "reason": "tiff_derived_limit",
+      "fixture": "30 main IFDs share one synthetic 2500 by 4000 pixel text image; each page is fully decoded",
+      "syntheticLinesPerPage": 70
+    }
+  ],
+  "archiveBudget": {
+    "implementedPixels": 300000000,
+    "includesUnselectedStructurallyValidTiffLeaves": true,
+    "checkedBeforeNativeDocumentDecoding": true,
+    "finalTestResult": "passed_exact_300MP_reaches_native_and_excess_rejects_before_native_including_unselected_leaf"
+  },
+  "decoder": {
+    "status": "passed_final_combined_run",
+    "files": [
+      "tests/tiff-decoder.test.ts",
+      "tests/tiff-adversarial.test.ts"
+    ],
+    "passed": 22,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 11924.539292,
+    "databaseUsed": false,
+    "externalProviderCalls": 0
+  },
+  "compiledResource": {
+    "status": "passed_current_compiled_maximum_pixel_fixture",
+    "runtime": "Node24.13.0",
+    "v8HeapMiB": 192,
+    "tsxLoader": false,
+    "sourceBytes": 255578,
+    "totalPixels": 300000000,
+    "pages": 30,
+    "durationMs": 2596.343417,
+    "pdfBytes": 3981862,
+    "parsedPdfPages": 30,
+    "timedOut": false,
+    "compiledFilesUnchanged": true,
+    "nativePeakRss": "not_measured",
+    "compiledSha256": {
+      "server/core/source.js": "d2b16e80360cb882cabb506d31d8dd0d929a7d8dcfd1994fdbe4e6149dccb449",
+      "server/core/decoder-child.js": "62c7f859b7353b3967e79fad3cc547e26321801fcea95025b92000d89d02d5db",
+      "server/core/tiff-engine.js": "e8ad73bb2d0e468f1eb8fb0f6eaada06bf48cfae57200c717d30d969336c28a7",
+      "shared/tiff.js": "bd5b37b9428ed6fba696b1bd353331353226c6a893e5e6347f7b6daa2f4b91c6"
+    },
+    "sourceSha256": "5bd44eb1f1821f264ea2dfc2b2aaf3126f1238082a5b52e720fd42c8a1f0f4b4",
+    "pdfSha256": "4011b5caf53a2446d040feab9f33b8ee46d5220e6fd5f2efec8f253ab0ee8248"
+  },
+  "intakeApi": {
+    "status": "passed_at_final_source_checkpoint",
+    "testFile": "tests/tiff-intake.test.ts",
+    "passed": 6,
+    "failed": 0,
+    "durationMs": 7212,
+    "coverage": [
+      "ordinary and signed-upload/ZIP TIFF acceptance",
+      "once-only page metering and immutable original replay",
+      "both controlled AI worker paths",
+      "structural/policy rejection without accepted data",
+      "preview revocation, deletion and original-corruption checks"
+    ]
+  },
+  "fullSuite": {
+    "status": "passed_final_source",
+    "passed": 641,
+    "failed": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "durationMs": 209385.615792
+  },
+  "buildPackageRuntime": {
+    "status": "passed_same_frozen_source",
+    "buildSeconds": 1.7455,
+    "packageSeconds": 5.1855,
+    "bundleSeconds": 9.3216,
+    "bundleTiffCoverage": [
+      "classic and BigTIFF inspection",
+      "actual JPEG page previews",
+      "ordered visual PDF conversion"
+    ]
+  },
+  "sourceFingerprint": "13f315c6092c88f57dd7e78b05309ac3dd500fdf784ab33c6b53059ac1d9e6bd",
+  "release": {
+    "hostedPendingMigrations": "021\u2013033",
+    "matchingHostedRuntime": "pending",
+    "realProviderAcceptance": "not_performed_by_this_receipt",
+    "billing": "existing_free_plans_and_mock_billing_unchanged"
+  },
+  "limitations": [
+    "V8 heap limits do not bound total native RSS or provide an OS sandbox",
+    "Untyped native decoding failures remain operational and unaccepted",
+    "No general TIFF codec, OCR accuracy, throughput, hosted readiness or customer-use claim",
+    "Other original C09 formats and C10 TIFF splitting remain incomplete"
+  ],
+  "sourceFiles": 288,
+  "backupRestoreRegression": {
+    "status": "passed_current_migration_033",
+    "groups": 11,
+    "runtimeAssertions": 13,
+    "durationSeconds": 13.684,
+    "sourceFingerprint": "13f315c6092c88f57dd7e78b05309ac3dd500fdf784ab33c6b53059ac1d9e6bd"
+  },
+  "combinedVerification": "verification.json",
+  "browserEvidence": "browser-verification.json",
+  "ciEvidence": "Consult pull-request checks for the exact commit; this dated local receipt makes no future CI claim."
+}

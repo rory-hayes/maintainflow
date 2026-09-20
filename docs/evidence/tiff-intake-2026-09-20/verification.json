@@ -1,0 +1,89 @@
+{
+  "status": "passed",
+  "recordedAt": "2026-09-20T00:08:41.568797+00:00",
+  "source": {
+    "count": 288,
+    "fingerprint": "13f315c6092c88f57dd7e78b05309ac3dd500fdf784ab33c6b53059ac1d9e6bd",
+    "unchanged": true
+  },
+  "node": "24.13.0",
+  "tests": {
+    "passed": 641,
+    "failed": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "seconds": 209.385615792,
+    "newTiffTests": 31,
+    "signInRegression": "tests/auth-login.test.ts included"
+  },
+  "phases": {
+    "suite": {
+      "startedAt": "2026-09-20T00:04:14.424664+00:00",
+      "completedAt": "2026-09-20T00:07:43.905383+00:00",
+      "seconds": 209.4816385,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "build": {
+      "startedAt": "2026-09-20T00:04:15.592557+00:00",
+      "completedAt": "2026-09-20T00:04:17.338071+00:00",
+      "seconds": 1.7455204169999998,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "package": {
+      "startedAt": "2026-09-20T00:04:45.520502+00:00",
+      "completedAt": "2026-09-20T00:04:50.705955+00:00",
+      "seconds": 5.185473041,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "bundle": {
+      "startedAt": "2026-09-20T00:05:25.063419+00:00",
+      "completedAt": "2026-09-20T00:05:34.384940+00:00",
+      "seconds": 9.321560917,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    }
+  },
+  "browser": {
+    "receipt": "browser-verification.json",
+    "passed": 10,
+    "failed": 0,
+    "seconds": 17.465,
+    "viewports": [
+      "1440x1000",
+      "820x1000",
+      "390x844"
+    ],
+    "all13ScreenshotsInspected": true,
+    "realProviderCalls": 0,
+    "unexpectedConsoleErrors": 0,
+    "ownedFixturesCleaned": true
+  },
+  "decoderEvidence": "decoder-adversarial-resource.json",
+  "backupRegression": "backup-regression.json",
+  "originalCapabilityCriteriaPreserved": 47,
+  "localMigration": {
+    "latest": "033",
+    "appliedCount": 24
+  },
+  "providerBoundary": "Real native TIFF decoding and real adapter request construction with controlled responses; no new real AI, email or payment requests.",
+  "hosted": {
+    "status": "pending",
+    "requiredMigrations": "021\u2013033",
+    "runtimeActivation": "pending"
+  },
+  "ci": "Outside this local acceptance receipt; consult the pull request checks for its exact commit.",
+  "releaseLimits": [
+    "TIFF remains one original document; TIFF splitting and other C09 converters remain open.",
+    "Review and AI use resized lossy derivatives; raw TIFF remains unchanged.",
+    "V8 heap limits are not native RSS or an operating-system sandbox.",
+    "Free plans and mock billing remain unchanged."
+  ],
+  "priorAttempts": [
+    "Independent pixel assertions caught swapped orientations5/7; corrected before final suite.",
+    "Real libtiff writer output caught an overly strict BigTIFF alignment check; corrected before final suite.",
+    "A controlled field-suggestion fixture incorrectly required its suggested field; corrected before final suite."
+  ]
+}

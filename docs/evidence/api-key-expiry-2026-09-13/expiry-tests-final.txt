@@ -1,0 +1,19 @@
+(node:74126) [FSTDEP023] FastifyDeprecation: disableRequestLogging option is deprecated. Use the logController option with disableRequestLogging or isLogDisabled override instead. The disableRequestLogging top-level option will be removed in `fastify@6`.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ invalid, timezone-less and past expiry values reject without creating a key or audit (638.942292ms)
+✔ an explicit offset expiry is normalized, returned, and committed with a redacted audit (7.07175ms)
+✔ a future key works, then expiry rejects original, result, job and upload access before last-used or intake changes (276.674417ms)
+✔ omitted and null expiry preserve non-expiring keys, including inserts using the legacy columns (17.092458ms)
+✔ the database-clock boundary excludes exact equality and the past but permits a strictly future instant (17.919584ms)
+✔ expiry does not widen scopes, tenant access, roles or session-only key management (239.606292ms)
+✔ listing returns server-derived expiry states, revoked precedence and no key material across workspaces (15.718291ms)
+{"level":50,"time":1789295551268,"pid":74126,"hostname":"Rorys-MacBook-Pro.local","reqId":"req-1v","errorName":"error","route":"/api/workspace/api-keys","msg":"Request failed"}
+✔ an audit insertion failure rolls back the expiring key and never returns its token (10.685ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2806.432166

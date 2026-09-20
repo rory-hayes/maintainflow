@@ -1,0 +1,276 @@
+{
+  "recordedAt": "2026-09-19T20:09:42.540959+00:00",
+  "node": "24.13.0",
+  "platform": "darwin-arm64",
+  "scope": "Owned local fixtures and controlled senders; no actual mail or provider requests.",
+  "source": {
+    "count": 238,
+    "fingerprint": "acf25f241811ef9057b00ac22f14112fbe21042c1a44d6f6acff1ce01c84b1a0",
+    "manifest": "source-manifest.json",
+    "scope": "Tracked and nonignored server/shared/src/tests/migrations/scripts/.github plus package files, tsconfig, vite/vercel config and index.html; excludes docs, private runtime, generated dist and environment files."
+  },
+  "tests": {
+    "focused": {
+      "tests": 53,
+      "passed": 53,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "durationMs": 9297.709583
+    },
+    "suite": {
+      "tests": 512,
+      "passed": 512,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "durationMs": 142958.095834
+    }
+  },
+  "phases": {
+    "focused": {
+      "startedAt": "2026-09-19T20:01:19.328857+00:00",
+      "completedAt": "2026-09-19T20:01:28.721391+00:00",
+      "seconds": 9.392847375,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "suite": {
+      "startedAt": "2026-09-19T20:01:44.654904+00:00",
+      "completedAt": "2026-09-19T20:04:07.695855+00:00",
+      "seconds": 143.045727292,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "build": {
+      "startedAt": "2026-09-19T20:01:45.849531+00:00",
+      "completedAt": "2026-09-19T20:01:48.230033+00:00",
+      "seconds": 2.3805780829999996,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "package": {
+      "startedAt": "2026-09-19T20:02:18.172168+00:00",
+      "completedAt": "2026-09-19T20:02:23.546632+00:00",
+      "seconds": 5.374641667,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    },
+    "bundle": {
+      "startedAt": "2026-09-19T20:03:12.550134+00:00",
+      "completedAt": "2026-09-19T20:03:17.113530+00:00",
+      "seconds": 4.563548084,
+      "exitCode": 0,
+      "sourceUnchanged": true
+    }
+  },
+  "localMigrations": 20,
+  "hostedMigrationsAppliedByThisIncrement": false,
+  "hostedPending": "021\u2013029",
+  "billing": "mock",
+  "hostingPlanChanged": false,
+  "actualProviderAcceptance": false,
+  "inboxDeliveryVerified": false,
+  "invitationMail": "separate remaining W07 increment",
+  "historicalEvidence": "The 14 September preliminary local checks were superseded by these fresh checks. Their private temporary logs were cleaned during the pause; no claim is made that those files remain available.",
+  "browser": {
+    "startedAt": "2026-09-19T20:09:07.860Z",
+    "completedAt": "2026-09-19T20:09:14.662Z",
+    "checks": {
+      "requiredSignupAnonymous202NoSessionOrAccountBeforeWorker": true,
+      "pendingPasswordSessionKeyAndWorkspaceAccessDeniedGenerically": true,
+      "passwordProofDoubleSubmitFencingAndNoAutomaticLogin": true,
+      "VerifiedAccountNormalLoginAndParserOnboarding": true,
+      "publicUnknownResendUniformAcceptanceWithoutAccountOrMail": true,
+      "legacyViewerTruthfulStatusCrossAccountProofAndDataKeyPreservation": true,
+      "invalidExpiredAndReusedLinksHaveOneSafeError": true,
+      "missingReloadAndBackRequireOriginalLinkWithoutPersistence": true,
+      "sameTabNewLinkClearsPasswordAndUsesNewToken": true,
+      "committedLateResponseCannotOverwriteReplacementLinkState": true,
+      "lostCommittedResponseOffersNormalLoginRecovery": true,
+      "senderOutageTruthfulControlsAndIssuedProofStillWorks": true,
+      "noPrivatePersistenceExternalCallsOrUnexplainedBrowserErrors": true
+    },
+    "viewports": {
+      "desktop-required-signup.png": {
+        "width": 1440,
+        "height": 1000,
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "mobile-required-signup.png": {
+        "width": 390,
+        "height": 844,
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-pending-generic-error.png": {
+        "width": 390,
+        "height": 844,
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-password-proof-error.png": {
+        "width": 390,
+        "height": 844,
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-verified.png": {
+        "width": 390,
+        "height": 844,
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "desktop-verified-onboarding.png": {
+        "width": 1440,
+        "height": 1000,
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "mobile-public-resend.png": {
+        "width": 390,
+        "height": 844,
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "desktop-viewer-verification.png": {
+        "width": 1440,
+        "height": 1000,
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      },
+      "mobile-viewer-verified-status.png": {
+        "width": 390,
+        "height": 844,
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-missing-reloaded-link.png": {
+        "width": 390,
+        "height": 844,
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-uncertain-result.png": {
+        "width": 390,
+        "height": 844,
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      },
+      "mobile-sender-unavailable.png": {
+        "width": 390,
+        "height": 844,
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    "externalProviderCalls": 0,
+    "pageErrors": [],
+    "sourceUnchanged": true,
+    "controlledEmailAttempts": 10,
+    "controlledEmailAccepted": 10,
+    "ownedAccounts": 11,
+    "cleanedOwnedFixtures": {
+      "accounts": 11,
+      "workspaces": 11
+    },
+    "preserved": {
+      "documents": 1,
+      "usage": 1,
+      "memberships": 1,
+      "key": true,
+      "unrelatedSession": true
+    },
+    "browser": "Browser plugin not available; installed Playwright fallback",
+    "rateLimitBoundary": "isolated non-throttling browser store; covered separately by integration tests",
+    "artifactDirectory": "Selected redacted screenshots in this directory; private harness/evidence retained in ignored local acceptance directory.",
+    "harnessSha256": "c29eb07eae10a86dc54197935102e35f951c61d203250acdfbc3ccc277115f60",
+    "selectedScreenshots": [
+      {
+        "file": "desktop-viewer-verification.png",
+        "sha256": "cc0302b1af6787f6bd5b735e94495ac3a1a42963be9ef371b2e179c47d8f65da",
+        "visuallyReviewed": true
+      },
+      {
+        "file": "mobile-password-proof-error.png",
+        "sha256": "fe26686a6b1a716486fb43db01494a7fb7abacd25d879fd548683b96d21dcc59",
+        "visuallyReviewed": true
+      },
+      {
+        "file": "mobile-uncertain-result.png",
+        "sha256": "b9cc9ef0054d03046bdae51c8be2ada10f19cf5dcd8a6c35ae856313e57659bb",
+        "visuallyReviewed": true
+      },
+      {
+        "file": "mobile-verified.png",
+        "sha256": "bbb3e20dfb383832627558b28ce839de777efe58e9dbd77eb6c3adbb95dbc7ce",
+        "visuallyReviewed": true
+      }
+    ],
+    "earlierHarnessFailures": [
+      {
+        "groupsCompleted": 5,
+        "reason": "Settings body inspected before destination finished rendering; fixed expected-heading waits."
+      },
+      {
+        "groupsCompleted": 6,
+        "reason": "Same-document fragment navigation incorrectly expected a new HTTP response; retained HTTP header checks for document loads and checked document referrer policy for fragment navigation."
+      }
+    ],
+    "earlierFailuresChangedProductSource": false
+  },
+  "canonicalSignin": {
+    "checkedAt": "2026-09-19T20:04:02.491631+00:00",
+    "health": {
+      "status": 200,
+      "body": {
+        "status": "ok",
+        "name": "Folio",
+        "environment": "preview",
+        "revision": "676a61a8b757931a649fb6b31b64d2f11937ce51",
+        "limits": {
+          "maxBytes": 10485760,
+          "maxPages": 30
+        }
+      }
+    },
+    "signin": {
+      "status": 401,
+      "body": {
+        "error": "request_error",
+        "message": "Email or password is incorrect"
+      },
+      "setsCookie": false
+    }
+  },
+  "originalCapabilitiesPreserved": 47,
+  "logHashes": {
+    "focused": "21fef5f737fa09139d06a97714d3e951463d57fe1668b7a40845c8f13e6c1bcb",
+    "suite": "b0f90dccee861e1f0763f1c1c8cbb0913110fc56322eff4cfc2d9b7ecd239f63",
+    "build": "3c0ec02fa32227aae56591cbf7b6636ee72e454e7c781ba6e3b4640b0f8e7300",
+    "package": "f67271ed4fdbebee6c9a2f23339d0a289448d38b205809010b7e3c8fcba4997b",
+    "bundle": "9cf500c4a13b154acf9f973de93bff5b06d162881137afe9f84822e649df516f"
+  },
+  "secretScan": {
+    "recordedAt": "2026-09-19T20:10:19.798268+00:00",
+    "filesScanned": 717,
+    "knownValuesCompared": 12,
+    "matches": [],
+    "passed": true
+  }
+}

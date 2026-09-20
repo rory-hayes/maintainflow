@@ -22,7 +22,11 @@ test('production server serves the root and SPA routes while retaining static as
       process.chdir(${JSON.stringify(temporary)});
       const {buildApp}=await import(${JSON.stringify(appUrl)});
       const {closeDatabase}=await import(${JSON.stringify(databaseUrl)});
-      const app=await buildApp();
+      class StaticRoutingStore {
+        incr(_key,callback) { callback(null,{current:1,ttl:60000}); }
+        child() { return this; }
+      }
+      const app=await buildApp({rateLimitStore:StaticRoutingStore});
       try{
         for(const url of ['/','/app/parsers']){
           const response=await app.inject({method:'GET',url});
@@ -33,6 +37,12 @@ test('production server serves the root and SPA routes while retaining static as
         const asset=await app.inject({method:'GET',url:'/assets/app.js'});
         assert.equal(asset.statusCode,200,asset.body);
         assert.equal(asset.body,'globalThis.staticRoutingQA = true;');
+        for(const url of ['/forgot-password','/reset-password?ignored=value','/verify-email','/verify-email/confirm?ignored=value','/verify-email/confirm/']){
+          const response=await app.inject({method:'GET',url});
+          assert.equal(response.statusCode,200,response.body);
+          assert.equal(response.headers['referrer-policy'],'no-referrer');
+          assert.equal(response.headers['cache-control'],'private, no-store');
+        }
         const health=await app.inject({method:'GET',url:'/api/health'});
         assert.equal(health.statusCode,200,health.body);
         assert.equal(health.json().environment,'production');
@@ -40,6 +50,7 @@ test('production server serves the root and SPA routes while retaining static as
         const missing=await app.inject({method:'GET',url:'/api/missing-static-qa'});
         assert.equal(missing.statusCode,404,missing.body);
         assert.equal(missing.json().error,'not_found');
+        assert.equal(missing.headers['x-ratelimit-limit'],'300');
       }finally{
         await app.close();
         await closeDatabase();

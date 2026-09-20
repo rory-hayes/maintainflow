@@ -1,0 +1,347 @@
+{
+  "recordedAt": "2026-09-20T09:19:06.035237+00:00",
+  "scope": "Native PDF scalar region templates with anchor-relative matching",
+  "source": {
+    "count": 335,
+    "finalSuiteFingerprint": "6c30b667c3ba30ff03e11ad242aa84cfc0007beca855734ca2ae43c453399580",
+    "browserBuildPackageBackupFingerprint": "621b497001f9f05efe3b8156fe7e349771d3389a43d70edd9b96fe8b834b8e74",
+    "unchangedAcrossAllChecks": false,
+    "continuity": {
+      "allFileNamesCompared": 335,
+      "unchangedFiles": 334,
+      "applicationSourceUnchanged": true,
+      "applicationFileCount": 239,
+      "applicationFingerprint": "8a7ce0f55e978edfd6ebc10e77096dafd312a01370145a1f117f23f1b64dde82",
+      "applicationDefinition": "Source manifest excluding tests/; includes runtime, frontend, shared modules, migrations, scripts, dependency locks and build/CI configuration",
+      "onlyDifference": {
+        "path": "tests/pdf-split-intake.test.ts",
+        "beforeSha256": "50ef485a487e84021d443c44fc08759bc541359ff98c5fee0333c3f6da0c3aca",
+        "afterSha256": "4955b2d0de44e1b18139124d64adb457686a1feb374b13d82d2e0a9902d55453",
+        "change": "One new PDF split job assertion now expects complete-regions-v1 instead of complete-v1; no application changes"
+      },
+      "firstSuite": {
+        "tests": 821,
+        "pass": 820,
+        "fail": 1,
+        "fingerprint": "621b497001f9f05efe3b8156fe7e349771d3389a43d70edd9b96fe8b834b8e74",
+        "failure": "Outdated new-job policy expectation in tests/pdf-split-intake.test.ts:103"
+      },
+      "passingChecksNotRepeated": "Browser, build, package, compiled runtime, geometry resource and backup restore verified unchanged application source before this test-only correction."
+    }
+  },
+  "node": "24.13.0",
+  "suite": {
+    "tests": 821,
+    "pass": 821,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "phases": {
+    "suite": {
+      "startedAt": "2026-09-20T09:11:07.914022+00:00",
+      "completedAt": "2026-09-20T09:18:47.521565+00:00",
+      "seconds": 459.60936416699997,
+      "exitCode": 0,
+      "sourceCount": 335,
+      "sourceFingerprint": "6c30b667c3ba30ff03e11ad242aa84cfc0007beca855734ca2ae43c453399580",
+      "sourceUnchanged": true
+    },
+    "build": {
+      "startedAt": "2026-09-20T08:56:53.560747+00:00",
+      "completedAt": "2026-09-20T08:56:55.931008+00:00",
+      "seconds": 2.370265333,
+      "exitCode": 0,
+      "sourceCount": 335,
+      "sourceFingerprint": "621b497001f9f05efe3b8156fe7e349771d3389a43d70edd9b96fe8b834b8e74",
+      "sourceUnchanged": true
+    },
+    "package": {
+      "startedAt": "2026-09-20T08:57:28.808666+00:00",
+      "completedAt": "2026-09-20T08:57:34.597071+00:00",
+      "seconds": 5.788423042000001,
+      "exitCode": 0,
+      "sourceCount": 335,
+      "sourceFingerprint": "621b497001f9f05efe3b8156fe7e349771d3389a43d70edd9b96fe8b834b8e74",
+      "sourceUnchanged": true
+    },
+    "bundle": {
+      "startedAt": "2026-09-20T08:58:10.493966+00:00",
+      "completedAt": "2026-09-20T08:58:24.024061+00:00",
+      "seconds": 13.530143916,
+      "exitCode": 0,
+      "sourceCount": 335,
+      "sourceFingerprint": "621b497001f9f05efe3b8156fe7e349771d3389a43d70edd9b96fe8b834b8e74",
+      "sourceUnchanged": true
+    },
+    "backup": {
+      "startedAt": "2026-09-20T08:58:20.123128+00:00",
+      "completedAt": "2026-09-20T08:58:51.882511+00:00",
+      "seconds": 31.759507457999998,
+      "exitCode": 0,
+      "sourceCount": 335,
+      "sourceFingerprint": "621b497001f9f05efe3b8156fe7e349771d3389a43d70edd9b96fe8b834b8e74",
+      "sourceUnchanged": true
+    },
+    "geometry-resource": {
+      "startedAt": "2026-09-20T08:58:10.503874+00:00",
+      "completedAt": "2026-09-20T08:58:14.349185+00:00",
+      "seconds": 3.845324708,
+      "exitCode": 0,
+      "sourceCount": 335,
+      "sourceFingerprint": "621b497001f9f05efe3b8156fe7e349771d3389a43d70edd9b96fe8b834b8e74",
+      "sourceUnchanged": true
+    }
+  },
+  "browser": {
+    "runId": "6231a203-6c59-465c-9bb3-8f8ba67b01e5",
+    "passed": true,
+    "recordedMode": "early",
+    "designation": "Completed unchanged candidate selected as final browser evidence; original early-run receipt retained without relabeling.",
+    "startedAt": "2026-09-20T09:00:18.927Z",
+    "completedAt": "2026-09-20T09:00:53.728Z",
+    "elapsedSeconds": 34.801,
+    "reviewedFrameCount": 18,
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 1000
+      },
+      {
+        "width": 820,
+        "height": 1000
+      },
+      {
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "checks": {
+      "pageIdentity": {
+        "passed": true,
+        "evidence": "Exact owned loopback parser URL, Folio page title and Native PDF regions heading asserted at entry; Document review heading asserted during reprocessing."
+      },
+      "notBlank": {
+        "passed": true,
+        "evidence": "Meaningful authoring, exact draft results, recovery controls, real rendered PDFs and historical review content across ten workflow groups."
+      },
+      "frameworkOverlay": {
+        "passed": true,
+        "evidence": "No vite-error-overlay at entry; no framework error overlay in all eighteen individually reviewed frames."
+      },
+      "consoleHealth": {
+        "passed": true,
+        "unexpectedConsole": [],
+        "pageErrors": [],
+        "expectedResponses": [
+          {
+            "status": 404,
+            "routeGroup": "template mutation request lookup",
+            "count": 7,
+            "reason": "Fresh or deliberately unsent save identity has no receipt. Unknown lookup retains the nonce until accepted or explicitly closed."
+          },
+          {
+            "status": 409,
+            "routeGroup": "template update",
+            "count": 1,
+            "reason": "Intentional two-editor base-revision conflict preserves the first draft for explicit reconciliation."
+          },
+          {
+            "networkError": "net::ERR_FAILED",
+            "count": 2,
+            "reason": "One real committed save response was deliberately dropped; another save was deliberately aborted before submission."
+          },
+          {
+            "status": 410,
+            "routeGroup": "late closed template save",
+            "count": 1,
+            "transport": "server API injection after browser close action",
+            "reason": "The exact original save body is refused after the browser authoritatively closes its unknown nonce."
+          }
+        ],
+        "serverWarning": "Existing Fastify FSTDEP023 rate-limit fixture logging-option deprecation; no product error."
+      },
+      "screenshotEvidence": {
+        "passed": true,
+        "count": 18,
+        "reviewedFrameCount": 18,
+        "allIndividuallyViewed": true,
+        "viewports": [
+          {
+            "width": 1440,
+            "height": 1000
+          },
+          {
+            "width": 820,
+            "height": 1000
+          },
+          {
+            "width": 390,
+            "height": 844
+          }
+        ]
+      },
+      "interactionProof": {
+        "passed": true,
+        "count": 10,
+        "groups": {
+          "ActualPdfGeometryNumericAuthoringExactZeroFalseNoJobsCreditsOrProvider": true,
+          "DesktopTabletMobileWholeBlockOverlayPointerAndKeyboardAlternatives": true,
+          "LostCommittedCreateReloadRecoversOneTemplateWithMetadataOnlyStorage": true,
+          "PartialDuplicateRasterPagesAndTranslatedDraftKeepDeclaredNativeLimits": true,
+          "TwoEditorConflictClosedNonceAndExplicitCurrentRevisionPreserveDraft": true,
+          "HeldGeometryDraftAndWorkspaceResponsesCannotPaintReplacementState": true,
+          "ViewerInspectsCurrentDefinitionWithoutAuthoringOrSourceRequests": true,
+          "ReprocessPinsDeletedTemplateExactOriginalHistoryAndJsonCsvXlsxExports": true,
+          "HistoricalRecordedRegionNavigationUsesExactSourceAtThreeViewports": true,
+          "UnsubmittedUnknownSaveClosesAfterReloadAndLateOriginalWriteIsRefused": true
+        }
+      }
+    },
+    "fixture": {
+      "nativePdfPages": 2,
+      "translatedPdfPages": 2,
+      "rasterPageNotOcr": true,
+      "exactCsvXlsxJson": true,
+      "sourcePreserved": true,
+      "historicalRunPreserved": true,
+      "generatedPdfDocuments": 3,
+      "duplicateAnchorPdfPages": 2,
+      "syntheticAccounts": 3,
+      "syntheticWorkspaces": 3,
+      "metadataOnlyRecovery": true,
+      "disabledDraftPreviewExplicitlyConditional": true
+    },
+    "controlledExtractionCalls": 2,
+    "realProviderCalls": 0,
+    "cleanup": {
+      "accounts": 3,
+      "workspaces": 3,
+      "documents": 3,
+      "completed": true,
+      "preservedUnownedFixtures": true,
+      "privateSourceStorageRemoved": true
+    },
+    "limitations": [
+      "Native searchable PDF scalar regions only: no OCR, table/repeating-region extraction, automatic page search or automatic layout scaling.",
+      "The two controlled extraction calls seed prior runs; native template preview and the reprocessed native run make no real or additional controlled provider call.",
+      "Fresh Chromium at desktop/tablet/mobile viewport widths; no Safari/Firefox, physical touch, hosted deployment or broad document-accuracy claim.",
+      "Rate-limit store is isolated in this browser harness; capacity enforcement is separate backend evidence.",
+      "Screenshots include deliberate scrolling; numeric controls and actions were exercised beyond the individual captured viewport.",
+      "Only minimal save identity survives reload. Unsaved template body is intentionally not persisted; an unknown post-reload save can be checked or explicitly closed."
+    ]
+  },
+  "backup": {
+    "runId": "1eef73d1-b0e0-4eeb-9d83-cc441ab83e4b",
+    "passed": true,
+    "checks": {
+      "NewIsolatedPostgres17ClusterRestrictedRolesAndDistinctDatabases": true,
+      "SyntheticSourceFixtureAndEveryTableSnapshotAfterRuntimeShutdown": true,
+      "RealEncryptedCreateAndInspectAfterQuiescedSourceShutdown": true,
+      "MissingRequiredSourceFileRefusesCaptureWithoutDatabaseChanges": true,
+      "EveryTableAndSequenceExactlyRestoredBeforeRuntimeMutation": true,
+      "FreshApiAndWorkerRefusePendingRestoreBeforeActivation": true,
+      "ActivationRequiresExplicitOutboundFlagAndExactRestoredObjectBytes": true,
+      "ActivationReceiptCrashRecoveryAndRepeatDoNotStartServicesOrChangeData": true,
+      "FreshRestoredRuntimeLoginTenantIsolationOriginalsExportsKeyAndQueueOnce": true,
+      "DistinctEmptyTargetsRejectMalformedTruncatedWrongIdentityMissingPayloadAndRequiredObjectOmissionOrDowngrade": true,
+      "ExistingTargetDatabaseStorageAndKeyRemainUnchangedAfterRefusedRestore": true
+    },
+    "tables": 57,
+    "rows": 263,
+    "objects": 33,
+    "runtime": {
+      "checks": {
+        "login": true,
+        "tenantIsolation": true,
+        "correctionApprovalRawProvenance": true,
+        "exactSavedCsvXlsxJsonBytesAndTypedValues": true,
+        "schemasTemplateMapping": true,
+        "exactEveryLiveOriginal": true,
+        "retainedPdfAndZipLineage": true,
+        "replaysTombstonesUnchangedPageUsage": true,
+        "storedSplitRootLineageAndSourceCopy": true,
+        "storedUndoAndAdmissionIdentitySurviveRestore": true,
+        "restoredTiffMimeOriginalPreviewAndSplitReplay": true,
+        "restoredTiffUndoKeepsPageLedgerAndTombstones": true,
+        "splitSuggestionExactRowsSourcesAndConfirmationNonces": true,
+        "splitSuggestionRestoreIsolationSourceExpiryAndAppliedUndoReplays": true,
+        "queuedSplitSuggestionResumesOnceWithoutAcceptingOrChargingPages": true,
+        "expiredSplitSuggestionSourceCleanupPreservesDraftAndLedger": true,
+        "encryptionKeyCanary": true,
+        "nativeRegionDefinitionsSnapshotsEvidenceAndApprovedExports": true,
+        "nativeTemplateMutationReplayClosureAndIndependentParserCopy": true,
+        "queuedNativeRegionUsesPinnedRevisionOnceWithoutAiOrRecharging": true,
+        "deterministicQueuedJobOnceWithoutRecharging": true,
+        "legacyAndCompleteV1QueuedSelectorsRemainUnchanged": true,
+        "pendingDeletionResumed": true,
+        "pendingOutboxControlledDeliveryOnce": true,
+        "pendingEmailPreservedWithoutSending": true
+      },
+      "forbiddenNetwork": 0,
+      "realProviderCalls": 0,
+      "forbiddenExtractionCalls": 0,
+      "controlledSplitProviderCalls": 1,
+      "restoredSplitSuggestions": 5,
+      "controlledWebhookDeliveries": 1,
+      "verifiedLiveOriginals": 14,
+      "savedExports": 6,
+      "accounts": 2
+    },
+    "cleanup": {
+      "clusterRemoved": true,
+      "socketRemoved": true,
+      "sourceAndRestoredStorageRemoved": true,
+      "privateKeysAndCredentialFixtureRemoved": true,
+      "ownedAccountsPerPopulatedDatabase": 2,
+      "populatedDatabases": 2,
+      "normalDevelopmentDatabaseTouched": false
+    },
+    "sourceUnchanged": true
+  },
+  "scopePreserved": {
+    "originalCriteria": 47,
+    "firstFourColumnsUnchanged": true
+  },
+  "releaseBoundary": {
+    "localOnly": true,
+    "hostedMigrationActivationPerformed": false,
+    "hostedMigrationsPending": "021-037",
+    "canonicalDomainVerifiedForThisRevision": false,
+    "billing": "mock",
+    "plan": "free",
+    "githubCi": "Separate exact-head PR checks",
+    "fullGoalComplete": false,
+    "limitations": [
+      "Searchable native PDF scalar fields only",
+      "No OCR, repeating regions, automatic layout scaling or broad document-accuracy claim"
+    ]
+  },
+  "geometryResource": {
+    "passed": true,
+    "node": "v24.13.0",
+    "execution": "copied deployment compiled child192MiB V8, noTSX",
+    "pageCount": 30,
+    "capturedItems": 20000,
+    "sourceBytes": 404807,
+    "sourceSha256": "b7173ff0fb66df8fbf86a1d46d001e8b5a57cefb517297836b3fbdaf0d9a4a5b",
+    "outputBytes": 2924267,
+    "durationMs": 1537.504375,
+    "overLimit": {
+      "nativeBlocks": 20001,
+      "reason": "geometry_limit",
+      "durationMs": 748.7524159999998
+    },
+    "nativeRssMeasured": false,
+    "realProviderCalls": 0,
+    "databaseCalls": 0,
+    "concurrentQaTiming": true
+  },
+  "review": {
+    "legacyTextCompatibility": "Large legal text definitions preserve matching, snapshots, disable/recovery and copying with separate text bounds",
+    "editorMetadata": "Editor-only row IDs are stripped before strict region matching; actual numeric/draw workflow verifies capture",
+    "disabledPreview": "Disabled draft matches are explicitly conditional and do not enable or save the template",
+    "earlierBrowserAttempts": "Earlier failed private harness runs retained; synchronization and selector expectations corrected before final browser acceptance"
+  }
+}

@@ -1,4 +1,4 @@
-import {useId,useRef,type ReactNode,type ButtonHTMLAttributes} from 'react';
+import {useId,useRef,type ReactNode,type ButtonHTMLAttributes,type ComponentProps} from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {X,AlertCircle,CheckCircle2,Loader2,FileText} from 'lucide-react';
 import {clsx} from 'clsx';
@@ -23,6 +23,6 @@ export function Tabs({items,value,onChange,label='Sections'}:{items:string[];val
     event.preventDefault();onChange(items[next]);buttons.current[next]?.focus();
   }} key={item}>{item}</button>)}</div>;
 }
-export function Modal({title,description,open,onOpenChange,children}:{title:string;description?:string;open:boolean;onOpenChange:(open:boolean)=>void;children:ReactNode}){const descriptionId=useId();return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="modal-overlay"/><Dialog.Content className="modal" aria-describedby={description?descriptionId:undefined}><Dialog.Title>{title}</Dialog.Title>{description&&<Dialog.Description id={descriptionId}>{description}</Dialog.Description>}<Dialog.Close type="button" className="icon-button modal-close" aria-label="Close dialog"><X size={20}/></Dialog.Close>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>;}
+export function Modal({title,description,open,onOpenChange,onCloseAutoFocus,children}:{title:string;description?:string;open:boolean;onOpenChange:(open:boolean)=>void;onCloseAutoFocus?:ComponentProps<typeof Dialog.Content>['onCloseAutoFocus'];children:ReactNode}){const descriptionId=useId();return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="modal-overlay"/><Dialog.Content className="modal" aria-describedby={description?descriptionId:undefined} onCloseAutoFocus={onCloseAutoFocus}><Dialog.Title>{title}</Dialog.Title>{description&&<Dialog.Description id={descriptionId}>{description}</Dialog.Description>}<Dialog.Close type="button" className="icon-button modal-close" aria-label="Close dialog"><X size={20}/></Dialog.Close>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>;}
 export function Field({label,children,hint}:{label:string;children:ReactNode;hint?:string}){return <label className="field"><span>{label}</span>{children}{hint&&<small>{hint}</small>}</label>;}
 export const dateTime=(date:string)=>new Intl.DateTimeFormat('en-IE',{dateStyle:'medium',timeStyle:'short'}).format(new Date(date));

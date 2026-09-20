@@ -6,9 +6,10 @@ import {withWorkspace,audit,badRequest,notFound,camel} from '../core/db.js';
 import {appendDocumentEvent} from '../core/document-events.js';
 import {renderExport,type ExportRecord} from './export-format.js';
 
-const columns = z.array(z.object({source:z.string().min(1).max(120),label:z.string().min(1).max(120)})).max(100);
-const optionsSchema = z.object({format:z.enum(['csv','xlsx','json']),columns:columns.optional(),lineItems:z.string().max(100).optional()});
-const exportSchema = optionsSchema.extend({documentIds:z.array(z.uuid()).min(1).max(100),revisions:z.array(z.object({documentId:z.uuid(),approvalId:z.uuid()})).max(100).optional()});
+import {exportColumns as columns,exportMappingInput,exportLineItems} from './export-input.js';
+const optionsSchema = z.object({format:z.enum(['csv','xlsx','json']),columns:columns.optional(),lineItems:exportLineItems.optional()});
+const canonicalUuid=z.uuid().transform(value=>value.toLowerCase());
+const exportSchema = optionsSchema.extend({documentIds:z.array(canonicalUuid).min(1).max(100),revisions:z.array(z.object({documentId:canonicalUuid,approvalId:canonicalUuid})).max(100).optional()});
 const hostedExportMaxBytes=4*1024*1024;
 class HostedExportSizeError extends Error {
   statusCode=413;
@@ -29,7 +30,9 @@ export async function registerExports(app:FastifyInstance, services:{render?:typ
       const found=await client.query(`SELECT d.id,d.name,d.approved_run_id FROM documents d WHERE d.id=ANY($1::uuid[]) AND d.workspace_id=$2 ORDER BY d.id FOR UPDATE OF d`,[uniqueIds,actor.workspaceId]);
       if(found.rows.length!==uniqueIds.length) notFound('One or more documents were not found.');
       const records:ExportRecord[]=[];
-      for(const document of found.rows) {
+      // Lock order prevents deadlocks; rendering follows the caller's selection.
+      const byId=new Map(found.rows.map(document=>[document.id,document]));
+      for(const document of uniqueIds.map(id=>byId.get(id)!)) {
         const selection=revisions?.find(r=>r.documentId===document.id);
         if(revisions&&!selection)badRequest('Select an approval revision for every exported document.');
         if(!selection&&!document.approved_run_id) badRequest('Approve every selected document before exporting.');
@@ -91,7 +94,7 @@ export async function registerExports(app:FastifyInstance, services:{render?:typ
   });
   app.post('/api/export-mappings',async request=> {
     const actor=await requireActor(request,{roles:['owner','admin','editor'],scope:'parsers:write'});
-    const input=z.object({parserId:z.uuid(),name:z.string().min(1).max(100),columns,lineItems:z.string().max(100).optional()}).parse(request.body);
+    const input=exportMappingInput.parse(request.body);
     return withWorkspace(actor.workspaceId,async c=> {
       if(!(await c.query('SELECT id FROM parsers WHERE id=$1 AND workspace_id=$2',[input.parserId,actor.workspaceId])).rowCount)notFound();
       return camel((await c.query('INSERT INTO export_mappings(id,workspace_id,parser_id,name,columns,line_items) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[randomUUID(),actor.workspaceId,input.parserId,input.name,JSON.stringify(input.columns),input.lineItems||null])).rows[0]);

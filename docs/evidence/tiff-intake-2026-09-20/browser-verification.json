@@ -1,0 +1,356 @@
+{
+  "startedAt": "2026-09-20T00:08:21.764Z",
+  "completedAt": "2026-09-20T00:08:39.229Z",
+  "origin": "http://127.0.0.1:4337",
+  "node": "24.13.0",
+  "browserAvailability": "Browser plugin unavailable; installed Playwright fallback",
+  "flow": "Generated three-page TIFF -> upload -> derived page preview -> navigation/retry/scope changes -> controlled extraction -> correction/approval -> exact exports and raw TIFF download",
+  "controlledOnly": true,
+  "rateLimits": "isolated browser store; rate limiting is outside this review fixture",
+  "checks": {
+    "ActualThreePageTiffUploadPageCreditsDecodedPreviewAndPrivateJpegHeaders": true,
+    "KeyboardPageOrderBoundaryControlsAndZoom": true,
+    "TabletAndMobileRealPageImagesKeyboardAndContainedControls": true,
+    "SafeFailureRetryAndStableKeyboardFocus": true,
+    "HeldHttpResponseAndImageDecodeCannotPaintSupersededPage": true,
+    "WorkspaceReplacementFencesLateAuthenticatedPreview": true,
+    "ControlledTiffPdfDerivativeOnceEvidenceCorrectionExactExportsAndOriginalTiff": true,
+    "ViewerCanInspectOriginalWhileOtherTenantCannotRead": true,
+    "ExistingPngAndPdfPreviewAndOriginalDownloadsRemainIntact": true,
+    "NoExternalProvidersOrUnexplainedBrowserErrors": true
+  },
+  "realProviderCalls": 0,
+  "controlledExtractionCalls": 1,
+  "controlledTiffVisualDocument": true,
+  "fixture": {
+    "sourceSha256": "5a177a54d35cf00cba861e233cb3287138c2c4977b7ae363ea13415c69268862",
+    "pageCount": 3,
+    "generatedRasterPages": true,
+    "controlledExtractionOnly": true,
+    "noRealOCRClaims": true
+  },
+  "cleanedOwnedFixtures": {
+    "accounts": 3,
+    "workspaces": 3,
+    "documents": 3
+  },
+  "passed": true,
+  "buildIndexSha256": "df467286f998f0ff7a7a3531cc074f93fd4a124fc0a12fec4dea1d965795411f",
+  "sourceUnchanged": true,
+  "recordedAt": "2026-09-20T00:09:38.722460+00:00",
+  "parentHead": "f8f71dc454891a217e65a2c2dea456dcc4679a60",
+  "sourceCount": 288,
+  "sourceFingerprint": "13f315c6092c88f57dd7e78b05309ac3dd500fdf784ab33c6b53059ac1d9e6bd",
+  "groups": 10,
+  "screenshots": [
+    {
+      "file": "desktop-tiff-original-page-1.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-tiff-original-page-3.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-tiff-zoom-130.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "tiff-original-page-2-820.png",
+      "width": 820,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 820,
+        "body": 820,
+        "document": 820
+      }
+    },
+    {
+      "file": "tiff-original-page-3-820.png",
+      "width": 820,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 820,
+        "body": 820,
+        "document": 820
+      }
+    },
+    {
+      "file": "tiff-original-page-2-390.png",
+      "width": 390,
+      "height": 844,
+      "dimensions": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "file": "tiff-original-page-3-390.png",
+      "width": 390,
+      "height": 844,
+      "dimensions": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "file": "desktop-safe-preview-error-retry.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-tiff-corrected-with-page-2-evidence.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-tiff-approved-export.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "mobile-viewer-tiff-preview.png",
+      "width": 390,
+      "height": 844,
+      "dimensions": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "file": "desktop-png-preview-regression.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "file": "desktop-pdf-preview-regression.png",
+      "width": 1440,
+      "height": 1000,
+      "dimensions": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    }
+  ],
+  "publicScreenshots": [
+    "desktop-tiff-original-page-1.png",
+    "desktop-tiff-zoom-130.png",
+    "tiff-original-page-3-820.png",
+    "tiff-original-page-2-390.png",
+    "desktop-safe-preview-error-retry.png",
+    "desktop-tiff-corrected-with-page-2-evidence.png",
+    "mobile-viewer-tiff-preview.png"
+  ],
+  "visualReview": {
+    "reviewedAt": "2026-09-20T00:09:38.657158+00:00",
+    "runId": "6ec583fe-2dec-45aa-85aa-eea8b3d02726",
+    "sourceFingerprint": "13f315c6092c88f57dd7e78b05309ac3dd500fdf784ab33c6b53059ac1d9e6bd",
+    "method": "All13 current final-run complete frames individually opened and visually inspected with view_image; no reuse of early images",
+    "frameCount": 13,
+    "passed": true,
+    "views": [
+      {
+        "file": "desktop-tiff-original-page-1.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Blue page 1, correct original-page label and disabled previous boundary; queued source preview readable."
+      },
+      {
+        "file": "desktop-tiff-original-page-3.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Red page 3 and disabled next boundary; page source matches title."
+      },
+      {
+        "file": "desktop-tiff-zoom-130.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "130 percent zoom grows original inside its scroll pane without shifting adjacent review or whole-page overflow."
+      },
+      {
+        "file": "tiff-original-page-2-820.png",
+        "width": 820,
+        "height": 1000,
+        "passed": true,
+        "notes": "Tablet green page 2 and navigation/zoom toolbar fit; raw original download visible."
+      },
+      {
+        "file": "tiff-original-page-3-820.png",
+        "width": 820,
+        "height": 1000,
+        "passed": true,
+        "notes": "Tablet red page 3 remains contained with disabled next boundary."
+      },
+      {
+        "file": "tiff-original-page-2-390.png",
+        "width": 390,
+        "height": 844,
+        "passed": true,
+        "notes": "Mobile Document tab shows green page 2, controls, label and raw-original action without overflow."
+      },
+      {
+        "file": "tiff-original-page-3-390.png",
+        "width": 390,
+        "height": 844,
+        "passed": true,
+        "notes": "Mobile red page 3 and boundary controls fit narrow viewport."
+      },
+      {
+        "file": "desktop-safe-preview-error-retry.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Fixed safe error and Retry preview are visible together; raw-original action remains available."
+      },
+      {
+        "file": "desktop-tiff-corrected-with-page-2-evidence.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Green original page 2 aligns with page-2 evidence; corrected reference and preserved zero/false visible."
+      },
+      {
+        "file": "desktop-tiff-approved-export.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Scrolled export dialog shows custom column mapping, pinned approval disclosure, successful download and action."
+      },
+      {
+        "file": "mobile-viewer-tiff-preview.png",
+        "width": 390,
+        "height": 844,
+        "passed": true,
+        "notes": "Viewer sees decoded blue TIFF page and original download in mobile Document tab."
+      },
+      {
+        "file": "desktop-png-preview-regression.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Original PNG renders normally; synthetic raster is reused from TIFF page 1 but is a single-page PNG."
+      },
+      {
+        "file": "desktop-pdf-preview-regression.png",
+        "width": 1440,
+        "height": 1000,
+        "passed": true,
+        "notes": "Existing PDF canvas renders normally with page boundary controls and original download."
+      }
+    ],
+    "limitations": [
+      "Controlled synthetic document and deterministic extraction adapter; no hosted OCR/AI call or deployment proof.",
+      "Desktop source is intentionally scrollable when zoomed; screenshot records visible portion."
+    ]
+  },
+  "pageErrors": 0,
+  "blockedExternalRequests": 0,
+  "unexpectedConsole": 0,
+  "expectedConsole": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "errorResponses": [
+    {
+      "status": 503,
+      "path": "/api/documents/:owned-id/preview"
+    },
+    {
+      "status": 404,
+      "path": "/api/documents/:owned-id"
+    }
+  ],
+  "errorResponseExplanation": [
+    {
+      "status": 503,
+      "path": "/api/documents/:owned-id/preview",
+      "reason": "The harness deliberately returned one503 for page2; the safe message appeared and Retry successfully fetched the real page."
+    },
+    {
+      "status": 404,
+      "path": "/api/documents/:owned-id",
+      "reason": "Document-detail revalidation followed the deliberate workspace-select POST before navigation completed. The new workspace cannot read the former workspace document. The app moved to /app, and no old image remained or returned after the held preview response was released."
+    }
+  ],
+  "limitations": [
+    "Local compiled application and synthetic TIFF; this does not prove hosted deployment or a live OCR/AI provider.",
+    "A deterministic controlled adapter supplies extraction values; the original TIFF and derived PDF/JPEG pages are real decoded media.",
+    "The isolated browser rate-limit store avoids unrelated fixture interference; rate-limiting behavior is covered separately."
+  ],
+  "reactReview": {
+    "reviewedAt": "2026-09-20T00:10:33.617722+00:00",
+    "skill": "build-web-apps:react-best-practices",
+    "passed": true,
+    "rules": [
+      "rerender-dependencies",
+      "rerender-derived-state-no-effect",
+      "rerender-use-ref-transient-values",
+      "rerender-no-inline-components",
+      "async-dependencies"
+    ],
+    "findings": [],
+    "notes": [
+      "Effects depend on primitive document/media/page/retry identities; unrelated review polling does not refetch the original.",
+      "Loading/current media/original-page labels are derived; async media is stored and keyed to resource scope. The effect reset marks a new async resource request.",
+      "Mounted/request versions and DOM focus use refs; resource scope changes deliberately remount a separately declared component.",
+      "Network read then media decode are data dependencies. Decoding runs asynchronously and a decoded image is mounted only for the current committed request.",
+      "Commit-time cleanup aborts requests and revokes blob URLs; delayed-response/decode and workspace-change browser checks passed."
+    ],
+    "files": {
+      "src/features/documents/DocumentPreview.tsx": "5f1e6f56a6742b8fdf1a07f335c74a93d20db3797efc0ef1b46f01d0cb3335a9",
+      "src/lib/api.ts": "7fc39c9423215bef65e501bd8c73b8c38e4c92e3efe95739160163558fe03107",
+      "src/features/documents/review.css": "6a43f341e5bcd69668e218ff89f3f20472630a4f08673d3591159a8c6d1dac34"
+    }
+  }
+}

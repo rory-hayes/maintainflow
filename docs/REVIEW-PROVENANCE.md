@@ -1,5 +1,7 @@
 # Review provenance and controlled UI evidence
 
+The later [nested review acceptance](NESTED-REVIEW.md) adds controlled desktop/tablet/mobile proof for supported four-level structures and structural row edits, including unchanged original source records. The dated evidence below remains historical.
+
 Recorded 7 September 2026. The review previously rendered source links only for top-level scalar fields. Table cells and nested object leaves could contain stored evidence without a visible source link. The frontend now exposes those records through **Original extraction sources** disclosures for each table or object. Controlled tests cover recursive structures; actual browser table disclosures, keyboard operation and desktop/mobile page navigation passed after a targeted CSS overflow fix.
 
 ## Source association
