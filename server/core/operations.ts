@@ -71,6 +71,29 @@ export async function probeNormalizationPolicy(pool:Pool){
   if(result.rows.length!==1||row.convalidated!==true||versions?.length!==2||new Set(versions).size!==2||!versions.includes('timestamp-v1')||!versions.includes('regional-v2'))throw new Error('Probe unavailable');
 }
 
+/** ODT can be advertised only after policy and durable rejection rows accept it. */
+export async function probeSourceFormatPolicy(pool:Pool){
+  const result=await probeDatabase(pool,`select c.conname,c.convalidated,pg_get_constraintdef(c.oid) definition
+    from pg_catalog.pg_constraint c join (values
+      ('parsers'::regclass,'parsers_allowed_formats'),
+      ('intake_events'::regclass,'intake_rejection_shape'),
+      ('archive_import_entries'::regclass,'archive_import_entries_format_check'),
+      ('archive_imports'::regclass,'archive_import_receipt_shape'),
+      ('pdf_splits'::regclass,'pdf_split_receipt_shape')
+    ) required(relation,name) on c.conrelid=required.relation and c.conname=required.name
+    where c.contype='c'`);
+  const formats=new Set(['parsers_allowed_formats','intake_rejection_shape','archive_import_entries_format_check','archive_import_receipt_shape']);
+  const rejections=new Set(['intake_rejection_shape','archive_import_receipt_shape','pdf_split_receipt_shape']);
+  if(result.rows.length!==5||new Set(result.rows.map(row=>row.conname)).size!==5)throw new Error('Probe unavailable');
+  for(const row of result.rows){
+    if(row.convalidated!==true||typeof row.definition!=='string'||!formats.has(row.conname)&&!rejections.has(row.conname))throw new Error('Probe unavailable');
+    const literals=new Set([...row.definition.matchAll(/'([a-z_]+)'(?:::text)?/g)].map(match=>match[1]));
+    if(formats.has(row.conname)&&!literals.has('odt'))throw new Error('Probe unavailable');
+    if(rejections.has(row.conname)&&['odt_invalid','odt_unsupported','odt_encrypted','odt_structure_limit','odt_text_limit','odt_empty'].some(reason=>!literals.has(reason)))throw new Error('Probe unavailable');
+    if(row.conname==='parsers_allowed_formats'&&!/cardinality\(allowed_formats\)\s*<=\s*11\b/.test(row.definition))throw new Error('Probe unavailable');
+  }
+}
+
 export async function probePrivateStorage(options:{env?:Record<string,string|undefined>;directory?:string;fetch?:typeof fetch}={}){
   const env=options.env??process.env,driver=env.STORAGE_DRIVER||'filesystem';
   if(driver==='filesystem'){
@@ -121,6 +144,7 @@ function productionServices():OperationalServices{
         probeDatabase(appPool,'select a.account_key,a.revision,t.fingerprint,u.bank_locale from bank_statement_accounts a,bank_statement_transactions t,direct_uploads u where false'),
         probeDatabase(appPool,'select d.id,d.workspace_id,b.billing_mode,c.billing_mode,c.idempotency_version from documents d,subscriptions b,billing_checkouts c where false'),
         probeNormalizationPolicy(adminPool),
+        probeSourceFormatPolicy(adminPool),
       ]);
     },
     storage:()=>probePrivateStorage(),

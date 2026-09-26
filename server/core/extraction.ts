@@ -31,7 +31,7 @@ if(field.type==='date'){
 }
 return str;
 }
-function cells(line:string):string[]{if(line.includes('|'))return line.split('|').map(v=>v.trim()).filter((v,i,a)=>v||i>0&&i<a.length-1);if(line.includes('\t'))return line.split('\t').map(v=>v.trim());const result:string[]=[];let value='',quoted=false;for(let i=0;i<line.length;i++){const char=line[i];if(char==='"'){if(quoted&&line[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(char===','&&!quoted){result.push(value.trim());value='';}else value+=char;}result.push(value.trim());return result;}
+function cells(line:string):string[]{if(line.includes('\t'))return line.split('\t').map(v=>v.trim());if(line.includes('|'))return line.split('|').map(v=>v.trim()).filter((v,i,a)=>v||i>0&&i<a.length-1);const result:string[]=[];let value='',quoted=false;for(let i=0;i<line.length;i++){const char=line[i];if(char==='"'){if(quoted&&line[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(char===','&&!quoted){result.push(value.trim());value='';}else value+=char;}result.push(value.trim());return result;}
 export const rulesEngine = Object.freeze({ engine: 'text-anchors', model: 'deterministic-v2' });
 const multilineLimits = { lines: 100, characters: 65_536 };
 

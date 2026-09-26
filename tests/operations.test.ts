@@ -6,7 +6,7 @@ import path from 'node:path';
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import type {Pool} from 'pg';
-import {createReadinessProbe,probeDatabase,probeNormalizationPolicy,probePrivateStorage,registerOperationalHealth,type OperationalServices} from '../server/core/operations.js';
+import {createReadinessProbe,probeDatabase,probeNormalizationPolicy,probeSourceFormatPolicy,probePrivateStorage,registerOperationalHealth,type OperationalServices} from '../server/core/operations.js';
 import {installationConfiguration} from '../server/core/installation.js';
 import {registerHostedWorker} from '../server/hosted-worker.js';
 
@@ -127,4 +127,30 @@ test('operator contacts and policy URLs reject controls, unsafe schemes and cred
   const invalid=installationConfiguration({FOLIO_OPERATOR_NAME:'Private\nHeader',FOLIO_SUPPORT_EMAIL:'x@example.test?body=secret',FOLIO_PRIVACY_URL:'javascript:alert(1)',FOLIO_TERMS_URL:'https://secret:token@example.test/terms'});assert.equal(invalid.publicDetails.configuration,'missing');
   const complete=installationConfiguration({FOLIO_OPERATOR_NAME:'Example Operator',FOLIO_SUPPORT_EMAIL:'support@example.test',FOLIO_PRIVACY_EMAIL:'privacy@example.test',FOLIO_PRIVACY_URL:'https://example.test/privacy',FOLIO_TERMS_URL:'https://example.test/terms',FOLIO_SUBPROCESSORS_URL:'https://example.test/providers',FOLIO_RETENTION_NOTICE:'Operator-supplied retention statement.',FOLIO_DATA_LOCATION_NOTICE:'Operator-supplied location statement.'});
   assert.equal(complete.publicDetails.configuration,'complete');assert.deepEqual(complete.readiness.missing,[]);assert.equal(complete.readiness.legalReviewVerified,false);assert.equal(complete.readiness.productionActivationVerified,false);
+});
+
+
+test('format readiness refuses pre-ODT constraints, incomplete receipts and unvalidated policies without writes',async()=>{
+  const reasons="'odt_invalid'::text,'odt_unsupported'::text,'odt_encrypted'::text,'odt_structure_limit'::text,'odt_text_limit'::text,'odt_empty'::text";
+  const definitions={
+    parsers_allowed_formats:"CHECK ((cardinality(allowed_formats) <= 11) AND allowed_formats <@ ARRAY['pdf'::text,'odt'::text])",
+    intake_rejection_shape:`CHECK ((rejection_format = ANY (ARRAY['pdf'::text,'odt'::text])) OR (rejection_reason = ANY (ARRAY[${reasons}])))`,
+    archive_import_entries_format_check:"CHECK ((format = ANY (ARRAY['pdf'::text,'odt'::text])))",
+    archive_import_receipt_shape:`CHECK ((rejection_reason = ANY (ARRAY['pdf'::text,'odt'::text])) OR (rejection_reason = ANY (ARRAY[${reasons}])))`,
+    pdf_split_receipt_shape:`CHECK ((rejection_reason = ANY (ARRAY[${reasons}])))`,
+  };
+  const rows=Object.entries(definitions).map(([conname,definition])=>({conname,definition,convalidated:true}));
+  const cases=[{rows,ready:true},{rows:[],ready:false},{rows:rows.slice(1),ready:false},
+    {rows:rows.map(row=>({...row,definition:row.definition.replace("'odt'::text","'txt'::text")})),ready:false},
+    {rows:rows.map(row=>({...row,definition:row.definition.replace('<= 11','<= 10')})),ready:false},
+    ...rows.map((_,i)=>({rows:rows.map((row,j)=>({...row,convalidated:i!==j})),ready:false})),
+    ...['odt_invalid','odt_unsupported','odt_encrypted','odt_structure_limit','odt_text_limit','odt_empty'].map(reason=>({rows:rows.map(row=>({...row,definition:row.definition.replace(reason,'old_reason')})),ready:false})),
+  ];
+  for(const scenario of cases){
+    const queries:string[]=[],releases:boolean[]=[];
+    const pool={connect:async()=>({query:async(sql:string)=>{queries.push(sql);return{rows:sql.includes('pg_catalog.pg_constraint')?scenario.rows:[]};},release:(destroy=false)=>releases.push(destroy)})} as unknown as Pool;
+    if(scenario.ready)await probeSourceFormatPolicy(pool);else await assert.rejects(probeSourceFormatPolicy(pool),{message:'Probe unavailable'});
+    assert.equal(queries[0],'BEGIN READ ONLY');assert.equal(queries.at(-1),'ROLLBACK');assert.deepEqual(releases,[false]);
+    assert.doesNotMatch(queries.join('\n'),/insert |update |alter |create /i);
+  }
 });

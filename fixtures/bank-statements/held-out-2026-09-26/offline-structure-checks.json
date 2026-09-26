@@ -1,0 +1,54 @@
+{
+  "kind": "offline_pdf_structure_only",
+  "providerCalls": 0,
+  "independentCases": 2,
+  "derivedRenditions": 1,
+  "renderDpi": 144,
+  "files": [
+    {
+      "file": "case-a-eur-multipage-native.pdf",
+      "sha256": "4bfa4c8fbd9638f84a8cfd6dd5eb7c429b7a335ef98f626b4df874ac2d5cba1b",
+      "bytes": 5008,
+      "pages": 2,
+      "textCharactersPerPage": [
+        1078,
+        1027
+      ],
+      "embeddedImagesPerPage": [
+        0,
+        0
+      ],
+      "renderedPages": 2
+    },
+    {
+      "file": "case-b-multiple-accounts-native.pdf",
+      "sha256": "190a8009776218c92cbdd09f1beefc1010f86274791da2f917154d6cc7cf2713",
+      "bytes": 4790,
+      "pages": 2,
+      "textCharactersPerPage": [
+        1021,
+        1019
+      ],
+      "embeddedImagesPerPage": [
+        0,
+        0
+      ],
+      "renderedPages": 2
+    },
+    {
+      "file": "case-a-eur-multipage-raster.pdf",
+      "sha256": "7f48a49cae16ce64cd3cba1eaa1cf2fbc96987e545d46826bd64bc78959559af",
+      "bytes": 154474,
+      "pages": 2,
+      "textCharactersPerPage": [
+        0,
+        0
+      ],
+      "embeddedImagesPerPage": [
+        1,
+        1
+      ],
+      "renderedPages": 2
+    }
+  ]
+}
