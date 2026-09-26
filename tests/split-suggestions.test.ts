@@ -232,7 +232,7 @@ const fieldResult=()=>({schema:{fields:[{key:'reference',label:'Reference',type:
 const extractionResult=()=>({rawValues:{reference:'OWNED'},normalizedValues:{reference:'OWNED'},evidence:{},issues:[],model:'controlled-extraction',engine:'controlled-ai',tokenUsage:{inputTokens:10},costUsd:0});
 
 test('field and split suggestions share the actual three-pending and ten-per-day admission limits',async()=>{
- const f=await fixture('shared-limits');configured();setSchemaSuggestionProvider({configured:()=>true,suggest:async()=>fieldResult()});
+ const f=await fixture('shared-limits');await adminPool.query("update workspaces set plan=jsonb_set(plan,'{id}','\"team\"') where id=$1",[f.account.workspace.id]);configured();setSchemaSuggestionProvider({configured:()=>true,suggest:async()=>fieldResult()});
  const source=await addDocument(actor(f.account),f.parserId,pdf,'owned-field-source.pdf');const field=await fieldQueue(f,source.document.id);assert.equal(field.statusCode,202,field.body);
  const uploading=await signed(f),split=await queue(f);assert.equal((await upload(f)).statusCode,429);assert.equal((await fieldQueue(f,source.document.id)).statusCode,429);
  // Complete only this owned field draft, leaving the split and uploading jobs
@@ -248,7 +248,7 @@ test('field and split suggestions share the actual three-pending and ten-per-day
 
 test('real queued rows share total FIFO order and every worker respects the shared processing cap',async()=>{
  const f=await fixture('shared-workers');configured();setSchemaSuggestionProvider({configured:()=>true,suggest:async()=>fieldResult()});setExtractionProvider({configured:()=>true,extract:async()=>extractionResult()});
- await adminPool.query("update workspaces set plan=jsonb_set(plan,'{maxConcurrent}','1') where id=$1",[f.account.workspace.id]);await adminPool.query("update parsers set mode='ai' where id=$1",[f.parserId]);
+ await adminPool.query("update workspaces set plan=jsonb_set(jsonb_set(plan,'{id}','\"team\"'),'{maxConcurrent}','1') where id=$1",[f.account.workspace.id]);await adminPool.query("update parsers set mode='ai' where id=$1",[f.parserId]);
  const source=await addDocument(actor(f.account),f.parserId,pdf,'owned-queue-source.pdf'),field=await fieldQueue(f,source.document.id);assert.equal(field.statusCode,202,field.body);const split=await queue(f),sameLane=await queue(f),tie=source.jobId!;
  await adminPool.query("update schema_suggestions set id=$2,created_at='2026-01-01 00:00:00+00' where id=$1",[field.json().suggestion.id,tie]);await adminPool.query("update split_suggestions set id=$2,created_at='2026-01-01 00:00:00+00' where id=$1",[split.id,tie]);await adminPool.query("update jobs set created_at='2026-01-01 00:00:00+00' where id=$1",[tie]);await adminPool.query("update split_suggestions set created_at='2026-01-02 00:00:00+00' where id=$1",[sameLane.id]);
  const order=await withWorkspace(f.account.workspace.id,async c=>(await c.query(`select id,lane,created_at from (${runnableAiWorkSql}) ready where workspace_id=$1 order by created_at,id,lane`,[f.account.workspace.id])).rows);assert.deepEqual(order.map(row=>[row.id,row.lane]),[[tie,0],[tie,1],[tie,2],[sameLane.id,2]]);

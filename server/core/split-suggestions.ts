@@ -15,7 +15,7 @@ import {isTiffHeader,inspectTiffStructure} from './tiff-engine.js';
 import {SourceValidationError} from './source-validation.js';
 import {ParserFormatNotAllowedError} from './intake-policy.js';
 import {prepareVisualDocument,visualRenderingMetadata} from './visual-source.js';
-import {requireSuggestionCapacity,runnableAiWorkSql} from './parser-setup.js';
+import {requireSuggestionCapacity,auditSuggestionRequest,workspaceSuggestionLimits,runnableAiWorkSql} from './parser-setup.js';
 import {hasWorkspaceExtractionCapacity} from './schema-suggestions.js';
 import {SplitSuggestionProviderError} from './split-suggestion-errors.js';
 import {assertStorageRestoreReady} from './restore-state.js';
@@ -127,14 +127,14 @@ async function reserve(auth:StoredPdfAuthorization,parserId:string,input:Admissi
   }
   if(!splitSuggestionsConfigured())badRequest('AI split suggestions are unavailable. Check the AI connection or choose page ranges manually.',503);
   if(input.size>Number(parser.plan.maxBytes))badRequest('Document exceeds the workspace file limit',413);
-  await requireSuggestionCapacity(c,auth.actor.workspaceId);
+  const admittedAt=await requireSuggestionCapacity(c,auth.actor.workspaceId);
   await pendingCapacity(c,auth.actor.workspaceId,input.size+(input.signed?splitSuggestionLimits.maxBytes:0));
   const id=randomUUID(),key=`${auth.actor.workspaceId}/${randomUUID()}`,stage=input.signed?`${auth.actor.workspaceId}/${randomUUID()}`:null;
   const row=(await c.query(`insert into split_suggestions(id,workspace_id,parser_id,requested_by,request_id,auth_type,token_hash,source_document_id,original_source_key,original_page_count,source_name,source_sha256,source_mime_type,expected_bytes,source_storage_key,source_reserved_bytes,staging_storage_key,staging_reserved_bytes,staging_expires_at,config)
    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$14,$16,$17,case when $16::text is null then null else now()+($18*interval '1 second') end,$19) returning *`,
    [id,auth.actor.workspaceId,parserId,auth.actor.userId,input.requestId,auth.actor.authType,auth.tokenHash,input.documentId??null,input.originalKey??null,input.originalPages??null,safeDownloadName(input.filename),input.sourceSha256,input.mimeType,input.size,key,stage,input.signed?splitSuggestionLimits.maxBytes:0,SIGNED_UPLOAD_RETENTION_SECONDS,JSON.stringify({locale:parser.locale})])).rows[0];
   await validateOriginal(c,row);
-  await audit(c,auth.actor.workspaceId,auth.actor.userId,'split.suggestion_requested',id,{parserId,sourceDocumentId:input.documentId??null});return row as Row;
+  await auditSuggestionRequest(c,auth.actor,'split.suggestion_requested',id,{parserId,sourceDocumentId:input.documentId??null},admittedAt);return row as Row;
  });
 }
 async function liveScope(auth:StoredPdfAuthorization,parserId:string,id:string,fn?:(c:PoolClient,row:Row)=>Promise<void>){
@@ -190,7 +190,7 @@ export async function registerSplitSuggestions(app:FastifyInstance,services:Serv
  app.get(base,async request=>{
   const auth=await actorFor(request),{id}=parameters.parse(request.params);
   return withSplitSuggestionAuthorization(auth,async c=>{await parserFor(c,auth.actor,id);const rows=(await c.query(`select *,${closedExpression} creation_closed from split_suggestions where workspace_id=$1 and parser_id=$2 and requested_by=$3 order by created_at desc,id desc limit 10`,[auth.actor.workspaceId,id,auth.actor.userId])).rows;
-   return {available:splitSuggestionsConfigured(),limits:splitSuggestionLimits,suggestions:rows.map(publicSplitSuggestion)};});
+   return {available:splitSuggestionsConfigured(),limits:{...splitSuggestionLimits,...await workspaceSuggestionLimits(c,auth.actor.workspaceId)},suggestions:rows.map(publicSplitSuggestion)};});
  });
  for(const byRequest of [false,true])app.get(`${base}/${byRequest?'requests/:requestId':':suggestionId'}`,async request=>{
   const auth=await actorFor(request),p=parameters.parse(request.params);

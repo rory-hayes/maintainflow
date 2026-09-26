@@ -60,12 +60,12 @@ test('mock billing requires exact explicit opt-in and is unavailable in producti
 test('mock select, change and cancel persist real local limits and audit across an app restart without billing records', async () => {
   const first = await select('standard'); assert.equal(first.statusCode, 200, first.body);
   assert.equal(first.json().mode, 'mock'); assert.equal(first.json().changed, true);
-  assert.equal((await stored()).monthlyPages, 1000); assert.equal((await stored()).name, 'Standard (local mock)');
+  assert.equal((await stored()).monthlyPages, 300); assert.equal((await stored()).name, 'Standard (local mock)');
   assert.equal((await select('standard')).json().changed, false); assert.equal((await audit()).length, 1);
   assert.equal((await select('team')).statusCode, 200);
   await app.close(); app = await buildApp();
   const usage = await app.inject({ method: 'GET', url: '/api/workspace/usage', headers: { cookie: owner.cookie } });
-  assert.equal(usage.statusCode, 200); assert.equal(usage.json().plan.monthlyPages, 5000); assert.equal(usage.json().plan.maxConcurrent, 4);
+  assert.equal(usage.statusCode, 200); assert.equal(usage.json().plan.monthlyPages, 1000); assert.equal(usage.json().plan.maxConcurrent, 4);
   const status = await app.inject({ method: 'GET', url: '/api/providers/status', headers: { cookie: owner.cookie } });
   assert.equal(status.json().stripe.mode, 'mock'); assert.equal(status.json().stripe.configured, false); assert.equal(status.json().stripe.verified, false); assert.equal(status.json().stripe.mockPlan.id, 'team');
   const parser = await request('/api/parsers', { name: 'Preserved mock downgrade parser', useCase: 'receipt' }); assert.equal(parser.statusCode, 201, parser.body);

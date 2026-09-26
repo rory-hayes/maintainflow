@@ -2,7 +2,7 @@ import {createContext,useContext,useState,type ReactNode} from 'react';
 import {useQuery,useQueryClient} from '@tanstack/react-query';
 import {ApiError,api,post,workspaceId} from './api';
 import type {Role} from '../../shared/types';
-export type Workspace={id:string;name:string;role:Role;settings:Record<string,unknown>;plan:{name:string;monthlyPages:number;maxParsers:number;maxConcurrent:number}};
+export type Workspace={id:string;name:string;role:Role;settings:Record<string,unknown>;plan:{id?:string;name:string;monthlyPages:number;maxParsers:number;maxConcurrent:number}};
 export type Session={user:{id:string;name:string;email:string;emailVerifiedAt:string|null;emailVerificationRequired:boolean};workspace:Workspace;workspaces:Workspace[]};
 type SessionValue={data?:Session;loading:boolean;refresh:()=>Promise<void>;select:(id:string)=>Promise<void>;logout:()=>Promise<void>};
 const Context=createContext<SessionValue>(null!);

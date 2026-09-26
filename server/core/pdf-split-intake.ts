@@ -118,7 +118,7 @@ export async function addSplitDocuments(actor:Actor,parserId:string,bytes:Buffer
  async function quota(c:PoolClient,sourcePageCount:number,selectedPages:number,parts:Awaited<ReturnType<SplitSource>>['parts']){
   const workspace=(await c.query('select plan from workspaces where id=$1',[actor.workspaceId])).rows[0],plan=workspace.plan;
   if(bytes.length>Math.min(pdfSplitLimits.maxBytes,plan.maxBytes)||sourcePageCount>Math.min(pdfSplitLimits.maxPages,plan.maxPages)||parts.some(p=>p.bytes.length>plan.maxBytes||p.source.pageCount>plan.maxPages))badRequest('Document exceeds the workspace file or page limit',413);
-  const usage=(await c.query("select coalesce(sum(pages),0)::integer used from usage_ledger where workspace_id=$1 and created_at>=date_trunc('month',now())",[actor.workspaceId])).rows[0];
+  const usage=(await c.query("select coalesce(sum(pages),0)::integer used from usage_ledger where workspace_id=$1 and created_at>=date_trunc('month',now(),'UTC')",[actor.workspaceId])).rows[0];
   if(usage.used+selectedPages>plan.monthlyPages)badRequest('Monthly page quota reached. Update the plan before uploading more documents.',429);
  }
  try{

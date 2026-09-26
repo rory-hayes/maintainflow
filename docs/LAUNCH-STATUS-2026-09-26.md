@@ -4,7 +4,15 @@
 
 This dated record supersedes deployment and branding statements in the [September 20 status](LAUNCH-STATUS-2026-09-20.md). Historical test records retain their original source and coverage. The [47-criterion capability inventory](PARITY-MATRIX.md) remains recorded in the product backlog. The newer [ordered launch backlog](LAUNCH-BACKLOG.md) distinguishes bank-launch requirements from broader product extensions awaiting a scope decision; the inventory does not make every extension a launch prerequisite.
 
-## Current deployment — update after PR46
+## Current deployment — update after PR52
+
+The canonical domain was verified on **`124cee1b950afc1748d34c58783d1eec1880c538`**, from [merged PR52](https://github.com/rory-hayes/maintainflow/pull/52). [CI](https://github.com/rory-hayes/maintainflow/actions/runs/36259028956) passed **1,087 tests**, build/runtime and both isolated recovery drills. Export-only API access and MaintainFlow sign-in copy are deployed. Free accounts, invitation-only preview and mock billing remain enabled.
+
+Fresh hosted API checks passed viewer/admin/editor transitions, actual editor correction/restoration, immediate downgrade/removal enforcement, workspace isolation and session revocation. The six-page held-out bank pack ran once per input: all rows/groups/repeated payments were retained, but native case A misplaced three credits as debits. Reconciliation caught them and blocked approval. The deliberately inconsistent case B also refused approval with HTTP 422. First-pass evidence is retained; no accuracy percentage or universal compatibility is established.
+
+The selected launch offer is **free/50 pages, €19/300 and €49/1,000 monthly**, with combined monthly AI field/split suggestion caps **3/5/20**. Source implementation passed 132 focused tests, typecheck/build and local desktop/mobile pricing and mock-plan checks; this is not yet the deployed offer or a changed Stripe catalogue. Rory Hayes, no current VAT registration and no discretionary refunds (subject to statutory rights) are confirmed. Address/phone details were deferred by the operator. Full policies, monitoring delivery/schedule, current hosted restore, authenticated browser acceptance, remaining integration/capacity checks and actual Stripe sandbox acceptance remain open. The existing Stripe test dashboard is available, but the named secure configuration lacks its server key. A fresh hosted restore needs an existing owner-capable DB connection; only runtime connections were identified.
+
+## Earlier deployed evidence — PR46
 
 The canonical domain now serves **`e139697a12696324117de14269a589d24a5e661e`** from [merged PR46](https://github.com/rory-hayes/maintainflow/pull/46), Vercel Production deployment `dpl_9X7ZC1q1b8zoVwCAiHhHBZNCahpA`. Migrations 039–042 are applied and read back (33 journal entries); bank tables retain forced RLS and the reviewed failure-event watchdog is applied with unchanged owner-only permissions and schedule. Free plans, mock billing and invitation-only preview remain enabled.
 

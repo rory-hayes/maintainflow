@@ -1,3 +1,4 @@
+import type {AiSuggestionLimits} from '../../../shared/ai-suggestion-allowances';
 import {useId,useRef,useState} from 'react';
 import {useQuery,useQueryClient} from '@tanstack/react-query';
 import {Link} from 'react-router-dom';
@@ -8,7 +9,7 @@ import {api,ApiError,post,useAction,useData,workspaceId} from '../../lib/api';
 import './schema-suggestions.css';
 
 export const fieldTypeLabels:Record<FieldType,string>={string:'Text',number:'Number',currency:'Currency amount',date:'Date',timestamp:'Timestamp (date & time)',boolean:'Boolean',multiline:'Multiline text',array:'Table / array',object:'Nested object'};
-interface SuggestionList {suggestions:SchemaSuggestion[];available:boolean;limits:{perDay:number;pendingPerWorkspace:number};}
+interface SuggestionList {suggestions:SchemaSuggestion[];available:boolean;limits:AiSuggestionLimits;}
 interface DocumentList {documents:{id:string;name:string}[];total:number;page:number;pageSize:number;}
 const pending=(suggestion:SchemaSuggestion)=>suggestion.state==='queued'||suggestion.state==='processing';
 
@@ -49,7 +50,7 @@ export default function SchemaSuggestions({parserId,baseSchemaId,canEdit,archive
   return <section className="schema-suggestions panel" aria-labelledby={`${descriptionId}-heading`}>
     <div className="schema-suggestions-heading"><h2 id={`${descriptionId}-heading`}>Suggest fields from a document</h2><span className="small muted">AI draft</span></div>
     <p>Choose a document already in this parser. Review the suggested fields, edit them, then save when you are ready.</p>
-    <p className="small muted" id={descriptionId}>The selected document is sent to the configured AI provider to suggest fields. No extra document-page credits are used. 10 suggestions per workspace every 24 hours.</p>
+    <p className="small muted" id={descriptionId}>The selected document is sent to the configured AI provider to suggest fields. No extra document-page credits are used. {history.data&&<>Field and split suggestions share {history.data.limits.perMonth} requests per workspace per calendar month (UTC), with up to {history.data.limits.perDay} every 24 hours.</>}</p>
     {history.isPending&&<p className="small muted" role="status">Checking field suggestions…</p>}
     {history.error&&<div><Notice error={history.error.message}/><Button type="button" variant="secondary" onClick={()=>void history.refetch()}>Retry suggestions</Button></div>}
     {history.data&&!history.error&&!history.data.available&&<p className="schema-suggestion-help" role="status">AI field suggestions need provider setup. You can keep editing fields manually.</p>}

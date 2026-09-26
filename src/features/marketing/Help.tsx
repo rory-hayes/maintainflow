@@ -5,6 +5,7 @@ import { MarketingFooter, MarketingHeader } from './MarketingShell';
 import { useAiAvailability } from '../../lib/ai';
 import { useData } from '../../lib/api';
 import type { PublicInstallation } from '../../../shared/installation';
+import { commercialTerms } from '../../../shared/commercial';
 import './marketing.css';
 
 type GuideLayoutProps = { title: string; introduction: string; children: ReactNode };
@@ -335,6 +336,14 @@ export function Terms() {
       <section>
         <h2>Pricing and providers</h2>
         <p>No subscription is activated by viewing a plan. Billing settings identify mock, test or live mode before you open Checkout. Review the displayed price and the operator’s payment and cancellation terms before confirming a live subscription. External services require their own configuration and account permissions.</p>
+        <p>{commercialTerms.allowance}</p>
+        <p>{commercialTerms.tax}</p>
+      </section>
+      <section>
+        <h2>Cancellation and refunds</h2>
+        <p>{commercialTerms.refunds}</p>
+        <p>When paid subscriptions are available, use the billing portal to manage cancellation and check its effective date. Paid access continues while a subscription is active; after it ends, the free plan’s limits apply. Cancellation does not delete existing documents or erase usage. Contact the support address above about a billing error, an unavailable cancellation control or a refund required by law.</p>
+        <p>The current private preview takes no payments. The operator’s postal address, telephone contact and complete service terms are still being finalised before paid launch.</p>
       </section>
       <section>
         <h2>Operator terms apply separately</h2>

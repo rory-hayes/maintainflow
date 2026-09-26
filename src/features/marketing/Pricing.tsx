@@ -2,6 +2,8 @@ import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CircleCheck } from 'lucide-react';
 import { PLANS } from '../../../shared/plans';
+import { commercialTerms } from '../../../shared/commercial';
+import { monthlyAiSuggestionLimit } from '../../../shared/ai-suggestion-allowances';
 
 function boundedNumber(value: string, max: number) {
   const parsed = Number(value);
@@ -53,12 +55,14 @@ export default function Pricing() {
             <h3 id={`plan-${plan.id}`}>{plan.name}</h3>
             <p className="marketing-price"><strong>€{plan.monthlyPrice}</strong><span>/ month</span></p>
             <p className="marketing-plan-pages">{plan.monthlyPages.toLocaleString('en-IE')} pages / month</p>
+            <p className="small">{monthlyAiSuggestionLimit(plan.id)} AI field or split suggestions / month</p>
             <ul>{plan.features.map((feature) => <li key={feature}><CircleCheck size={21} strokeWidth={1.7} /><span>{feature}</span></li>)}</ul>
             <Link className="button primary marketing-cta" to={`/sign-up?plan=${plan.id}`}>Get started</Link>
           </article>
         ))}
       </div>
-      <p className="marketing-pricing-note">Illustrative launch pricing. Checkout availability is shown in your workspace.</p>
+      <p className="marketing-pricing-note">Monthly launch plans. Checkout availability and whether billing is simulated, test or live are shown in your workspace.</p>
+      <p className="marketing-pricing-note">{commercialTerms.allowance} {commercialTerms.tax} <Link to="/terms">Payment and refund terms</Link>.</p>
       <SavingsCalculator />
     </section>
   );

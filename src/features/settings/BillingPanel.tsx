@@ -2,6 +2,8 @@ import { useSearchParams } from 'react-router-dom';
 import { useLayoutEffect, useRef } from 'react';
 import { CreditCard, ExternalLink } from 'lucide-react';
 import { PLANS } from '../../../shared/plans';
+import { commercialTerms } from '../../../shared/commercial';
+import { monthlyAiSuggestionLimit } from '../../../shared/ai-suggestion-allowances';
 import { Button, ErrorState, Loading, Notice, Status } from '../../components/ui';
 import { post, useAction, useData } from '../../lib/api';
 import { useSession } from '../../lib/session';
@@ -50,12 +52,15 @@ export default function BillingPanel() {
       <div className="plan-columns">
         {PLANS.map((plan) => <div key={plan.id}>
           <h3>{plan.name}</h3><h2>€{plan.monthlyPrice} <small>/ month{isMock ? ' · illustrative' : ''}</small></h2><p>{plan.monthlyPages.toLocaleString('en-IE')} pages / month</p>
+          <p className="small">{monthlyAiSuggestionLimit(plan.id)} AI field or split suggestions / month</p>
           <ul>{plan.features.map((feature) => <li key={feature}>{feature}</li>)}</ul>
           {plan.id === 'explore' ? <p className="small">{isMock ? 'Cancel a mock subscription to apply Explore limits.' : 'Explore is the free plan. Your current allowance is shown in Usage.'}</p> : isMock ?
             <Button disabled={!canManage || action.busy || stripe.mockPlan?.id === plan.id} onClick={() => void changeMockPlan(plan.id)}>{stripe.mockPlan?.id === plan.id ? `Current mock plan: ${plan.name}` : `Use ${plan.name} mock plan`}</Button> :
             <Button disabled={!canManage || !stripe.configured || action.busy} onClick={() => void openBilling('/api/billing/checkout', { planId: plan.id })}>{isLive?'Choose':'Test'} {plan.name} {isLive?'plan':'checkout'}</Button>}
         </div>)}
       </div>
+      <p className="small muted">{commercialTerms.allowance}</p>
+      <p className="small muted">{commercialTerms.tax} {commercialTerms.refunds}</p>
       <div className="actions">
         {isMock ? <Button variant="secondary" disabled={!canManage || action.busy || stripe.mockPlan?.status !== 'active'} onClick={() => void changeMockPlan()}>Cancel mock subscription</Button> : <Button variant="secondary" disabled={!canManage || !stripe.configured || action.busy} onClick={() => void openBilling('/api/billing/portal')}><ExternalLink size={16} /> {isLive?'Open billing portal':'Open test billing portal'}</Button>}
       </div>

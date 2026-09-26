@@ -22,7 +22,7 @@ function mode(value:StripeMode){
  Object.assign(process.env,{STRIPE_MODE:value,STRIPE_SECRET_KEY:`sk_${value}_controlled`,STRIPE_WEBHOOK_SECRET:signing,STRIPE_PRICE_STANDARD:`price_${value}_standard`,STRIPE_PRICE_TEAM:`price_${value}_team`,STRIPE_ACCOUNT_ID:'acct_approved',STRIPE_PORTAL_CONFIGURATION_ID:'bpc_approved',FOLIO_BILLING_MOCK:'false',FOLIO_PREVIEW_MODE:'false',RESEND_INBOUND_ENABLED:'false'});
  delete process.env.RESEND_API_KEY;
 }
-function price(id:string,live:boolean){return {id,livemode:live,active:true,currency:'eur',unit_amount:id.endsWith('team')?7900:2900,recurring:{interval:'month',interval_count:1,usage_type:'licensed'},billing_scheme:'per_unit',transform_quantity:null} as Stripe.Price;}
+function price(id:string,live:boolean){return {id,livemode:live,active:true,currency:'eur',unit_amount:id.endsWith('team')?4900:1900,recurring:{interval:'month',interval_count:1,usage_type:'licensed'},billing_scheme:'per_unit',transform_quantity:null} as Stripe.Price;}
 function subscription(customer:string,value:StripeMode,status='active'){return {id:`sub_${value}_${customer}`,customer,created:100,livemode:value==='live',status,items:{data:[{quantity:1,price:price(`price_${value}_standard`,value==='live')}]}} as Stripe.Subscription;}
 function portalConfiguration(value:StripeMode){return {id:'bpc_approved',active:true,livemode:value==='live',features:{subscription_cancel:{enabled:true},subscription_update:{enabled:true,default_allowed_updates:['price'],products:[{product:'prod_approved',prices:[`price_${value}_standard`,`price_${value}_team`]}]}}} as Stripe.BillingPortal.Configuration;}
 function client(value:StripeMode):Stripe {
@@ -67,6 +67,18 @@ test('exact plan and portal mappings work for live and test without widening pri
  for(const value of ['test','live'] as const){const prices={standard:`price_${value}_standard`,team:`price_${value}_team`},s=subscription('cus_fixture',value);assert.equal(stripePlan(s,prices,value),'standard');assert.equal(stripePlan(s,prices,value==='live'?'test':'live'),null);
  for(const patch of [{currency:'usd'},{unit_amount:1},{transform_quantity:{divide_by:2,round:'up'}},{recurring:{interval:'year',interval_count:1}},{recurring:{interval:'month',interval_count:1,usage_type:'metered'}}])assert.equal(stripePriceMatches({...s.items.data[0]!.price,...patch} as Stripe.Price,'standard',prices,value),false);
  const portal=portalConfiguration(value);assert.doesNotThrow(()=>assertStripePortalConfiguration(portal,prices,value));portal.features.subscription_update.default_allowed_updates.push('quantity');assert.throws(()=>assertStripePortalConfiguration(portal,prices,value));}
+});
+test('retired preview prices cannot grant the new paid entitlements',()=>{
+ for(const value of ['test','live'] as const){
+  const prices={standard:`price_${value}_standard`,team:`price_${value}_team`};
+  for(const [plan,oldAmount] of [['standard',2900],['team',7900]] as const){
+   const oldPrice={...price(prices[plan],value==='live'),unit_amount:oldAmount};
+   assert.equal(stripePriceMatches(oldPrice,plan,prices,value),false);
+   const active=subscription('cus_fixture',value);
+   active.items.data[0]!.price=oldPrice;
+   assert.equal(stripePlan(active,prices,value),null);
+  }
+ }
 });
 test('signed webhooks require mode and reject altered, stale, missing-mode and Connect payloads',()=>{
  for(const value of ['test','live'] as const){const payload={id:`evt_${randomUUID()}`,type:'customer.subscription.updated',created:100,livemode:value==='live',data:{object:{customer:'cus_fixture'}}};

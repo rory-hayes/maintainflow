@@ -1,3 +1,4 @@
+import type {AiSuggestionLimits} from '../../../shared/ai-suggestion-allowances';
 import {useLayoutEffect,useRef,useState} from 'react';
 import {Button,Notice} from '../../components/ui';
 import {readSavedSplitSuggestion,saveSplitSuggestion,clearSplitSuggestion,listSplitSuggestions,findSplitSuggestion,requestSplitSuggestion,cancelSplitSuggestion,readSplitSuggestionSource,type SavedSplitSuggestion,type SuggestionScope} from '../../lib/split-suggestions';
@@ -8,20 +9,21 @@ const rangesText=(value:SplitSuggestion)=>value.ranges?.map(range=>range.start==
 
 export default function SplitSuggestionPanel(props:Props){
  const {scope,documentId,sha256,mimeType,file,allowAutoRestore,disabled,manualChanged,appliedId}=props;
+ const [limits,setLimits]=useState<AiSuggestionLimits|null>(null);
  const [binding,setBinding]=useState<SavedSplitSuggestion|null>(null),[suggestion,setSuggestion]=useState<SplitSuggestion|null>(null),[available,setAvailable]=useState<boolean|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[confirmNew,setConfirmNew]=useState(false),[confirmApply,setConfirmApply]=useState(false),[now,setNow]=useState(Date.now());
  const committed=useRef(0),responses=useRef(0),controller=useRef(new AbortController()),running=useRef(false),callbacks=useRef(props),panel=useRef<HTMLElement>(null);
  useLayoutEffect(()=>{callbacks.current=props;});
  const matches=Boolean(binding&&(!sha256||binding.sha256===sha256)&&binding.mimeType===mimeType),expired=Boolean(suggestion&&Date.parse(suggestion.expiresAt)<=now),pending=Boolean(suggestion&&['uploading','queued','processing'].includes(suggestion.state)),canRequest=Boolean(sha256&&(documentId||file));
  useLayoutEffect(()=>{
   const version=++committed.current,turn=++responses.current;controller.current=new AbortController();const signal=controller.current.signal;let timer:ReturnType<typeof setTimeout>|undefined;const active=()=>committed.current===version&&responses.current===turn&&!signal.aborted;
-  running.current=false;setBusy(false);setSuggestion(null);setAvailable(null);setError('');setConfirmNew(false);setConfirmApply(false);const saved=readSavedSplitSuggestion(scope,documentId);setBinding(saved);
+  running.current=false;setBusy(false);setSuggestion(null);setAvailable(null);setLimits(null);setError('');setConfirmNew(false);setConfirmApply(false);const saved=readSavedSplitSuggestion(scope,documentId);setBinding(saved);
   async function poll(){
    try{if(!saved)return;const result=await findSplitSuggestion(saved,active,signal);if(!active())return;setSuggestion(result);setNow(Date.now());if(result){saveSplitSuggestion({...saved,suggestionId:result.id});if(result.sourceSha256===sha256)callbacks.current.onJob(result);
     if(allowAutoRestore&&!sha256&&!documentId&&['queued','processing','ready'].includes(result.state)&&Date.parse(result.expiresAt)>Date.now()&&!result.acceptedSplitId){const data=await readSplitSuggestionSource(scope,result,active,signal);if(active())callbacks.current.onRestore(result,data);}
 
    }}catch(cause){if(active())setError(cause instanceof Error?cause.message:'The saved AI request could not be checked.');}
   }
-  void(async()=>{try{const result=await listSplitSuggestions(scope,active,signal);if(active())setAvailable(result.available);}catch(cause){if(active())setError(cause instanceof Error?cause.message:'AI availability could not be checked.');}if(active())await poll();})();
+  void(async()=>{try{const result=await listSplitSuggestions(scope,active,signal);if(active()){setAvailable(result.available);setLimits(result.limits);}}catch(cause){if(active())setError(cause instanceof Error?cause.message:'AI availability could not be checked.');}if(active())await poll();})();
   return()=>{committed.current++;controller.current.abort();if(timer)clearTimeout(timer);running.current=false;};
  },[scope.userId,scope.workspaceId,scope.parserId,documentId,sha256,mimeType,allowAutoRestore]);
  useLayoutEffect(()=>{if(!suggestion)return;const remaining=Date.parse(suggestion.expiresAt)-Date.now();if(remaining<=0){setNow(Date.now());return;}const timer=setTimeout(()=>setNow(Date.now()),Math.min(remaining+50,2147483647));return()=>clearTimeout(timer);},[suggestion?.id,suggestion?.expiresAt]);
@@ -31,7 +33,7 @@ export default function SplitSuggestionPanel(props:Props){
   try{await action(active,signal);}catch(cause){if(active())setError(cause instanceof Error?cause.message:'The AI request could not be completed.');}finally{if(active()){running.current=false;setBusy(false);}}
  }
  async function refresh(active:()=>boolean,signal:AbortSignal){
-  const availability=await listSplitSuggestions(scope,active,signal);if(!active())return;setAvailable(availability.available);if(binding){const result=await findSplitSuggestion(binding,active,signal);if(!active())return;setSuggestion(result);setNow(Date.now());if(result&&result.sourceSha256===sha256)callbacks.current.onJob(result);}
+  const availability=await listSplitSuggestions(scope,active,signal);if(!active())return;setAvailable(availability.available);setLimits(availability.limits);if(binding){const result=await findSplitSuggestion(binding,active,signal);if(!active())return;setSuggestion(result);setNow(Date.now());if(result&&result.sourceSha256===sha256)callbacks.current.onJob(result);}
  }
  async function start(active:()=>boolean,signal:AbortSignal,fresh=false){
   if(!canRequest)return;let saved=binding;
@@ -50,6 +52,7 @@ export default function SplitSuggestionPanel(props:Props){
  const working=busy||disabled;
  return <section className="split-suggestion-panel" aria-label="AI split suggestions" ref={panel} tabIndex={-1}>
   <h3>AI page ranges</h3><p className="small">Requesting suggestions sends this whole PDF or TIFF to the configured AI provider. It uses an AI request, but creates no documents or page-credit charges. Review every boundary before using it.</p>
+  {limits&&<p className="small muted">Field and split suggestions share {limits.perMonth} requests per workspace per calendar month (UTC), with up to {limits.perDay} every 24 hours.</p>}
   <Notice error={error}/>
   {available===false&&<p className="small">AI split suggestions are unavailable. You can still choose ranges manually.</p>}
   {available===null&&!error&&<p className="small" role="status">Checking AI availability…</p>}

@@ -2,6 +2,12 @@
 
 This is a technical fact sheet for backlog L22, not a published privacy notice, service contract or legal approval. It prevents missing operator facts from being silently invented while policies are prepared.
 
+## Confirmed operator decisions — 26 September continuation
+
+The operator confirmed **Rory Hayes**, no current VAT registration and no discretionary refunds. Application wording preserves cancellation/refund rights required by applicable law; an absolute “no refunds under any circumstances” statement is not used. Existing configured support/privacy contact is `roryh1@gmail.com`. The operator has no business postal address to supply yet and will provide a support telephone number later; these disclosures remain unfinished. Inbox monitoring and delivery have not been inferred from the configured address.
+
+The selected monthly offer is free/50 pages, Standard €19/300 and Team €49/1,000, with shared monthly AI-helper allowances 3/5/20 and explicit UTC calendar-month reset. Payment, provider and complete legal-policy activation remain separate from those choices. See [CCPC digital-service obligations](https://www.ccpc.ie/information-for-businesses/selling-goods-and-services/selling-digital-content-or-services/) for mandatory rights; the operator's chosen discretionary policy does not override them.
+
 ## Current public configuration
 
 Read from the canonical site's public `/api/config` on 26 September 2026. The site reports private preview, required invitations, available password recovery and required signup verification. Public-service configuration is **partial**.

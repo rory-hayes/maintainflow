@@ -1,10 +1,11 @@
+import type {AiSuggestionLimits} from '../../../shared/ai-suggestion-allowances';
 import {useEffect,useId,useRef,useState} from 'react';
 import {useQuery,useQueryClient} from '@tanstack/react-query';
 import {Link} from 'react-router-dom';
 import {Button,Field,Notice,Status} from '../../components/ui';
 import {api,post,useAction,workspaceId} from '../../lib/api';
 
-interface Setup {state:'ready'|'awaiting_sample'|'suggesting'|'failed';suggestionId:string|null;sourceDocumentId:string|null;sourceDocumentName:string|null;error:string|null;waitingDocuments:number;available:boolean;}
+interface Setup {state:'ready'|'awaiting_sample'|'suggesting'|'failed';suggestionId:string|null;sourceDocumentId:string|null;sourceDocumentName:string|null;error:string|null;waitingDocuments:number;available:boolean;limits:AiSuggestionLimits;}
 interface SetupResponse {setup:Setup;}
 interface SetupDocuments {documents:{id:string;name:string}[];total:number;}
 const titles={ready:'Your fields are ready',awaiting_sample:'Add your first sample',suggesting:'Setting up your parser',failed:'Sample setup needs your attention'};
@@ -37,7 +38,7 @@ export default function ParserSetup({parserId,canEdit,archived,onEditFields,onAd
     {setup.state==='failed'&&<><p>Your initial fields could not be prepared. Retry with an uploaded sample or choose fields yourself to continue.</p><Notice error={setup.error?.slice(0,500)}/></>}
     {setup.state==='ready'&&<p>Your initial fields are saved. Extraction continues in the background. Review each result before approving or exporting.</p>}
     {setup.sourceDocumentId&&<p className="small">Setup source: <Link className="link" to={`/app/documents/${setup.sourceDocumentId}`}>{setup.sourceDocumentName||'View sample'}</Link></p>}
-    {setup.state!=='ready'&&<p className="small muted">{setup.waitingDocuments} document{setup.waitingDocuments===1?'':'s'} waiting for fields. Field discovery uses no extra page credits; 10 suggestions per workspace every 24 hours.</p>}
+    {setup.state!=='ready'&&<p className="small muted">{setup.waitingDocuments} document{setup.waitingDocuments===1?'':'s'} waiting for fields. Field discovery uses no extra page credits. Field and split suggestions share {setup.limits.perMonth} requests per workspace per calendar month (UTC), with up to {setup.limits.perDay} every 24 hours.</p>}
     {archived&&<p className="small">This parser is archived. <Link className="link" to="/app/parsers">Restore it from Parsers</Link> before continuing sample setup.</p>}
     {!setup.available&&setup.state!=='ready'&&<div className="parser-setup-disclosure"><p>AI sample setup is unavailable. Retry after the AI connection is restored, or choose fields yourself. For readable text, you can switch to text-anchor rules in Settings before saving your fields.</p><div className="actions"><Button type="button" variant="secondary" onClick={()=>void query.refetch()}>Refresh setup</Button><Button type="button" variant="secondary" onClick={onSettings}>Open settings</Button></div></div>}
     {canEdit&&retryable&&<>

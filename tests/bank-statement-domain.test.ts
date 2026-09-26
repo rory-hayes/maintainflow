@@ -68,6 +68,40 @@ test('missing amounts, both-sided amounts and unresolved currencies block approv
   for(const mutation of [(r:RawBankValues)=>{r.accounts[0].transactions[0].debit=null;r.accounts[0].transactions[0].credit=null;},(r:RawBankValues)=>{r.accounts[0].transactions[0].debit='1';r.accounts[0].transactions[0].credit='2';},(r:RawBankValues)=>{r.accounts[0].currency='$';}]){const raw=await fixture('usd-large-values');mutation(raw);const result=createBankStatementResult(raw,{},'en-US',{id:ids()});assert.ok(errors(result).length>0);}
 });
 
+test('explicit absent-money labels normalize to null while raw text and evidence remain unchanged',async()=>{
+  for(const marker of ['Not provided','not supplied','NOT STATED','not available','Not applicable','N/A','  not\n provided  ']){
+    const raw=await fixture('euro-current-account'),a=raw.accounts[0];
+    a.opening_balance=marker;a.closing_balance=marker;a.total_debits=marker;a.total_credits=marker;
+    a.transactions[0].balance=marker;a.transactions[0].credit=marker;a.transactions[1].debit=marker;
+    const source:Record<string,Evidence[]>={'accounts[0].opening_balance':[{page:1,text:marker,source:'matched-text'}],'accounts[0].transactions[0].balance':[{page:1,text:marker,source:'matched-text'}]},before=clone(raw),sourceBefore=clone(source);
+    const result=createBankStatementResult(raw,source,'de-DE',{id:ids()}),account=result.values.accounts[0];
+    for(const field of ['opening_balance','closing_balance','total_debits','total_credits'] as const)assert.equal(account[field],null,`${marker}: ${field}`);
+    assert.equal(account.transactions[0].balance,null);assert.equal(account.transactions[0].credit,null);assert.equal(account.transactions[1].debit,null);
+    assert.equal(account.transactions[0].debit,'10.00');assert.equal(account.transactions[1].credit,'20.00');assert.equal(errors(result).length,0);
+    assert.ok(codes(result.issues).includes('statement_balance_missing'));assert.ok(codes(result.issues).includes('statement_total_missing'));assert.ok(codes(result.issues).includes('running_balances_incomplete'));
+    assert.deepEqual(raw,before);assert.deepEqual(source,sourceBefore);assert.deepEqual(result.context.accounts[account.id].evidence['accounts[0].opening_balance'],sourceBefore['accounts[0].opening_balance']);
+    assert.deepEqual(result.context.transactions[account.transactions[0].id].evidence['accounts[0].transactions[0].balance'],sourceBefore['accounts[0].transactions[0].balance']);
+  }
+});
+
+test('absence-like or malformed amount text containing other content remains a blocking unresolved value',async()=>{
+  for(const value of ['Not provided 100.00','0.00 not available','not supplied yet','N/A 1.00','unknown','—','-','not applicable (-3.00)','1e3','Not provided?']){
+    const raw=await fixture('euro-current-account');raw.accounts[0].opening_balance=value;
+    const result=createBankStatementResult(raw,{},'de-DE',{id:ids()});assert.equal(result.values.accounts[0].opening_balance,value);
+    assert.ok(result.issues.some(i=>i.field==='opening_balance'&&i.severity==='error'),value);assert.ok(checkBankStatement(clone(result.values),clone(result.context)).some(i=>i.field==='opening_balance'&&i.severity==='error'),value);
+  }
+});
+
+test('absence labels in corrections preserve identities and cannot bypass a missing transaction amount',async()=>{
+  const result=await euro(),changed=clone(result.values),account=changed.accounts[0],row=account.transactions[0],contextBefore=clone(result.context);
+  account.opening_balance='Not stated';row.debit='N/A';row.credit='not provided';row.balance='Not available';
+  const corrected=normalizeBankStatementCorrections(changed,result.context,result.values),normalized=corrected.values.accounts[0];
+  assert.equal(normalized.opening_balance,null);assert.equal(normalized.transactions[0].debit,null);assert.equal(normalized.transactions[0].credit,null);assert.equal(normalized.transactions[0].balance,null);
+  assert.ok(corrected.issues.some(i=>i.code==='transaction_amount_missing'&&i.transactionId===row.id&&i.severity==='error'));
+  assert.ok(corrected.issues.some(i=>i.code==='statement_balance_missing'&&i.field==='opening_balance'));
+  assert.equal(normalized.id,account.id);assert.deepEqual(normalized.transactions.map(r=>r.id),account.transactions.map(r=>r.id));assert.deepEqual(result.context,contextBefore);
+});
+
 test('mixed currencies are kept separate and never included in the account reconciliation',async()=>{
   const result=await euro(),changed=clone(result.values);changed.accounts[0].transactions[1].currency='USD';changed.accounts[0].transactions[1].balance='1.00';const reviewed=normalizeBankStatementCorrections(changed,result.context,result.values);assert.ok(codes(reviewed.issues).includes('currency_conflict'));assert.equal(codes(reviewed.issues).includes('statement_total_mismatch'),false);assert.equal(codes(reviewed.issues).includes('closing_running_balance_mismatch'),false);assert.equal(bankTransactionFingerprint(reviewed.values.accounts[0],reviewed.values.accounts[0].transactions[1]),null);
 });

@@ -9,6 +9,8 @@ const accountMoney=['opening_balance','closing_balance','total_debits','total_cr
 const conventions=['credit_increases','debit_increases','unknown'];
 const uuidPattern=/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i;
 const canonicalMoney=/^-?(?:0|[1-9]\d{0,69})(?:\.\d{1,8})?$/;
+// Explicit whole-value absence labels are missing amounts, never zero. Other invalid text stays reviewable.
+const absentAmount=/^(?:not (?:provided|supplied|stated|available|applicable)|n\/a)$/i;
 const currencies=new Set(Intl.supportedValuesOf('currency'));
 const limits={accounts:100,transactions:20_000,text:4_000};
 export class BankStatementValidationError extends Error {readonly code='bank_statement_validation';constructor(message:string){super(message);this.name='BankStatementValidationError';}}
@@ -35,7 +37,7 @@ type ParsedAmount={value:BankScalar;error?:string;warning?:string};
 
 /** Only locale-valid grouping is accepted. Canonical correction values take precedence over locale grouping. */
 function parseAmount(raw:BankScalar,locale:string,currency:BankScalar,role:AmountRole,convention:BankBalanceConvention,correction:boolean):ParsedAmount{
-  if(!text(raw))return {value:null};let value=raw!.trim(),negative=false,explicitSign=false;
+  if(!text(raw)||absentAmount.test(raw!.trim().replace(/\s+/g,' ')))return {value:null};let value=raw!.trim(),negative=false,explicitSign=false;
   if(correction&&canonicalMoney.test(value)){const parsed=canonical(value)!;return {value:parsed,...(role!=='balance'&&parsed.startsWith('-')?{warning:'signed_column_amount'}:{})};}
   if(value.length>160)return {value:raw,error:'amount_invalid'};
   const directionMatch=value.match(/\s*(DR|CR)\.?$/i),direction=directionMatch?.[1].toUpperCase();if(directionMatch)value=value.slice(0,directionMatch.index).trim();
