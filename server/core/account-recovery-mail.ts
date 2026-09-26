@@ -7,14 +7,13 @@ import {processOneAccountRecoveryRequest} from './account-recovery.js';
 import {cleanupAccountRegistrations,processOneAccountRegistration} from './account-registration.js';
 import {cleanupEmailVerification,isEmailVerificationMailValid,processOneEmailVerificationRequest} from './email-verification.js';
 import {decryptSecret} from '../integrations/secrets.js';
-import {AccountEmailError,accountEmailStatus,sendAccountEmail,type AccountEmailErrorCode} from '../integrations/account-email.js';
+import {AccountEmailError,accountEmailStatus,accountEmailSubjects,sendAccountEmail,type AccountEmailErrorCode} from '../integrations/account-email.js';
 import {requireWorkBudget,type WorkBudget} from './work-budget.js';
 
-const payloadSchema=z.object({to:z.string().email().max(254),subject:z.enum(['Reset your Folio password','Your Folio password was changed','Verify your Folio email']),text:z.string().min(1).refine(value=>Buffer.byteLength(value)<=4096)}).strict();
+const payloadSchema=z.object({to:z.string().email().max(254),subject:z.enum([...accountEmailSubjects.password_reset,...accountEmailSubjects.password_changed,...accountEmailSubjects.email_verification]),text:z.string().min(1).refine(value=>Buffer.byteLength(value)<=4096)}).strict();
 const providerCodes=new Set<AccountEmailErrorCode>(['unavailable','invalid_message','temporary_failure','permanent_failure','timeout','cancelled','invalid_response']);
 type MailRow={id:string;user_id:string;token_id:string|null;verification_token_id:string|null;kind:'password_reset'|'password_changed'|'email_verification';payload_ciphertext:string|null;state:string;attempts:number;expires_at:Date;lease_owner:string|null;lease_until:Date|null;available_at:Date};
 type Claim={row:MailRow;lease:string;remainingMs:number};
-const subjects={password_reset:'Reset your Folio password',password_changed:'Your Folio password was changed',email_verification:'Verify your Folio email'} as const;
 const requestQueues=[processOneAccountRegistration,processOneEmailVerificationRequest,processOneAccountRecoveryRequest];
 let nextQueue=0;
 
@@ -149,7 +148,7 @@ export async function processOneAccountEmail(budget:WorkBudget={}):Promise<boole
   try{payload=JSON.parse(decryptSecret(claimed.row.payload_ciphertext!));}catch{throw new AccountEmailError('invalid_message',false);}
   const parsed=payloadSchema.safeParse(payload);
   if(!parsed.success)throw new AccountEmailError('invalid_message',false);
-  if(parsed.data.subject!==subjects[claimed.row.kind])throw new AccountEmailError('invalid_message',false);
+  if(!accountEmailSubjects[claimed.row.kind].some(subject=>subject===parsed.data.subject))throw new AccountEmailError('invalid_message',false);
   timer=setTimeout(()=>controller.abort(),remaining);
   await Promise.race([sendAccountEmail({...parsed.data,idempotencyKey:`folio-account-email/${claimed.row.id}`},{signal:controller.signal,deadlineAt:Date.now()+remaining}),aborted]);
  }catch(failure){error=failure;}

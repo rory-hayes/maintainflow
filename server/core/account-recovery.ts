@@ -39,7 +39,7 @@ async function grantAddress(c:PoolClient,email:string){
 /** The user row must already be locked. No provider call takes place here. */
 export async function enqueuePasswordChanged(c:PoolClient,user:{id:string;email:string}){
  const id=randomUUID();
- const payload=encryptSecret(JSON.stringify({to:user.email,subject:'Your Folio password was changed',text:'Your Folio password was changed. Browser sessions were signed out, except the current session when you changed it in Settings. API keys are separate credentials and remain separately revocable in Settings. If you did not make this change, use Forgot password on the Folio sign-in page.'}));
+ const payload=encryptSecret(JSON.stringify({to:user.email,subject:'Your MaintainFlow password was changed',text:'Your MaintainFlow password was changed. Browser sessions were signed out, except the current session when you changed it in Settings. API keys are separate credentials and remain separately revocable in Settings. If you did not make this change, use Forgot password on the MaintainFlow sign-in page.'}));
  await c.query(`INSERT INTO account_email_outbox(id,user_id,kind,payload_ciphertext,expires_at) VALUES($1,$2,'password_changed',$3,clock_timestamp()+interval '24 hours')`,[id,user.id,payload]);
 }
 
@@ -84,7 +84,7 @@ export async function processOneAccountRecoveryRequest(){
   await c.query(`INSERT INTO account_recovery_tokens(id,user_id,token_hash,credential_digest,expires_at)
    VALUES($1,$2,$3,$4,$5)`,[tokenId,user.id,hashToken(token),hashToken(user.password_hash),request.expires_at]);
   const link=new URL('/reset-password',origin);link.hash=`token=${token}`;
-  const encrypted=encryptSecret(JSON.stringify({to:user.email,subject:'Reset your Folio password',text:`A password reset was requested for your Folio account. Open this link within 30 minutes of your request to choose a new password:\n\n${link.href}\n\nIf you did not request this, you can ignore this email. Your password has not changed.`}));
+  const encrypted=encryptSecret(JSON.stringify({to:user.email,subject:'Reset your MaintainFlow password',text:`A password reset was requested for your MaintainFlow account. Open this link within 30 minutes of your request to choose a new password:\n\n${link.href}\n\nIf you did not request this, you can ignore this email. Your password has not changed.`}));
   await c.query(`INSERT INTO account_email_outbox(id,user_id,token_id,kind,payload_ciphertext,expires_at)
    VALUES($1,$2,$3,'password_reset',$4,$5)`,[outboxId,user.id,tokenId,encrypted,request.expires_at]);
   await c.query("INSERT INTO account_security_events(user_id,action) VALUES($1,'password_reset_requested')",[user.id]);

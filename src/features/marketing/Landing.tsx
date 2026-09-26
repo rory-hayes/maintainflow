@@ -118,7 +118,7 @@ export default function Landing() {
         <IntegrationsSection />
         <Pricing />
         <FAQSection />
-        <section className="marketing-final-cta marketing-container" aria-label="Try Folio"><h2>Let your documents do less waiting.</h2><Link className="button primary marketing-cta" to="/sign-up?sample=invoice">Try a sample</Link></section>
+        <section className="marketing-final-cta marketing-container" aria-label="Try MaintainFlow"><h2>Let your documents do less waiting.</h2><Link className="button primary marketing-cta" to="/sign-up?sample=invoice">Try a sample</Link></section>
       </main>
       <MarketingFooter />
     </div>

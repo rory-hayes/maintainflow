@@ -7,11 +7,11 @@ import {config} from '../server/core/config.js';
 import {hashPassword} from '../server/core/auth.js';
 import {requestVerifiedRegistration} from '../server/core/account-registration.js';
 import {requestEmailVerification,enqueueEmailVerification} from '../server/core/email-verification.js';
-import {requestPasswordReset,processOneAccountRecoveryRequest} from '../server/core/account-recovery.js';
+import {enqueuePasswordChanged,requestPasswordReset,processOneAccountRecoveryRequest} from '../server/core/account-recovery.js';
 import {processOneAccountEmail} from '../server/core/account-recovery-mail.js';
 import {runAccountEmailWorker} from '../server/core/account-email-worker.js';
-import {setAccountEmailSenderForTests,type AccountEmailMessage} from '../server/integrations/account-email.js';
-import {encryptSecret,privateIdentifier} from '../server/integrations/secrets.js';
+import {AccountEmailError,setAccountEmailSenderForTests,type AccountEmailMessage} from '../server/integrations/account-email.js';
+import {decryptSecret,encryptSecret,privateIdentifier} from '../server/integrations/secrets.js';
 
 const addresses=new Set<string>(),sent:AccountEmailMessage[]=[];
 const queues=[['account_registration_requests','folio:account-registration:address:v1'],['email_verification_requests','folio:email-verification:address:v1'],['account_recovery_requests','folio:account-recovery:address:v1']] as const;
@@ -68,7 +68,7 @@ test('a retained failing registration cannot block ready reset mail or peers, ba
   await adminPool.query(`CREATE FUNCTION ${name}() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN IF EXISTS(SELECT 1 FROM users WHERE id=NEW.user_id AND email='${pendingEmail}') THEN PERFORM nextval('${sequence}'); RAISE EXCEPTION 'Owned dispatch database failure'; END IF; RETURN NEW; END$$`);
   await adminPool.query(`CREATE TRIGGER ${name} BEFORE INSERT ON account_security_events FOR EACH ROW EXECUTE FUNCTION ${name}()`);
   assert.equal(await processOneAccountEmail(),true);assert.equal(await attempts(),1);await retained();
-  assert.equal(sent.length,1);assert.equal(sent[0].to,recovery.email);assert.equal(sent[0].subject,'Reset your Folio password');
+  assert.equal(sent.length,1);assert.equal(sent[0].to,recovery.email);assert.equal(sent[0].subject,'Reset your MaintainFlow password');
   assert.deepEqual((await adminPool.query('SELECT state,attempts,payload_ciphertext FROM account_email_outbox WHERE id=$1',[ready.id])).rows[0],{state:'accepted',attempts:1,payload_ciphertext:null});
   await assert.rejects(processOneAccountEmail(),error=>error instanceof Error&&error.message==='Account email request processing failed.'&&error.cause===undefined);
   assert.equal(await attempts(),2);await retained();assert.equal(sent.length,1);
@@ -89,7 +89,7 @@ test('a retained failing registration cannot block ready reset mail or peers, ba
   await adminPool.query(`DROP SEQUENCE IF EXISTS ${sequence}`);
  }
  assert.equal(await processOneAccountEmail(),true);assert.deepEqual(await counts(),[0,0,0]);
- assert.equal(sent.length,2);assert.equal(sent[1].to,pendingEmail);assert.equal(sent[1].subject,'Verify your Folio email');
+ assert.equal(sent.length,2);assert.equal(sent[1].to,pendingEmail);assert.equal(sent[1].subject,'Verify your MaintainFlow email');
  assert.deepEqual((await adminPool.query('SELECT email_verification_required,email_verified_at FROM users WHERE email=$1',[pendingEmail])).rows[0],{email_verification_required:true,email_verified_at:null});
  assert.equal(await processOneAccountEmail(),false);
 });
@@ -106,8 +106,8 @@ test('one durable mail unit admits at most one request and three busy queues eac
  const after=await counts();assert.deepEqual(initial.map((n,i)=>n-after[i]),[1,1,1]);
  for(let unit=0;unit<2;unit++)assert.equal(await processOneAccountEmail(),true);
  assert.deepEqual(await counts(),[0,0,0]);assert.equal(sent.length,5);assert.equal(await processOneAccountEmail(),false);
- assert.equal(sent.filter(message=>message.subject==='Reset your Folio password').length,1);
- assert.equal(sent.filter(message=>message.subject==='Verify your Folio email').length,4);
+ assert.equal(sent.filter(message=>message.subject==='Reset your MaintainFlow password').length,1);
+ assert.equal(sent.filter(message=>message.subject==='Verify your MaintainFlow email').length,4);
  const rows=(await adminPool.query('SELECT email_verification_required,email_verified_at FROM users WHERE email=ANY($1::text[]) AND name=$2',[[...addresses],'Owned pending fixture'])).rows;
  assert.equal(rows.length,3);for(const row of rows){assert.equal(row.email_verification_required,true);assert.equal(row.email_verified_at,null);}
 });
@@ -123,8 +123,33 @@ test('disabled sender still cleans expired encrypted requests in every queue wit
 test('outbox kind and subject must match exactly before transport, with owned token revoked on terminal failure',async()=>{
  const user=await fixture();
  await transaction(adminPool,async c=>{await c.query('SELECT id FROM users WHERE id=$1 FOR UPDATE',[user.id]);await enqueueEmailVerification(c,user,new Date(Date.now()+60_000));});
- await adminPool.query("UPDATE account_email_outbox SET payload_ciphertext=$2 WHERE user_id=$1 AND kind='email_verification'",[user.id,encryptSecret(JSON.stringify({to:user.email,subject:'Your Folio password was changed',text:'Owned mismatched subject fixture'}))]);
+ await adminPool.query("UPDATE account_email_outbox SET payload_ciphertext=$2 WHERE user_id=$1 AND kind='email_verification'",[user.id,encryptSecret(JSON.stringify({to:user.email,subject:'Your MaintainFlow password was changed',text:'Owned mismatched subject fixture'}))]);
  assert.equal(await processOneAccountEmail(),true);assert.equal(sent.length,0);
  const row=(await adminPool.query('SELECT state,failure_code,payload_ciphertext,verification_token_id FROM account_email_outbox WHERE user_id=$1',[user.id])).rows[0];assert.deepEqual(row,{state:'failed',failure_code:'invalid_message',payload_ciphertext:null,verification_token_id:null});
  assert.equal((await adminPool.query('SELECT count(*)::int n FROM email_verification_tokens WHERE user_id=$1',[user.id])).rows[0].n,0);
 });
+
+for(const kind of ['password_reset','password_changed','email_verification'] as const){
+ test(`legacy encrypted ${kind} mail is accepted without changing its retry payload`,async()=>{
+  const user=await fixture(),calls:AccountEmailMessage[]=[];
+  if(kind==='password_reset'){await requestPasswordReset(user.email);assert.equal(await processOneAccountRecoveryRequest(),true);}
+  else await transaction(adminPool,async c=>{
+   await c.query('SELECT id FROM users WHERE id=$1 FOR UPDATE',[user.id]);
+   if(kind==='password_changed')await enqueuePasswordChanged(c,user);
+   else await enqueueEmailVerification(c,user,new Date(Date.now()+60_000));
+  });
+  const row=(await adminPool.query('SELECT * FROM account_email_outbox WHERE user_id=$1 AND kind=$2',[user.id,kind])).rows[0];
+  const payload=JSON.parse(decryptSecret(row.payload_ciphertext));
+  assert.match(payload.subject,/MaintainFlow/);assert.match(payload.text,/MaintainFlow/);
+  payload.subject=payload.subject.replaceAll('MaintainFlow','Folio');payload.text=payload.text.replaceAll('MaintainFlow','Folio');
+  const ciphertext=encryptSecret(JSON.stringify(payload));
+  await adminPool.query('UPDATE account_email_outbox SET payload_ciphertext=$2 WHERE id=$1',[row.id,ciphertext]);
+  setAccountEmailSenderForTests({async send(message){calls.push(message);if(calls.length===1)throw new AccountEmailError('temporary_failure',true);return {providerId:randomUUID()};}});
+  assert.equal(await processOneAccountEmail(),true);
+  assert.deepEqual((await adminPool.query('SELECT state,payload_ciphertext FROM account_email_outbox WHERE id=$1',[row.id])).rows[0],{state:'pending',payload_ciphertext:ciphertext});
+  await adminPool.query('UPDATE account_email_outbox SET available_at=clock_timestamp() WHERE id=$1',[row.id]);
+  assert.equal(await processOneAccountEmail(),true);
+  const expected={...payload,idempotencyKey:`folio-account-email/${row.id}`};assert.deepEqual(calls,[expected,expected]);
+  assert.deepEqual((await adminPool.query('SELECT state,attempts,payload_ciphertext FROM account_email_outbox WHERE id=$1',[row.id])).rows[0],{state:'accepted',attempts:2,payload_ciphertext:null});
+ });
+}

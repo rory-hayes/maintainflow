@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-export const restorePendingMessage='This restored instance is inactive. Verify and activate the backup before starting Folio.';
+export const restorePendingMessage='This restored instance is inactive. Verify and activate the backup before starting MaintainFlow.';
 /** A pending restore must not run API requests, workers or outbound deliveries. */
 export async function assertStorageRestoreReady(storageDir:string,driver:string){
  if(driver!=='filesystem')return;

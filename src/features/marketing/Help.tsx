@@ -105,7 +105,7 @@ export default function Help() {
           <div><dt>AI extraction</dt><dd>{ai.message} AI mode uses your field definitions and written instructions. Configuration does not establish accuracy on your documents; review each result.</dd></div>
           <div><dt>Inbound email</dt><dd>An intake address appears only after the email provider and receiving domain are configured. Uploading an EML file remains available separately.</dd></div>
           <div><dt>Webhooks</dt><dd>Connect a public HTTPS destination, store the signing secret securely, and check delivery history. Failed deliveries retry with the same delivery identity. A manual replay is available to workspace administrators.</dd></div>
-          <div><dt>Automation tools</dt><dd>Zapier, Make, n8n and Power Automate can receive data through their webhook or HTTP steps. These are API/webhook recipes, not published Folio marketplace connectors.</dd></div>
+          <div><dt>Automation tools</dt><dd>Zapier, Make, n8n and Power Automate can receive data through their webhook or HTTP steps. These are API/webhook recipes, not published MaintainFlow marketplace connectors.</dd></div>
           <div><dt>Google Sheets</dt><dd>Requires a configured Google provider and access to the destination spreadsheet. The connection panel reports the actual configuration state.</dd></div>
           <div><dt>Billing</dt><dd>The hosted preview uses mock billing. Plan changes are simulated and do not activate live charges.</dd></div>
         </dl>
@@ -186,7 +186,7 @@ export function ApiDocs() {
         <h2>Authentication</h2>
         <p>Create a revocable key in Workspace settings → API keys. Keep it in your server or automation secret store, and send it in the Authorization header as a bearer token. The key is scoped to one workspace and remains limited by its owner's role.</p>
         <p>Choose an expiry of 7, 30 or 90 days, one year, or no expiry. New keys default to 30 days in Settings. Existing keys retain their original expiry. Expired keys stop authenticating automatically; create a replacement and update your connection before that time. A key’s expiry cannot be extended after creation.</p>
-        <p>Use the origin of your own running Folio instance as <code>FOLIO_URL</code>. The examples below use environment variables for your Folio API key and resource IDs. They do not contain a real credential.</p>
+        <p>Use the origin of your own running MaintainFlow instance as <code>FOLIO_URL</code>. The examples below use environment variables for your MaintainFlow API key and resource IDs. They do not contain a real credential.</p>
       </section>
       <section>
         <h2>Upload a document</h2>
@@ -249,7 +249,7 @@ export function ApiDocs() {
         <p>Verify the signature as an HMAC-SHA256 of the timestamp, a period, and the unchanged request body, using your connection's signing secret. The signature header has the form <code>v1=hex-digest</code>. Reject old timestamps and process each delivery ID only once. Return a 2xx response after accepting the event.</p>
         <p>Automatic failures retry up to five attempts. Manual replay retains the delivery identity so a receiver can continue to deduplicate the event. Redirects and private-network destinations are rejected.</p>
         <h3>Automation recipes</h3>
-        <p>For Zapier, use a webhook catch step; for Make, use a custom webhook; for n8n, use a Webhook trigger; for Power Automate, use an HTTP request trigger. Map the event's <code>values</code> object to the next action. If the tool cannot verify Folio's signature, put a verification endpoint you control in front of it.</p>
+        <p>For Zapier, use a webhook catch step; for Make, use a custom webhook; for n8n, use a Webhook trigger; for Power Automate, use an HTTP request trigger. Map the event's <code>values</code> object to the next action. If the tool cannot verify MaintainFlow's signature, put a verification endpoint you control in front of it.</p>
         <p>External delivery and provider-specific configuration still need to be tested against your chosen account. These instructions describe generic webhook bridges.</p>
       </section>
       <section>

@@ -68,7 +68,7 @@ export async function enqueueEmailVerification(c:PoolClient,user:VerificationUse
  if(!Number.isFinite(expiresAt.getTime())||expiresAt<=clock.at)return;
  const token=newToken(),tokenId=randomUUID(),outboxId=randomUUID();
  const link=new URL('/verify-email/confirm',origin);link.hash=`token=${token}`;
- const payload=encryptSecret(JSON.stringify({to:user.email,subject:'Verify your Folio email',text:`Confirm your email address for Folio by opening this link and entering your current Folio password within 24 hours of your request:\n\n${link.href}\n\nIf you did not register or request verification, ignore this email. Opening the link alone will not verify the account.`}));
+ const payload=encryptSecret(JSON.stringify({to:user.email,subject:'Verify your MaintainFlow email',text:`Confirm your email address for MaintainFlow by opening this link and entering your current MaintainFlow password within 24 hours of your request:\n\n${link.href}\n\nIf you did not register or request verification, ignore this email. Opening the link alone will not verify the account.`}));
  await c.query(`INSERT INTO email_verification_tokens(id,user_id,token_hash,credential_digest,email_digest,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)`,[tokenId,user.id,hashToken(token),hashToken(user.password_hash),emailDigest(user.email),clock.at,expiresAt]);
  await c.query(`INSERT INTO account_email_outbox(id,user_id,verification_token_id,kind,payload_ciphertext,expires_at) VALUES($1,$2,$3,'email_verification',$4,$5)`,[outboxId,user.id,tokenId,payload,expiresAt]);
  await c.query("INSERT INTO account_security_events(user_id,action) VALUES($1,'email_verification_requested')",[user.id]);

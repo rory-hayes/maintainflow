@@ -38,7 +38,7 @@
     {
       "platform": "Power Automate",
       "trigger": "When an HTTP request is received / called by a verified Entra-authenticated relay",
-      "verification": "Folio HMAC verification happens in the owned relay; relay supplies the OAuth token required by the flow.",
+      "verification": "MaintainFlow HMAC verification happens in the owned relay; relay supplies the OAuth token required by the flow.",
       "mappings": [
         {"field": "Approval ID", "sourcePath": "id", "expression": "triggerBody()?['id']", "expected": "0b1456d2-5aa6-45e7-a574-7796e2b995c5"},
         {"field": "Invoice", "sourcePath": "values.invoice_number", "expression": "triggerBody()?['values']?['invoice_number']", "expected": "000127"},
