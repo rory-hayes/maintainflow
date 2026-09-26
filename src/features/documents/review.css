@@ -9,3 +9,5 @@
 .tiff-preview-label{margin:0 0 12px}.preview-error{margin-bottom:16px}.preview-error .notice{margin-top:0}.preview-paper>[role=status]{padding:20px}
 
 .review-native-pdf-sheet{position:relative}.review-region-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.recorded-anchor{fill:#16845120;stroke:#168451;stroke-width:2}.recorded-value{fill:#6264c420;stroke:#565ac4;stroke-width:2;stroke-dasharray:6 3}.recorded-region-caption{font-size:12px;padding:12px;overflow-wrap:anywhere;line-height:1.6}.run-template-snapshot{max-width:100%;overflow-wrap:anywhere}.run-template-snapshot pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}.history-list>div>div{min-width:0}
+
+.review-table-field .review-source-format{display:block;max-width:26ch;white-space:normal;overflow-wrap:anywhere;font-weight:400;line-height:1.5;margin-top:4px}

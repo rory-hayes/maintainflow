@@ -1,0 +1,162 @@
+{
+  "verifiedAt": "2026-09-26T12:33:21.622Z",
+  "scope": "Local synthetic accounts, real application API/database/worker, controlled AI and webhook transports; no hosted activation or real receiver calls.",
+  "source": {
+    "count": 458,
+    "fingerprint": "431ca26d89dadad42e3a44910fcfa0a6f73aae8602cd1a8ae72e974c4ac59920",
+    "changedFileHashes": {
+      "deploy/supabase-worker.sql": "f0449bb9bccb69eedc690cce6a3434b96a8c4572201668dda8e120999bf2fe47",
+      "examples/automations/verify.ts": "416c13ed4c05ef4806955d250d042d227ba466d5aae5a89a3553f7705962a0e4",
+      "fixtures/automations/document-export-failed.json": "f3ce1c616f88208c1be7735b5f952c2d4428c7a4601a9ea40be885c23304d3db",
+      "fixtures/automations/document-extraction-failed.json": "e0299aec0368d650b20c044b947a4960ba43b8e4f4ef99735dbd1b2a57c0f0c4",
+      "fixtures/automations/document-failed.schema.json": "d177701ecf4a64ff240e2cd31265b7c598dc991b04116e6b45165e740067b200",
+      "server/core/worker.ts": "e9e1e94d541ab460b234653a0821302c0be16242607dce2a0cd44a5afbc2c490",
+      "server/hosted-worker.ts": "7957d1f0ff4c4951b6def86313459be85d046b83a8761e1967003b06849c18c1",
+      "server/integrations/webhooks.ts": "c5c45c3e153d4361299a74960232fbda8b7b9a65d72bd45fd0816edbc20972b5",
+      "server/integrations/worker.ts": "4964447ff7e9a9bb0e698a2be4d07aa4c36556ed926c0fd30b5506aa5ba84147",
+      "shared/webhook-events.ts": "301afa12056558bc58065edf9cc3cff49e11e98de402b7358a16ab9debcb144f",
+      "src/features/integrations/Integrations.tsx": "40c25f01e0e054eafbdd4f8a2137ecbbe8c9b17a5208bb0eb9293dee424f237a",
+      "src/features/integrations/integrations.css": "9db4de42fa0cbfa33105215f37d2c1d5245155cecbd61762e9b9e8fe3abccaba",
+      "src/features/integrations/types.ts": "46fa222733fcfe4bf994b8eab809c7bfa46d16aa016968b2e2401fe6311b4253",
+      "src/features/marketing/Help.tsx": "f84a8fe8070227e2d79403b32bc9c33e76eb7971897db0ef61d3e5607d5421ec",
+      "tests/automations.test.ts": "91fd8d4ea3d3ca671bf5c8e9d6b8ea40df4cff75f2982fa9f869ebf7f33210fe",
+      "tests/hosted-watchdog.test.ts": "64e4e85dacebdd6f3e7f0b1dd822ba76928f287aa6edc8e17dc90aff399f5e9c",
+      "tests/webhook-failure-events.test.ts": "e0687ce3c9e892b879ba799ca2fa02f473af0e11c12850aeb432df7cdc4f53de"
+    }
+  },
+  "regression": {
+    "tests": 80,
+    "passed": 80,
+    "failed": 0,
+    "skipped": 0,
+    "newWebhookCases": 9,
+    "watchdogCases": 13,
+    "receiverExampleCases": 3,
+    "testFiles": [
+      "tests/webhook-failure-events.test.ts",
+      "tests/integrations.test.ts",
+      "tests/automations.test.ts",
+      "tests/export-lifecycle.test.ts",
+      "tests/hosted-watchdog.test.ts",
+      "tests/hosted-worker.test.ts",
+      "tests/ai-worker.test.ts",
+      "tests/retention-notifications.test.ts"
+    ]
+  },
+  "browser": {
+    "result": "passed",
+    "origin": "http://127.0.0.1:54479",
+    "serverStoppedAfterTest": true,
+    "tool": "Existing Playwright Chromium; Browser plugin not available",
+    "viewports": [
+      [
+        1440,
+        1000
+      ],
+      [
+        390,
+        844
+      ]
+    ],
+    "checks": [
+      "Real sign-in and meaningful integrations page",
+      "Default approval and empty-selection guard",
+      "Both failure subscriptions saved via real API",
+      "Actual terminal extraction failure queued and signature-verified by controlled receiver",
+      "History labels and replay preserve exact failure payload and delivery identity",
+      "Failure history links to the actual source document",
+      "Mobile form scroll and actual default approval-only creation",
+      "Mobile selection reset and readable delivery history",
+      "Viewer can inspect history but cannot create or replay",
+      "No runtime overlay, unexpected console errors or external calls"
+    ],
+    "screenshotEvidence": [
+      {
+        "name": "desktop-event-selection",
+        "geometry": {
+          "width": 1440,
+          "scroll": 1440,
+          "body": 1440
+        },
+        "sha256": "80587362a130205e802d1983dd26053e326b7714ff03850b5e2535537493a877"
+      },
+      {
+        "name": "desktop-failure-delivery",
+        "geometry": {
+          "width": 1440,
+          "scroll": 1440,
+          "body": 1440
+        },
+        "sha256": "5ef2820456a1e1d313ce7d88486ba0b023fd3099dedb32f07ee752fafd28d7b5"
+      },
+      {
+        "name": "mobile-event-selection",
+        "geometry": {
+          "width": 390,
+          "scroll": 390,
+          "body": 390
+        },
+        "sha256": "ca6f52bf32853e30e665131cff32251f5cbde51a20add5eb00102a04dd7bdeb8"
+      },
+      {
+        "name": "mobile-event-selection-submit",
+        "geometry": {
+          "width": 390,
+          "scroll": 390,
+          "body": 390
+        },
+        "sha256": "aa20b316c532303a7736f0f473bf9809b540cb5e038ab469d640223c41d59969"
+      },
+      {
+        "name": "mobile-failure-delivery",
+        "geometry": {
+          "width": 390,
+          "scroll": 390,
+          "body": 390
+        },
+        "sha256": "26f8810b6c091110aabf2081b47aed983f38369e0f4984e2065c870a4d6e0034"
+      }
+    ],
+    "pageErrors": 0,
+    "unexpectedConsoleErrors": 0,
+    "expectedConsoleResponses": [
+      "Initial signed-out session probe returned HTTP401."
+    ],
+    "realProviderCalls": 0,
+    "blockedExternalCalls": 0,
+    "driverSha256": "ddd5f8f1f230482dd2ac26c2d0248d438e35f6e08880b090408d9c859bbffdc7"
+  },
+  "build": "TypeScript, Vite, hosted package and isolated function runtime/decoders passed.",
+  "managedRestore": {
+    "checksPassed": 12,
+    "checks": [
+      "OwnedSocketOnlyPostgres17CurrentMigrationsTwoTenantsAndPlatformObserver",
+      "DedicatedModeStillRejectsUnrelatedClients",
+      "ManagedModeDoesNotAcceptARestrictedRuntimeOrReadOnlyIdentity",
+      "ManagedSnapshotCoversBothTenantsJournalSequenceAndAllCurrentReferenceQueries",
+      "WidenedWatchdogPermissionRefused",
+      "OutstandingWriterLeaseRefused",
+      "ActualCliEncryptedManagedCaptureUsesReadOnlyControlledBucketTransport",
+      "AuthenticatedInventoryBindsRequiredOptionalAbsentAndOmittedObjects",
+      "ExactBinaryDataAndOwnersAclRlsConstraintsWatchdogRestoredInTransaction",
+      "ActivationRechecksFullDatabaseAndObjectsWithoutStartingServices",
+      "RestoredTenantIsolationJournalDenialSequenceAndNoSchedulerActivation",
+      "ArbitrarySourceAclDriftCannotRestoreAndRollbackLeavesDestinationInactive"
+    ],
+    "hostedCalls": 0,
+    "functionBodySha256": "ea997bb8bd3048ae4ff32e32f8ac709d1ee6ab219a18631070053fc289a24490"
+  },
+  "cleanup": {
+    "ownedClustersStopped": true,
+    "ownedCopiesRemoved": true,
+    "normalDatabaseTouched": false,
+    "realCredentialsRead": false
+  },
+  "limitations": [
+    "No real destination or hosted scheduling acceptance.",
+    "Full exact-commit CI is recorded by the release pull request.",
+    "Previous two browser attempts failed only on exact-label test selectors; they were corrected and this final source-bound run passed.",
+    "Controlled restore is not a current hosted production backup.",
+    "Bank migrations and deployment remain pending their separate approval."
+  ]
+}

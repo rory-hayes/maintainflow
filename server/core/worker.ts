@@ -11,7 +11,8 @@ import {config} from './config.js';
 import {assertStorageRestoreReady} from './restore-state.js';
 import {prepareVisualDocument,visualRenderingMetadata} from './visual-source.js';
 import {lockParserForDocument,runnableAiWorkSql} from './parser-setup.js';
-import {timestampPolicy,type NormalizationContext} from './timestamps.js';
+import type {NormalizationContext} from './timestamps.js';
+import {resolveJobNormalizationPolicy,assertJobSourceFormats} from '../../shared/source-formats.js';
 import {extractRules} from './extraction.js';
 import {selectTemplateExtraction} from './template-selection.js';
 import {needsPdfGeometry,selectCurrentTemplateExtraction} from './template-region-selection.js';
@@ -60,7 +61,9 @@ async function recoverExpiredCoreJobs(onlyJobId?:string){
  for(const candidate of candidates)await transaction(adminPool,async c=>{
   await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[candidate.workspace_id]);
   const {rows:[job]}=await c.query("update jobs set state=case when attempts>=max_attempts then 'failed' else 'queued' end,lease_owner=null,lease_until=null,error='Worker lease expired; retry scheduled',updated_at=now() where id=$1 and state='processing' and lease_until<now() returning *",[candidate.id]);
-  if(job?.state==='failed')await c.query("update documents d set status='failed',error=$2,updated_at=now() where d.id=$1 and d.status='processing' and not exists(select 1 from jobs active where active.document_id=d.id and active.state in('queued','processing'))",[job.document_id,job.error]);
+  // Reviewing the previous successful run can change the document's display
+  // status during extraction. The fenced terminal job still owns this failure.
+  if(job?.state==='failed')await c.query("update documents d set status='failed',error=$2,updated_at=now() where d.id=$1 and not exists(select 1 from jobs active where active.document_id=d.id and active.state in('queued','processing'))",[job.document_id,job.error]);
  });
 }
 
@@ -99,7 +102,7 @@ const attempt=await extractWithDeadline(async signal=>{
  const bank=job.config.useCase==='bank_statement';
  if(job.config.bankWorkflow!=null&&job.config.bankWorkflow!==bankStatementWorkflow||bank&&job.config.bankWorkflow!==bankStatementWorkflow||job.config.bankWorkflow===bankStatementWorkflow&&!bank)throw Object.assign(new Error('This job uses an unsupported bank statement workflow. Reprocess with current saved settings.'),{permanent:true});
  if(bank&&(job.config.mode!=='ai'||!isDeepStrictEqual(data.schema,bankStatementSchema)))throw Object.assign(new Error('This bank statement job has incompatible extraction settings. Reprocess with the bank statement workflow.'),{permanent:true});
- if(job.config.normalizationPolicy!=null&&job.config.normalizationPolicy!==timestampPolicy)throw Object.assign(new Error('This job uses an unsupported normalization version. Reprocess with current saved settings.'),{permanent:true});
+ const valuePolicy=resolveJobNormalizationPolicy(job.config.normalizationPolicy);assertJobSourceFormats(data.schema,valuePolicy);
  if(policy!=null&&policy!==templatePolicy&&policy!==regionTemplatePolicy)throw Object.assign(new Error('This job uses an unsupported template version. Reprocess the document with current saved settings.'),{permanent:true});
  let sourceBytes:Buffer|undefined,geometry:Awaited<ReturnType<typeof readPdfGeometry>>|undefined;
  if(policy===regionTemplatePolicy&&needsPdfGeometry(job.config.templates??[])&&data.doc.mime_type==='application/pdf'){
@@ -108,8 +111,8 @@ const attempt=await extractWithDeadline(async signal=>{
   if(geometry.sourceSha256!==data.doc.sha256||geometry.pageCount!==data.doc.page_count||sourceBytes.length!==Number(data.doc.byte_size))throw Object.assign(new Error('The original PDF changed and its template regions could not be verified. Reprocess a verified source.'),{permanent:true});
  }
  const decision=bank?undefined:policy===templatePolicy
-  ?selectTemplateExtraction(data.doc.source_text,data.schema,job.config.locale,job.config.templates??[],job.config.mode,job.config.timezone)
-  :policy===regionTemplatePolicy?selectCurrentTemplateExtraction(data.doc.source_text,data.schema,job.config.locale,job.config.templates??[],job.config.mode,geometry,job.config.timezone):undefined;
+  ?selectTemplateExtraction(data.doc.source_text,data.schema,job.config.locale,job.config.templates??[],job.config.mode,job.config.timezone,valuePolicy)
+  :policy===regionTemplatePolicy?selectCurrentTemplateExtraction(data.doc.source_text,data.schema,job.config.locale,job.config.templates??[],job.config.mode,geometry,job.config.timezone,valuePolicy):undefined;
  if(decision)selection=decision.selection;
  if(decision?.selection.outcome==='failed'){
   const messages={no_readable_text:'This document has no readable text. Scans and images require a configured OCR/AI provider.',limit:'Template checking exceeded a supported limit. Reduce the templates or document size, or enable AI extraction, then reprocess.',no_match:'No saved template fully matches this document. Check the template anchors and required fields, or enable AI extraction, then reprocess.'};
@@ -117,22 +120,22 @@ const attempt=await extractWithDeadline(async signal=>{
  }
  if(decision?.result)result=decision.result;
  else if(job.config.mode==='ai'){
-  const activeProvider=provider;if(!activeProvider?.configured())throw Object.assign(new Error('AI extraction is not configured. Configure the server provider or choose text-anchor rules.'),{permanent:true});
+  const activeProvider=provider;if(!activeProvider?.configured())throw Object.assign(new Error(bank?'Bank statement extraction is unavailable because the AI provider is not configured. Ask your administrator to enable it, then retry the statement.':'AI extraction is not configured. Configure the server provider or choose text-anchor rules.'),{permanent:true});
   const bytes=sourceBytes??await readStoredObject(data.doc.storage_key);signal.throwIfAborted();
-  const input={bytes,mimeType:data.doc.mime_type,pages:data.doc.source_text,schema:data.schema,instructions:job.config.instructions,locale:job.config.locale,timezone:job.config.timezone,signal};
+  const input={bytes,mimeType:data.doc.mime_type,pages:data.doc.source_text,schema:data.schema,instructions:job.config.instructions,locale:job.config.locale,timezone:job.config.timezone,normalizationPolicy:valuePolicy,signal};
   const visualDocument=await prepareVisualDocument(input,{signal,expectedSha256:data.doc.sha256});signal.throwIfAborted();
   result=await activeProvider.extract({...input,...(visualDocument?{visualDocument}:{})});
   if(visualDocument)result={...result,tokenUsage:{...(result.tokenUsage&&typeof result.tokenUsage==='object'&&!Array.isArray(result.tokenUsage)?result.tokenUsage:{}),sourceRendering:visualRenderingMetadata(visualDocument)}};
  }else{
   if(!data.doc.source_text.some((p:any)=>p.text.trim()))throw Object.assign(new Error('This document has no readable text. Scans and images require a configured OCR/AI provider.'),{permanent:true});
-  result=extractRules(data.doc.source_text,data.schema,job.config.locale,decision?[]:job.config.templates||[],job.config.timezone);
+  result=extractRules(data.doc.source_text,data.schema,job.config.locale,decision?[]:job.config.templates||[],job.config.timezone,valuePolicy);
  }
  let bankContext=null;
  if(bank){try{const statement=createBankStatementResult(result.rawValues,result.evidence,job.config.locale);bankContext=statement.context;result={...result,normalizedValues:statement.values as unknown as Record<string,unknown>,issues:statement.issues.map(issue=>({field:issue.field??issue.transactionId??issue.accountId??'accounts',code:issue.code,message:issue.message}))};}catch(error){throw Object.assign(error instanceof Error?error:new Error('Bank statement extraction is invalid'),{permanent:true});}}
- signal.throwIfAborted();return {data,result,selection,bankContext,geometryVerified:Boolean(geometry),templateSnapshot:decision?.result?.templateSnapshot??null};
+ signal.throwIfAborted();return {data,result,selection,bankContext,valuePolicy,geometryVerified:Boolean(geometry),templateSnapshot:decision?.result?.templateSnapshot??null};
 },options);
-if(!attempt)return true;const {data,result,selection,bankContext,geometryVerified,templateSnapshot}=attempt;
-const normalizationContext:NormalizationContext={version:timestampPolicy,locale:job.config.locale,timezone:job.config.timezone??null,tzdbVersion:process.versions.tz??null};
+if(!attempt)return true;const {data,result,selection,bankContext,valuePolicy,geometryVerified,templateSnapshot}=attempt;
+const normalizationContext:NormalizationContext={version:valuePolicy,locale:job.config.locale,timezone:job.config.timezone??null,tzdbVersion:process.versions.tz??null};
 await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const lock=(await c.query('select * from jobs where id=$1 and lease_owner=$2 and state=$3 for update',[job.id,owner,'processing'])).rows[0];if(!lock)return;if(geometryVerified){const current=(await c.query('select sha256,storage_key,mime_type,page_count,byte_size from documents where id=$1 for update',[job.document_id])).rows[0];if(!current||current.sha256!==data.doc.sha256||current.storage_key!==data.doc.storage_key||current.mime_type!==data.doc.mime_type||current.page_count!==data.doc.page_count||String(current.byte_size)!==String(data.doc.byte_size))throw Object.assign(new Error('The original PDF changed before its template result could be saved. Reprocess a verified source.'),{permanent:true});}const {rows:[run]}=await c.query('insert into extraction_runs(workspace_id,document_id,schema_version_id,job_id,engine,model,prompt_version,document_sha256,raw_values,normalized_values,evidence,issues,token_usage,cost_usd,selection,template_snapshot,normalization_context,bank_statement_context) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning id',[job.workspace_id,job.document_id,job.schema_version_id,job.id,result.engine,result.model,result.promptVersion??'folio-extraction-v1',data.doc.sha256,JSON.stringify(result.rawValues),JSON.stringify(result.normalizedValues),JSON.stringify(result.evidence),JSON.stringify(result.issues),JSON.stringify(result.tokenUsage??{}),result.costUsd??0,selection?JSON.stringify(selection):null,templateSnapshot?JSON.stringify(templateSnapshot):null,JSON.stringify(normalizationContext),bankContext?JSON.stringify(bankContext):null]);await c.query("update documents set latest_run_id=$2,status='needs_review',error=null,updated_at=now() where id=$1",[job.document_id,run.id]);if(bankContext)await indexBankStatement(c,job.workspace_id,job.document_id,run.id,result.normalizedValues as any);await c.query("update jobs set state='completed',lease_until=null,lease_owner=null,updated_at=now() where id=$1",[job.id]);});
 }catch(e){const permanent=(e as any).permanent||job.attempts>=job.max_attempts;const message=e instanceof Error?e.message.slice(0,500):'Processing failed';await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const changed=await c.query("update jobs set state=$3,error=$4,available_at=now()+($5 * interval '1 second'),lease_owner=null,lease_until=null,updated_at=now() where id=$1 and lease_owner=$2 and state='processing' returning id",[job.id,owner,permanent?'failed':'queued',message,Math.min(60,2**job.attempts)]);if(changed.rowCount)await c.query('update documents set status=$2,error=$3,updated_at=now() where id=$1',[job.document_id,permanent?'failed':'queued',message]);});}
 return true;

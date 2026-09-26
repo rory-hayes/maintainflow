@@ -1,0 +1,37 @@
+{
+  "synthetic": true,
+  "description": "Invented ordinary Drive file; no real account or credential data.",
+  "config": {
+    "origin": "https://maintainflow.io",
+    "parserId": "a015ec08-2026-4000-8000-000000000001",
+    "folderId": "synthetic_drive_folder_01"
+  },
+  "trigger": {
+    "id": "synthetic_drive_file_01",
+    "parents": [
+      "synthetic_drive_folder_01"
+    ]
+  },
+  "metadata": {
+    "id": "synthetic_drive_file_01",
+    "name": "synthetic-drive-file.txt",
+    "mimeType": "text/plain",
+    "version": "18446744073709551615",
+    "size": "78",
+    "md5Checksum": "7b58161062b7f64489a0a4486c81a146",
+    "trashed": false,
+    "parents": [
+      "synthetic_drive_folder_01"
+    ],
+    "capabilities": {
+      "canDownload": true
+    }
+  },
+  "contentUtf8": "MaintainFlow synthetic intake fixture\nReference: MF-SOURCE-0001\nAmount: 12.50\n",
+  "sha256": "976c577f30416c8fd468a9807b3c8b2ebf10b8233f15f4a9da4c61017f81bc65",
+  "binaryMetadata": {
+    "fileName": "synthetic-drive-file.txt",
+    "mimeType": "text/plain"
+  },
+  "expectedIdempotencyKey": "gd:a015ec08-2026-4000-8000-000000000001:synthetic_drive_file_01:v18446744073709551615"
+}

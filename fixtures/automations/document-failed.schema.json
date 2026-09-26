@@ -1,0 +1,274 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MaintainFlow terminal document failure event",
+  "description": "Synthetic examples use no customer data. Failure events contain operation identity and safe explanations, never extracted values.",
+  "anyOf": [
+    {
+      "type": "object",
+      "required": [
+        "event",
+        "id",
+        "document",
+        "failedAt",
+        "jobId",
+        "error"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "document.extraction_failed"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "document": {
+          "type": "object",
+          "required": [
+            "id",
+            "name",
+            "parserId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string"
+            },
+            "parserId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        },
+        "failedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "jobId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "extraction_failed"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "enum": [
+                "Document processing failed. Open the document to review the failure and retry."
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "event",
+        "id",
+        "document",
+        "failedAt",
+        "exportId",
+        "runId",
+        "approvalId",
+        "format",
+        "error"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "document.export_failed"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "document": {
+          "type": "object",
+          "required": [
+            "id",
+            "name",
+            "parserId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string"
+            },
+            "parserId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        },
+        "failedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "exportId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "runId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "approvalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "csv",
+            "xlsx",
+            "json"
+          ]
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "export_generation_failed"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "enum": [
+                "Export generation failed. Try again or select another format."
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "event",
+        "id",
+        "document",
+        "failedAt",
+        "exportId",
+        "runId",
+        "approvalId",
+        "format",
+        "error"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "document.export_failed"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "document": {
+          "type": "object",
+          "required": [
+            "id",
+            "name",
+            "parserId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string"
+            },
+            "parserId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        },
+        "failedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "exportId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "runId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "approvalId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "csv",
+            "xlsx",
+            "json"
+          ]
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "export_size_limit"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "enum": [
+                "This export is too large to download here. Select fewer documents and export again.",
+                "This export exceeds the supported size limits. Export a smaller selection."
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

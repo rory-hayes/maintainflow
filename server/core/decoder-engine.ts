@@ -1,13 +1,13 @@
 import path from 'node:path';
 import type {PageText} from '../../shared/types.js';
 import {isTiffHeader} from './tiff-engine.js';
+import type {SourceFormat} from '../../shared/source-formats.js';
 import {nativePdfPageText} from '../../shared/pdf-split.js';
 import {decoderError,decoderLimits as config} from './decoder-limits.js';
 import {SourceValidationError,type SourceValidationReason} from './source-validation.js';
 const invalid=(reason:SourceValidationReason):never=>{throw new SourceValidationError(reason);};
-type SourceFormat = 'pdf'|'png'|'jpeg'|'tiff'|'docx'|'xlsx'|'txt'|'csv'|'eml'|'html';
 const textExtensions:Record<string,SourceFormat>={'.txt':'txt','.csv':'csv','.eml':'eml','.html':'html','.htm':'html'};
-const binaryExtensions:Record<string,SourceFormat>={'.pdf':'pdf','.png':'png','.jpg':'jpeg','.jpeg':'jpeg','.docx':'docx','.xlsx':'xlsx','.tif':'tiff','.tiff':'tiff'};
+const binaryExtensions:Record<string,SourceFormat>={'.pdf':'pdf','.png':'png','.jpg':'jpeg','.jpeg':'jpeg','.docx':'docx','.xlsx':'xlsx','.odt':'odt','.tif':'tiff','.tiff':'tiff'};
 const begins=(bytes:Buffer,signature:number[]|string)=>{const prefix=typeof signature==='string'?Buffer.from(signature):Buffer.from(signature);return bytes.subarray(0,prefix.length).equals(prefix);};
 
 /** Read bounded directory metadata without inflating or writing archive entries. */
@@ -48,6 +48,12 @@ export function validateZipExpansion(bytes:Buffer){officeEntries(bytes);}
 function officeFormat(bytes:Buffer):SourceFormat{
   const names=officeEntries(bytes);
   const word=names.has('word/document.xml'),sheet=names.has('xl/workbook.xml');
+  // This metadata-only classifier also runs in the parent when checking an
+  // isolated archive response. Full package/XML decoding must stay in the child.
+  if(names.has('mimetype')||names.has('META-INF/manifest.xml')||names.has('content.xml')){
+    if(word||sheet||names.has('[Content_Types].xml')||names.has('_rels/.rels'))invalid('office_format_unsupported');
+    return 'odt';
+  }
   if(!names.has('[Content_Types].xml')||!names.has('_rels/.rels')||word===sheet)invalid('office_format_unsupported');
   return word?'docx':'xlsx';
 }
@@ -175,6 +181,7 @@ export async function decodeSource(bytes:Buffer,filename:string):Promise<{mimeTy
     }finally{await loading.destroy();}
   }
   if(format==='tiff'){const {decodeTiffSource}=await import('./tiff-engine.js');return decodeTiffSource(bytes);}
+  if(format==='odt'){const {decodeOdtSource}=await import('./odt-engine.js');return decodeOdtSource(bytes);}
   if(['png','jpeg'].includes(format)){
     const sharp=(await import('sharp')).default;
     try{

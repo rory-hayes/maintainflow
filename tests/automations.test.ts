@@ -6,7 +6,7 @@ import {z} from 'zod';
 import {signDelivery} from '../server/integrations/webhooks.js';
 import {closeDatabase} from '../server/core/db.js';
 import {after} from 'node:test';
-import {verifyApprovalDelivery} from '../examples/automations/verify.js';
+import {verifyApprovalDelivery,verifyWebhookDelivery} from '../examples/automations/verify.js';
 const read=(file:string)=>JSON.parse(readFileSync(new URL(`../fixtures/automations/${file}`,import.meta.url),'utf8'));
 const fixture=read('document-approved.json'),schema=z.fromJSONSchema(read('document-approved.schema.json'));
 after(closeDatabase);
@@ -25,4 +25,22 @@ test('receiver example verifies the sender contract before JSON parsing and pres
  assert.throws(()=>verifyApprovalDelivery({body,headers},secret,Number(timestamp)+301),/expired/);
  assert.throws(()=>verifyApprovalDelivery({body,headers},'wrong-fixture-secret'),/signature/);
  assert.throws(()=>verifyApprovalDelivery({body,headers:{...headers,'Idempotency-Key':randomUUID()}},secret),/identity/);
+});
+
+test('subscribed failure receiver validates operation identity and rejects extracted data while approval recipes stay approval-only',()=>{
+ const secret='synthetic-failure-receiver-only',timestamp=String(Math.floor(Date.now()/1000)),deliveryId=randomUUID();
+ const signed=(event:unknown)=>{const body=Buffer.from(JSON.stringify(event));return{body,headers:{'X-Folio-Delivery':deliveryId,'Idempotency-Key':deliveryId,'X-Folio-Timestamp':timestamp,'X-Folio-Signature':`v1=${signDelivery(secret,timestamp,body.toString())}`}};};
+ for(const file of ['document-extraction-failed.json','document-export-failed.json']){
+  const failure=read(file),input=signed(failure);
+  assert.deepEqual(verifyWebhookDelivery(input,secret),{deliveryId,event:failure});
+  assert.deepEqual(verifyWebhookDelivery(input,secret),verifyWebhookDelivery(input,secret));
+  assert.throws(()=>verifyApprovalDelivery(input,secret),'Existing approval-only receivers must never map failures as invoices.');
+  for(const invalid of [{...failure,values:{account:'private'}},{...failure,id:null},{...failure,failedAt:'yesterday'},{...failure,error:{code:'provider_error',message:'raw provider content'}},{...failure,...(failure.jobId?{jobId:null}:{approvalId:null})}])assert.throws(()=>verifyWebhookDelivery(signed(invalid),secret));
+  assert.throws(()=>verifyWebhookDelivery({...input,body:Buffer.from(input.body.toString()+' ')},secret),/signature/);
+  assert.throws(()=>verifyWebhookDelivery(input,secret,Number(timestamp)+301),/expired/);
+ }
+ const exportFailure=read('document-export-failed.json');
+ for(const message of ['This export is too large to download here. Select fewer documents and export again.','This export exceeds the supported size limits. Export a smaller selection.'])assert.doesNotThrow(()=>verifyWebhookDelivery(signed({...exportFailure,error:{code:'export_size_limit',message}}),secret));
+ assert.throws(()=>verifyWebhookDelivery(signed({...exportFailure,error:{code:'export_size_limit',message:'Export generation failed. Try again or select another format.'}}),secret));
+ assert.deepEqual(verifyWebhookDelivery(signed(fixture),secret).event,fixture);
 });

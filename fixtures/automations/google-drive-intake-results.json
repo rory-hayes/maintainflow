@@ -1,0 +1,90 @@
+{
+  "synthetic": true,
+  "upload": {
+    "statusCode": 202,
+    "body": {
+      "document": {
+        "id": "b015ec08-2026-4000-8000-000000000001",
+        "parserId": "a015ec08-2026-4000-8000-000000000001",
+        "status": "queued"
+      },
+      "jobId": "c015ec08-2026-4000-8000-000000000001",
+      "duplicate": false
+    }
+  },
+  "duplicate": {
+    "statusCode": 202,
+    "body": {
+      "document": {
+        "id": "b015ec08-2026-4000-8000-000000000001",
+        "parserId": "a015ec08-2026-4000-8000-000000000001",
+        "status": "queued"
+      },
+      "jobId": null,
+      "duplicate": true
+    }
+  },
+  "queued": {
+    "statusCode": 200,
+    "body": {
+      "document": {
+        "id": "b015ec08-2026-4000-8000-000000000001",
+        "parserId": "a015ec08-2026-4000-8000-000000000001",
+        "status": "queued",
+        "latestRunId": null
+      },
+      "jobs": [
+        {
+          "id": "c015ec08-2026-4000-8000-000000000001",
+          "state": "queued",
+          "waitingForSchema": false
+        }
+      ],
+      "runs": []
+    }
+  },
+  "ready": {
+    "statusCode": 200,
+    "body": {
+      "document": {
+        "id": "b015ec08-2026-4000-8000-000000000001",
+        "parserId": "a015ec08-2026-4000-8000-000000000001",
+        "status": "needs_review",
+        "latestRunId": "d015ec08-2026-4000-8000-000000000001"
+      },
+      "jobs": [
+        {
+          "id": "c015ec08-2026-4000-8000-000000000001",
+          "state": "completed",
+          "waitingForSchema": false
+        }
+      ],
+      "runs": [
+        {
+          "id": "d015ec08-2026-4000-8000-000000000001",
+          "documentId": "b015ec08-2026-4000-8000-000000000001",
+          "jobId": "c015ec08-2026-4000-8000-000000000001"
+        }
+      ]
+    }
+  },
+  "failed": {
+    "statusCode": 200,
+    "body": {
+      "document": {
+        "id": "b015ec08-2026-4000-8000-000000000001",
+        "parserId": "a015ec08-2026-4000-8000-000000000001",
+        "status": "failed",
+        "latestRunId": null
+      },
+      "jobs": [
+        {
+          "id": "c015ec08-2026-4000-8000-000000000001",
+          "state": "failed",
+          "waitingForSchema": false
+        }
+      ],
+      "runs": []
+    }
+  }
+}

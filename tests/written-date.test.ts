@@ -14,7 +14,8 @@ test('Written months normalize deterministically using the parser locale without
 
 test('Written-date normalization does not roll over invalid dates or guess foreign/ambiguous months', () => {
   const date = normalizeValue('31 February 2026', field, 'en-IE');
-  assert.equal(date, '2026-02-31');
+  assert.equal(date, '31 February 2026');
+  assert.equal(normalizeValue('31 February 2026', field, 'en-IE', undefined, 'timestamp-v1'), '2026-02-31');
   assert.ok(validateValues({ date }, { fields: [field] }).some(issue => issue.code === 'date'));
   assert.equal(normalizeValue('24 août 2026', field, 'en-IE'), '24 août 2026');
   assert.equal(normalizeValue('last Thursday', field, 'en-IE'), 'last Thursday');
