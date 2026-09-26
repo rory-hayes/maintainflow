@@ -13,6 +13,14 @@ type Dependencies={fetchImpl?:typeof fetch;timeoutMs?:number};
 const email=z.string().max(254).email();
 const uuid=z.string().uuid();
 const maximumResponseBytes=16*1024;
+// Legacy subjects identify durable messages created before the brand change.
+// Keep their sender, subject and body unchanged for provider idempotency retries.
+export const accountEmailSubjects={
+  password_reset:['Reset your MaintainFlow password','Reset your Folio password'],
+  password_changed:['Your MaintainFlow password was changed','Your Folio password was changed'],
+  email_verification:['Verify your MaintainFlow email','Verify your Folio email'],
+  invitation:['Join your MaintainFlow workspace','Join your Folio workspace'],
+} as const;
 
 /** Use configured application identity, never request Host or a supplied redirect. */
 export function trustedAccountOrigin(environment:Environment=process.env):string|undefined{
@@ -31,7 +39,7 @@ function configuredSender(environment:Environment){
   const from=environment.FOLIO_AUTH_EMAIL_FROM?.trim();
   const apiKey=environment.FOLIO_AUTH_EMAIL_API_KEY;
   if(!from||!email.safeParse(from).success||!apiKey||!/^re_[A-Za-z0-9_-]{8,250}$/.test(apiKey))return;
-  return {from:`Folio <${from}>`,apiKey};
+  return {from,apiKey};
 }
 
 async function responseJson(response:Response,signal:AbortSignal){
@@ -76,10 +84,11 @@ export function createAccountEmailSender(environment:Environment=process.env,dep
   const transport=dependencies.fetchImpl??globalThis.fetch;
   return {async send(message,budget={}){
     if(!message||typeof message.idempotencyKey!=='string'||!message.idempotencyKey.startsWith('folio-account-email/')||!uuid.safeParse(message.idempotencyKey.slice('folio-account-email/'.length)).success||
-      !email.safeParse(message.to).success||!['Reset your Folio password','Your Folio password was changed','Verify your Folio email','Join your Folio workspace'].includes(message.subject)||typeof message.text!=='string'||message.text.length<1||Buffer.byteLength(message.text)>4096){
+      !email.safeParse(message.to).success||!Object.values(accountEmailSubjects).some(subjects=>subjects.some(subject=>subject===message.subject))||typeof message.text!=='string'||message.text.length<1||Buffer.byteLength(message.text)>4096){
       throw new AccountEmailError('invalid_message',false);
     }
-    const body=JSON.stringify({from:settings.from,to:[message.to],subject:message.subject,text:message.text});
+    const legacy=Object.values(accountEmailSubjects).some(subjects=>subjects[1]===message.subject);
+    const body=JSON.stringify({from:`${legacy?'Folio':'MaintainFlow'} <${settings.from}>`,to:[message.to],subject:message.subject,text:message.text});
     if(Buffer.byteLength(body)>8192)throw new AccountEmailError('invalid_message',false);
     if(budget.signal?.aborted)throw new AccountEmailError('cancelled',true);
     const remaining=budget.deadlineAt===undefined?configuredTimeout:Math.min(configuredTimeout,budget.deadlineAt-Date.now());

@@ -71,7 +71,7 @@ export function assertStripePortalConfiguration(configuration:Stripe.BillingPort
  const update=configuration.features.subscription_update;
  if(update.enabled){
   const approved=new Set(Object.values(prices));
-  if(update.default_allowed_updates.some(value=>value!=='price')||!update.products?.length||update.products.some(product=>!product.prices.length||product.prices.some(id=>!approved.has(id))))throw new Error('The Stripe portal may only offer the approved Folio plan prices without quantity changes.');
+  if(update.default_allowed_updates.some(value=>value!=='price')||!update.products?.length||update.products.some(product=>!product.prices.length||product.prices.some(id=>!approved.has(id))))throw new Error('The Stripe portal may only offer the approved MaintainFlow plan prices without quantity changes.');
  }
 }
 export const resendEventSchema=z.object({type:z.literal('email.received'),data:z.object({

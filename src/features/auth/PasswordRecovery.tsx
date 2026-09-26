@@ -59,7 +59,7 @@ function useRecoveryPost(){
 }
 
 function RecoveryLayout({title,description,children}:{title:string;description:string;children:ReactNode}){
-  return <div className="auth-page recovery-page"><meta name="referrer" content="no-referrer"/><header><Link to="/" className="wordmark">Folio</Link><Link className="link" to="/sign-in" rel="noreferrer">Back to sign in</Link></header><main className="recovery-main"><section className="auth-form" aria-labelledby="recovery-title"><span className="recovery-icon" aria-hidden="true"><KeyRound size={26}/></span><h1 id="recovery-title">{title}</h1><p>{description}</p>{children}</section></main></div>;
+  return <div className="auth-page recovery-page"><meta name="referrer" content="no-referrer"/><header><Link to="/" className="wordmark">MaintainFlow</Link><Link className="link" to="/sign-in" rel="noreferrer">Back to sign in</Link></header><main className="recovery-main"><section className="auth-form" aria-labelledby="recovery-title"><span className="recovery-icon" aria-hidden="true"><KeyRound size={26}/></span><h1 id="recovery-title">{title}</h1><p>{description}</p>{children}</section></main></div>;
 }
 
 function RequestPasswordReset(){
@@ -78,7 +78,7 @@ function RequestPasswordReset(){
     if(result.status===503){setSenderUnavailable(true);return;}
     setError(result.status===400?'Enter a valid email address.':result.status===429?'Too many attempts. Please wait a few minutes and try again.':'We couldn’t request a reset link. Please try again.');
   }
-  return <RecoveryLayout title={accepted?'Check your email':'Forgot your password?'} description={accepted?'Follow the link in the email to choose a new password.':'Enter the email address you use for Folio.'}>
+  return <RecoveryLayout title={accepted?'Check your email':'Forgot your password?'} description={accepted?'Follow the link in the email to choose a new password.':'Enter the email address you use for MaintainFlow.'}>
     {accepted?<><div ref={feedback} tabIndex={-1} className="recovery-feedback"><Notice message={acceptedMessage}/></div><p className="small">The link expires after 30 minutes. Check your spam folder if it does not arrive.</p><p className="small">If you entered a different address, you can <button type="button" className="recovery-text-button" onClick={()=>setAccepted(false)}>try another email</button>.</p></>:<>
       {runtime.isPending?<p role="status">Checking password recovery…</p>:runtime.isError?<div className="recovery-feedback"><Notice error="We couldn’t check password recovery availability."/><Button variant="secondary" type="button" disabled={runtime.isFetching} onClick={()=>{void runtime.refetch();}}>{runtime.isFetching?'Checking…':'Try again'}</Button></div>:!ready?<div ref={availabilityFeedback} tabIndex={-1} className="recovery-feedback"><Notice error={unavailableMessage}/></div>:null}
       <form onSubmit={submit} aria-busy={request.busy}>

@@ -352,7 +352,7 @@ export async function registerProviders(app:FastifyInstance,dependencies:{stripe
   if(!priceId)badRequest('This plan has no configured Stripe price.',503);
   await verifyBillingAccount(client,settings,true);
   const price=await client.prices.retrieve(priceId);
-  if(!stripePriceMatches(price,planId,settings.prices,mode,true))badRequest('Configured Stripe price does not match the Folio monthly plan.',503);
+  if(!stripePriceMatches(price,planId,settings.prices,mode,true))badRequest('Configured Stripe price does not match the MaintainFlow monthly plan.',503);
   const reservation=await transaction(adminPool,async c=>{
    await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`billing:${actor.workspaceId}`]);
    let {rows:[subscription]}=await c.query('select * from subscriptions where workspace_id=$1 and billing_mode=$2 for update',[actor.workspaceId,mode]);
@@ -400,7 +400,7 @@ export async function registerProviders(app:FastifyInstance,dependencies:{stripe
   if(settings.portalConfigurationId){
    const configuration=await client.billingPortal.configurations.retrieve(settings.portalConfigurationId);
    assertStripePortalConfiguration(configuration,settings.prices,mode);
-   for(const plan of ['standard','team'] as const){const id=settings.prices[plan];if(id&&!stripePriceMatches(await client.prices.retrieve(id),plan,settings.prices,mode,true))badRequest('Configured Stripe price does not match the Folio monthly plan.',503);}
+   for(const plan of ['standard','team'] as const){const id=settings.prices[plan];if(id&&!stripePriceMatches(await client.prices.retrieve(id),plan,settings.prices,mode,true))badRequest('Configured Stripe price does not match the MaintainFlow monthly plan.',503);}
   }
   const session=await client.billingPortal.sessions.create({customer:local.customer_id,return_url:`${config.origin}/app/usage`,...(settings.portalConfigurationId?{configuration:settings.portalConfigurationId}:{})});
   assertStripeMode(session,mode);
@@ -478,6 +478,6 @@ async function registerGoogleRoutes(app:FastifyInstance){
   const row=await withWorkspace(actor.workspaceId,async c=>{const result=await c.query("select * from integrations where id=$1 and kind='google_sheets' for update",[id]);if(!result.rows[0])notFound();await c.query('update integrations set enabled=false,secret_ciphertext=null where id=$1',[id]);await c.query('delete from oauth_states where integration_id=$1',[id]);await audit(c,actor.workspaceId,actor.userId,'google_sheets.disconnected',id);return result.rows[0];});
   let providerRevoked=false;
   if(row.secret_ciphertext){const token=JSON.parse(decryptSecret(row.secret_ciphertext)) as Credentials;const revoke=token.refresh_token||token.access_token;if(revoke){try{await googleClient().revokeToken(revoke);providerRevoked=true;}catch{ /* Local disconnection remains effective; user can revoke in Google account settings. */ }}}
-  return {disconnected:true,providerRevoked,reason:providerRevoked?null:'Local delivery is disabled. Revoke Folio access in your Google account if provider revocation could not complete.'};
+  return {disconnected:true,providerRevoked,reason:providerRevoked?null:'Local delivery is disabled. Revoke access for this app in your Google account if provider revocation could not complete.'};
  });
 }

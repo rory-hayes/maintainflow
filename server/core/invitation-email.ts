@@ -3,12 +3,12 @@ import type {PoolClient} from 'pg';
 import {z} from 'zod';
 import {adminPool,transaction} from './db.js';
 import {hashToken} from './auth.js';
-import {cancelInvitationMail,invitationEmailSubject,type InvitationRow} from './invitations.js';
+import {cancelInvitationMail,type InvitationRow} from './invitations.js';
 import {decryptSecret} from '../integrations/secrets.js';
-import {AccountEmailError,accountEmailStatus,sendAccountEmail,type AccountEmailErrorCode} from '../integrations/account-email.js';
+import {AccountEmailError,accountEmailStatus,accountEmailSubjects,sendAccountEmail,type AccountEmailErrorCode} from '../integrations/account-email.js';
 import {requireWorkBudget,type WorkBudget} from './work-budget.js';
 
-const payloadSchema=z.object({to:z.string().email().max(254),subject:z.literal(invitationEmailSubject),text:z.string().min(1).refine(value=>Buffer.byteLength(value)<=4096)}).strict();
+const payloadSchema=z.object({to:z.string().email().max(254),subject:z.enum(accountEmailSubjects.invitation),text:z.string().min(1).refine(value=>Buffer.byteLength(value)<=4096)}).strict();
 const providerCodes=new Set<AccountEmailErrorCode>(['unavailable','invalid_message','temporary_failure','permanent_failure','timeout','cancelled','invalid_response']);
 type MailRow={id:string;invitation_id:string;workspace_id:string;token_hash:string;payload_ciphertext:string|null;state:string;attempts:number;expires_at:Date;lease_owner:string|null;lease_until:Date|null;available_at:Date};
 type Claim={row:MailRow;invite:InvitationRow;lease:string;remainingMs:number};

@@ -6,7 +6,7 @@ import {accountEmailStatus,trustedAccountOrigin} from '../integrations/account-e
 import {encryptSecret,privateIdentifier} from '../integrations/secrets.js';
 
 export const invalidInvitationMessage='This invitation is invalid, expired or already used';
-export const invitationEmailSubject='Join your Folio workspace';
+export const invitationEmailSubject='Join your MaintainFlow workspace';
 export const invitationAddressKey=(email:string)=>privateIdentifier('folio:invitation-email:address:v1',email);
 export type InvitationRow={id:string;workspace_id:string;email:string;role:'admin'|'editor'|'viewer';token_hash:string;expires_at:Date;accepted_at:Date|null;created_at:Date;issuer_id:string|null;delivery:'manual'|'email'};
 export function invitationEmailStatus(){return {available:accountEmailStatus().available};}
@@ -56,7 +56,7 @@ async function reserveMail(c:PoolClient,email:string){
 
 async function enqueue(c:PoolClient,invite:InvitationRow,token:string,workspaceName:string,origin:string){
  const name=workspaceName.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g,' ').replace(/\s+/g,' ').trim().slice(0,100);
- const text=`You have been invited to join ${name} on Folio as ${invite.role}.\n\nSign in or create an account with this email address, then review your invitation:\n${origin}/invite#token=${token}\n\nThis invitation expires on ${invite.expires_at.toUTCString()}. If you were not expecting it, you can ignore this email.`;
+ const text=`You have been invited to join ${name} on MaintainFlow as ${invite.role}.\n\nSign in or create an account with this email address, then review your invitation:\n${origin}/invite#token=${token}\n\nThis invitation expires on ${invite.expires_at.toUTCString()}. If you were not expecting it, you can ignore this email.`;
  await c.query(`INSERT INTO invitation_email_outbox(invitation_id,workspace_id,token_hash,payload_ciphertext,expires_at) VALUES($1,$2,$3,$4,$5)`,
   [invite.id,invite.workspace_id,invite.token_hash,encryptSecret(JSON.stringify({to:invite.email,subject:invitationEmailSubject,text})),invite.expires_at]);
 }

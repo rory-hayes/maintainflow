@@ -86,7 +86,7 @@ export async function registerExports(app:FastifyInstance, services:{render?:typ
     const row=await withWorkspace(actor.workspaceId,async c=>(await c.query('SELECT format,mime_type,bytes FROM export_snapshots WHERE id=$1 AND workspace_id=$2',[id,actor.workspaceId])).rows[0]);
     if(!row)notFound();
     checkHostedExportSize(row.bytes);
-    return reply.header('Cache-Control','private, no-store').header('Content-Disposition',`attachment; filename="folio-export-${id.slice(0,8)}.${row.format}"`).type(row.mime_type).send(row.bytes);
+    return reply.header('Cache-Control','private, no-store').header('Content-Disposition',`attachment; filename="maintainflow-export-${id.slice(0,8)}.${row.format}"`).type(row.mime_type).send(row.bytes);
   });
   app.get('/api/export-mappings',async request=> {
     const actor=await requireActor(request,{scope:'results:read'});

@@ -75,7 +75,7 @@ test('missing, malformed, duplicate and unremovable verification links require r
 
 test('confirmation proof accepts existing short or spaced credentials and preserves sign-in creation-policy separation',()=>{
   for(const password of ['x','  ','short','a'.repeat(128)])assert.equal(verificationPasswordError(password),'');
-  assert.match(verificationPasswordError(''),/Enter your Folio password/);assert.match(verificationPasswordError('a'.repeat(129)),/Enter your Folio password/);
+  assert.match(verificationPasswordError(''),/Enter your MaintainFlow password/);assert.match(verificationPasswordError('a'.repeat(129)),/Enter your MaintainFlow password/);
   const signIn=render({surface:'signin',available:false});assert.doesNotMatch(signIn.match(/<input[^>]*type="password"[^>]*>/)?.[0]||'',/minLength/);assert.doesNotMatch(submit(signIn,'Sign in'),/disabled/);assert.match(signIn,/Need a verification email/);
   assert.match(render({surface:'signup'}),/minLength="10"/);
 });
