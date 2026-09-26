@@ -84,6 +84,25 @@ test('unsupported body objects, annotations, changes, forms, hidden sections and
  rejects(await packageBytes(undefined,{extra:{'styles.xml':footer}}),'odt_unsupported');
 });
 
+test('referenced page-style images and master-page objects cannot disappear behind readable body text',async()=>{
+ const image=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64');
+ const declarations=`${attributes} xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"`;
+ const backgrounds=[
+  '<s:background-image xlink:href="Pictures/source.png"/>',
+  `<s:background-image><o:binary-data>${image.toString('base64')}</o:binary-data></s:background-image>`,
+ ];
+ for(const background of backgrounds){
+  const style=`<s:page-layout s:name="Page"><s:page-layout-properties>${background}</s:page-layout-properties></s:page-layout>`;
+  rejects(await packageBytes('<t:p>Identifier: 000127</t:p>',{styles:style,extra:{'Pictures/source.png':image}}),'odt_unsupported');
+  const external=`<o:document-styles ${declarations} o:version="1.3"><o:automatic-styles>${style}</o:automatic-styles><o:master-styles><s:master-page s:name="Standard" s:page-layout-name="Page"/></o:master-styles></o:document-styles>`;
+  rejects(await packageBytes(undefined,{extra:{'styles.xml':external,'Pictures/source.png':image}}),'odt_unsupported');
+ }
+ const master=`<o:document-styles ${declarations} o:version="1.3"><o:master-styles><s:master-page s:name="Standard"><draw:frame><draw:image xlink:href="Pictures/source.png"/></draw:frame></s:master-page></o:master-styles></o:document-styles>`;
+ rejects(await packageBytes(undefined,{extra:{'styles.xml':master,'Pictures/source.png':image}}),'odt_unsupported');
+ // An explicit empty background reset has no image content to omit.
+ assert.equal(text(await packageBytes(undefined,{styles:'<s:page-layout s:name="Plain"><s:page-layout-properties><s:background-image/></s:page-layout-properties></s:page-layout>'})),'Identifier: 000127');
+});
+
 test('DTD, external/general entities, XML instructions and malformed namespace XML are rejected without resolution',async()=>{
  const base=document('<t:p>Safe</t:p>');
  for(const content of [base.replace('<o:document-content','<!DOCTYPE o:document-content SYSTEM "https://never-fetched.example.test/evil.dtd"><o:document-content'),base.replace('<o:document-content','<!DOCTYPE o:document-content [<!ENTITY evil "EXPANDED">]><o:document-content'),base.replace('<o:body>','<?fetch href="https://never-fetched.example.test"?><o:body>')])rejects(await packageBytes('',{content}),'odt_unsupported');

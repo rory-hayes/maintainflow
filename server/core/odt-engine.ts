@@ -105,10 +105,15 @@ function packageContents(bytes:Buffer){
 
 function attrs(node:XmlNode,allowed:string[]){const accepted=new Set([...allowed,key(ns.xml,'id')]);for(const name of Object.keys(node.attributes))if(!accepted.has(name))fail('odt_unsupported');}
 const textStyle=[key(ns.text,'style-name'),key(ns.text,'class-names')];
+const drawingNamespace='urn:oasis:names:tc:opendocument:xmlns:drawing:1.0';
 interface ListLevel{kind:'bullet'|'number';bullet?:string;prefix:string;suffix:string;start:number;}
 function styleCatalogue(content:XmlNode,styles?:XmlNode){
  const lists=new Map<string,Map<number,ListLevel>>();let numberedOutline=false;
  const visit=(node:XmlNode)=>{
+  // Page styles can carry source images/objects outside office:body. Accepting
+  // the remaining body text would hide their omission from the extraction.
+  if(is(node,ns.style,'background-image')&&(attr(node,ns.xlink,'href')?.trim()||elements(node).length||node.children.some(child=>typeof child==='string'&&child.trim())))fail('odt_unsupported');
+  if(node.uri===drawingNamespace&&['frame','image','fill-image','object','object-ole','plugin','floating-frame'].includes(node.local))fail('odt_unsupported');
   if(node.uri===ns.style&&/^(?:header|footer)(?:-|$)/.test(node.local))fail('odt_unsupported');
   if(is(node,ns.office,'scripts')&&elementContent(node).length)fail('odt_unsupported');
   for(const [name,value] of Object.entries(node.attributes)){

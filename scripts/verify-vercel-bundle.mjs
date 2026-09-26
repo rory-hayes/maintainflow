@@ -53,6 +53,11 @@ try{
     assert.deepEqual(odtImported.parts[0].bytes,odtBytes);assert.deepEqual(odtImported.parts[0].source,odt);
     await assert.rejects(previewArchiveSource(odtBytes,'renamed.zip'),error=>error.reason==='office_package');
     console.log('PASS packaged ODT byte-led text, exact table cells and atomic ZIP leaf');
+    const styledOdt=await JSZip.loadAsync(odtBytes),styledContent=await styledOdt.file('content.xml').async('string');
+    styledOdt.file('mimetype','application/vnd.oasis.opendocument.text',{compression:'STORE',createFolders:false});
+    styledOdt.file('content.xml',styledContent.replace('<office:body>','<office:automatic-styles><style:page-layout xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" style:name="ImagePage"><style:page-layout-properties><style:background-image xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="https://never-fetched.example.test/source.png"/></style:page-layout-properties></style:page-layout></office:automatic-styles><office:body>'));
+    await assert.rejects(inspectSource(await styledOdt.generateAsync({type:'nodebuffer',compression:'DEFLATE'}),'style-image.odt'),error=>error.reason==='odt_unsupported');
+    console.log('PASS packaged ODT refuses page-style image omission');
     for(const filename of ['owned-classic.tiff','owned-big.tiff']){
       const bytes=await fs.readFile('fixtures/'+filename),sourceSha256=createHash('sha256').update(bytes).digest('hex');
       const source=await inspectSource(bytes,'misleading.txt');assert.deepEqual(source,{mimeType:'image/tiff',pageCount:2,pages:[{page:1,text:''},{page:2,text:''}]});

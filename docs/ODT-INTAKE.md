@@ -13,7 +13,7 @@ This is a bounded addition to the existing MaintainFlow source registry and C09 
 
 ## Visible refusals and limitations
 
-Encrypted files, DTD/entity declarations, XML processing instructions, malformed/unsafe packages, unsupported versions and unsupported body structures fail visibly. Embedded objects/images, annotations/notes, tracked changes, forms, headers/footers, hidden/conditional content, unresolved/complex/continued list numbering, merged/nested/ragged tables and table-cell tabs are not projected. Rich documents may therefore need an unencrypted text-based PDF or DOCX export. This is not universal ODT compatibility or a page-layout renderer.
+Encrypted files, DTD/entity declarations, XML processing instructions, malformed/unsafe packages, unsupported versions and unsupported body structures fail visibly. Embedded objects/images, annotations/notes, tracked changes, forms, headers/footers, hidden/conditional content, unresolved/complex/continued list numbering, merged/nested/ragged tables and table-cell tabs are not projected. Referenced background images and master-page objects are also refused even when the body has readable text; an empty background reset remains allowed. Rich documents may therefore need an unencrypted text-based PDF or DOCX export. This is not universal ODT compatibility or a page-layout renderer.
 
 A matching filename is insufficient. Renamed ODT is still subject to the ODT policy after child validation; malformed files do not create partial jobs or page charges. Raw source text and extracted values remain available alongside normalized values and corrections. Existing saved normalization settings, explicit approvals and immutable export revisions are reused. No separate authentication, storage, permissions, billing or processing system was introduced.
 
@@ -29,4 +29,4 @@ Current local verification and draft/deployment status are recorded in the task'
 
 ## Format references
 
-The implementation follows the bounded subset above of the [OASIS OpenDocument 1.3 package specification](https://docs.oasis-open.org/office/OpenDocument/v1.3/os/part2-packages/OpenDocument-v1.3-os-part2-packages.html), using the [saxes XML parser](https://github.com/lddubeau/saxes) with DTDs and processing instructions refused.
+The implementation follows the bounded subset above of the [OASIS OpenDocument 1.3 package specification](https://docs.oasis-open.org/office/OpenDocument/v1.3/os/part2-packages/OpenDocument-v1.3-os-part2-packages.html), and [OpenDocument schema](https://docs.oasis-open.org/office/OpenDocument/v1.3/OpenDocument-v1.3-part3-schema.html), using the [saxes XML parser](https://github.com/lddubeau/saxes) with DTDs and processing instructions refused.
