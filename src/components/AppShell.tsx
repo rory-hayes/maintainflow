@@ -1,12 +1,12 @@
 import {useEffect,useRef,useState} from 'react';
 import {NavLink,Outlet,Link,Navigate,useLocation,useNavigate} from 'react-router-dom';
-import {FileText,Layers3,Puzzle,ChartNoAxesColumn,Settings,HelpCircle,LogOut,Menu,X,Plus} from 'lucide-react';
+import {FileText,Layers3,Puzzle,ChartNoAxesColumn,Settings,HelpCircle,LogOut,Menu,X,Plus,Landmark} from 'lucide-react';
 import {useSession} from '../lib/session';
 import {Button,Loading,Modal,Field,Notice} from './ui';
 import {post,useAction} from '../lib/api';
 import ProcessingNotifications from './ProcessingNotifications';
 import {EmailVerificationPrompt} from '../features/auth/EmailVerification';
-const links=[['/app','Documents',FileText],['/app/parsers','Parsers',Layers3],['/app/integrations','Integrations',Puzzle],['/app/usage','Usage',ChartNoAxesColumn],['/app/settings','Settings',Settings]] as const;
+const links=[['/app','Documents',FileText],['/app/bank-statements','Bank statements',Landmark],['/app/parsers','Parsers',Layers3],['/app/integrations','Integrations',Puzzle],['/app/usage','Usage',ChartNoAxesColumn],['/app/settings','Settings',Settings]] as const;
 export default function AppShell(){
   const session=useSession(),location=useLocation(),navigate=useNavigate();
   const [menu,setMenu]=useState(false),[mobile,setMobile]=useState(()=>window.matchMedia('(max-width:1000px)').matches),[newWorkspace,setNewWorkspace]=useState(false),[name,setName]=useState('');

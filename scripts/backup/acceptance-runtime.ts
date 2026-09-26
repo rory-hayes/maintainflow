@@ -112,6 +112,45 @@ async function verifyNativeTemplates(owner:Account,other:Account,native:any,usag
  const after=ok(await request(owner,'GET',`/api/documents/${native.queued.document.id}`));assert.equal(after.jobs[0].attempts,1);assert.equal(after.runs.length,1);assert.deepEqual(after.runs[0].normalizedValues,{reference:'PINNED-000043',amount:0,paid:false});assert.equal(after.runs[0].engine,'native-pdf-regions');assert.equal(after.runs[0].templateSnapshot.template.id,native.templateId);assert.equal(after.runs[0].templateSnapshot.template.revision,1);assert.equal(after.runs[0].templateSnapshot.template.enabled,true);assert.deepEqual(after.runs[0].templateSnapshot.template.rules,native.definition.rules);assert.equal(after.runs[0].evidence.reference[0].region.sourceSha256,native.queuedSha256);assert.equal(forbiddenExtractionCalls,0);assert.deepEqual(await ledger(),usage);
  assert.deepEqual(ok(await request(owner,'GET',`/api/documents/${native.completed.document.id}`)).runs[0],native.run);checks.queuedNativeRegionUsesPinnedRevisionOnceWithoutAiOrRecharging=true;
 }
+async function bankIndexState(workspaceId:string){
+ return {accounts:(await db.adminPool.query('select workspace_id,document_id,run_id,revision,account_id,account_key,currency,statement_start::text,statement_end::text from bank_statement_accounts where workspace_id=$1 order by document_id,account_id',[workspaceId])).rows,
+  transactions:(await db.adminPool.query('select * from bank_statement_transactions where workspace_id=$1 order by document_id,transaction_id',[workspaceId])).rows};
+}
+async function seedBankStatements(owner:Account){
+ await db.adminPool.query("update workspaces set plan=jsonb_set(plan,'{maxParsers}','4') where id=$1",[owner.workspace.id]);
+ const {bankRawFixture,setBankFixtureProvider}=await import('../../tests/bank-statement-fixtures.js');
+ const parser=ok(await request(owner,'POST','/api/bank-statements/setup',{locale:'en-IE'})).parser,raw=bankRawFixture(),documents=[];
+ for(const label of ['first','related']){const source=await upload(owner,parser.id,Buffer.from('SYNTHETIC BANK RESTORE '+label),'synthetic-bank-'+label+'.txt');setBankFixtureProvider(raw);assert.equal(await worker.processOneCoreJob(source.jobId),true);documents.push(source);}
+ worker.setExtractionProvider(undefined);
+ let run=ok(await request(owner,'GET',`/api/bank-statements/${documents[0].document.id}`)).runs[0];const values=structuredClone(run.bankValues);values.accounts[0].transactions[0].description='Corrected wrapped description\nPreserved after restore';
+ run=ok(await request(owner,'POST',`/api/runs/${run.id}/corrections`,{values,expectedRevision:run.effectiveRevision})).run;
+ assert.ok(run.bankIssues.some((issue:any)=>issue.code==='possible_duplicate_transaction'));assert.ok(run.bankIssues.some((issue:any)=>issue.code==='statement_period_overlap'));
+ const approval=ok(await request(owner,'POST',`/api/runs/${run.id}/approve`,{expectedRevision:run.effectiveRevision,bankReviewToken:run.bankReviewToken,acknowledgeBankWarnings:true})).approval;
+ const exports=[];for(const format of ['csv','xlsx']){const result=ok(await request(owner,'POST','/api/exports',{workflow:'bank_statement',format,documentIds:[documents[0].document.id],revisions:[{documentId:documents[0].document.id,approvalId:approval.id}]}));exports.push({...result,format,sha256:hash(await download(owner,result.downloadUrl))});}
+ const runs=[];for(const source of documents)runs.push(ok(await request(owner,'GET',`/api/bank-statements/${source.document.id}`)).runs[0]);
+ const indexes=await bankIndexState(owner.workspace.id);assert.equal(indexes.accounts.length,2);assert.equal(indexes.transactions.length,4);assert.ok(indexes.accounts.every(row=>row.statement_start==='2026-09-01'&&row.statement_end==='2026-09-30'));
+ // An aged cleaned capability has no active signed upload or staging object, but
+ // its chosen locale must survive the same binary table capture as live columns.
+ const uploadId=randomUUID(),first=documents[0];
+ const reservation=(await db.adminPool.query("insert into direct_uploads(id,workspace_id,parser_id,created_by,storage_key,filename,expected_bytes,expected_sha256,state,document_id,job_id,bank_locale,expires_at,cleanup_after) values($1,$2,$3,$4,$5,'',1,$6,'cleaned',$7,$8,'en-IE',now()-interval '1 day',now()-interval '1 day') returning id,document_id,job_id,bank_locale,state",[uploadId,owner.workspace.id,parser.id,owner.user.id,owner.workspace.id+'/'+uploadId,hash('synthetic cleaned upload'),first.document.id,first.jobId])).rows[0];
+ return {parser,documents,runs,indexes,exports,approval,reservation};
+}
+async function verifyBankStatements(owner:Account,other:Account,bank:any){
+ assert.deepEqual(await bankIndexState(owner.workspace.id),bank.indexes);
+ assert.deepEqual((await db.adminPool.query('select id,document_id,job_id,bank_locale,state from direct_uploads where id=$1',[bank.reservation.id])).rows[0],bank.reservation);
+ for(const [index,source] of bank.documents.entries()){const current=ok(await request(owner,'GET',`/api/bank-statements/${source.document.id}`)).runs[0];assert.deepEqual(current,bank.runs[index]);assert.equal((await request(other,'GET',`/api/bank-statements/${source.document.id}`)).statusCode,404);}
+ await db.withWorkspace(other.workspace.id,async c=>{assert.equal((await c.query('select 1 from bank_statement_accounts where workspace_id=$1',[owner.workspace.id])).rowCount,0);assert.equal((await c.query('select 1 from bank_statement_transactions where workspace_id=$1',[owner.workspace.id])).rowCount,0);});
+ checks.bankDateIndexesContextsIdentitiesCorrectionsApprovalsAndTenantIsolation=true;
+ for(const entry of bank.exports){const bytes=await download(owner,entry.downloadUrl);assert.equal(hash(bytes),entry.sha256);assert.equal((await request(other,'GET',entry.downloadUrl)).statusCode,404);if(entry.format==='csv'){assert.match(bytes.toString(),/Corrected wrapped description/);assert.match(bytes.toString(),/00001234/);assert.match(bytes.toString(),/20\.00/);}}
+ checks.bankExactApprovedCsvExcelSnapshotsSurviveRestore=true;
+ const before=bank.runs[0],related=bank.runs[1],values=structuredClone(related.bankValues);values.accounts[0].statement_start='2026-08-31';
+ ok(await request(owner,'POST',`/api/runs/${related.id}/corrections`,{values,expectedRevision:related.effectiveRevision}));
+ assert.equal((await request(owner,'POST',`/api/runs/${before.id}/approve`,{expectedRevision:before.effectiveRevision,bankReviewToken:before.bankReviewToken,acknowledgeBankWarnings:true})).statusCode,409);
+ const refreshed=ok(await request(owner,'GET',`/api/bank-statements/${bank.documents[0].document.id}`)).runs[0];assert.deepEqual(refreshed.bankIssues,before.bankIssues);assert.notEqual(refreshed.bankReviewToken,before.bankReviewToken);
+ assert.deepEqual((await db.adminPool.query('select values,bank_review from approvals where id=$1',[bank.approval.id])).rows[0],{values:bank.approval.values,bank_review:bank.approval.bankReview});
+ for(const entry of bank.exports)assert.equal(hash(await download(owner,entry.downloadUrl)),entry.sha256);
+ checks.bankRestoredCrossFileWarningsRequireFreshAcknowledgement=true;
+}
 try{
  for(const [pool,role]of [[db.adminPool,cfg.adminRole],[db.appPool,cfg.appRole]] as const){const r=(await pool.query("select current_database() db,current_schema() schema,current_user role,inet_server_addr() address")).rows[0];assert.equal(r.db,cfg.database.database);assert.equal(r.schema,'folio');assert.equal(r.role,role);assert.equal(r.address,null);}
  if(phase==='blocked'){
@@ -152,6 +191,10 @@ try{
   const mapping=ok(await request(owner,'POST','/api/export-mappings',{parserId:parser.id,name:'Preserved typed columns',columns}));
   const schema2=ok(await request(owner,'POST',`/api/parsers/${parser.id}/schema`,schema)).schema;
   const queued=await upload(owner,parser.id,Buffer.from(sourceText.replace('000042','QUEUED-42')),'queued.txt');
+  const odtBytes=await fs.readFile(path.join(root,'fixtures/source-formats/synthetic-receipt.odt'));
+  const odtQueued=await upload(owner,parser.id,odtBytes,'synthetic-restored.odt');
+  assert.equal(odtQueued.document.mimeType,'application/vnd.oasis.opendocument.text');
+  assert.equal(odtQueued.document.pageCount,1);
   const otherDoc=await upload(other,otherParser.id,Buffer.from(sourceText.replace('000042','OTHER-42')),'other.txt');
   // Model the two pre-region job policies explicitly; restore must not upgrade
   // their selector or manufacture a native-template snapshot.
@@ -209,11 +252,11 @@ try{
   const deliveryId=randomUUID();await db.adminPool.query("insert into webhook_deliveries(id,workspace_id,integration_id,event_key,payload) values($1,$2,$3,'owned-backup-delivery',$4)",[deliveryId,owner.workspace.id,integrationId,JSON.stringify({synthetic:true,reference:'CONTROLLED-OUTBOX'})]);
   const deletionKey=owner.workspace.id+'/'+randomUUID();await fs.writeFile(path.join(cfg.storageDir,deletionKey),Buffer.from('SYNTHETIC PENDING DELETION'));await db.adminPool.query('insert into file_deletions(workspace_id,storage_key) values($1,$2)',[owner.workspace.id,deletionKey]);
   const emailCanary=encryptSecret(JSON.stringify({to:owner.email,subject:'Synthetic restore message',text:'Controlled fixture only'}));await db.adminPool.query("insert into account_email_outbox(user_id,kind,payload_ciphertext,expires_at) values($1,'password_changed',$2,now()+interval '1 day')",[owner.user.id,emailCanary]);
-  const native=await seedNativeTemplates(owner);
+  const native=await seedNativeTemplates(owner),bank=await seedBankStatements(owner);
   const originals=[];for(const row of(await db.adminPool.query('select id,storage_key,sha256,workspace_id from documents order by id')).rows)originals.push({...row,actualSha256:hash(await fs.readFile(path.join(cfg.storageDir,row.storage_key)))});
-  const fixture={accounts,parserId:parser.id,otherParserId:otherParser.id,ordinary,queued,otherDoc,native,runId:runDetail.id,approvalId:approval.id,corrected,normalized:runDetail.normalizedValues,raw:runDetail.rawValues,exports,template,mapping,schema2,split,splitRequestId,splitOptions,pdfSha256:hash(pdfBytes),storedSourceId,storedSourceSha256,storedOptions,storedRequestId,storedSplit,undoneRequestId,undoneSplit,tiffOriginal,tiffOptions,tiffRequestId,tiffUndoneId,tiffSplit,tiffUndone,tiffSha256:hash(tiffBytes),suggestions,splitSuggestionRows,splitSuggestionObjects,archive,zipRequestId,zipOptions,zipSha256:hash(zipBytes),originals,integrationId,canarySha256:hash(canary),deliveryId,deletionKey,usage:await ledger()};
+  const fixture={accounts,parserId:parser.id,otherParserId:otherParser.id,ordinary,queued,odtQueued,otherDoc,native,bank,runId:runDetail.id,approvalId:approval.id,corrected,normalized:runDetail.normalizedValues,raw:runDetail.rawValues,exports,template,mapping,schema2,split,splitRequestId,splitOptions,pdfSha256:hash(pdfBytes),storedSourceId,storedSourceSha256,storedOptions,storedRequestId,storedSplit,undoneRequestId,undoneSplit,tiffOriginal,tiffOptions,tiffRequestId,tiffUndoneId,tiffSplit,tiffUndone,tiffSha256:hash(tiffBytes),suggestions,splitSuggestionRows,splitSuggestionObjects,archive,zipRequestId,zipOptions,zipSha256:hash(zipBytes),originals,integrationId,canarySha256:hash(canary),deliveryId,deletionKey,usage:await ledger()};
   await fs.writeFile(path.join(run,'source.pdf'),pdfBytes,{mode:0o600});await fs.writeFile(path.join(run,'source.zip'),zipBytes,{mode:0o600});await write('fixture-private.json',fixture);
-  await write('runtime-seed.json',{accounts:2,workspaces:2,documents:originals.length,exports:6,schemaVersions:5,nativeTemplates:{completed:1,queuedPinnedRevision:1,savedCurrentRevision:2,independentCopies:1,closedMutations:1},splitSuggestions:{queued:1,ready:1,applied:1,undone:1,expired:1,controlledProviderCalls:controlledSplitCalls},syntheticCanaries:['encrypted integration','pending webhook','pending account email','pending file deletion'],forbiddenNetwork});
+  await write('runtime-seed.json',{accounts:2,workspaces:2,documents:originals.length,exports:8,schemaVersions:6,bankStatements:{documents:2,accountDateRows:2,transactionFingerprints:4,approvedSnapshots:2,controlledProviderCalls:2},nativeTemplates:{completed:1,queuedPinnedRevision:1,savedCurrentRevision:2,independentCopies:1,closedMutations:1},splitSuggestions:{queued:1,ready:1,applied:1,undone:1,expired:1,controlledProviderCalls:controlledSplitCalls},syntheticCanaries:['encrypted integration','pending webhook','pending account email','pending file deletion'],forbiddenNetwork});
  }else{
   const f=JSON.parse(await fs.readFile(path.join(run,'fixture-private.json'),'utf8'));
   const owner=await login(f.accounts[0]),other=await login(f.accounts[1]);checks.login=true;
@@ -281,13 +324,23 @@ try{
   assert.deepEqual(await ledger(),f.usage);checks.expiredSplitSuggestionSourceCleanupPreservesDraftAndLedger=true;
   const cipher=(await db.adminPool.query('select secret_ciphertext from integrations where id=$1',[f.integrationId])).rows[0].secret_ciphertext;assert.equal(hash(decryptSecret(cipher)),f.canarySha256);checks.encryptionKeyCanary=true;
   await verifyNativeTemplates(owner,other,f.native,f.usage);
+  await verifyBankStatements(owner,other,f.bank);
+  assert.equal((await request(other,'GET',`/api/documents/${f.odtQueued.document.id}`)).statusCode,404);
+  assert.equal(await worker.processOneCoreJob(f.odtQueued.jobId),true);
+  assert.equal(await worker.processOneCoreJob(f.odtQueued.jobId),false);
+  const restoredOdt=ok(await request(owner,'GET',`/api/documents/${f.odtQueued.document.id}`));
+  assert.equal(restoredOdt.document.mimeType,'application/vnd.oasis.opendocument.text');
+  assert.equal(restoredOdt.runs.length,1);assert.equal(restoredOdt.jobs[0].attempts,1);
+  assert.deepEqual(restoredOdt.runs[0].effectiveValues,{reference:'000042',amount:12.5,paid:false,missing_date:null});
+  assert.equal(restoredOdt.runs[0].normalizationContext.version,'regional-v2');
+  assert.deepEqual(await ledger(),f.usage);checks.queuedOdtOriginalAndPinnedNormalizationResumeOnceWithoutRecharging=true;
   assert.equal(await worker.processOneCoreJob(f.queued.jobId),true);assert.equal(await worker.processOneCoreJob(f.queued.jobId),false);const queued=ok(await request(owner,'GET',`/api/documents/${f.queued.document.id}`));assert.equal(queued.runs.length,1);assert.equal(queued.jobs[0].attempts,1);assert.equal(queued.jobs[0].state,'completed');assert.equal(queued.runs[0].effectiveValues.reference,'QUEUED-42');assert.deepEqual(await ledger(),f.usage);checks.deterministicQueuedJobOnceWithoutRecharging=true;
   assert.equal(queued.runs[0].selection.policy,'complete-v1');assert.equal(queued.runs[0].templateSnapshot,null);
   assert.equal(await worker.processOneCoreJob(f.otherDoc.jobId),true);assert.equal(await worker.processOneCoreJob(f.otherDoc.jobId),false);const legacy=ok(await request(other,'GET',`/api/documents/${f.otherDoc.document.id}`));assert.equal(legacy.runs[0].effectiveValues.reference,'OTHER-42');assert.equal(legacy.runs[0].selection,null);assert.equal(legacy.runs[0].templateSnapshot,null);assert.deepEqual(await ledger(),f.usage);checks.legacyAndCompleteV1QueuedSelectorsRemainUnchanged=true;
   const {deleteStoredFile}=await import('../../server/core/retention.js');assert.equal(await deleteStoredFile(owner.workspace.id,f.deletionKey),'complete');assert.equal(await deleteStoredFile(owner.workspace.id,f.deletionKey),'complete');assert.equal(await fs.stat(path.join(cfg.storageDir,f.deletionKey)).then(()=>true,()=>false),false);checks.pendingDeletionResumed=true;
   const {processOneDelivery,signDelivery}=await import('../../server/integrations/webhooks.js');let deliveries=0;await processOneDelivery({workspaceId:owner.workspace.id,transport:async(_url,options:any)=>{deliveries++;const body=options.body;assert.equal(options.headers['X-Folio-Signature'],'v1='+signDelivery(decryptSecret(cipher),options.headers['X-Folio-Timestamp'],body));return{status:204,body:'',headers:{}} as any;}});await processOneDelivery({workspaceId:owner.workspace.id,transport:async()=>{deliveries++;throw new Error('No duplicate fixture delivery');}});assert.equal(deliveries,1);assert.equal((await db.adminPool.query('select status from webhook_deliveries where id=$1',[f.deliveryId])).rows[0].status,'delivered');checks.pendingOutboxControlledDeliveryOnce=true;
   assert.equal((await db.adminPool.query("select count(*)::int n from account_email_outbox where state='pending'")).rows[0].n,1);checks.pendingEmailPreservedWithoutSending=true;
-  await write('runtime-verification.json',{checks,forbiddenNetwork,realProviderCalls:0,forbiddenExtractionCalls,controlledSplitProviderCalls:controlledSplitCalls,restoredSplitSuggestions:f.splitSuggestionRows.length,controlledWebhookDeliveries:deliveries,verifiedLiveOriginals:f.originals.length,savedExports:6,accounts:2});
+  await write('runtime-verification.json',{checks,forbiddenNetwork,realProviderCalls:0,forbiddenExtractionCalls,controlledSplitProviderCalls:controlledSplitCalls,restoredSplitSuggestions:f.splitSuggestionRows.length,controlledWebhookDeliveries:deliveries,verifiedLiveOriginals:f.originals.length,savedExports:8,restoredBankAccountDateRows:f.bank.indexes.accounts.length,restoredBankTransactionFingerprints:f.bank.indexes.transactions.length,accounts:2});
  }
  }
  assert.equal(forbiddenNetwork,0);

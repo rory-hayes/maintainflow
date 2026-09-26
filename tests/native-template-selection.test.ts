@@ -23,6 +23,17 @@ const rules:PdfRegionRule[]=[['reference','Reference:'],['amount','Amount:'],['e
 const definition:TemplateDefinition={kind:'native-pdf-region-v1',name:'Owned invoice regions',matchText:'Reference:',enabled:true,rules};
 const saved={...definition,id:'00000000-0000-4000-8000-000000000001',revision:3,created_at:'2026-01-02T00:00:00Z'};
 
+test('native timestamp regions use the saved timezone and preserve repeated clock times for review',()=>{
+ const timestampSchema:ParserSchema={fields:[{key:'reference',label:'Reference',type:'timestamp',required:true}]};
+ const template={...saved,rules:[rules[0]]};
+ for(const [text,expected,issue] of [['2026-07-15 14:30','2026-07-15T13:30:00Z',undefined],['2026-10-25 01:30','2026-10-25 01:30','timestamp_ambiguous']] as const){
+  const sourceGeometry=geometry();sourceGeometry.pages[0].items[1].text=text;
+  const result=selectCurrentTemplateExtraction(source,timestampSchema,'en-IE',[template],'rules',sourceGeometry,'Europe/Dublin');
+  assert.equal(result.selection.outcome,'template');assert.equal(result.result?.rawValues.reference,text);assert.equal(result.result?.normalizedValues.reference,expected);
+  assert.deepEqual(result.result?.issues.map(value=>value.code),issue?[issue]:[]);
+ }
+});
+
 test('native regions normalize exact source values including false and retain geometry plus immutable definition provenance',()=>{
   const result=selectCurrentTemplateExtraction(source,schema,'en-IE',[saved],'ai',geometry());
   assert.equal(result.selection.policy,'complete-regions-v1');assert.equal(result.selection.outcome,'template');assert.equal(result.selection.template?.kind,'native-pdf-region-v1');assert.equal(result.selection.template?.revision,3);

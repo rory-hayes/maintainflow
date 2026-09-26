@@ -7,7 +7,7 @@ import {appendDocumentEvent} from '../core/document-events.js';
 import {renderExport,type ExportRecord} from './export-format.js';
 
 import {exportColumns as columns,exportMappingInput,exportLineItems} from './export-input.js';
-const optionsSchema = z.object({format:z.enum(['csv','xlsx','json']),columns:columns.optional(),lineItems:exportLineItems.optional()});
+const optionsSchema = z.object({format:z.enum(['csv','xlsx','json']),columns:columns.optional(),lineItems:exportLineItems.optional(),workflow:z.literal('bank_statement').optional()});
 const canonicalUuid=z.uuid().transform(value=>value.toLowerCase());
 const exportSchema = optionsSchema.extend({documentIds:z.array(canonicalUuid).min(1).max(100),revisions:z.array(z.object({documentId:canonicalUuid,approvalId:canonicalUuid})).max(100).optional()});
 const hostedExportMaxBytes=4*1024*1024;
@@ -27,8 +27,15 @@ export async function registerExports(app:FastifyInstance, services:{render?:typ
     const outcome=await withWorkspace(actor.workspaceId,async client=> {
       const uniqueIds=[...new Set(documentIds)];
       // Lock in one stable order so approval, export and deletion cannot interleave.
-      const found=await client.query(`SELECT d.id,d.name,d.approved_run_id FROM documents d WHERE d.id=ANY($1::uuid[]) AND d.workspace_id=$2 ORDER BY d.id FOR UPDATE OF d`,[uniqueIds,actor.workspaceId]);
+      const found=await client.query(`SELECT d.id,d.name,d.approved_run_id,p.use_case FROM documents d JOIN parsers p ON p.id=d.parser_id AND p.workspace_id=d.workspace_id WHERE d.id=ANY($1::uuid[]) AND d.workspace_id=$2 ORDER BY d.id FOR UPDATE OF d`,[uniqueIds,actor.workspaceId]);
       if(found.rows.length!==uniqueIds.length) notFound('One or more documents were not found.');
+      const bankCount=found.rows.filter(document=>document.use_case==='bank_statement').length;
+      if(bankCount||options.workflow==='bank_statement'){
+        if(bankCount!==found.rows.length)badRequest('Export bank statements separately from other document workflows.');
+        if(options.format==='json'||options.columns||options.lineItems)badRequest('Bank statements use the fixed CSV or Excel transaction export.');
+        options.workflow='bank_statement';
+        if(revisions&&new Set(revisions.map(revision=>revision.documentId)).size!==revisions.length)badRequest('Select one approval revision per statement.');
+      }
       const records:ExportRecord[]=[];
       // Lock order prevents deadlocks; rendering follows the caller's selection.
       const byId=new Map(found.rows.map(document=>[document.id,document]));
@@ -39,6 +46,7 @@ export async function registerExports(app:FastifyInstance, services:{render?:typ
         const approval=await client.query(`SELECT a.*, (SELECT count(*)::int FROM corrections c WHERE c.run_id=a.run_id AND c.created_at<=a.created_at) revision FROM approvals a JOIN extraction_runs r ON r.id=a.run_id WHERE r.document_id=$1 AND a.workspace_id=$2 AND (($3::uuid is not null AND a.id=$3) OR ($3::uuid is null AND a.run_id=$4)) ORDER BY a.created_at DESC,a.id DESC LIMIT 1`,[document.id,actor.workspaceId,selection?.approvalId||null,document.approved_run_id]);
         if(!approval.rowCount) badRequest('An approved revision is no longer available.');
         const row=approval.rows[0];
+        if(options.workflow==='bank_statement'&&row.bank_review?.version!==1)badRequest('Review and approve this bank statement before exporting.');
         records.push({documentId:document.id,filename:document.name,runId:row.run_id,revision:row.revision,approvalId:row.id,correctionId:row.correction_id,values:row.values});
       }
       const id=randomUUID();

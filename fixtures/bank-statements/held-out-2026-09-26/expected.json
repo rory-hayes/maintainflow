@@ -1,0 +1,84 @@
+{
+  "packId": "maintainflow-synthetic-bank-acceptance-2026-09-26",
+  "status": "prepared_not_provider_evaluated",
+  "authorship": "Source statements and this expected manifest were authored separately as literal synthetic data. No application extraction, normalization or reconciliation code generated these answers.",
+  "counting": {"independentCases": 2, "nativeFiles": 2, "imageOnlyDerivatives": 1, "independentTransactions": 18},
+  "comparisonRules": {
+    "money": "Canonical decimal strings; no binary floating point. An absent debit, credit or balance is null, not an invented zero.",
+    "descriptions": "Join source line wraps with one space; preserve the words, punctuation and order.",
+    "identities": "expectedRowId identifies the printed item only. It is not a required application-generated transaction ID. Record the application's stable IDs separately and verify they survive edits/reordering.",
+    "raw": "Retain the source date, number and sign strings separately from normalized values. Raw description line breaks may follow available extraction evidence.",
+    "missing": "Do not infer the missing opening or running balance even where other values imply a possible amount.",
+    "stages": "Raw values describe source preservation. Normalized values describe economic reviewer targets, not guaranteed first-pass application normalization. Literal signed debit values may remain negative and require signed_column_amount review under the current preset.",
+    "approval": "A blocking statement-total mismatch must refuse approval/export. Do not replace the literal stated total with the row sum merely to pass. Keep case B unapproved unless separate evidence justifies an audited resolution."
+  },
+  "cases": [
+    {
+      "caseId": "MF-HO-A",
+      "sourceFile": "case-a-eur-multipage-native.pdf",
+      "derivedFile": "case-a-eur-multipage-raster.pdf",
+      "pages": 2,
+      "accounts": [{
+        "expectedAccountId": "A-EUR",
+        "bankName": "Example Delta Bank",
+        "accountIdentifier": "TEST-EUR-286",
+        "currency": "EUR",
+        "rawMetadata": {"statementStart": "01/08/2026", "statementEnd": "31/08/2026", "openingBalance": "2.500,00", "closingBalance": "2.267,51", "totalDebits": "1.708,14", "totalCredits": "1.475,65"},
+        "normalizedMetadata": {"statementStart": "2026-08-01", "statementEnd": "2026-08-31", "openingBalance": "2500.00", "closingBalance": "2267.51", "totalDebits": "1708.14", "totalCredits": "1475.65", "balanceConvention": "credit_increases"},
+        "transactions": [
+          {"expectedRowId":"A-01","page":1,"printedItem":"01","raw":{"date":"02/08/2026","description":"Workshop materials\nAugust repair and maintenance supplies","reference":"A-1001","debit":"125,50","credit":null,"balance":"2.374,50"},"normalized":{"date":"2026-08-02","description":"Workshop materials August repair and maintenance supplies","reference":"A-1001","debit":"125.50","credit":null,"balance":"2374.50"}},
+          {"expectedRowId":"A-02","page":1,"printedItem":"02","raw":{"date":"03/08/2026","description":"Customer settlement\nInvoice INV-2048, installation project","reference":"A-1002","debit":null,"credit":"1.200,00","balance":"3.574,50"},"normalized":{"date":"2026-08-03","description":"Customer settlement Invoice INV-2048, installation project","reference":"A-1002","debit":null,"credit":"1200.00","balance":"3574.50"}},
+          {"expectedRowId":"A-03","page":1,"printedItem":"03","raw":{"date":"05/08/2026","description":"Equipment rental daily charge","reference":"RENT-DAILY","debit":"49,95","credit":null,"balance":"3.524,55"},"normalized":{"date":"2026-08-05","description":"Equipment rental daily charge","reference":"RENT-DAILY","debit":"49.95","credit":null,"balance":"3524.55"}},
+          {"expectedRowId":"A-04","page":1,"printedItem":"04","raw":{"date":"05/08/2026","description":"Equipment rental daily charge","reference":"RENT-DAILY","debit":"49,95","credit":null,"balance":"3.474,60"},"normalized":{"date":"2026-08-05","description":"Equipment rental daily charge","reference":"RENT-DAILY","debit":"49.95","credit":null,"balance":"3474.60"}},
+          {"expectedRowId":"A-05","page":1,"printedItem":"05","raw":{"date":"12/08/2026","description":"Premises cleaning\nQuarterly deep-clean service","reference":"A-1005","debit":"320,00","credit":null,"balance":"3.154,60"},"normalized":{"date":"2026-08-12","description":"Premises cleaning Quarterly deep-clean service","reference":"A-1005","debit":"320.00","credit":null,"balance":"3154.60"}},
+          {"expectedRowId":"A-06","page":1,"printedItem":"06","raw":{"date":"15/08/2026","description":"Credit interest","reference":"A-1006","debit":null,"credit":"0,40","balance":"3.155,00"},"normalized":{"date":"2026-08-15","description":"Credit interest","reference":"A-1006","debit":null,"credit":"0.40","balance":"3155.00"}},
+          {"expectedRowId":"A-07","page":2,"printedItem":"07","raw":{"date":"19/08/2026","description":"Equipment servicing\nReplacement filter, fitting and inspection","reference":"A-1007","debit":"1.050,75","credit":null,"balance":"2.104,25"},"normalized":{"date":"2026-08-19","description":"Equipment servicing Replacement filter, fitting and inspection","reference":"A-1007","debit":"1050.75","credit":null,"balance":"2104.25"}},
+          {"expectedRowId":"A-08","page":2,"printedItem":"08","raw":{"date":"20/08/2026","description":"Supplier refund\nReturned unused component","reference":"A-1008","debit":null,"credit":"275,25","balance":"2.379,50"},"normalized":{"date":"2026-08-20","description":"Supplier refund Returned unused component","reference":"A-1008","debit":null,"credit":"275.25","balance":"2379.50"}},
+          {"expectedRowId":"A-09","page":2,"printedItem":"09","raw":{"date":"28/08/2026","description":"Account service fee","reference":"A-1009","debit":"12,00","credit":null,"balance":"2.367,50"},"normalized":{"date":"2026-08-28","description":"Account service fee","reference":"A-1009","debit":"12.00","credit":null,"balance":"2367.50"}},
+          {"expectedRowId":"A-10","page":2,"printedItem":"10","raw":{"date":"31/08/2026","description":"Office consumables","reference":"A-1010","debit":"99,99","credit":null,"balance":"2.267,51"},"normalized":{"date":"2026-08-31","description":"Office consumables","reference":"A-1010","debit":"99.99","credit":null,"balance":"2267.51"}}
+        ],
+        "checks": {"rowCount":10,"computedDebits":"1708.14","computedCredits":"1475.65","netMovement":"-232.49","openingPlusMovement":"2267.51","closingBalanceMatches":true,"statementTotalsMatch":true,"allRunningBalancesMatch":true,"legitimateRepeatedRows":["A-03","A-04"],"requiredReview":"Keep both repeated payments. A matching reconciliation must not be presented as proof of extraction accuracy."}
+      }],
+      "crossFileChecks": "The native and raster files depict the same statement. When deliberately uploaded together they should warn about overlap/possible duplicates, remain separate documents and never silently remove either source or either legitimate repeated row."
+    },
+    {
+      "caseId": "MF-HO-B",
+      "sourceFile": "case-b-multiple-accounts-native.pdf",
+      "pages": 2,
+      "accounts": [
+        {
+          "expectedAccountId": "B-USD",
+          "bankName": "Example Harbour Bank",
+          "accountIdentifier": "TEST-USD-041",
+          "currency": "USD",
+          "rawMetadata": {"statementStart":"2026-09-01","statementEnd":"2026-09-30","openingBalance":"Not provided","closingBalance":"3,500.00","totalDebits":"750.70","totalCredits":"3,450.75"},
+          "normalizedMetadata": {"statementStart":"2026-09-01","statementEnd":"2026-09-30","openingBalance":null,"closingBalance":"3500.00","totalDebits":"750.70","totalCredits":"3450.75","balanceConvention":"credit_increases"},
+          "transactions": [
+            {"expectedRowId":"B-U1","page":1,"printedItem":"U1","raw":{"date":"2026-09-04","description":"Incoming customer payment\nSeptember workshop reservation","reference":"USD-901","signedAmount":"+3,450.75","balance":"4,250.75"},"normalized":{"date":"2026-09-04","description":"Incoming customer payment September workshop reservation","reference":"USD-901","debit":null,"credit":"3450.75","balance":"4250.75"}},
+            {"expectedRowId":"B-U2","page":1,"printedItem":"U2","raw":{"date":"2026-09-10","description":"Cloud hosting\nSeptember service period","reference":"USD-902","signedAmount":"-120.50","balance":null},"normalized":{"date":"2026-09-10","description":"Cloud hosting September service period","reference":"USD-902","debit":"120.50","credit":null,"balance":null}},
+            {"expectedRowId":"B-U3","page":1,"printedItem":"U3","raw":{"date":"2026-09-14","description":"Office supplies","reference":"USD-903","signedAmount":"(30.25)","balance":"4,100.00"},"normalized":{"date":"2026-09-14","description":"Office supplies","reference":"USD-903","debit":"30.25","credit":null,"balance":"4100.00"}},
+            {"expectedRowId":"B-U4","page":1,"printedItem":"U4","raw":{"date":"2026-09-29","description":"Transfer to reserve","reference":"USD-904","signedAmount":"-600.00","balance":"3,500.00"},"normalized":{"date":"2026-09-29","description":"Transfer to reserve","reference":"USD-904","debit":"600.00","credit":null,"balance":"3500.00"}}
+          ],
+          "checks": {"rowCount":4,"computedDebits":"750.75","computedCredits":"3450.75","netMovement":"2700.00","openingPlusMovement":null,"closingBalanceMatches":null,"statementDebitTotalMatches":false,"declaredDebitsMinusComputed":"-0.05","statementCreditTotalMatches":true,"missingValues":["openingBalance","B-U2.balance"],"requiredReview":"Show the five-cent debit-total discrepancy and unavailable opening/running values. Retain the stated total 750.70 separately from the computed total 750.75. Verify that the unresolved blocking mismatch refuses approval/export; acknowledgement must not bypass it. Do not change the source total just to pass, invent an 800.00 opening balance or invent a 4130.25 running balance."}
+        },
+        {
+          "expectedAccountId": "B-EUR",
+          "bankName": "Example Harbour Bank",
+          "accountIdentifier": "TEST-EUR-057",
+          "currency": "EUR",
+          "rawMetadata": {"statementStart":"2026-09-01","statementEnd":"2026-09-30","openingBalance":"1,250.00","closingBalance":"1,950.00","totalDebits":"325.35","totalCredits":"1,025.35"},
+          "normalizedMetadata": {"statementStart":"2026-09-01","statementEnd":"2026-09-30","openingBalance":"1250.00","closingBalance":"1950.00","totalDebits":"325.35","totalCredits":"1025.35","balanceConvention":"credit_increases"},
+          "transactions": [
+            {"expectedRowId":"B-E1","page":2,"printedItem":"E1","raw":{"date":"2026-09-03","description":"Service payment received","reference":"EUR-901","signedAmount":"+1,000.00","balance":"2,250.00"},"normalized":{"date":"2026-09-03","description":"Service payment received","reference":"EUR-901","debit":null,"credit":"1000.00","balance":"2250.00"}},
+            {"expectedRowId":"B-E2","page":2,"printedItem":"E2","raw":{"date":"2026-09-06","description":"Workshop lease adjustment","reference":"EUR-902","signedAmount":"(250.25)","balance":"1,999.75"},"normalized":{"date":"2026-09-06","description":"Workshop lease adjustment","reference":"EUR-902","debit":"250.25","credit":null,"balance":"1999.75"}},
+            {"expectedRowId":"B-E3","page":2,"printedItem":"E3","raw":{"date":"2026-09-17","description":"Telephone and data service","reference":"EUR-903","signedAmount":"-75.10","balance":"1,924.65"},"normalized":{"date":"2026-09-17","description":"Telephone and data service","reference":"EUR-903","debit":"75.10","credit":null,"balance":"1924.65"}},
+            {"expectedRowId":"B-E4","page":2,"printedItem":"E4","raw":{"date":"2026-09-30","description":"Returned payment fee refund","reference":"EUR-904","signedAmount":"+25.35","balance":"1,950.00"},"normalized":{"date":"2026-09-30","description":"Returned payment fee refund","reference":"EUR-904","debit":null,"credit":"25.35","balance":"1950.00"}}
+          ],
+          "checks": {"rowCount":4,"computedDebits":"325.35","computedCredits":"1025.35","netMovement":"700.00","openingPlusMovement":"1950.00","closingBalanceMatches":true,"statementTotalsMatch":true,"allRunningBalancesMatch":true}
+        }
+      ],
+      "groupingChecks": "Exactly two account/currency groups and eight transactions. Never combine USD and EUR totals or join a running-balance chain across the page/account boundary.",
+      "approvalExpectation": "Blocked while the statement-total mismatch or signed-column blocking errors remain unresolved. Record final exports as not executed unless an evidence-backed, audited resolution permits approval."
+    }
+  ]
+}

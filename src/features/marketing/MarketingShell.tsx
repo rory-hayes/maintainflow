@@ -4,11 +4,12 @@ import { Menu, X } from 'lucide-react';
 
 const navigation = [
   { label: 'Product', href: '/#product' },
+  { label: 'Bank statements', href: '/bank-statement-converter' },
   { label: 'How it works', href: '/#workflow' },
   { label: 'Pricing', href: '/#pricing' },
 ];
 
-export function MarketingHeader() {
+export function MarketingHeader({startTo='/sign-up',startLabel='Start extracting',signInTo='/sign-in'}:{startTo?:string;startLabel?:string;signInTo?:string}={}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
 
@@ -17,7 +18,7 @@ export function MarketingHeader() {
   }
 
   return (
-    <header className="marketing-header">
+    <header className="marketing-header marketing-header-with-bank">
       <div className="marketing-container marketing-header-inner">
         <Link className="folio-brand" to="/" aria-label="MaintainFlow home">MaintainFlow</Link>
         <nav className="marketing-desktop-nav" aria-label="Main navigation">
@@ -25,8 +26,8 @@ export function MarketingHeader() {
           <Link to="/help">Resources</Link>
         </nav>
         <div className="marketing-header-actions">
-          <Link className="marketing-sign-in" to="/sign-in">Sign in</Link>
-          <Link className="button primary marketing-cta" to="/sign-up">Start extracting</Link>
+          <Link className="marketing-sign-in" to={signInTo}>Sign in</Link>
+          <Link className="button primary marketing-cta" to={startTo}>{startLabel}</Link>
         </div>
         <button
           ref={menuButton}
@@ -54,8 +55,8 @@ export function MarketingHeader() {
         >
           {navigation.map((item) => <a key={item.label} href={item.href} onClick={closeMenu}>{item.label}</a>)}
           <Link to="/help" onClick={closeMenu}>Resources</Link>
-          <Link to="/sign-in" onClick={closeMenu}>Sign in</Link>
-          <Link className="button primary marketing-cta" to="/sign-up" onClick={closeMenu}>Start extracting</Link>
+          <Link to={signInTo} onClick={closeMenu}>Sign in</Link>
+          <Link className="button primary marketing-cta" to={startTo} onClick={closeMenu}>{startLabel}</Link>
         </nav>
       ) : null}
     </header>
@@ -73,6 +74,7 @@ export function MarketingFooter() {
         <nav aria-label="Product links">
           <h3>Product</h3>
           <a href="/#product">Documents</a>
+          <Link to="/bank-statement-converter">Bank statements</Link>
           <Link to="/sign-up">Parsers</Link>
           <a href="/#integrations">Integrations</a>
         </nav>

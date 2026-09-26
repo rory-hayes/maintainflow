@@ -1,19 +1,37 @@
 import type {PageText,ParserSchema,SchemaField,ExtractionResult,Evidence} from '../../shared/types.js';
 import {validateValues} from './schema.js';
+import {normalizeTimestamp,normalizeTimestampCorrections} from './timestamps.js';
 import {normalizeWrittenDate} from './written-date.js';
+import {normalizeSourceNumber} from './source-numbers.js';
+import {regionalSourceLocale} from './source-locale.js';
+import {fieldSourceLocale,normalizationPolicy,type NormalizationPolicy} from '../../shared/source-formats.js';
 const currencies=new Set(Intl.supportedValuesOf('currency'));
 const escaped=(v:string)=>v.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-export function normalizeValue(value:unknown,field:SchemaField,locale:string):unknown{
-if(value===null||value===undefined||value==='')return field.default===undefined?null:field.default;
-if(field.type==='array')return Array.isArray(value)?value.map(row=>Object.fromEntries((field.fields||[]).map(f=>[f.key,normalizeValue((row as any)?.[f.key],f,locale)]))):value;
-if(field.type==='object')return typeof value==='object'?Object.fromEntries((field.fields||[]).map(f=>[f.key,normalizeValue((value as any)[f.key],f,locale)])):value;
+export function normalizeValue(value:unknown,field:SchemaField,locale:string,timezone?:string,policy:NormalizationPolicy=normalizationPolicy):unknown{
+if(value===null||value===undefined||value===''){if(field.default===undefined)return null;return normalizeTimestampCorrections({[field.key]:field.default},{fields:[field]},{locale,timezone,version:policy})[field.key];}
+if(field.type==='array')return Array.isArray(value)?value.map(row=>Object.fromEntries((field.fields||[]).map(f=>[f.key,normalizeValue((row as any)?.[f.key],f,locale,timezone,policy)]))):value;
+if(field.type==='object')return typeof value==='object'?Object.fromEntries((field.fields||[]).map(f=>[f.key,normalizeValue((value as any)[f.key],f,locale,timezone,policy)])):value;
+locale=fieldSourceLocale(field,locale,policy)!;
+if(field.type==='timestamp')return normalizeTimestamp(value,{locale,timezone:field.timezone??timezone,version:policy}).value;
 let str=String(value).trim();if(field.type==='string'||field.type==='multiline'){if(field.transform==='uppercase')str=str.toUpperCase();if(field.transform==='lowercase')str=str.toLowerCase();return str;}
-if(field.type==='number'||field.type==='currency'){if(typeof value==='number')return value;const parts=new Intl.NumberFormat(locale).formatToParts(12345.6),decimal=parts.find(p=>p.type==='decimal')?.value||'.',group=parts.find(p=>p.type==='group')?.value||',';const negative=/^\(.*\)$/.test(str);if(negative)str=str.slice(1,-1);if(field.type==='currency')str=str.replace(/\p{Sc}/gu,'').replace(/\b[A-Z]{3}\b/g,code=>currencies.has(code)?'':code);str=str.replace(new RegExp(escaped(group),'g'),'').replace(decimal,'.').replace(/\s/g,'');if(!str||!/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(str))return String(value);const n=Number(str);return Number.isFinite(n)?(negative?-n:n):String(value);}
+if(field.type==='number'||field.type==='currency'){if(policy===normalizationPolicy)return normalizeSourceNumber(value,field.type,locale);if(typeof value==='number')return value;const parts=new Intl.NumberFormat(locale).formatToParts(12345.6),decimal=parts.find(p=>p.type==='decimal')?.value||'.',group=parts.find(p=>p.type==='group')?.value||',';const negative=/^\(.*\)$/.test(str);if(negative)str=str.slice(1,-1);if(field.type==='currency')str=str.replace(/\p{Sc}/gu,'').replace(/\b[A-Z]{3}\b/g,code=>currencies.has(code)?'':code);str=str.replace(new RegExp(escaped(group),'g'),'').replace(decimal,'.').replace(/\s/g,'');if(!str||!/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(str))return String(value);const n=Number(str);return Number.isFinite(n)?(negative?-n:n):String(value);}
 if(field.type==='boolean'){if(/^(true|yes|1)$/i.test(str))return true;if(/^(false|no|0)$/i.test(str))return false;return str;}
-if(field.type==='date'){if(/^\d{4}-\d{2}-\d{2}$/.test(str))return str;const m=str.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);if(m){const us=/^en-US/i.test(locale);return `${m[3]}-${(us?m[1]:m[2]).padStart(2,'0')}-${(us?m[2]:m[1]).padStart(2,'0')}`;}return normalizeWrittenDate(str,locale)??str;}
+if(field.type==='date'){
+ if(policy===normalizationPolicy){
+  if(typeof value!=='string')return value;
+  let result=str;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(str)){
+   try{const regional=regionalSourceLocale(locale);if(!regional)return value;
+    const m=str.match(/^(\d{1,2})([\/.\-])(\d{1,2})\2(\d{4})$/);if(m){if(!['month-day-year','day-month-year'].includes(regional.dateOrder))return value;const us=regional.dateOrder==='month-day-year';result=`${m[4]}-${(us?m[1]:m[3]).padStart(2,'0')}-${(us?m[3]:m[1]).padStart(2,'0')}`;}else result=normalizeWrittenDate(str,locale)??str;
+   }catch{return value;}
+  }
+  const parsed=new Date(result);return /^\d{4}-\d{2}-\d{2}$/.test(result)&&!result.startsWith('0000-')&&Number.isFinite(parsed.getTime())&&parsed.toISOString().slice(0,10)===result?result:value;
+ }
+ if(/^\d{4}-\d{2}-\d{2}$/.test(str))return str;const m=str.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);if(m){const us=/^en-US/i.test(locale);return `${m[3]}-${(us?m[1]:m[2]).padStart(2,'0')}-${(us?m[2]:m[1]).padStart(2,'0')}`;}return normalizeWrittenDate(str,locale)??str;
+}
 return str;
 }
-function cells(line:string):string[]{if(line.includes('|'))return line.split('|').map(v=>v.trim()).filter((v,i,a)=>v||i>0&&i<a.length-1);if(line.includes('\t'))return line.split('\t').map(v=>v.trim());const result:string[]=[];let value='',quoted=false;for(let i=0;i<line.length;i++){const char=line[i];if(char==='"'){if(quoted&&line[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(char===','&&!quoted){result.push(value.trim());value='';}else value+=char;}result.push(value.trim());return result;}
+function cells(line:string):string[]{if(line.includes('\t'))return line.split('\t').map(v=>v.trim());if(line.includes('|'))return line.split('|').map(v=>v.trim()).filter((v,i,a)=>v||i>0&&i<a.length-1);const result:string[]=[];let value='',quoted=false;for(let i=0;i<line.length;i++){const char=line[i];if(char==='"'){if(quoted&&line[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(char===','&&!quoted){result.push(value.trim());value='';}else value+=char;}result.push(value.trim());return result;}
 export const rulesEngine = Object.freeze({ engine: 'text-anchors', model: 'deterministic-v2' });
 const multilineLimits = { lines: 100, characters: 65_536 };
 
@@ -41,7 +59,7 @@ function captureMultiline(
   return { value: limited || !values.length ? null : values.join('\n'), text: source.join('\n'), limited };
 }
 
-function extractAnchors(pages:PageText[],schema:ParserSchema,locale:string,template:any|undefined,strict=false){
+function extractAnchors(pages:PageText[],schema:ParserSchema,locale:string,template:any|undefined,strict=false,timezone?:string,policy:NormalizationPolicy=normalizationPolicy){
   const rawValues: Record<string, unknown> = {}, evidence: Record<string, Evidence[]> = {};
   const matchedRules=new Set<string>();
   const extractionIssues: ExtractionResult['issues'] = [];
@@ -147,22 +165,22 @@ function extractAnchors(pages:PageText[],schema:ParserSchema,locale:string,templ
     }
   };
   walk(schema.fields, rawValues);
-  const normalizedValues = Object.fromEntries(schema.fields.map(field => [field.key, normalizeValue(rawValues[field.key], field, locale)]));
-  const issues = [...validateValues(normalizedValues, schema), ...extractionIssues];
+  const normalizedValues = Object.fromEntries(schema.fields.map(field => [field.key, normalizeValue(rawValues[field.key], field, locale, timezone,policy)]));
+  const issues = [...validateValues(normalizedValues, schema,{locale,timezone,version:policy}), ...extractionIssues];
   return {result:{rawValues,normalizedValues,evidence,issues,...rulesEngine} as ExtractionResult,matchedRules};
 }
 
 /** Legacy snapshots keep their original oldest-phrase matching and label fallback. */
-export function extractRules(pages:PageText[],schema:ParserSchema,locale:string,templates:any[]=[]):ExtractionResult{
+export function extractRules(pages:PageText[],schema:ParserSchema,locale:string,templates:any[]=[],timezone?:string,policy:NormalizationPolicy=normalizationPolicy):ExtractionResult{
  const text=pages.map(page=>page.text).join('\n');
  const matching=templates.filter(template=>template.enabled&&(!template.match_text||text.includes(template.match_text)));
- const result=extractAnchors(pages,schema,locale,matching[0]).result;
+ const result=extractAnchors(pages,schema,locale,matching[0],false,timezone,policy).result;
  if(matching.length>1)result.issues.push({field:'_template',code:'multiple_templates',message:'Several templates matched. The oldest matching template was used; refine exact match text.'});
  if(templates.some(template=>template.enabled)&&!matching.length)result.issues.push({field:'_template',code:'no_template',message:'No saved template matched. Field-label anchors were used.'});
  return result;
 }
 
 /** Strict source anchors are used only by versioned, complete template selection. */
-export function extractTemplateValues(pages:PageText[],schema:ParserSchema,locale:string,template:any){
- return extractAnchors(pages,schema,locale,template,true);
+export function extractTemplateValues(pages:PageText[],schema:ParserSchema,locale:string,template:any,timezone?:string,policy:NormalizationPolicy=normalizationPolicy){
+ return extractAnchors(pages,schema,locale,template,true,timezone,policy);
 }

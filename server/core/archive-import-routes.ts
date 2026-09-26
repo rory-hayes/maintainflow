@@ -13,6 +13,7 @@ import {privateStorage,safeDownloadName,validateStorageKey} from './storage.js';
 const uuid=z.string().uuid().transform(value=>value.toLowerCase());
 const idFrom=(params:unknown)=>z.object({id:uuid}).parse(params).id;
 async function multipart(request:FastifyRequest,preview:boolean){
+ z.object({bankLocale:z.never().optional()}).parse(request.query);
  let file:{bytes:Buffer;filename:string}|undefined,requestId:string|undefined,spec:ArchiveImportSpec|undefined;
  const seen=new Set<string>();
  try{for await(const part of request.parts({limits:{fileSize:config.maxBytes,files:1,fields:preview?1:2,parts:preview?2:3,fieldSize:4096}})){

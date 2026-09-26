@@ -1,0 +1,1 @@
+Clearly labelled synthetic fixtures. The native and scanned PDFs depict the same two-page statement. The PNG contains page 1 only and must not be treated as the complete two-page statement. These files demonstrate supported input handling, not measured OCR accuracy or bank compatibility. Regenerate with scripts/bank-statement-fixtures.ts.

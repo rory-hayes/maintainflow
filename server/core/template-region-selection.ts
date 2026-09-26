@@ -1,3 +1,4 @@
+import {normalizationPolicy,type NormalizationPolicy} from '../../shared/source-formats.js';
 import {createHash} from 'node:crypto';
 import type {ExtractionResult,PageText,ParserSchema,SchemaField} from '../../shared/types.js';
 import {matchPdfRegion,pdfGeometryVersion,type PdfGeometry} from '../../shared/pdf-regions.js';
@@ -52,7 +53,7 @@ function definitionSnapshot(template:any,definition:TemplateDefinition):Template
     ...(definition.kind==='native-pdf-region-v1'?{geometryVersion:pdfGeometryVersion}:{})};
 }
 
-function evaluateRegion(pages:PageText[],schema:ParserSchema,locale:string,template:any,geometry?:PdfGeometry){
+function evaluateRegion(pages:PageText[],schema:ParserSchema,locale:string,template:any,geometry?:PdfGeometry,timezone?:string,policy:NormalizationPolicy=normalizationPolicy){
   const candidate:TemplateCandidate={...identity(template),matched:false,fieldCount:0,matchedFields:0,reasons:[],unmatchedFields:[]};
   const parsed=templateDefinitionInput.safeParse(storedTemplateDefinition(template));
   if(!parsed.success||parsed.data.kind!=='native-pdf-region-v1'){candidate.reasons.push('invalid_rules');return {candidate};}
@@ -72,10 +73,10 @@ function evaluateRegion(pages:PageText[],schema:ParserSchema,locale:string,templ
     const key=prefix+field.key;
     return [field.key,field.type==='object'?collect(field.fields??[],key+'.'):captured.get(key)??null];
   }));
-  const rawValues=collect(schema.fields),normalizedValues=Object.fromEntries(schema.fields.map(field=>[field.key,normalizeValue(rawValues[field.key],field,locale)]));
-  const issues=validateValues(normalizedValues,schema),missing=missingRequired(rawValues,schema.fields);
+  const rawValues=collect(schema.fields),normalizedValues=Object.fromEntries(schema.fields.map(field=>[field.key,normalizeValue(rawValues[field.key],field,locale,timezone,policy)]));
+  const issues=validateValues(normalizedValues,schema,{locale,timezone,version:policy}),missing=missingRequired(rawValues,schema.fields);
   if(missing.length){candidate.reasons.push('missing_value');candidate.unmatchedFields.push(...missing);}
-  if(issues.length)candidate.reasons.push('invalid_value');
+  if(issues.some(issue=>!issue.code.startsWith('timestamp_')))candidate.reasons.push('invalid_value');
   candidate.reasons=[...new Set(candidate.reasons)];candidate.unmatchedFields=[...new Set(candidate.unmatchedFields)].slice(0,templateLimits.schemaFields);
   candidate.matched=candidate.reasons.length===0;
   const result:ExtractionResult={rawValues,normalizedValues,evidence,issues,engine:'native-pdf-regions',model:'deterministic-pdf-regions-v1',promptVersion:'folio-native-pdf-regions-v1'};
@@ -83,7 +84,7 @@ function evaluateRegion(pages:PageText[],schema:ParserSchema,locale:string,templ
 }
 
 /** New jobs use this version. Queued complete-v1 and legacy jobs keep their original selectors. */
-export function selectCurrentTemplateExtraction(pages:PageText[],schema:ParserSchema,locale:string,templates:any[],mode:'ai'|'rules',geometry?:PdfGeometry):{
+export function selectCurrentTemplateExtraction(pages:PageText[],schema:ParserSchema,locale:string,templates:any[],mode:'ai'|'rules',geometry?:PdfGeometry,timezone?:string,policy:NormalizationPolicy=normalizationPolicy):{
   selection:TemplateSelection;candidates:TemplateCandidate[];availableSourceText:boolean;result?:ExtractionResult;
 }{
   const enabled=(Array.isArray(templates)?templates:[]).filter(template=>template?.enabled===true),text=pages.map(page=>page.text).join('\n'),availableSourceText=Boolean(text.trim());
@@ -94,9 +95,9 @@ export function selectCurrentTemplateExtraction(pages:PageText[],schema:ParserSc
   if(enabled.length>templateLimits.templates||fields>templateLimits.schemaFields||Buffer.byteLength(text)>templateLimits.nativeBytes||enabled.some(template=>Array.isArray(template?.rules)&&template.rules.length>templateLimits.rules)||text.split(/\r?\n/).length*Math.max(1,fields)*enabled.length>templateLimits.lineFieldChecks||text.length*Math.max(1,fields)*enabled.length>templateLimits.characterFieldChecks)
     return fallback('limit',enabled.slice(0,templateLimits.templates).map(template=>({...identity(template),matched:false,fieldCount:0,matchedFields:0,reasons:['check_limit'],unmatchedFields:[]})));
   const evaluated=enabled.map<{template:any;index:number;candidate:TemplateCandidate;result?:ExtractionResult;definition?:TemplateDefinition}>((template,index)=>{
-    if(template.kind==='native-pdf-region-v1')return {...evaluateRegion(pages,schema,locale,template,geometry),template,index};
+    if(template.kind==='native-pdf-region-v1')return {...evaluateRegion(pages,schema,locale,template,geometry,timezone,policy),template,index};
     if(template.kind!==undefined&&template.kind!==null&&template.kind!=='text-v1')return {template,index,candidate:{...identity(template),matched:false,fieldCount:0,matchedFields:0,reasons:['invalid_rules'],unmatchedFields:[]} as TemplateCandidate};
-    const selected=selectTemplateExtraction(pages,schema,locale,[template],mode);
+    const selected=selectTemplateExtraction(pages,schema,locale,[template],mode,timezone,policy);
     const parsed=templateDefinitionInput.safeParse(storedTemplateDefinition(template));
     if(!parsed.success)return {template,index,candidate:{...selected.candidates[0],matched:false,reasons:[...new Set([...selected.candidates[0].reasons,'invalid_rules'])]}};
     return {template,index,candidate:selected.candidates[0],result:selected.result,definition:parsed.data};
@@ -110,10 +111,10 @@ export function selectCurrentTemplateExtraction(pages:PageText[],schema:ParserSc
 }
 
 /** Partial values belong only to an explicitly labelled unsaved check, never worker admission. */
-export function previewTemplateDefinition(pages:PageText[],schema:ParserSchema,locale:string,definition:TemplateDefinition,geometry?:PdfGeometry){
+export function previewTemplateDefinition(pages:PageText[],schema:ParserSchema,locale:string,definition:TemplateDefinition,geometry?:PdfGeometry,timezone?:string,policy:NormalizationPolicy=normalizationPolicy){
   const candidate={...definition,id:null,revision:1,enabled:true};
-  const selection=selectCurrentTemplateExtraction(pages,schema,locale,[candidate],'rules',geometry);
+  const selection=selectCurrentTemplateExtraction(pages,schema,locale,[candidate],'rules',geometry,timezone,policy);
   if(definition.kind!=='native-pdf-region-v1')return selection;
-  const evaluated=evaluateRegion(pages,schema,locale,candidate,geometry);
+  const evaluated=evaluateRegion(pages,schema,locale,candidate,geometry,timezone,policy);
   return {...selection,...(evaluated.result?{result:evaluated.result}:{})};
 }

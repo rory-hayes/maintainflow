@@ -8,6 +8,7 @@ import {archiveImportLimits as limits, ArchiveImportValidationError, canonicalAr
   type ArchiveImportSpec, type ArchiveEntryReason, type ArchivePreviewEntry} from '../../shared/archive-import.js';
 import type {PageText} from '../../shared/types.js';
 import {scanZip, inflateZipEntry, isMacArchiveMetadata} from './zip-reader.js';
+import {isOdtPackageCandidate} from './odt-engine.js';
 
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export interface ArchiveSourcePart {
@@ -20,7 +21,8 @@ export interface DecodedArchive {
 }
 export type ArchiveDecoderResponse = Omit<DecodedArchive, 'parts'> & {parts: Array<Omit<ArchiveSourcePart, 'bytes'> & {data: string}>};
 const zipSignature = (bytes: Buffer) => bytes.length >= 4 && [0x04034b50, 0x06054b50, 0x08074b50].includes(bytes.readUInt32LE(0));
-const officeCandidate = (names: Set<string>) => names.has('[Content_Types].xml') || names.has('_rels/.rels') || names.has('word/document.xml') || names.has('xl/workbook.xml');
+const ooxmlCandidate = (names: Set<string>) => names.has('[Content_Types].xml') || names.has('_rels/.rels') || names.has('word/document.xml') || names.has('xl/workbook.xml');
+const officeCandidate = (names: Set<string>) => ooxmlCandidate(names) || isOdtPackageCandidate(names);
 function entryReason(error: SourceValidationError): ArchiveEntryReason {
   if (error.reason === 'empty') return 'empty_file';
   if (['format_unsupported', 'binary_format_unsupported', 'text_binary_content', 'text_encoding'].includes(error.reason)) return 'unsupported_format';
@@ -71,7 +73,8 @@ export async function decodeArchive(bytes: Buffer, _filename: string, value?: Ar
       const innerNames = new Set(inner.map(record => record.path));
       if (!officeCandidate(innerNames)) {entry.reason = archiveEntryReasons.nested_archive; continue;}
       const word = innerNames.has('word/document.xml'), sheet = innerNames.has('xl/workbook.xml');
-      if (!innerNames.has('[Content_Types].xml') || !innerNames.has('_rels/.rels') || word === sheet) {entry.reason = archiveEntryReasons.invalid_document; continue;}
+      const odt = isOdtPackageCandidate(innerNames);
+      if (odt ? ooxmlCandidate(innerNames) : !innerNames.has('[Content_Types].xml') || !innerNames.has('_rels/.rels') || word === sheet) {entry.reason = archiveEntryReasons.invalid_document; continue;}
       for (const item of inner) {
         const remaining = limits.maxOfficeExpandedBytes - officeExpanded;
         if (item.byteSize > remaining) throw new ArchiveImportValidationError('office_expansion_limit');
