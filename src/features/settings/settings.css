@@ -1,3 +1,5 @@
+@import './checkout-terms.css';
+
 .settings-tab-content { padding-top: 10px; }
 .settings-section-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
 .settings-section-heading h2 { margin-bottom: 8px; }

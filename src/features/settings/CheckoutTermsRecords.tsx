@@ -4,7 +4,6 @@ import {Download} from 'lucide-react';
 import type {CheckoutTermsList,CheckoutTermsSummary} from '../../../shared/checkout-contracts';
 import {Button,Notice,dateTime} from '../../components/ui';
 import {api,workspaceId} from '../../lib/api';
-import './checkout-terms.css';
 
 function acceptanceLabel(record:CheckoutTermsSummary){
   return record.completion?.state==='accepted'?'Terms accepted':record.completion?'Acceptance not recorded':'Awaiting acceptance record';
