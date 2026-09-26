@@ -1,3 +1,4 @@
+import {bankLocaleSchema,withBankLocale} from './bank-locale.js';
 import type {FastifyInstance} from 'fastify';
 import {randomUUID,createHash} from 'node:crypto';
 import {z} from 'zod';
@@ -15,7 +16,7 @@ import {archiveImportSpecSchema,canonicalArchiveImportSpec,ArchiveImportValidati
 import {addArchiveDocuments,previewArchiveDocuments} from './archive-import-intake.js';
 import {readArchiveImportReceipt,assertArchiveRequestBinding} from './archive-import-records.js';
 
-const reserveBody=z.object({filename:z.string().min(1).max(300),size:z.number().int().min(1).max(10*1024*1024),sha256:z.string().regex(/^[0-9a-f]{64}$/),pdfSplit:z.object({requestId:z.string().uuid().transform(value=>value.toLowerCase()),options:pdfSplitSpecSchema.optional()}).strict().optional(),archiveImport:z.object({requestId:z.string().uuid().transform(value=>value.toLowerCase()),options:archiveImportSpecSchema.optional()}).strict().optional()}).strict().refine(body=>!(body.pdfSplit&&body.archiveImport),'Choose one import operation.');
+const reserveBody=z.object({bankLocale:bankLocaleSchema.optional(),filename:z.string().min(1).max(300),size:z.number().int().min(1).max(10*1024*1024),sha256:z.string().regex(/^[0-9a-f]{64}$/),pdfSplit:z.object({requestId:z.string().uuid().transform(value=>value.toLowerCase()),options:pdfSplitSpecSchema.optional()}).strict().optional(),archiveImport:z.object({requestId:z.string().uuid().transform(value=>value.toLowerCase()),options:archiveImportSpecSchema.optional()}).strict().optional()}).strict().refine(body=>!(body.pdfSplit&&body.archiveImport),'Choose one import operation.').refine(body=>body.bankLocale===undefined||(!body.pdfSplit&&!body.archiveImport),'A bank locale cannot be combined with document splitting or archive import.');
 class UploadBytesMismatch extends Error {readonly statusCode=400;constructor(){super('Uploaded bytes do not match this reservation. Start a new upload.');}}
 const uploadId=(params:unknown)=>z.object({id:z.string().uuid()}).parse(params).id;
 export async function reserveDirectUpload(actor:Actor,parserId:string,input:z.infer<typeof reserveBody>){
@@ -23,8 +24,9 @@ export async function reserveDirectUpload(actor:Actor,parserId:string,input:z.in
   const body=reserveBody.parse(input),id=randomUUID(),key=`${actor.workspaceId}/${id}`;
   const reservation=await withWorkspace(actor.workspaceId,async c=>{
     await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[actor.workspaceId]);
-    const parser=(await c.query('select id,field_setup_state,allowed_formats from parsers where id=$1 and workspace_id=$2 and archived=false for update',[parserId,actor.workspaceId])).rows[0];
+    const parser=(await c.query('select id,use_case,field_setup_state,allowed_formats from parsers where id=$1 and workspace_id=$2 and archived=false for update',[parserId,actor.workspaceId])).rows[0];
     if(!parser)notFound('Active parser not found');
+    withBankLocale(parser,body.bankLocale);
     if(body.pdfSplit){
       await assertUploadedSplitBinding(c,actor.workspaceId,parserId,body.pdfSplit.requestId,body.sha256,body.pdfSplit.options?canonicalPdfSplitSpec(body.pdfSplit.options):undefined);
       if(parser.field_setup_state!=='ready')badRequest('Finish parser setup before splitting a document.',409);
@@ -51,7 +53,7 @@ export async function reserveDirectUpload(actor:Actor,parserId:string,input:z.in
     const splitIntents=(await c.query('select coalesce(sum(reserved_bytes),0)::bigint bytes from intake_files where workspace_id=$1 and (split_attempt_id is not null or archive_attempt_id is not null)',[actor.workspaceId])).rows[0];
     const suggestions=(await c.query('select coalesce(sum(source_reserved_bytes+staging_reserved_bytes),0)::bigint bytes from split_suggestions where workspace_id=$1',[actor.workspaceId])).rows[0];
     if(reserved.active>=20||reserved.total>=100||Number(reserved.bytes)+Number(splitIntents.bytes)+Number(suggestions.bytes)+config.maxBytes>250*1024*1024)badRequest('Too many recent uploads. Finish pending uploads or retry after their cleanup window.',429);
-    const {rows:[row]}=await c.query('insert into direct_uploads(id,workspace_id,parser_id,created_by,storage_key,filename,expected_bytes,expected_sha256,pdf_split_spec,pdf_split_request_id,archive_spec,archive_request_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning expires_at,cleanup_after',[id,actor.workspaceId,parserId,actor.userId,key,safeDownloadName(body.filename),body.size,body.sha256,body.pdfSplit?.options?canonicalPdfSplitSpec(body.pdfSplit.options):null,body.pdfSplit?.requestId??null,body.archiveImport?.options?canonicalArchiveImportSpec(body.archiveImport.options):null,body.archiveImport?.requestId??null]);
+    const {rows:[row]}=await c.query('insert into direct_uploads(id,workspace_id,parser_id,created_by,storage_key,filename,expected_bytes,expected_sha256,pdf_split_spec,pdf_split_request_id,archive_spec,archive_request_id,bank_locale) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning expires_at,cleanup_after',[id,actor.workspaceId,parserId,actor.userId,key,safeDownloadName(body.filename),body.size,body.sha256,body.pdfSplit?.options?canonicalPdfSplitSpec(body.pdfSplit.options):null,body.pdfSplit?.requestId??null,body.archiveImport?.options?canonicalArchiveImportSpec(body.archiveImport.options):null,body.archiveImport?.requestId??null,body.bankLocale??null]);
     return row;
   });
   try{return {uploadId:id,uploadUrl:await storage.signUpload!(key),method:'PUT',headers:{'Content-Type':'application/octet-stream','x-upsert':'false'},expiresAt:reservation.expires_at};}
@@ -96,7 +98,7 @@ export async function finalizeDirectUpload(actor:Actor,id:string):Promise<any>{
       if(remaining<=0)throw Object.assign(new Error('ZIP importing took too long. Retry the same upload.'),{statusCode:503});
       return await addArchiveDocuments(actor,row.parser_id,bytes,row.filename,row.archive_request_id,row.archive_spec,{timeoutMs:remaining,directUpload:{id,owner:leaseOwner}});
     }
-    const result=await addDocument(actor,row.parser_id,bytes,row.filename,'application/octet-stream',`direct-upload:${id}`);
+    const result=await addDocument(actor,row.parser_id,bytes,row.filename,'application/octet-stream',`direct-upload:${id}`,{bankLocale:row.bank_locale??undefined});
     await withWorkspace(actor.workspaceId,async c=>{
       const saved=await c.query("update direct_uploads set state='complete',document_id=$3,job_id=$4,duplicate=$5,finalize_owner=null,finalize_lease_until=null where id=$1 and finalize_owner=$2",[id,leaseOwner,result.document.id,result.jobId,result.duplicate]);
       if(!saved.rowCount)badRequest('Upload verification completed in another request. Retry shortly.',409);

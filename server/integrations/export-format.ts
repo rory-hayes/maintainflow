@@ -1,7 +1,8 @@
 import ExcelJS from 'exceljs';
+import {bankExportTable} from './bank-statement-export.js';
 
 export type ExportColumn = { source: string; label: string };
-export type ExportOptions = { columns?: ExportColumn[]; lineItems?: string; format: 'csv' | 'xlsx' | 'json' };
+export type ExportOptions = { columns?: ExportColumn[]; lineItems?: string; format: 'csv' | 'xlsx' | 'json'; workflow?:'bank_statement' };
 export type ExportRecord = {
   documentId: string;
   filename: string;
@@ -70,13 +71,15 @@ export function exportRows(records: ExportRecord[], options: ExportOptions) {
 }
 
 export async function renderExport(records: ExportRecord[], options: ExportOptions): Promise<{bytes: Buffer; mime: string; extension: string}> {
+  if(options.workflow==='bank_statement'&&(options.format==='json'||options.columns||options.lineItems))throw new Error('Bank statements use the fixed CSV or Excel transaction export.');
   if (options.format === 'json') {
     return {
       bytes: Buffer.from(JSON.stringify({ version: 1, documents: records }, null, 2)),
       mime: 'application/json', extension: 'json',
     };
   }
-  const {headers, rows} = exportRows(records, options);
+  const bank=options.workflow==='bank_statement'?bankExportTable(records,options.format):null;
+  const {headers, rows} = bank??exportRows(records, options);
   if (options.format === 'csv') {
     const quote = (value: unknown) => `"${String(value).replaceAll('"', '""')}"`;
     return {
@@ -86,13 +89,18 @@ export async function renderExport(records: ExportRecord[], options: ExportOptio
   }
   const book = new ExcelJS.Workbook();
   book.creator = 'MaintainFlow';
-  const sheet = book.addWorksheet('Extracted data');
+  const sheet = book.addWorksheet(bank?'Transactions':'Extracted data');
   sheet.addRow(headers);
   sheet.addRows(rows);
   sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
   sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: {argb: 'FF6573D5'} };
   sheet.views = [{state: 'frozen', ySplit: 1}];
   sheet.columns.forEach(column => { column.width = 24; });
+  if(bank){
+    sheet.autoFilter={from:{row:1,column:1},to:{row:Math.max(1,rows.length+1),column:headers.length}};
+    bank.decimals.forEach((places,index)=>places.forEach((count,offset)=>{sheet.getCell(index+2,headers.length-2+offset).numFmt=`0.${'0'.repeat(count)}`;}));
+    sheet.getColumn(14).width=50;
+  }
   return {
     bytes: Buffer.from(await book.xlsx.writeBuffer()),
     mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', extension: 'xlsx',

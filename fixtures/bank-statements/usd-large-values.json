@@ -1,0 +1,12 @@
+{
+  "accounts": [{
+    "bank_name":"Example National Bank","account_identifier":"0000123456789","currency":"USD",
+    "statement_start":"2026-09-01","statement_end":"2026-09-30",
+    "opening_balance":"9,007,199,254,740,993.00","closing_balance":"9,007,199,254,740,993.02",
+    "total_debits":"0.01","total_credits":"0.03","balance_convention":"credit_increases",
+    "transactions":[
+      {"date":"09/03/2026","description":"Credit adjustment","reference":"ADJ-C","debit":null,"credit":"$0.03","balance":"9,007,199,254,740,993.03","currency":"USD"},
+      {"date":"09/04/2026","description":"Debit adjustment","reference":"ADJ-D","debit":"$0.01","credit":null,"balance":"9,007,199,254,740,993.02","currency":"USD"}
+    ]
+  }]
+}

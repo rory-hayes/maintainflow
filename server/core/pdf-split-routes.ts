@@ -33,6 +33,7 @@ export async function registerPdfSplitRoutes(app:FastifyInstance){
   return undoStoredPdfSplit(storedPdfAuthorization(request,actor),id);
  });
  app.post('/api/parsers/:id/pdf-splits',async(request,reply)=>{
+  z.object({bankLocale:z.never().optional()}).parse(request.query);
   const actor=await requireActor(request,{roles:editors,scope:'documents:write'}),parserId=idFrom(request.params);
   let file:{bytes:Buffer;filename:string}|undefined,requestId:string|undefined,spec:PdfSplitSpec|undefined;
   const seen=new Set<string>();

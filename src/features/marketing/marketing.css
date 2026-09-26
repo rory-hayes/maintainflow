@@ -35,6 +35,7 @@
 .marketing-header { position: relative; z-index: 2; background: #fff; }
 .marketing-header-inner { display: flex; align-items: center; justify-content: space-between; min-height: 86px; gap: 24px; }
 .marketing-desktop-nav { display: flex; gap: 30px; align-items: center; margin-left: auto; margin-right: auto; padding-left: 76px; }
+.marketing-header-with-bank .marketing-desktop-nav { gap: clamp(12px,1.5vw,24px); padding-left: 0; }
 .marketing-desktop-nav a, .marketing-sign-in { font-size: 15px; font-weight: 480; white-space: nowrap; }
 .marketing-desktop-nav a:hover, .marketing-sign-in:hover { color: var(--color-action); }
 .marketing-header-actions { display: flex; align-items: center; gap: 28px; }

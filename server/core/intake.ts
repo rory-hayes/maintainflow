@@ -1,3 +1,4 @@
+import {withBankLocale,type BankLocale} from './bank-locale.js';
 import {pinnedTemplateConfig} from './template-snapshot.js';
 import {randomUUID,createHash} from 'node:crypto';
 import path from 'node:path';
@@ -44,11 +45,11 @@ async function priorIntake(c:PoolClient,actor:Actor,parserId:string,sha:string,k
 function accepted(decision:Decision):IntakeResult{if('rejection' in decision)throw decision.rejection;return decision;}
 
 /** The inspection override is internal test injection; HTTP routes never accept it. */
-export async function addDocument(actor:Actor,parserId:string,buffer:Buffer,filename:string,_mimeType?:string,idempotencyKey?:string,options:{inspectSource?:typeof inspectSource}={}):Promise<IntakeResult>{
+export async function addDocument(actor:Actor,parserId:string,buffer:Buffer,filename:string,_mimeType?:string,idempotencyKey?:string,options:{inspectSource?:typeof inspectSource;bankLocale?:BankLocale}={}):Promise<IntakeResult>{
  if(idempotencyKey&&idempotencyKey.length>200)badRequest('Idempotency key is too long');
  const name=path.basename(filename).replace(/[\u0000-\u001f\u007f]/g,'').slice(0,240)||'document.txt';
  const sha=createHash('sha256').update(buffer).digest('hex');
- const prior=await withWorkspace(actor.workspaceId,async c=>{await lockParser(c,actor,parserId);return priorIntake(c,actor,parserId,sha,idempotencyKey);});
+ const prior=await withWorkspace(actor.workspaceId,async c=>{withBankLocale(await lockParser(c,actor,parserId),options.bankLocale);return priorIntake(c,actor,parserId,sha,idempotencyKey);});
  if(prior)return accepted(prior);
  let source:Awaited<ReturnType<typeof inspectSource>>;
  try{source=await (options.inspectSource??inspectSource)(buffer,name);}
@@ -73,7 +74,7 @@ export async function addDocument(actor:Actor,parserId:string,buffer:Buffer,file
  try{
   writeAttempted=true;await privateStorage().write(storageKey,buffer);writeCompleted=true;
   const result=await withWorkspace(actor.workspaceId,async c=>{
-   const parser=await lockParser(c,actor,parserId);
+   const parser=withBankLocale(await lockParser(c,actor,parserId),options.bankLocale);
    if(!(await c.query('select id from intake_files where id=$1 for update',[id])).rowCount)badRequest('The original write reservation expired. Retry the upload.',409);
    const existing=await priorIntake(c,actor,parserId,sha,idempotencyKey);if(existing)return existing;
    if(parser.allowed_formats!==null&&parser.allowed_formats!==undefined&&!parser.allowed_formats.includes(format)){

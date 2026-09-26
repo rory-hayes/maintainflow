@@ -1,0 +1,11 @@
+{
+  "accounts":[{
+    "bank_name":"Example Card Bank","account_identifier":"1234567890123456","currency":"EUR",
+    "statement_start":"2026-09-01","statement_end":"2026-09-30",
+    "opening_balance":"100.00 DR","closing_balance":"69.99 DR","total_debits":"20.01","total_credits":"50.02","balance_convention":"debit_increases",
+    "transactions":[
+      {"date":"3 September 2026","description":"Purchase","reference":"P-1","debit":"20.01 DR","credit":null,"balance":"120.01 DR","currency":"EUR"},
+      {"date":"September 4, 2026","description":"Payment","reference":"C-1","debit":null,"credit":"50.02 CR","balance":"69.99 DR","currency":"EUR"}
+    ]
+  }]
+}

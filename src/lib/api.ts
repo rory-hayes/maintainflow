@@ -21,11 +21,12 @@ export function useAction(){
   return {run,busy,error,message,setError,setMessage};
 }
 type UploadResult={document?:{id:string};duplicate?:boolean;name?:string;error?:string;jobId?:string|null};
-export async function uploadDocuments(parserId:string,files:File[]):Promise<UploadResult&{results:UploadResult[]}>{
+export async function uploadDocuments(parserId:string,files:File[],options:{bankLocale?:'en-IE'|'en-US'|'de-DE'}={}):Promise<UploadResult&{results:UploadResult[]}>{
   const configuration=await api<{strategy:'signed'|'multipart';maxBytes:number}>('/api/uploads/config');
   if(configuration.strategy==='multipart'){
     const form=new FormData();files.forEach(file=>form.append('files',file));
-    return api(`/api/parsers/${parserId}/documents`,{method:'POST',body:form,headers:{'Idempotency-Key':crypto.randomUUID()}});
+    const query=options.bankLocale?`?bankLocale=${encodeURIComponent(options.bankLocale)}`:'';
+    return api(`/api/parsers/${parserId}/documents${query}`,{method:'POST',body:form,headers:{'Idempotency-Key':crypto.randomUUID()}});
   }
   const results:UploadResult[]=[];
   for(const file of files){
@@ -33,7 +34,7 @@ export async function uploadDocuments(parserId:string,files:File[]):Promise<Uplo
       if(file.size<1||file.size>configuration.maxBytes)throw new Error('Each file must contain data and be 10 MB or smaller.');
       const digest=await crypto.subtle.digest('SHA-256',await file.arrayBuffer());
       const sha256=Array.from(new Uint8Array(digest),value=>value.toString(16).padStart(2,'0')).join('');
-      const reservation=await post<{uploadId:string;uploadUrl:string}>(`/api/parsers/${parserId}/uploads`,{filename:file.name,size:file.size,sha256});
+      const reservation=await post<{uploadId:string;uploadUrl:string}>(`/api/parsers/${parserId}/uploads`,{filename:file.name,size:file.size,sha256,...(options.bankLocale?{bankLocale:options.bankLocale}:{})});
       const destination=new URL(reservation.uploadUrl);
       if(destination.protocol!=='https:'||!destination.hostname.endsWith('.supabase.co'))throw new Error('The private upload destination is invalid.');
       const uploaded=await fetch(destination,{method:'PUT',body:file,headers:{'Content-Type':'application/octet-stream','x-upsert':'false'},credentials:'omit',redirect:'error',referrerPolicy:'no-referrer'});

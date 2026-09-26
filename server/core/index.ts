@@ -1,3 +1,4 @@
+import {registerBankStatements} from './bank-statement-routes.js';
 import type {FastifyInstance} from 'fastify';
 import {registerAuth} from './auth-routes.js';
 import {registerParsers} from './parser-routes.js';
@@ -7,7 +8,7 @@ import {registerNotifications} from './notifications.js';
 import {registerSchemaSuggestions} from './schema-suggestions.js';
 import {registerSplitSuggestions} from './split-suggestions.js';
 import {registerSplitSuggestionCreate} from './split-suggestion-create.js';
-export async function registerCore(app:FastifyInstance){await registerAuth(app);await registerParsers(app);await registerDocuments(app);await registerWorkspace(app);await registerNotifications(app);await registerSchemaSuggestions(app);await registerSplitSuggestions(app);await registerSplitSuggestionCreate(app);}
+export async function registerCore(app:FastifyInstance){await registerAuth(app);await registerParsers(app);await registerDocuments(app);await registerBankStatements(app);await registerWorkspace(app);await registerNotifications(app);await registerSchemaSuggestions(app);await registerSplitSuggestions(app);await registerSplitSuggestionCreate(app);}
 export {requireActor,editors,admins,requireSession} from './auth.js';
 export {withWorkspace,adminPool,appPool,camel,badRequest,notFound,audit} from './db.js';
 export {resolveRun,publicRun} from './runs.js';

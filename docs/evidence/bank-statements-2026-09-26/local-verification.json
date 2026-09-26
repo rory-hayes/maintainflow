@@ -1,0 +1,330 @@
+{
+  "date": "2026-09-26",
+  "scope": "Local synthetic acceptance with controlled provider responses. No universal bank compatibility or real-world accuracy claim.",
+  "suites": [
+    {
+      "label": "full-regression-before-final-locale-fix",
+      "result": "passed",
+      "testsPassed": 982,
+      "failed": 0,
+      "source": {
+        "count": 442,
+        "fingerprint": "27e60dc232f05ea8ea1e90b802e615a8dc8e9491198b9c131253464fe7976580"
+      },
+      "backendFingerprint": "0ae36f49cb3c6d14fa24a82ddc935d239f77bb715f33359e3ded7d521993c608",
+      "sourceUnchanged": false,
+      "backendSourceUnchanged": false,
+      "changedSourceFiles": [
+        "fixtures/bank-statements/README.md",
+        "src/features/bank-statements/BankReview.tsx",
+        "src/features/bank-statements/BankStatements.tsx",
+        "src/lib/api.ts"
+      ],
+      "phases": [
+        {
+          "phase": "initdb",
+          "exitCode": 0
+        },
+        {
+          "phase": "start",
+          "exitCode": 0
+        },
+        {
+          "phase": "bootstrap",
+          "exitCode": 0
+        },
+        {
+          "phase": "identity",
+          "exitCode": 0
+        },
+        {
+          "phase": "migrations",
+          "exitCode": 0
+        },
+        {
+          "phase": "suite",
+          "exitCode": 0
+        },
+        {
+          "phase": "typecheck",
+          "exitCode": 0
+        },
+        {
+          "phase": "frontend-build",
+          "exitCode": 0
+        },
+        {
+          "phase": "hosted-build",
+          "exitCode": 0
+        },
+        {
+          "phase": "hosted-runtime",
+          "exitCode": 0
+        },
+        {
+          "phase": "stop",
+          "exitCode": 0
+        }
+      ],
+      "normalDatabaseTouched": false,
+      "hostedCalls": 0,
+      "credentialsRead": false,
+      "isolatedClusterStopped": true,
+      "ownedCheckoutAndDatabaseRemoved": true
+    },
+    {
+      "label": "final-targeted-backend-regression",
+      "result": "passed",
+      "testsPassed": 321,
+      "failed": 0,
+      "source": {
+        "count": 445,
+        "fingerprint": "e2cbe0d77efb95953a222ef3d746202168b621722a9e376ceb1bf6f4fa9bfc50"
+      },
+      "backendFingerprint": "2cebe99e14df92cd78dbf826bcad7e8654f822d50e873426868f349dadc7a217",
+      "sourceUnchanged": false,
+      "backendSourceUnchanged": true,
+      "changedSourceFiles": [
+        "scripts/backup/acceptance-runtime.ts",
+        "scripts/verify-backup-restore.ts",
+        "src/features/bank-statements/BankReview.tsx",
+        "src/features/bank-statements/BankStatements.tsx"
+      ],
+      "phases": [
+        {
+          "phase": "initdb",
+          "exitCode": 0
+        },
+        {
+          "phase": "start",
+          "exitCode": 0
+        },
+        {
+          "phase": "bootstrap",
+          "exitCode": 0
+        },
+        {
+          "phase": "identity",
+          "exitCode": 0
+        },
+        {
+          "phase": "migrations",
+          "exitCode": 0
+        },
+        {
+          "phase": "suite",
+          "exitCode": 0
+        },
+        {
+          "phase": "typecheck",
+          "exitCode": 0
+        },
+        {
+          "phase": "stop",
+          "exitCode": 0
+        }
+      ],
+      "normalDatabaseTouched": false,
+      "hostedCalls": 0,
+      "credentialsRead": false,
+      "isolatedClusterStopped": true,
+      "ownedCheckoutAndDatabaseRemoved": true
+    }
+  ],
+  "browser": {
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 1000
+      },
+      {
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "checks": {
+      "browser-phase1": {
+        "checks": [
+          {
+            "name": "desktop landing",
+            "url": "http://127.0.0.1:54379/bank-statement-converter",
+            "title": "MaintainFlow \u2014 Documents, beautifully structured",
+            "size": {
+              "viewport": 1440,
+              "width": 1440
+            }
+          },
+          {
+            "name": "mobile landing",
+            "size": {
+              "viewport": 390,
+              "width": 390
+            }
+          },
+          {
+            "name": "public CTA preserves sign-in return",
+            "url": "http://127.0.0.1:54379/app/bank-statements"
+          },
+          {
+            "name": "mixed batch native scan PDF and PNG plus corrupt PDF",
+            "accepted": 3,
+            "progress": "Current upload\n4 of 4 received or checked\nsynthetic-native-multipage.pdf\nReceived \u00b7 processing in the background\nOpen\nsynthetic-scanned-multipage.pdf\nReceived \u00b7 processing in the background\nOpen\nsynthetic-scanned-page.png\nReceived \u00b7 processing in the background\nOpen\ncorrupt-synthetic.pdf\nThe file does not contain a valid PDF\nRetry"
+          },
+          {
+            "name": "mobile hub",
+            "size": {
+              "viewport": 390,
+              "width": 390
+            }
+          }
+        ],
+        "passed": null,
+        "logs": [
+          {
+            "type": "error",
+            "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+          },
+          {
+            "type": "error",
+            "text": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+          }
+        ]
+      },
+      "browser-phase2": {
+        "checks": [
+          {
+            "name": "initial review and warnings block unacknowledged approval",
+            "issues": 4
+          },
+          {
+            "name": "acknowledged approval and CSV/XLSX download",
+            "approval": "df8188f7-26b3-4a96-8a28-783db9659a4c",
+            "csvBytes": 977,
+            "xlsxBytes": 7328
+          },
+          {
+            "name": "correction saves with revision and refreshes checks"
+          },
+          {
+            "name": "reordering preserves source identity and balance errors resolve after restoring order"
+          },
+          {
+            "name": "exclude and restore preserve extracted row"
+          },
+          {
+            "name": "user-added row labelled and retained with exclusion reason"
+          },
+          {
+            "name": "mobile review no page overflow and evidence opens original",
+            "size": {
+              "viewport": 390,
+              "width": 390
+            }
+          },
+          {
+            "name": "historical approval export pinned and excluded user row absent"
+          }
+        ],
+        "passed": null,
+        "logs": []
+      },
+      "browser-phase3-bank": {
+        "checks": [
+          {
+            "name": "duplicate upload keeps document jobs and page usage unchanged",
+            "pages": 5,
+            "documents": 3
+          },
+          {
+            "name": "selected batch CSV/XLSX export pins two approvals",
+            "csvBytes": 1687,
+            "xlsxBytes": 7616
+          },
+          {
+            "name": "failed controlled extraction explicitly retried successfully"
+          },
+          {
+            "name": "transaction dialog returns keyboard focus to its trigger"
+          },
+          {
+            "name": "mobile correction dialog accessible without page overflow",
+            "size": {
+              "width": 390,
+              "viewport": 390
+            }
+          }
+        ],
+        "passed": null,
+        "logs": [
+          "Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
+          "Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
+          "Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
+          "Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
+          "Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
+          "Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
+          "Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
+          "Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
+          "Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
+          "Failed to load resource: the server responded with a status of 429 (Too Many Requests)"
+        ]
+      },
+      "browser-generic": {
+        "checks": [],
+        "passed": true,
+        "logs": []
+      },
+      "browser-safeguards": {
+        "checks": [
+          {
+            "name": "reverse twice restores draft order; saved reversal keeps IDs and balance errors resolve after restoring",
+            "rows": 3
+          },
+          {
+            "name": "background extraction preserves pinned run and draft; explicit switch requires discard confirmation",
+            "oldRun": "22fe416b-9dc1-4bd6-9b73-db0c27e11ca5",
+            "newRun": "ea75088d-aec6-4704-9b1b-aa41eebcfb82"
+          }
+        ],
+        "passed": null,
+        "logs": []
+      },
+      "browser-locale": {
+        "checks": [
+          {
+            "name": "statement search uses filtered results"
+          },
+          {
+            "name": "prior approval stays selectable after re-extraction and selection remains pinned when a newer approval arrives"
+          },
+          {
+            "name": "two-file batch sends chosen en-US on every upload despite concurrent parser default change to de-DE",
+            "uploads": [
+              "en-US",
+              "en-US"
+            ]
+          },
+          {
+            "name": "explicit re-extraction changes locale; historical selected run default correctly shows and preserves latest locale",
+            "historicalLocale": "en-US",
+            "latestLocale": "de-DE"
+          }
+        ],
+        "passed": null,
+        "logs": []
+      }
+    },
+    "rateLimitNote": "Rapid combined browser phases reached the existing global 300 requests/minute limit. The five bank checks in phase3 completed first. Generic signup was rerun successfully after the natural window; limits were unchanged. The original private failure receipt is retained.",
+    "realProviderCalls": 0
+  },
+  "productionAtPreparation": {
+    "revision": "c418f497d8eb24e561a2fe5761951590bfd36e0e",
+    "bankWorkflowDeployed": false,
+    "latestDatabaseMigration": "038_stripe_billing_modes.sql"
+  },
+  "releaseSQL": {
+    "payload": "migrations-039-040.delta.sql",
+    "sha256": "920972e95884428b0d762c11692a24275562176ecd4d8547d07a25db8f623f53",
+    "localRehearsalGroupsPassed": 7,
+    "hostedExecuted": false
+  }
+}

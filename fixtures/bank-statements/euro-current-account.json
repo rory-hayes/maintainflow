@@ -1,0 +1,18 @@
+{
+  "accounts": [{
+    "bank_name": "Example Bank",
+    "account_identifier": "IE12 EXAM 1234 5678 9012 34",
+    "currency": "EUR",
+    "statement_start": "01.09.2026",
+    "statement_end": "30.09.2026",
+    "opening_balance": "1.000,00",
+    "closing_balance": "1.010,00",
+    "total_debits": "10,00",
+    "total_credits": "20,00",
+    "balance_convention": "credit_increases",
+    "transactions": [
+      {"date":"03.09.2026","description":"Coffee supply","reference":"INV-001","debit":"10,00 DR","credit":null,"balance":"990,00 CR","currency":"EUR"},
+      {"date":"04.09.2026","description":"Client payment","reference":"INV-002","debit":null,"credit":"20,00 CR","balance":"1.010,00 CR","currency":null}
+    ]
+  }]
+}

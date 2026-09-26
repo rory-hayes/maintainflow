@@ -85,7 +85,9 @@ async function catalogue(client:pg.Client,config:BackupConfig,expected:string[],
  const tables:BackupTable[]=[];
  for(const row of rows.filter(r=>r.relkind==='r')){
   const columns=(await client.query("SELECT attname name,format_type(atttypid,atttypmod) type,attgenerated generated,attidentity identity,atttypid::int type_oid FROM pg_attribute WHERE attrelid=$1 AND attnum>0 AND NOT attisdropped ORDER BY attnum",[row.oid])).rows;
-  for(const column of columns){assert([16,17,20,23,25,1009,1184,1700,2950,2951,3802].includes(column.type_oid),'An application column uses a type outside the supported built-in migration types.');delete column.type_oid;databaseIdentifier(column.name);assert(column.generated===''&&['','a','d'].includes(column.identity),'Stored generated columns are not supported.');}
+  // DATE (1082) is copied in PostgreSQL's binary format, like the other built-ins;
+  // no JavaScript timezone or calendar conversion touches bank index boundaries.
+  for(const column of columns){assert([16,17,20,23,25,1009,1082,1184,1700,2950,2951,3802].includes(column.type_oid),'An application column uses a type outside the supported built-in migration types.');delete column.type_oid;databaseIdentifier(column.name);assert(column.generated===''&&['','a','d'].includes(column.identity),'Stored generated columns are not supported.');}
   const keys=(await client.query("SELECT a.attname FROM pg_index i CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum,position) JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum WHERE i.indrelid=$1 AND i.indisprimary ORDER BY k.position",[row.oid])).rows.map(r=>r.attname as string);
   assert(keys.length>0,'Every application table must have a primary key.');
   const count=countRows?safeNumber((await client.query(`SELECT count(*)::text n FROM ${qualified(config.schema,row.relname)}`)).rows[0].n):0;
