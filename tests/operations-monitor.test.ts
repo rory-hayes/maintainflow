@@ -15,7 +15,7 @@ test('monitor requires three failing polls and emits one incident plus one actua
   for(let i=0;i<2;i++){state=advance(state,{...healthy(i*5),ready:false},options);assert.equal(state.pending.length,0);}
   state=advance(state,{...healthy(10),ready:false},options);assert.equal(state.pending.length,1);assert.equal(state.pending[0].kind,'incident');
   state=advance(state,{...healthy(15),ready:false},options);assert.equal(state.pending.length,1);
-  state=advance(state,healthy(20),options);assert.equal(state.incident,null);assert.deepEqual(state.pending.map(x=>x.kind),['incident','recovery']);
+  state=advance(state,healthy(20),options);assert.equal(state.incident,null);assert.deepEqual(state.pending.map(x=>x.kind),['incident','recovery']);assert.deepEqual(state.pending.map(x=>x.messageVersion),[2,2]);
   state=advance(state,healthy(25),options);assert.equal(state.pending.length,2);
 });
 
@@ -94,13 +94,29 @@ test('transport errors are redacted and a never-successful probe does not claim 
 });
 
 test('incident and recovery use different stable idempotency keys, approved recipient only, and explicit test labels',async()=>{
-  const notice:Notice={id:incidentId,kind:'incident',at:healthy(0).at,openedAt:healthy(0).at,reasons:['readiness_unavailable'],test:true},keys:string[]=[],messages:any[]=[];
+  const notice=drillNotices(origin,incidentId,healthy(0).at)[0],keys:string[]=[],messages:any[]=[];
   const transport:typeof fetch=async(input,init)=>{assert.equal(String(input),'https://api.resend.com/emails');assert.equal(init?.redirect,'error');keys.push(new Headers(init?.headers).get('idempotency-key')!);messages.push(JSON.parse(String(init?.body)));return Response.json({id:incidentId});};
   const config={origin,to:'operator@example.test',from:'monitor@example.test',apiKey:'re_owned_fixture_only'};
   await sendNotice(notice,config,transport);await sendNotice(notice,config,transport);await sendNotice({...notice,kind:'recovery'},config,transport);
-  assert.equal(keys[0],keys[1]);assert.notEqual(keys[1],keys[2]);assert.deepEqual(messages[0].to,[config.to]);assert.match(messages[0].subject,/\[TEST\]/);assert.match(message(notice,origin).text,/No production outage/);
+  assert.equal(keys[0],`folio-monitor/${incidentId}/incident`);assert.equal(keys[0],keys[1]);assert.equal(keys[2],`folio-monitor/${incidentId}/recovery`);assert.deepEqual(messages[0],messages[1]);assert.deepEqual(messages[0].to,[config.to]);
+  assert.equal(messages[0].from,'MaintainFlow monitor <monitor@example.test>');assert.equal(messages[0].subject,'[MaintainFlow monitor] [TEST] Action required');assert.equal(messages[2].subject,'[MaintainFlow monitor] [TEST] Recovered');
+  assert.match(messages[0].text,/approved MaintainFlow synthetic monitoring drill/);assert.match(message(notice,origin).text,/No production outage/);assert.match(message({...notice,test:false},origin).text,/^MaintainFlow operational monitoring notification\./);
   await assert.rejects(sendNotice(notice,{...config,to:'victim@example.test\nBcc:other@example.test'},transport),/invalid_email/);
   await assert.rejects(sendNotice(notice,config,async()=>new Response('provider secret',{status:503})),/alert_delivery_failed/);
+});
+
+test('unversioned encrypted pending notices retain their exact original payload and retry key',async()=>{
+  const configuration={origin,to:'operator@example.test',from:'monitor@example.test',apiKey:'re_owned_fixture_only'},key=randomBytes(32).toString('base64');
+  for(const kind of ['incident','recovery'] as const)for(const test of [false,true]){
+    const notice:Notice={id:incidentId,kind,at:healthy(0).at,openedAt:healthy(0).at,reasons:['readiness_unavailable'],test},state=initialState(origin),requests:{body:string;key:string}[]=[];state.pending.push(notice);
+    const transport:typeof fetch=async(_input,init)=>{requests.push({body:String(init?.body),key:new Headers(init?.headers).get('idempotency-key')!});if(requests.length===1)throw new Error('uncertain transport');return Response.json({id:incidentId});};
+    await assert.rejects(deliverPending(state,configuration,async()=>{},transport,()=>Date.parse(healthy(1).at)),/uncertain transport/);
+    const restored=unseal(seal(state,key),key,origin);assert.deepEqual(restored.pending,[notice]);
+    assert.equal(await deliverPending(restored,configuration,async()=>{},transport,()=>Date.parse(healthy(2).at)),1);assert.deepEqual(requests[0],requests[1]);assert.equal(requests[0].key,`folio-monitor/${incidentId}/${kind}`);
+    const title=kind==='incident'?'Action required':'Recovered';
+    assert.deepEqual(JSON.parse(requests[0].body),{from:'Folio monitor <monitor@example.test>',to:[configuration.to],subject:`[Folio monitor]${test?' [TEST]':''} ${title}`,text:[test?'This is an approved synthetic monitoring drill. No production outage was caused.':'Folio operational monitoring notification.',`${title}: ${origin}`,`Observed at: ${notice.at}`,`Incident began: ${notice.openedAt}`,'Checks: readiness_unavailable',kind==='recovery'?'All monitored conditions are healthy again. A retained failure-count increase does not imply failed work was replayed or cleared.':'Inspect readiness, the operator diagnostics and provider logs. This monitor never wakes workers, retries jobs or changes customer data.'].join('\n\n')});
+  }
+  const unsupported=initialState(origin);unsupported.pending.push({...drillNotices(origin,incidentId,healthy(0).at)[0],messageVersion:3} as unknown as Notice);assert.throws(()=>seal(unsupported,key),/invalid_monitor_state/);
 });
 
 test('CLI refuses unknown actions without loading secrets or making a network request',async()=>{await assert.rejects(main(['--send-anything'],{}),/invalid_arguments/);});

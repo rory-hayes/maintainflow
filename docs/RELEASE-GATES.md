@@ -1,6 +1,12 @@
 # Remaining implementation and release gates
 
-## Current native PDF region gates — 20 September 2026
+## Current hosted checkpoint — 26 September 2026
+
+The [current launch status](LAUNCH-STATUS-2026-09-26.md) records the deployed MaintainFlow rename and a passing real **5,243,969-byte PDF** signed-upload, automatic-extraction, finalize-replay and exact-original round trip on revision `279f5d798c6871393e0aecca5eaaa1470723eb4c`. One job/run and one page charge were observed; owned document/original cleanup and session revocation passed. [Sanitized hosted receipt](evidence/hosted-oversized-pdf-2026-09-26/verification.json).
+
+Earlier dated migration and deployment statements below are historical; the September 20 cutover applied hosted migrations through 038. This new native-text PDF test does not establish AI quality, complete account/integration acceptance, monitoring or hosted backup recovery. All 47 original capability criteria remain in scope. Private preview, invitation requirements, free plans and mock billing remain unchanged; account upgrades alone are insufficient for public launch.
+
+## Earlier native PDF region gates — 20 September 2026
 
 Saved native-text PDF regions are implemented with explicit draft preview, versioned save/recovery, authoritative closure of unknown requests, pinned extraction definitions and exact source-region evidence. Moved anchor/value pairs are supported within unchanged reference page geometry. Existing text templates and old queued policies retain their contracts. [Contract and limits](NATIVE-PDF-REGIONS.md).
 

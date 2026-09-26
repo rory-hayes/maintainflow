@@ -9,7 +9,7 @@ type Lane=typeof lanes[number];
 export type Snapshot={at:string;health:boolean;ready:boolean;diagnostics:boolean;queues:Record<Lane,{failed:number;expiredLeases:number;oldestDueSeconds:number|null}>|null};
 type Incident={id:string;openedAt:string;reasons:string[];notified:boolean};
 export type MonitorState={version:1;origin:string;checkedAt:string|null;consecutiveFailures:number;expiredPolls:Record<string,number>;failedCounts:Record<string,number>;incident:Incident|null;pending:Notice[]};
-export type Notice={id:string;kind:'incident'|'recovery';at:string;openedAt:string;reasons:string[];test:boolean};
+export type Notice={id:string;kind:'incident'|'recovery';at:string;openedAt:string;reasons:string[];test:boolean;messageVersion?:2};
 export class MonitorError extends Error{readonly code:string;constructor(code:string){super(code);this.code=code;}}
 function requireValue(ok:unknown,code:string):asserts ok{if(!ok)throw new MonitorError(code);}
 const iso=(value:unknown):value is string=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)&&Number.isFinite(Date.parse(value));
@@ -42,9 +42,9 @@ export function advance(previous:MonitorState,snapshot:Snapshot,options:{test?:b
   const actionable=state.consecutiveFailures>=3||reasons.some(reason=>!reason.endsWith('_unavailable'));
   if(!state.incident&&actionable){
     const incident={id:(options.id??randomUUID)(),openedAt:snapshot.at,reasons:[...new Set(reasons)],notified:false};
-    state.incident=incident;state.pending.push({id:incident.id,kind:'incident',at:snapshot.at,openedAt:incident.openedAt,reasons:incident.reasons,test:options.test??false});
+    state.incident=incident;state.pending.push({id:incident.id,kind:'incident',at:snapshot.at,openedAt:incident.openedAt,reasons:incident.reasons,test:options.test??false,messageVersion:2});
   }else if(state.incident&&!unavailable&&!reasons.length){
-    const incident=state.incident;state.pending.push({id:incident.id,kind:'recovery',at:snapshot.at,openedAt:incident.openedAt,reasons:incident.reasons,test:options.test??false});state.incident=null;
+    const incident=state.incident;state.pending.push({id:incident.id,kind:'recovery',at:snapshot.at,openedAt:incident.openedAt,reasons:incident.reasons,test:options.test??false,messageVersion:2});state.incident=null;
   }
   requireValue(state.pending.length<=16,'notification_backlog_limit');state.checkedAt=snapshot.at;return state;
 }
@@ -56,7 +56,7 @@ function validateState(value:unknown,origin:string):asserts value is MonitorStat
   for(const [key,count]of Object.entries(s.failedCounts))requireValue(lanes.includes(key as Lane)&&integer(count),'invalid_monitor_state');
   const incident=(n:Incident|Notice)=>requireValue(n&&/^[a-f0-9-]{36}$/.test(n.id)&&iso(n.openedAt)&&Array.isArray(n.reasons)&&n.reasons.length<=32&&n.reasons.every(r=>reasonPattern.test(r)),'invalid_monitor_state');
   if(s.incident){incident(s.incident);requireValue(typeof s.incident.notified==='boolean','invalid_monitor_state');}
-  for(const n of s.pending){incident(n);requireValue(['incident','recovery'].includes(n.kind)&&iso(n.at)&&typeof n.test==='boolean','invalid_monitor_state');}
+  for(const n of s.pending){incident(n);requireValue(['incident','recovery'].includes(n.kind)&&iso(n.at)&&typeof n.test==='boolean'&&(n.messageVersion===undefined||n.messageVersion===2),'invalid_monitor_state');}
 }
 function encryptionKey(value:string){requireValue(/^[A-Za-z0-9+/]{43}=$/.test(value),'invalid_state_key');const key=Buffer.from(value,'base64');requireValue(key.length===32,'invalid_state_key');return key;}
 export function seal(state:MonitorState,key:string):Buffer{
@@ -84,13 +84,16 @@ export async function probe(origin:string,secret:string,transport:typeof fetch=f
   }
   return {at:now(),health:health?.name==='Folio'&&health.status==='ok',ready:readyShape(ready),diagnostics:queues!==null,queues};
 }
+// Keep unversioned queued notices byte-compatible with their original idempotency key.
+function noticeBrand(notice:Notice){return notice.messageVersion===2?'MaintainFlow':'Folio';}
 export function message(notice:Notice,origin:string){
   const title=notice.kind==='incident'?'Action required':'Recovered';
-  return {subject:`[Folio monitor]${notice.test?' [TEST]':''} ${title}`,text:[notice.test?'This is an approved synthetic monitoring drill. No production outage was caused.':'Folio operational monitoring notification.',`${title}: ${origin}`,`Observed at: ${notice.at}`,`Incident began: ${notice.openedAt}`,`Checks: ${notice.reasons.join(', ')}`,notice.kind==='recovery'?'All monitored conditions are healthy again. A retained failure-count increase does not imply failed work was replayed or cleared.':'Inspect readiness, the operator diagnostics and provider logs. This monitor never wakes workers, retries jobs or changes customer data.'].join('\n\n')};
+  const brand=noticeBrand(notice);
+  return {subject:`[${brand} monitor]${notice.test?' [TEST]':''} ${title}`,text:[notice.test?`This is an approved ${notice.messageVersion===2?'MaintainFlow ':''}synthetic monitoring drill. No production outage was caused.`:`${brand} operational monitoring notification.`,`${title}: ${origin}`,`Observed at: ${notice.at}`,`Incident began: ${notice.openedAt}`,`Checks: ${notice.reasons.join(', ')}`,notice.kind==='recovery'?'All monitored conditions are healthy again. A retained failure-count increase does not imply failed work was replayed or cleared.':'Inspect readiness, the operator diagnostics and provider logs. This monitor never wakes workers, retries jobs or changes customer data.'].join('\n\n')};
 }
 export async function sendNotice(notice:Notice,configuration:{origin:string;to:string;from:string;apiKey:string},transport:typeof fetch=fetch){
   requireValue(/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(configuration.to)&&/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(configuration.from),'invalid_email_configuration');
-  const body={from:`Folio monitor <${configuration.from}>`,to:[configuration.to],...message(notice,configuration.origin)};
+  const body={from:`${noticeBrand(notice)} monitor <${configuration.from}>`,to:[configuration.to],...message(notice,configuration.origin)};
   const response=await transport('https://api.resend.com/emails',{method:'POST',redirect:'error',headers:{authorization:'Bearer '+configuration.apiKey,'content-type':'application/json','idempotency-key':`folio-monitor/${notice.id}/${notice.kind}`},body:JSON.stringify(body),signal:AbortSignal.timeout(12_000)});
   if(!response.ok){await response.body?.cancel();throw new MonitorError('alert_delivery_failed');}const result=await boundedJSON(response);requireValue(typeof result?.id==='string'&&/^[a-f0-9-]{36}$/.test(result.id),'alert_acceptance_invalid');return {id:result.id,accepted:true};
 }

@@ -31,6 +31,8 @@ Uploads use immutable names, include the hidden path explicitly, fail on missing
 
 If a provider accepts an email but its response or final checkpoint is lost, the earlier checkpoint retains the same notice ID, timestamp and body. Resend receives the same idempotency key on retry. Pending notices aged 23 hours or more stop for reconciliation; the monitor does not recreate an expired provider idempotency key. Preserve sender, recipient and origin configuration during uncertain-delivery recovery because changing them changes the request body. Provider acceptance and actual inbox delivery remain different evidence.
 
+New notices use MaintainFlow sender, subject and body text and persist `messageVersion: 2`. An unversioned pending notice retains the original Folio payload on restore/retry. State-envelope version, encryption binding, idempotency keys and exact workflow run-name matching remain unchanged. This compatibility support does not assert that monitoring or email delivery has been activated.
+
 ## Configuration and activation
 
 1. Install an independently generated `FOLIO_MONITOR_SECRET` as a sensitive server setting and as a GitHub Actions secret. Keep the worker credential out of the monitor workflow.
