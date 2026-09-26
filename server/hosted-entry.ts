@@ -7,7 +7,7 @@ import {createOpenAISchemaSuggestionProvider} from './core/openai-schema-suggest
 import {setSplitSuggestionProvider} from './core/split-suggestions.js';
 import {createOpenAISplitSuggestionProvider} from './core/openai-split-suggestions.js';
 import {waitUntil} from '@vercel/functions';
-import {registerHostedWorker,wakeHostedWorker} from './hosted-worker.js';
+import {recordHostedInvocation,registerHostedWorker} from './hosted-worker.js';
 
 let application:ReturnType<typeof buildApp>|undefined;
 async function hostedApp(){
@@ -15,18 +15,14 @@ async function hostedApp(){
   setSchemaSuggestionProvider(createOpenAISchemaSuggestionProvider());
   setSplitSuggestionProvider(createOpenAISplitSuggestionProvider());
   const app=await buildApp();
-  registerHostedWorker(app,{waitUntil});
-  app.addHook('onResponse',async(request,reply)=>{
-    if(!['GET','HEAD','OPTIONS'].includes(request.method)&&reply.statusCode>=200&&reply.statusCode<300&&request.url!=='/api/internal/worker'){
-      waitUntil(wakeHostedWorker());
-    }
-  });
+  registerHostedWorker(app,{waitUntil,wakeAfterMutation:true});
   await app.ready();
   return app;
 }
 
 /** Raw streams preserve Fastify multipart parsing and signed webhook bodies. */
 export default async function handler(request:IncomingMessage,response:ServerResponse){
+  recordHostedInvocation(request);
   application??=hostedApp().catch(error=>{application=undefined;throw error;});
   const app=await application;
   await new Promise<void>((resolve,reject)=>{
