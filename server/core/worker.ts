@@ -1,8 +1,10 @@
 import {isDeepStrictEqual} from 'node:util';
 import {bankStatementWorkflow,bankStatementSchema} from '../../shared/bank-statement-preset.js';
+import {bankPdfLayoutVersion,serializeBankPdfLayout,type BankPdfLayoutInput,type BankPdfLayoutProvenance} from '../../shared/bank-pdf-layout.js';
+import {PdfGeometryError,pdfRegionLimits} from '../../shared/pdf-regions.js';
 import {createBankStatementResult} from './bank-statement-domain.js';
 import {indexBankStatement} from './bank-statement-service.js';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {readStoredObject} from './storage.js';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -16,7 +18,7 @@ import {resolveJobNormalizationPolicy,assertJobSourceFormats} from '../../shared
 import {extractRules} from './extraction.js';
 import {selectTemplateExtraction} from './template-selection.js';
 import {needsPdfGeometry,selectCurrentTemplateExtraction} from './template-region-selection.js';
-import {readPdfGeometry} from './source.js';
+import {readPdfGeometry,type DecoderOptions} from './source.js';
 import {templatePolicy,regionTemplatePolicy,type TemplateSelection} from '../../shared/template-selection.js';
 import {hasWorkspaceExtractionCapacity,processOneSchemaSuggestion,setSchemaSuggestionProvider} from './schema-suggestions.js';
 import {processOneSplitSuggestion,reconcileExpiredSplitSuggestions,setSplitSuggestionProvider} from './split-suggestions.js';
@@ -27,7 +29,7 @@ let provider:ExtractionProvider|undefined;
 export function setExtractionProvider(value:ExtractionProvider|undefined){provider=value;}
 export function aiConfigured(){return provider?.configured()===true;}
 const providerDeadlineMs=90_000;
-interface JobOptions {signal?:AbortSignal;providerTimeoutMs?:number;}
+interface JobOptions {signal?:AbortSignal;providerTimeoutMs?:number;pdfGeometryOptions?:Pick<DecoderOptions,'spawnChild'|'timeoutMs'>;}
 
 async function extractWithDeadline<T>(work:(signal:AbortSignal)=>Promise<T>,options:JobOptions):Promise<T>{
   const timeoutMs=options.providerTimeoutMs??providerDeadlineMs;
@@ -100,11 +102,30 @@ const attempt=await extractWithDeadline(async signal=>{
  let selection:TemplateSelection|null=null;
  const policy=job.config.templatePolicy;
  const bank=job.config.useCase==='bank_statement';
+ if(Object.hasOwn(job.config,'bankPdfLayoutVersion')&&(!bank||job.config.bankPdfLayoutVersion!==bankPdfLayoutVersion))throw Object.assign(new Error('This job uses an unsupported bank PDF input version. Reprocess with current saved settings.'),{permanent:true});
  if(job.config.bankWorkflow!=null&&job.config.bankWorkflow!==bankStatementWorkflow||bank&&job.config.bankWorkflow!==bankStatementWorkflow||job.config.bankWorkflow===bankStatementWorkflow&&!bank)throw Object.assign(new Error('This job uses an unsupported bank statement workflow. Reprocess with current saved settings.'),{permanent:true});
  if(bank&&(job.config.mode!=='ai'||!isDeepStrictEqual(data.schema,bankStatementSchema)))throw Object.assign(new Error('This bank statement job has incompatible extraction settings. Reprocess with the bank statement workflow.'),{permanent:true});
  const valuePolicy=resolveJobNormalizationPolicy(job.config.normalizationPolicy);assertJobSourceFormats(data.schema,valuePolicy);
  if(policy!=null&&policy!==templatePolicy&&policy!==regionTemplatePolicy)throw Object.assign(new Error('This job uses an unsupported template version. Reprocess the document with current saved settings.'),{permanent:true});
  let sourceBytes:Buffer|undefined,geometry:Awaited<ReturnType<typeof readPdfGeometry>>|undefined;
+ let bankPdfLayout:BankPdfLayoutInput|undefined,bankPdfLayoutInput:(BankPdfLayoutProvenance&{sourceByteSize:number;pageCountVerification:'geometry'|'intake_source_hash'})|undefined;
+ if(bank&&job.config.bankPdfLayoutVersion===bankPdfLayoutVersion&&data.doc.mime_type==='application/pdf'){
+  sourceBytes=await readStoredObject(data.doc.storage_key);signal.throwIfAborted();
+  const sourceSha256=createHash('sha256').update(sourceBytes).digest('hex'),pageCount=data.doc.page_count,byteSize=Number(data.doc.byte_size);
+  if(!sourceBytes.length||!Number.isSafeInteger(byteSize)||byteSize!==sourceBytes.length||byteSize>pdfRegionLimits.maxBytes||!sourceBytes.subarray(0,5).equals(Buffer.from('%PDF-'))||sourceSha256!==data.doc.sha256||!Number.isInteger(pageCount)||pageCount<1||pageCount>pdfRegionLimits.maxPages||!Array.isArray(data.doc.source_text)||data.doc.source_text.length!==pageCount||data.doc.source_text.some((page:any,index:number)=>!page||page.page!==index+1||typeof page.text!=='string'))throw Object.assign(new Error('The original bank PDF no longer matches its verified intake. Reprocess a verified source.'),{permanent:true});
+  try{
+   geometry=await readPdfGeometry(sourceBytes,{...options.pdfGeometryOptions,signal});signal.throwIfAborted();
+   if(geometry.sourceSha256!==sourceSha256||geometry.pageCount!==pageCount)throw Object.assign(new Error('The original bank PDF page count or source identity changed. Reprocess a verified source.'),{permanent:true});
+   bankPdfLayout={version:bankPdfLayoutVersion,geometry};
+  }catch(error){
+   signal.throwIfAborted();
+   // Only this stricter geometry limit may retain the already verified intake.
+   // Operational failures and malformed geometry never become visual fallbacks.
+   if(!(error instanceof PdfGeometryError)||error.reason!=='geometry_limit')throw error;
+   bankPdfLayout={version:bankPdfLayoutVersion,unavailableReason:'geometry_limit',sourceSha256,pageCount};
+  }
+  bankPdfLayoutInput={...serializeBankPdfLayout(bankPdfLayout,{sourceSha256,pageCount}).provenance,sourceByteSize:byteSize,pageCountVerification:geometry?'geometry':'intake_source_hash'};
+ }
  if(policy===regionTemplatePolicy&&needsPdfGeometry(job.config.templates??[])&&data.doc.mime_type==='application/pdf'){
   sourceBytes=await readStoredObject(data.doc.storage_key);signal.throwIfAborted();
   geometry=await readPdfGeometry(sourceBytes,{signal});signal.throwIfAborted();
@@ -122,21 +143,22 @@ const attempt=await extractWithDeadline(async signal=>{
  else if(job.config.mode==='ai'){
   const activeProvider=provider;if(!activeProvider?.configured())throw Object.assign(new Error(bank?'Bank statement extraction is unavailable because the AI provider is not configured. Ask your administrator to enable it, then retry the statement.':'AI extraction is not configured. Configure the server provider or choose text-anchor rules.'),{permanent:true});
   const bytes=sourceBytes??await readStoredObject(data.doc.storage_key);signal.throwIfAborted();
-  const input={bytes,mimeType:data.doc.mime_type,pages:data.doc.source_text,schema:data.schema,instructions:job.config.instructions,locale:job.config.locale,timezone:job.config.timezone,normalizationPolicy:valuePolicy,signal};
+  const input={bytes,mimeType:data.doc.mime_type,pages:data.doc.source_text,schema:data.schema,instructions:job.config.instructions,locale:job.config.locale,timezone:job.config.timezone,normalizationPolicy:valuePolicy,signal,...(bankPdfLayout?{bankPdfLayout}:{})};
   const visualDocument=await prepareVisualDocument(input,{signal,expectedSha256:data.doc.sha256});signal.throwIfAborted();
   result=await activeProvider.extract({...input,...(visualDocument?{visualDocument}:{})});
   if(visualDocument)result={...result,tokenUsage:{...(result.tokenUsage&&typeof result.tokenUsage==='object'&&!Array.isArray(result.tokenUsage)?result.tokenUsage:{}),sourceRendering:visualRenderingMetadata(visualDocument)}};
+  if(bankPdfLayoutInput)result={...result,tokenUsage:{...(result.tokenUsage&&typeof result.tokenUsage==='object'&&!Array.isArray(result.tokenUsage)?result.tokenUsage:{}),bankPdfLayoutInput}};
  }else{
   if(!data.doc.source_text.some((p:any)=>p.text.trim()))throw Object.assign(new Error('This document has no readable text. Scans and images require a configured OCR/AI provider.'),{permanent:true});
   result=extractRules(data.doc.source_text,data.schema,job.config.locale,decision?[]:job.config.templates||[],job.config.timezone,valuePolicy);
  }
  let bankContext=null;
  if(bank){try{const statement=createBankStatementResult(result.rawValues,result.evidence,job.config.locale);bankContext=statement.context;result={...result,normalizedValues:statement.values as unknown as Record<string,unknown>,issues:statement.issues.map(issue=>({field:issue.field??issue.transactionId??issue.accountId??'accounts',code:issue.code,message:issue.message}))};}catch(error){throw Object.assign(error instanceof Error?error:new Error('Bank statement extraction is invalid'),{permanent:true});}}
- signal.throwIfAborted();return {data,result,selection,bankContext,valuePolicy,geometryVerified:Boolean(geometry),templateSnapshot:decision?.result?.templateSnapshot??null};
+ signal.throwIfAborted();return {data,result,selection,bankContext,valuePolicy,sourceVerified:Boolean(geometry||bankPdfLayoutInput),templateSnapshot:decision?.result?.templateSnapshot??null};
 },options);
-if(!attempt)return true;const {data,result,selection,bankContext,valuePolicy,geometryVerified,templateSnapshot}=attempt;
+if(!attempt)return true;const {data,result,selection,bankContext,valuePolicy,sourceVerified,templateSnapshot}=attempt;
 const normalizationContext:NormalizationContext={version:valuePolicy,locale:job.config.locale,timezone:job.config.timezone??null,tzdbVersion:process.versions.tz??null};
-await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const lock=(await c.query('select * from jobs where id=$1 and lease_owner=$2 and state=$3 for update',[job.id,owner,'processing'])).rows[0];if(!lock)return;if(geometryVerified){const current=(await c.query('select sha256,storage_key,mime_type,page_count,byte_size from documents where id=$1 for update',[job.document_id])).rows[0];if(!current||current.sha256!==data.doc.sha256||current.storage_key!==data.doc.storage_key||current.mime_type!==data.doc.mime_type||current.page_count!==data.doc.page_count||String(current.byte_size)!==String(data.doc.byte_size))throw Object.assign(new Error('The original PDF changed before its template result could be saved. Reprocess a verified source.'),{permanent:true});}const {rows:[run]}=await c.query('insert into extraction_runs(workspace_id,document_id,schema_version_id,job_id,engine,model,prompt_version,document_sha256,raw_values,normalized_values,evidence,issues,token_usage,cost_usd,selection,template_snapshot,normalization_context,bank_statement_context) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning id',[job.workspace_id,job.document_id,job.schema_version_id,job.id,result.engine,result.model,result.promptVersion??'folio-extraction-v1',data.doc.sha256,JSON.stringify(result.rawValues),JSON.stringify(result.normalizedValues),JSON.stringify(result.evidence),JSON.stringify(result.issues),JSON.stringify(result.tokenUsage??{}),result.costUsd??0,selection?JSON.stringify(selection):null,templateSnapshot?JSON.stringify(templateSnapshot):null,JSON.stringify(normalizationContext),bankContext?JSON.stringify(bankContext):null]);await c.query("update documents set latest_run_id=$2,status='needs_review',error=null,updated_at=now() where id=$1",[job.document_id,run.id]);if(bankContext)await indexBankStatement(c,job.workspace_id,job.document_id,run.id,result.normalizedValues as any);await c.query("update jobs set state='completed',lease_until=null,lease_owner=null,updated_at=now() where id=$1",[job.id]);});
+await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const lock=(await c.query('select * from jobs where id=$1 and lease_owner=$2 and state=$3 for update',[job.id,owner,'processing'])).rows[0];if(!lock)return;if(sourceVerified){const current=(await c.query('select sha256,storage_key,mime_type,page_count,byte_size from documents where id=$1 for update',[job.document_id])).rows[0];if(!current||current.sha256!==data.doc.sha256||current.storage_key!==data.doc.storage_key||current.mime_type!==data.doc.mime_type||current.page_count!==data.doc.page_count||String(current.byte_size)!==String(data.doc.byte_size))throw Object.assign(new Error('The original PDF changed before its extraction result could be saved. Reprocess a verified source.'),{permanent:true});}const {rows:[run]}=await c.query('insert into extraction_runs(workspace_id,document_id,schema_version_id,job_id,engine,model,prompt_version,document_sha256,raw_values,normalized_values,evidence,issues,token_usage,cost_usd,selection,template_snapshot,normalization_context,bank_statement_context) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning id',[job.workspace_id,job.document_id,job.schema_version_id,job.id,result.engine,result.model,result.promptVersion??'folio-extraction-v1',data.doc.sha256,JSON.stringify(result.rawValues),JSON.stringify(result.normalizedValues),JSON.stringify(result.evidence),JSON.stringify(result.issues),JSON.stringify(result.tokenUsage??{}),result.costUsd??0,selection?JSON.stringify(selection):null,templateSnapshot?JSON.stringify(templateSnapshot):null,JSON.stringify(normalizationContext),bankContext?JSON.stringify(bankContext):null]);await c.query("update documents set latest_run_id=$2,status='needs_review',error=null,updated_at=now() where id=$1",[job.document_id,run.id]);if(bankContext)await indexBankStatement(c,job.workspace_id,job.document_id,run.id,result.normalizedValues as any);await c.query("update jobs set state='completed',lease_until=null,lease_owner=null,updated_at=now() where id=$1",[job.id]);});
 }catch(e){const permanent=(e as any).permanent||job.attempts>=job.max_attempts;const message=e instanceof Error?e.message.slice(0,500):'Processing failed';await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const changed=await c.query("update jobs set state=$3,error=$4,available_at=now()+($5 * interval '1 second'),lease_owner=null,lease_until=null,updated_at=now() where id=$1 and lease_owner=$2 and state='processing' returning id",[job.id,owner,permanent?'failed':'queued',message,Math.min(60,2**job.attempts)]);if(changed.rowCount)await c.query('update documents set status=$2,error=$3,updated_at=now() where id=$1',[job.document_id,permanent?'failed':'queued',message]);});}
 return true;
 }
