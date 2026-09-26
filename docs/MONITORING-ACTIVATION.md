@@ -1,8 +1,10 @@
 # Monitoring activation handoff
 
+**Status update — 27 September 2026:** the diagnostics credential and separate monitoring-state key were installed on 26 September at 16:30 UTC. The [PR58 monitor probe](https://github.com/rory-hayes/maintainflow/actions/runs/36276759352) subsequently passed on canonical revision `b7ee471d407ad5f94766428020dc3bef1c65c8b0`, observed at 22:36 UTC, with zero emails and zero monitoring-state writes. The scheduling switch remains absent/disabled; incident-recipient confirmation, inbox delivery, state initialization and genuine scheduled operation remain outstanding.
+
 This is an activation checklist for the existing independent monitor, not a new monitoring service. Read [Independent operational monitoring](INDEPENDENT-MONITORING.md) for incident thresholds, encrypted artifact history and uncertain-delivery recovery. The implementation already has scoped probes, encrypted checkpoints, an outbox and idempotent incident/recovery notices. Those mechanisms do not establish hosted activation or receipt of an alert.
 
-**Current preparation boundary:** installing the monitor credential and selecting/authorizing the incident recipient remain pending approvals. The checklist and offline preflight do not grant those approvals. No secret is installed, notice sent, state created or GitHub schedule activated by this work.
+**Original preparation boundary — historical, superseded above:** installing the monitor credential and selecting/authorizing the incident recipient remain pending approvals. The checklist and offline preflight do not grant those approvals. No secret is installed, notice sent, state created or GitHub schedule activated by this work.
 
 ## Offline configuration preflight
 
