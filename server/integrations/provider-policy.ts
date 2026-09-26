@@ -82,9 +82,22 @@ export function verifyResendPayload(raw:Buffer,headers:Record<string,string>,sec
  new Webhook(secret).verify(payload,headers);
  return resendEventSchema.parse(JSON.parse(payload));
 }
+const googleOAuthGuidance={
+ invalid_grant:'Reconnect Google Sheets in Integrations.',
+ invalid_client:"Contact support to check this application's Google connection settings.",
+ unauthorized_client:'Contact support to check whether this application is allowed to connect to Google.',
+ access_denied:'Check your Google account permissions, then reconnect Google Sheets in Integrations.',
+} as const;
 export function publicProviderError(provider:string,error:unknown) {
- const candidate=error as {status?:number;statusCode?:number;code?:string};
+ const candidate=error as {status?:number;statusCode?:number;response?:{data?:unknown}};
  const status=Number(candidate?.status||candidate?.statusCode);
+ if((provider==='Google Sheets'||provider==='Google OAuth')&&[400,401,403].includes(status)){
+  // The Google client preserves OAuth codes here, but its message and description
+  // can contain credentials or URLs. Never inspect or echo those free-text fields.
+  const data=candidate?.response?.data;
+  const code=data&&typeof data==='object'&&!Array.isArray(data)&&Object.hasOwn(data,'error')?(data as {error?:unknown}).error:undefined;
+  if(typeof code==='string'&&Object.hasOwn(googleOAuthGuidance,code))return `${provider} authorization failed (${code}). ${googleOAuthGuidance[code as keyof typeof googleOAuthGuidance]}`;
+ }
  if(status===401||status===403) return `${provider} authorization failed. Check credentials and permissions.`;
  if(status===429) return `${provider} rate limit reached. The worker will retry within its configured limit.`;
  return `${provider} operation failed. Check provider configuration and the documented release gates.`;
