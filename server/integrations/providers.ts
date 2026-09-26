@@ -15,6 +15,7 @@ import {ParserFormatNotAllowedError,SourceIntakeRejectedError} from '../core/int
 import {encryptSecret,decryptSecret} from './secrets.js';
 import {publicRequest} from './network.js';
 import {mockBillingEnabled,mockBillingStatus,registerMockBilling,requireRealBilling} from './mock-billing.js';
+import {validateCheckoutPolicy,readCheckoutContract,reserveCheckoutContract,contractSessionKey,bindCheckoutContract,checkoutCompletionPointer,captureCheckoutCompletion,listCheckoutContracts,getCheckoutContract,renderCheckoutTermsRecord,type CheckoutPolicyInput,type CheckoutCompletionPointer} from './checkout-contracts.js';
 import {
  SHEETS_SCOPE,stripeMode,stripeConfiguration,assertStripeMode,stripePriceMatches,assertStripePortalConfiguration,verifyStripePayload,verifyResendPayload,
  publicProviderError,emailAddress,deliveredRecipients,verifiedReceivingDomain,managedReceivingProbe,verifiedManagedReceivingProbe,
@@ -23,7 +24,7 @@ import {
 } from './provider-policy.js';
 
 type Integration={id:string;workspace_id:string;parser_id:string|null;kind:string;config:Record<string,unknown>;secret_ciphertext:string|null;enabled:boolean};
-type StripePointer={id:string;type:string;created:number;customerId:string;mode?:StripeMode};
+type StripePointer={id:string;type:string;created:number;customerId:string;mode?:StripeMode;checkout?:CheckoutCompletionPointer};
 type ResendPointer={emailId:string;recipients:string[]};
 const uuid=z.string().uuid();
 type BillingConfiguration=ReturnType<typeof stripeConfiguration>;
@@ -111,7 +112,18 @@ function stripePointer(event:Stripe.Event):StripePointer|null {
  if(!['customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','checkout.session.completed','checkout.session.async_payment_succeeded','invoice.paid','invoice.payment_failed','invoice.payment_action_required'].includes(event.type))return null;
  const object=event.data.object as unknown as {customer?:string|{id:string}};
  const customerId=typeof object.customer==='string'?object.customer:object.customer?.id;
- return customerId?{id:event.id,type:event.type,created:event.created,customerId,mode:event.livemode?'live':'test'}:null;
+ const checkout=checkoutCompletionPointer(event);
+ return customerId?{id:event.id,type:event.type,created:event.created,customerId,mode:event.livemode?'live':'test',...(checkout?{checkout}:{})}:null;
+}
+
+/** Neither completion evidence nor entitlement reconciliation can starve the other. */
+export async function processStripeEvent(pointer:StripePointer,controlledClient?:Stripe){
+ if(!pointer.checkout)return reconcileStripeCustomer(pointer,controlledClient);
+ requireRealBilling();
+ const settings=billingConfiguration();if((pointer.mode??'test')!==settings.mode)return;
+ const client=controlledClient??stripeClient(settings);
+ const outcomes=await Promise.allSettled([captureCheckoutCompletion(pointer,client),reconcileStripeCustomer(pointer,client)]);
+ if(outcomes.some(outcome=>outcome.status==='rejected'))throw new Error('Stripe event processing is incomplete. Retry the recorded event.');
 }
 
 /** Reconcile current provider state under the customer lock, including older event deliveries. */
@@ -255,7 +267,7 @@ export async function tickProviders(budget:WorkBudget={},dependencies:{resend?:R
  const heartbeat=setInterval(()=>{void adminPool.query("update provider_events set lease_until=now()+interval '5 minutes' where id=$1 and lease_token=$2 and status='processing'",[event.id,token]).catch(()=>{});},30_000);
  heartbeat.unref();
  try{
-  if(event.provider==='stripe')await reconcileStripeCustomer(event.payload);
+  if(event.provider==='stripe')await processStripeEvent(event.payload);
   else if(event.provider==='resend')await processResendEvent(event.id,event.payload,dependencies.resend,budget);
   else throw new Error('Unsupported provider event.');
   await adminPool.query("update provider_events set status='completed',error=null,lease_until=null,lease_token=null where id=$1 and lease_token=$2",[event.id,token]);
@@ -306,8 +318,28 @@ export async function sendGoogleSheets(integration:Integration,delivery:{id:stri
 }
 
 /** Optional client is an internal controlled-transport seam; configuration/authorization still run. */
-export async function registerProviders(app:FastifyInstance,dependencies:{stripeClient?:(settings:BillingConfiguration)=>Stripe}={}){
+export async function registerProviders(app:FastifyInstance,dependencies:{stripeClient?:(settings:BillingConfiguration)=>Stripe;checkoutPolicy?:()=>CheckoutPolicyInput|null}={}){
  const billingClient=(settings:BillingConfiguration)=>dependencies.stripeClient?.(settings)??stripeClient(settings);
+ // No production policy provider is installed. A future approved catalogue can
+ // supply this internal seam; absent configuration never invents acceptance.
+ const checkoutPolicy=()=>{const policy=dependencies.checkoutPolicy?.();return policy===null||policy===undefined?null:validateCheckoutPolicy(policy);};
+ const captureEnabled=()=>{try{return Boolean(checkoutPolicy());}catch{return false;}};
+ app.get('/api/billing/contracts',async(request,reply)=>{
+  reply.header('Cache-Control','private, no-store');
+  const actor=await sessionAdmin(request),query=z.object({cursor:z.string().max(256).optional()}).strict().parse(request.query);
+  let selectedMode:StripeMode|null=null;try{selectedMode=stripeMode();}catch{/* Invalid current config must not hide historical evidence. */}
+  return listCheckoutContracts(actor.workspaceId,captureEnabled(),selectedMode,query.cursor);
+ });
+ app.get('/api/billing/contracts/:id',async(request,reply)=>{
+  reply.header('Cache-Control','private, no-store');
+  const actor=await sessionAdmin(request),id=uuid.parse((request.params as {id:string}).id);
+  return getCheckoutContract(actor.workspaceId,id);
+ });
+ app.get('/api/billing/contracts/:id/download',async(request,reply)=>{
+  const actor=await sessionAdmin(request),id=uuid.parse((request.params as {id:string}).id);
+  const record=await getCheckoutContract(actor.workspaceId,id);
+  return reply.header('Cache-Control','private, no-store').header('X-Content-Type-Options','nosniff').header('Content-Disposition',`attachment; filename="checkout-terms-${id}.txt"`).type('text/plain; charset=utf-8').send(renderCheckoutTermsRecord(record));
+ });
  await registerMockBilling(app);
  app.get('/api/providers/status',async request=>{
   const actor=await requireActor(request);requireSession(actor);
@@ -367,24 +399,32 @@ export async function registerProviders(app:FastifyInstance,dependencies:{stripe
    verifySubscriptionModes(active.data,mode,subscription.customer_id);
    if(active.has_more||active.data.some(s=>!['canceled','incomplete_expired'].includes(s.status)))badRequest('Use the billing portal to manage the existing subscription',409);
    let {rows:[checkout]}=await c.query('select * from billing_checkouts where workspace_id=$1 and billing_mode=$2',[actor.workspaceId,mode]);
+   let contract=checkout?await readCheckoutContract(c,checkout.request_id):null;
+   if(checkout&&checkout.contract_capture!==Boolean(contract))badRequest('Checkout terms evidence requires operator reconciliation before retry.',409);
    if(checkout?.session_id){
     const existing=await client.checkout.sessions.retrieve(checkout.session_id);assertStripeMode(existing,mode);
     const customer=typeof existing.customer==='string'?existing.customer:existing.customer?.id;
     if(customer!==subscription.customer_id||existing.client_reference_id!==actor.workspaceId)throw new Error('Stripe Checkout does not match this workspace.');
-    if(existing.status==='open'&&checkout.plan_id===planId)return {url:existing.url};
-    if(existing.status==='open')await client.checkout.sessions.expire(existing.id);checkout=null;
+    if(existing.status==='open'&&checkout.plan_id===planId){if(contract)await bindCheckoutContract(c,contract,existing);return {url:existing.url};}
+    if(existing.status==='open')await client.checkout.sessions.expire(existing.id);checkout=null;contract=null;
    }
    if(checkout&&checkout.plan_id!==planId)badRequest('A different Checkout is being prepared. Retry that plan before changing plans.',409);
    if(checkout&&Date.now()-new Date(checkout.created_at).getTime()>23*60*60*1000)badRequest('An unresolved Checkout reservation requires operator reconciliation before another Checkout can be created.',409);
-   if(!checkout){const result=await c.query('insert into billing_checkouts(workspace_id,billing_mode,plan_id) values($1,$2,$3) on conflict(workspace_id,billing_mode) do update set request_id=gen_random_uuid(),session_id=null,plan_id=excluded.plan_id,idempotency_version=2,created_at=now() returning *',[actor.workspaceId,mode,planId]);checkout=result.rows[0];}
-   return {requestId:checkout.request_id as string,customerId:subscription.customer_id as string,idempotencyVersion:checkout.idempotency_version as number};
+   if(!checkout){
+    const policy=checkoutPolicy(); // Only new attempts read the current policy.
+    const result=await c.query('insert into billing_checkouts(workspace_id,billing_mode,plan_id,contract_capture) values($1,$2,$3,$4) on conflict(workspace_id,billing_mode) do update set request_id=gen_random_uuid(),session_id=null,plan_id=excluded.plan_id,contract_capture=excluded.contract_capture,idempotency_version=2,created_at=now() returning *',[actor.workspaceId,mode,planId,Boolean(policy)]);checkout=result.rows[0];
+    if(policy)contract=await reserveCheckoutContract(c,{id:checkout.request_id,workspaceId:actor.workspaceId,userId:actor.userId,mode,customerId:subscription.customer_id,planId,priceId,origin:config.origin,policy});
+   }
+   if(contract&&(contract.workspace_id!==actor.workspaceId||contract.billing_mode!==mode||contract.customer_id!==subscription.customer_id||contract.plan_id!==planId))throw new Error('Checkout terms reservation does not match this workspace.');
+   return {requestId:checkout.request_id as string,customerId:subscription.customer_id as string,idempotencyVersion:checkout.idempotency_version as number,contract};
   });
   if('url' in reservation)return {url:reservation.url,mode};
   // Persist the nonce before external creation; retry the same mode-bound Session after a lost response.
-  const session=await client.checkout.sessions.create({customer:reservation.customerId,mode:'subscription',line_items:[{price:priceId,quantity:1}],success_url:`${config.origin}/app/usage?checkout=returned`,cancel_url:`${config.origin}/app/usage?checkout=canceled`,client_reference_id:actor.workspaceId},{idempotencyKey:reservation.idempotencyVersion===1?`folio-checkout:${reservation.requestId}`:`folio-checkout:${mode}:${reservation.requestId}`});
+  const session=await client.checkout.sessions.create(reservation.contract?.create_params??{customer:reservation.customerId,mode:'subscription',line_items:[{price:priceId,quantity:1}],success_url:`${config.origin}/app/usage?checkout=returned`,cancel_url:`${config.origin}/app/usage?checkout=canceled`,client_reference_id:actor.workspaceId},{idempotencyKey:reservation.contract?contractSessionKey(reservation.contract):reservation.idempotencyVersion===1?`folio-checkout:${reservation.requestId}`:`folio-checkout:${mode}:${reservation.requestId}`});
   assertStripeMode(session,mode);
   if((typeof session.customer==='string'?session.customer:session.customer?.id)!==reservation.customerId||session.client_reference_id!==actor.workspaceId)throw new Error('Stripe Checkout does not match this workspace.');
-  await withWorkspace(actor.workspaceId,async c=>{
+  await transaction(adminPool,async c=>{
+   if(reservation.contract)await bindCheckoutContract(c,reservation.contract,session);
    const result=await c.query('update billing_checkouts set session_id=$4 where workspace_id=$1 and billing_mode=$2 and request_id=$3',[actor.workspaceId,mode,reservation.requestId,session.id]);if(!result.rowCount)throw new Error('Checkout reservation changed.');
    await audit(c,actor.workspaceId,actor.userId,'billing.checkout_created',null,{planId,mode});
   });
@@ -413,9 +453,11 @@ export async function registerProviders(app:FastifyInstance,dependencies:{stripe
   raw.post('/api/billing/webhook',{bodyLimit:1024*1024,config:{providerWebhook:true}},async(request,reply)=>{
    requireRealBilling();
    const settings=billingConfiguration();
-   let pointer:StripePointer|null;
-   try{pointer=stripePointer(verifyStripePayload(request.body as Buffer,header(request,'stripe-signature'),settings.webhookSecret,settings.mode));}catch{badRequest('Invalid Stripe webhook signature, mode or payload.',400);}
+   let pointer:StripePointer|null,event:Stripe.Event;
+   try{event=verifyStripePayload(request.body as Buffer,header(request,'stripe-signature'),settings.webhookSecret,settings.mode);pointer=stripePointer(event);}catch{badRequest('Invalid Stripe webhook signature, mode or payload.',400);}
    if(!pointer!)return {received:true,ignored:true};
+   // The bounded completion pointer is durable before any Session retrieval.
+   // Worker capture and entitlement reconciliation are independently attempted.
    return reply.code(202).send(await storeProviderEvent('stripe',pointer!.id,pointer!));
   });
   raw.post('/api/providers/resend/webhook',{bodyLimit:1024*1024,config:{providerWebhook:true}},async(request,reply)=>{
