@@ -15,12 +15,12 @@ type DocumentPage={documents:{id:string;name:string}[];total:number;page:number;
 const kindLabels={scalar:'Field',column:'Table column',table:'Table heading'};
 const templateBody=(template:SavedTemplate):TemplateBody=>({name:template.name,matchText:template.matchText,enabled:template.enabled,rules:template.rules});
 
-export default function TemplateEditor({parserId,templates,schema,mode,locale,canEdit}:{parserId:string;templates:SavedTemplate[];schema:ParserSchema;mode:'ai'|'rules';locale:string;canEdit:boolean}){
+export default function TemplateEditor({parserId,templates,schema,mode,locale,timezone,canEdit}:{parserId:string;templates:SavedTemplate[];schema:ParserSchema;mode:'ai'|'rules';locale:string;timezone?:string;canEdit:boolean}){
   const options=templateFieldOptions(schema),[authoring,setAuthoring]=useState('Text anchors'),[nativeVisited,setNativeVisited]=useState(false);
   const textTemplates=templates.filter(template=>(template as unknown as VersionedSavedTemplate).kind!=='native-pdf-region-v1');
   return <div className="template-editor">
     <Tabs items={['Text anchors','Native PDF regions']} value={authoring} onChange={value=>{setAuthoring(value);if(value==='Native PDF regions')setNativeVisited(true);}} label="Template authoring mode"/><div hidden={authoring!=='Text anchors'}><header><h2>Saved text templates</h2><p>Enabled templates are checked before AI. Every configured anchor and required field must have a valid source value. The complete match with the most configured fields wins; ties use the oldest template, then its ID.</p><p className="small muted">Changes apply to new documents and explicit reprocessing. Existing jobs and runs keep their saved settings.</p></header>
-    <TemplateCheck key={parserId} parserId={parserId} schema={schema} templates={templates} mode={mode} locale={locale} options={options} canEdit={canEdit}/>
+    <TemplateCheck key={parserId} parserId={parserId} schema={schema} templates={templates} mode={mode} locale={locale} timezone={timezone} options={options} canEdit={canEdit}/>
     <section aria-label="Saved templates" className="template-list">
       {!textTemplates.length&&<p className="muted">No saved text templates yet. AI parsers use AI when no complete template matches. Text-anchor parsers without enabled templates use field labels.</p>}
       {textTemplates.map(template=><TemplateCard key={template.id} template={template} parserId={parserId} options={options} canEdit={canEdit}/>)}
@@ -89,12 +89,12 @@ function TemplateForm({parserId,options,initial,onClose}:{parserId:string;option
   </form>;
 }
 
-function TemplateCheck({parserId,schema,templates,mode,locale,options,canEdit}:{parserId:string;schema:ParserSchema;templates:SavedTemplate[];mode:'ai'|'rules';locale:string;options:TemplateFieldOption[];canEdit:boolean}){
+function TemplateCheck({parserId,schema,templates,mode,locale,timezone,options,canEdit}:{parserId:string;schema:ParserSchema;templates:SavedTemplate[];mode:'ai'|'rules';locale:string;timezone?:string;options:TemplateFieldOption[];canEdit:boolean}){
   const [page,setPage]=useState(1),[documentId,setDocumentId]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const running=useRef(false);
   const [result,setResult]=useState<{documentId:string;signature:string;check:CheckResult}|null>(null);
   const documents=useData<DocumentPage>(`/api/parsers/${parserId}/documents?page=${page}&pageSize=20`);
-  const signature=JSON.stringify({schema,templates,mode,locale});
+  const signature=JSON.stringify({schema,templates,mode,locale,timezone});
   const stale=Boolean(result&&(result.signature!==signature||result.documentId!==documentId));
   async function check(){
     if(!documentId||running.current)return;running.current=true;setBusy(true);setError('');setResult(null);

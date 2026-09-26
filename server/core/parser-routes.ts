@@ -2,6 +2,7 @@ import type {FastifyInstance} from 'fastify';
 import {z} from 'zod';
 import {requireActor,editors,admins} from './auth.js';
 import {withWorkspace,camel,badRequest,notFound,audit} from './db.js';
+import {validTimezone} from './timestamps.js';
 import {parserSchema} from './schema.js';
 import {presets} from '../../shared/presets.js';
 import {parserSetupStatus,queueInitialSetup,releaseInitialJobs} from './parser-setup.js';
@@ -14,7 +15,7 @@ import {registerTemplateMutations} from './template-mutations.js';
 import {registerTemplateRegionRoutes} from './template-region-routes.js';
 const idFrom=(p:unknown)=>z.object({id:z.string().uuid()}).parse(p).id;
 const locale=z.string().max(35).refine(v=>{try{new Intl.NumberFormat(v);return true;}catch{return false;}},'Invalid locale');
-const timezone=z.string().max(80).refine(v=>{try{new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}},'Invalid timezone');
+const timezone=z.string().max(80).refine(validTimezone,'Invalid timezone');
 const parserInput=z.object({setupMode:z.enum(['preset','sample']).default('preset'),name:z.string().trim().min(1).max(100),useCase:z.enum(['invoice','purchase_order','receipt','leads','custom']).default('custom'),mode:z.enum(['rules','ai']).default('rules'),instructions:z.string().max(8000).default(''),locale:locale.default('en-IE'),timezone:timezone.default('Europe/Dublin'),schema:parserSchema.optional(),allowedFormats:allowedFormatsInput.optional()});
 // Creation defaults must never reset settings omitted from a partial update.
 const parserPatch=z.object({name:parserInput.shape.name.optional(),mode:z.enum(['rules','ai']).optional(),instructions:z.string().max(8000).optional(),locale:locale.optional(),timezone:timezone.optional(),archived:z.boolean().optional(),allowedFormats:allowedFormatsInput.optional()});

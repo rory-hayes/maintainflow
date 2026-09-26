@@ -51,7 +51,7 @@ async function snapshot(c:PoolClient,auth:TemplateAuthorization,parserId:string,
 }
 function signature(value:Awaited<ReturnType<typeof snapshot>>){
  const {parser,document,templates}=value;
- return JSON.stringify({schema:parser.active_schema_id,locale:parser.locale,mode:parser.mode,archived:parser.archived,setup:parser.field_setup_state,allowedFormats:parser.allowed_formats,document,templates});
+ return JSON.stringify({schema:parser.active_schema_id,locale:parser.locale,timezone:parser.timezone,mode:parser.mode,archived:parser.archived,setup:parser.field_setup_state,allowedFormats:parser.allowed_formats,document,templates});
 }
 async function scope<T>(auth:TemplateAuthorization,op:Operation,write:boolean,fn:(c:PoolClient)=>Promise<T>){
  op.check();return op.bounded(withTemplateAuthorization(auth,write?['parsers:read','parsers:write','documents:read']:['parsers:read','documents:read'],write,async c=>{
@@ -100,7 +100,7 @@ export async function previewTemplateDraft(auth:TemplateAuthorization,parserId:s
  try{
   const first=await scope(auth,op,true,async c=>{const found=await snapshot(c,auth,parserId,body.documentId);validateSource(found,body);return found;});
   const geometry=await geometryFor(first,auth,op,options);
-  const checked=previewTemplateDefinition(first.document.source_text,first.parser.schema,first.parser.locale,body.definition,geometry);
+  const checked=previewTemplateDefinition(first.document.source_text,first.parser.schema,first.parser.locale,body.definition,geometry,first.parser.timezone);
   await scope(auth,op,true,async c=>{const current=await snapshot(c,auth,parserId,body.documentId);validateSource(current,body);if(signature(current)!==signature(first))badRequest('The parser, template settings or original changed during this preview. Reload and preview again.',409);});
   op.check();return {source:sourceMetadata(first.document),schemaId:first.parser.active_schema_id,definitionDigest:sha(canonicalTemplateDefinition(body.definition)),evaluatedWhileDisabled:!body.definition.enabled,...checked,result:checked.result??null};
  }finally{op.close();}
@@ -115,7 +115,7 @@ export async function checkSavedTemplates(auth:TemplateAuthorization,parserId:st
   if(first.document.mime_type==='application/pdf'&&first.templates.some(template=>template.enabled&&template.kind==='native-pdf-region-v1')){
    validateSource(first);geometry=await geometryFor(first,auth,op,options);
   }
-  const {selection,candidates,availableSourceText}=selectCurrentTemplateExtraction(first.document.source_text,first.parser.schema,first.parser.locale,first.templates,first.parser.mode,geometry);
+  const {selection,candidates,availableSourceText}=selectCurrentTemplateExtraction(first.document.source_text,first.parser.schema,first.parser.locale,first.templates,first.parser.mode,geometry,first.parser.timezone);
   await scope(auth,op,false,async c=>{const current=await snapshot(c,auth,parserId,documentId);if(signature(current)!==signature(first))badRequest('Saved settings or the original changed during this check. Check templates again.',409);});
   op.check();return {selection,candidates,availableSourceText};
  }finally{op.close();}

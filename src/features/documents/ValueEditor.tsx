@@ -18,7 +18,7 @@ function ScalarInput({field,value,onChange,disabled,path}:EditorProps){
   }
   if(field.type==='boolean')return <select disabled={disabled} aria-label={label} aria-required={field.required||undefined} value={value==null?'':String(value)} onChange={event=>onChange(event.target.value===''?null:event.target.value==='true')}><option value="">Not found</option><option value="true">Yes</option><option value="false">No</option></select>;
   if(field.type==='multiline')return <textarea disabled={disabled} aria-label={label} aria-required={field.required||undefined} rows={3} value={value==null?'':String(value)} placeholder="Not found" onChange={event=>onChange(event.target.value||null)}/>;
-  return <input disabled={disabled} aria-label={label} aria-required={field.required||undefined} type={field.type==='date'?'date':'text'} inputMode={['number','currency'].includes(field.type)?'decimal':undefined} value={value==null?'':String(value)} placeholder="Not found" onChange={event=>onChange(event.target.value||null)}/>;
+  return <input disabled={disabled} aria-label={label} aria-required={field.required||undefined} type={field.type==='date'?'date':'text'} inputMode={['number','currency'].includes(field.type)?'decimal':undefined} value={value==null?'':String(value)} placeholder={field.type==='timestamp'?'2026-09-17T14:30:00+01:00':'Not found'} onChange={event=>onChange(event.target.value||null)}/>;
 }
 function ArrayEditor({field,value,onChange,disabled,path}:EditorProps&{path:string}){
     const container=useRef<HTMLDivElement>(null),rowElements=useRef<Array<HTMLElement|null>>([]),focusRow=useRef<number|null>(null);
@@ -43,5 +43,5 @@ export default function ValueEditor({field,value,onChange,disabled,path=field.la
     const object=(value&&typeof value==='object'&&!Array.isArray(value)?value:{}) as Record<string,unknown>;
     return <fieldset className="object-field"><legend>{field.label}{field.required?' *':''}</legend>{field.fields?.map(child=><ValueEditor key={child.key} field={child} value={object[child.key]} path={`${path}, ${child.label}`} disabled={disabled} onChange={next=>onChange({...object,[child.key]:next})}/>)}</fieldset>;
   }
-  return <Field label={`${field.label}${field.required?' *':''}`} hint={field.instructions}><ScalarInput field={field} value={value} path={path} disabled={disabled} onChange={onChange}/></Field>;
+  return <Field label={`${field.label}${field.required?' *':''}`} hint={field.type==='timestamp'?`${field.instructions?field.instructions+' ':''}Date and 24-hour time; include Z or a numeric offset to identify the instant. Saved output uses UTC.`:field.instructions}><ScalarInput field={field} value={value} path={path} disabled={disabled} onChange={onChange}/></Field>;
 }

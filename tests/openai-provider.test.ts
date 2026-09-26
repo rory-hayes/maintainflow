@@ -26,6 +26,16 @@ function response(value: unknown = { rawValues, evidence }, overrides: Record<st
 const transport = (payload: unknown, status = 200) => (async () => new Response(JSON.stringify(payload), { status })) as typeof fetch;
 const provider = (payload: unknown, status = 200) => createOpenAIProvider({ apiKey: 'synthetic-fixture-credential', fetch: transport(payload, status) });
 
+test('timestamp source is normalized locally with the pinned timezone and uncertain clock changes stay reviewable',async()=>{
+ const schema:ParserSchema={fields:[{key:'occurred_at',label:'Occurred at',type:'timestamp',required:true}]};
+ for(const [value,expected,code] of [['2026-07-15 14:30','2026-07-15T13:30:00Z',undefined],['2026-10-25 01:30','2026-10-25 01:30','timestamp_ambiguous']] as const){
+  const text=`Occurred at: ${value}`,rawValues={occurred_at:value};
+  const result=await provider(response({rawValues,evidence:[{field:'occurred_at',page:1,text}]})).extract(input({schema,locale:'en-IE',timezone:'Europe/Dublin',pages:[{page:1,text}]}));
+  assert.deepEqual(result.rawValues,rawValues);assert.equal(result.normalizedValues.occurred_at,expected);
+  assert.deepEqual(result.issues.map(issue=>issue.code),code?[code]:[]);
+ }
+});
+
 test('OpenAI request pins model/schema, isolates document instructions and retains native raw values, evidence and cost', async () => {
   let captured: Record<string, any> | undefined;
   const model = createOpenAIProvider({ apiKey: 'synthetic-fixture-credential', fetch: (async (url, options) => {

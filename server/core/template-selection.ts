@@ -41,7 +41,7 @@ const createdAt=(template:any)=>{const value=template?.created_at??template?.cre
 export function compareTemplatePriority(a:any,b:any){const aid=identity(a).id??'',bid=identity(b).id??'';return createdAt(a)-createdAt(b)||(aid<bid?-1:aid>bid?1:0);}
 
 /** Read-only, bounded selection. All inputs belong to a pinned job or an explicitly labelled preview. */
-export function selectTemplateExtraction(pages:PageText[],schema:ParserSchema,locale:string,templates:any[],mode:'ai'|'rules'):{selection:TemplateSelection;candidates:TemplateCandidate[];availableSourceText:boolean;result?:ExtractionResult}{
+export function selectTemplateExtraction(pages:PageText[],schema:ParserSchema,locale:string,templates:any[],mode:'ai'|'rules',timezone?:string):{selection:TemplateSelection;candidates:TemplateCandidate[];availableSourceText:boolean;result?:ExtractionResult}{
  const enabled=(Array.isArray(templates)?templates:[]).filter(template=>template?.enabled===true),text=pages.map(page=>page.text).join('\n'),availableSourceText=Boolean(text.trim());
  const base={policy:templatePolicy,consideredTemplates:enabled.length,eligibleTemplates:0};
  const fallback=(reason:TemplateSelection['reason'],candidates:TemplateCandidate[]=[])=>({selection:{...base,outcome:mode==='ai'?'ai':reason==='no_templates'?'rules':'failed',reason} as TemplateSelection,candidates,availableSourceText});
@@ -57,7 +57,7 @@ export function selectTemplateExtraction(pages:PageText[],schema:ParserSchema,lo
   else if(phrase&&!text.includes(phrase))candidate.reasons.push('phrase_missing');
   if(!availableSourceText)candidate.reasons.push('missing_anchor');
   if(candidate.reasons.length)return {candidate,index,template};
-  const extracted=extractTemplateValues(pages,schema,locale,template),result=extracted.result;
+  const extracted=extractTemplateValues(pages,schema,locale,template,timezone),result=extracted.result;
   const rules=template.rules as TemplateRule[];
   for(const rule of rules){
    if(!extracted.matchedRules.has(rule.field)){candidate.reasons.push('missing_anchor');candidate.unmatchedFields.push(rule.field);}
@@ -65,7 +65,8 @@ export function selectTemplateExtraction(pages:PageText[],schema:ParserSchema,lo
   for(const path of validation.covered){const values=pathValues(result.rawValues,path.split('.'));if(!values.length||!values.every(sourcePresent)){candidate.reasons.push('missing_value');candidate.unmatchedFields.push(path);}else candidate.matchedFields++;}
   const required=missingRequired(result.rawValues,schema.fields);if(required.length){candidate.reasons.push('missing_value');candidate.unmatchedFields.push(...required);}
   if(result.issues.some(issue=>['multiline_limit','table_limit'].includes(issue.code)))candidate.reasons.push('extraction_limit');
-  if(result.issues.length)candidate.reasons.push('invalid_value');
+  // A captured timestamp with an uncertain clock transition belongs in review.
+  if(result.issues.some(issue=>!issue.code.startsWith('timestamp_')))candidate.reasons.push('invalid_value');
   candidate.reasons=[...new Set(candidate.reasons)];candidate.unmatchedFields=[...new Set(candidate.unmatchedFields)].slice(0,templateLimits.schemaFields);candidate.matched=candidate.reasons.length===0;
   return {candidate,index,template,result};
  });

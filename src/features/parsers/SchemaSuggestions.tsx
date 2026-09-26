@@ -7,7 +7,7 @@ import {Button,Field,Notice,Status,dateTime} from '../../components/ui';
 import {api,ApiError,post,useAction,useData,workspaceId} from '../../lib/api';
 import './schema-suggestions.css';
 
-export const fieldTypeLabels:Record<FieldType,string>={string:'Text',number:'Number',currency:'Currency amount',date:'Date',boolean:'Boolean',multiline:'Multiline text',array:'Table / array',object:'Nested object'};
+export const fieldTypeLabels:Record<FieldType,string>={string:'Text',number:'Number',currency:'Currency amount',date:'Date',timestamp:'Timestamp (date & time)',boolean:'Boolean',multiline:'Multiline text',array:'Table / array',object:'Nested object'};
 interface SuggestionList {suggestions:SchemaSuggestion[];available:boolean;limits:{perDay:number;pendingPerWorkspace:number};}
 interface DocumentList {documents:{id:string;name:string}[];total:number;page:number;pageSize:number;}
 const pending=(suggestion:SchemaSuggestion)=>suggestion.state==='queued'||suggestion.state==='processing';

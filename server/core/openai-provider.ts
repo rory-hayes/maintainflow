@@ -29,8 +29,9 @@ export function extractionResponseSchema(schema: ParserSchema): JsonSchema {
     const result: JsonSchema = {};
     for (const field of fields) {
       if (++count > openAIExtraction.maxFields) throw failed('AI schemas are limited to 500 fields across all nested levels.');
+      const timestampSelection=field.type==='timestamp'?' Select the full literal date and time, preserving any timezone offset. Never remove the time, infer an offset, or convert it yourself.':'';
       const dateSelection = field.type === 'date' ? ' Select only the literal calendar-date component, excluding its label, surrounding prose and time of day. Keep the original date spelling and order. Never infer a transaction date from file metadata.' : '';
-      const description = `${field.label}. Target type: ${field.type}. ${field.instructions || ''} Preserve the literal source text; return null when absent.${dateSelection}`;
+      const description = `${field.label}. Target type: ${field.type}. ${field.instructions || ''} Preserve the literal source text; return null when absent.${dateSelection}${timestampSelection}`;
       if (field.type === 'object') result[field.key] = { anyOf: [record(field.fields || []), { type: 'null' }], description };
       else if (field.type === 'array') result[field.key] = { type: ['array', 'null'], items: record(field.fields || []), maxItems: openAIExtraction.maxRows, description };
       else result[field.key] = { type: ['string', 'null'], maxLength: 65_536, description };
@@ -224,10 +225,10 @@ export function createOpenAIProvider(options: ProviderOptions = {}): ExtractionP
         try { decoded = JSON.parse(text[0]); } catch { throw invalid(); }
         const output = validateOutput(decoded, input.schema);
         const normalizationInput = input.mimeType === 'text/csv' ? decodeCsvRawValues(output.rawValues, input.schema, input.pages) : output.rawValues;
-        const normalizedValues = Object.fromEntries(input.schema.fields.map(field => [field.key, normalizeValue(normalizationInput[field.key], field, input.locale)]));
+        const normalizedValues = Object.fromEntries(input.schema.fields.map(field => [field.key, normalizeValue(normalizationInput[field.key], field, input.locale, input.timezone)]));
         const evidence = sourceEvidence(output, input, visual);
         if (payload.model !== openAIExtraction.model) throw failed('OpenAI returned a different model version than the pinned extraction model.');
-        return { rawValues: output.rawValues, normalizedValues, evidence: evidence.evidence, issues: [...validateValues(normalizedValues, input.schema), ...evidence.issues], engine: 'openai', model: payload.model, promptVersion: openAIExtraction.promptVersion, ...usageDetails(payload) };
+        return { rawValues: output.rawValues, normalizedValues, evidence: evidence.evidence, issues: [...validateValues(normalizedValues, input.schema,{locale:input.locale,timezone:input.timezone}), ...evidence.issues], engine: 'openai', model: payload.model, promptVersion: openAIExtraction.promptVersion, ...usageDetails(payload) };
       } finally { clearTimeout(timer); }
     },
   };

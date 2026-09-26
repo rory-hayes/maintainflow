@@ -102,7 +102,7 @@ function productionServices():OperationalServices{
       const {adminPool,appPool}=await import('./db.js');
       await Promise.all([
         // Runtime roles cannot read the migration journal. These zero-row queries verify current capabilities.
-        probeDatabase(adminPool,'select j.config,d.mime_type,r.template_snapshot,s.confirmed_request_id,t.revision,b.billing_mode,c.billing_mode,c.idempotency_version from jobs j,documents d,extraction_runs r,split_suggestions s,templates t,subscriptions b,billing_checkouts c where false'),
+        probeDatabase(adminPool,'select j.config,d.mime_type,r.template_snapshot,r.normalization_context,s.confirmed_request_id,t.revision,b.billing_mode,c.billing_mode,c.idempotency_version from jobs j,documents d,extraction_runs r,split_suggestions s,templates t,subscriptions b,billing_checkouts c where false'),
         probeDatabase(appPool,'select d.id,d.workspace_id,b.billing_mode,c.billing_mode,c.idempotency_version from documents d,subscriptions b,billing_checkouts c where false'),
       ]);
     },
