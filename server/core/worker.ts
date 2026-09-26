@@ -60,7 +60,9 @@ async function recoverExpiredCoreJobs(onlyJobId?:string){
  for(const candidate of candidates)await transaction(adminPool,async c=>{
   await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[candidate.workspace_id]);
   const {rows:[job]}=await c.query("update jobs set state=case when attempts>=max_attempts then 'failed' else 'queued' end,lease_owner=null,lease_until=null,error='Worker lease expired; retry scheduled',updated_at=now() where id=$1 and state='processing' and lease_until<now() returning *",[candidate.id]);
-  if(job?.state==='failed')await c.query("update documents d set status='failed',error=$2,updated_at=now() where d.id=$1 and d.status='processing' and not exists(select 1 from jobs active where active.document_id=d.id and active.state in('queued','processing'))",[job.document_id,job.error]);
+  // Reviewing the previous successful run can change the document's display
+  // status during extraction. The fenced terminal job still owns this failure.
+  if(job?.state==='failed')await c.query("update documents d set status='failed',error=$2,updated_at=now() where d.id=$1 and not exists(select 1 from jobs active where active.document_id=d.id and active.state in('queued','processing'))",[job.document_id,job.error]);
  });
 }
 

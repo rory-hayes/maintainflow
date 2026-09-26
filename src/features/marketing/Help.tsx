@@ -104,7 +104,7 @@ export default function Help() {
         <dl className="marketing-help-connections">
           <div><dt>AI extraction</dt><dd>{ai.message} AI mode uses your field definitions and written instructions. Configuration does not establish accuracy on your documents; review each result.</dd></div>
           <div><dt>Inbound email</dt><dd>An intake address appears only after the email provider and receiving domain are configured. Uploading an EML file remains available separately.</dd></div>
-          <div><dt>Webhooks</dt><dd>Connect a public HTTPS destination, store the signing secret securely, and check delivery history. Failed deliveries retry with the same delivery identity. A manual replay is available to workspace administrators.</dd></div>
+          <div><dt>Webhooks</dt><dd>Connect a public HTTPS destination and choose approvals, final extraction failures or export generation failures. Store the signing secret securely and check delivery history. Failed webhook deliveries retry with the same delivery identity; administrators can replay them.</dd></div>
           <div><dt>Automation tools</dt><dd>Zapier, Make, n8n and Power Automate can receive data through their webhook or HTTP steps. These are API/webhook recipes, not published MaintainFlow marketplace connectors.</dd></div>
           <div><dt>Google Sheets</dt><dd>Requires a configured Google provider and access to the destination spreadsheet. The connection panel reports the actual configuration state.</dd></div>
           <div><dt>Billing</dt><dd>The hosted preview uses mock billing. Plan changes are simulated and do not activate live charges.</dd></div>
@@ -245,11 +245,18 @@ export function ApiDocs() {
       </section>
       <section id="webhooks">
         <h2>Signed webhook deliveries</h2>
-        <p>Approval events can be delivered to a public HTTPS endpoint. The request includes <code>X-Folio-Delivery</code>, <code>X-Folio-Timestamp</code>, <code>X-Folio-Signature</code> and <code>Idempotency-Key</code>.</p>
+        <p>Choose the document events to send when you add a signed webhook in Integrations. New connections default to approvals, and existing connections without an event selection remain approval-only. Google Sheets receives approved values only.</p>
+        <ul>
+          <li><code>document.approved</code> — a reviewed document was approved; the payload includes that approval’s saved values.</li>
+          <li><code>document.extraction_failed</code> — document processing stopped with a final failure, including exhausted automatic retries.</li>
+          <li><code>document.export_failed</code> — generating an export failed. This is separate from a webhook delivery failing to reach its destination.</li>
+        </ul>
+        <p>Failure notifications include document identity and a safe reason, with no extracted values. They describe the recorded failure even if processing is later retried or the document receives a new result. Choose only the events your receiver can handle. To change the event selection, create a new webhook connection.</p>
+        <p>The request includes <code>X-Folio-Delivery</code>, <code>X-Folio-Timestamp</code>, <code>X-Folio-Signature</code> and <code>Idempotency-Key</code>.</p>
         <p>Verify the signature as an HMAC-SHA256 of the timestamp, a period, and the unchanged request body, using your connection's signing secret. The signature header has the form <code>v1=hex-digest</code>. Reject old timestamps and process each delivery ID only once. Return a 2xx response after accepting the event.</p>
-        <p>Automatic failures retry up to five attempts. Manual replay retains the delivery identity so a receiver can continue to deduplicate the event. Redirects and private-network destinations are rejected.</p>
+        <p>Failed webhook deliveries retry up to five attempts. Delivery history shows the document event separately from its delivery status. Manual replay sends the same event again with the same delivery identity; it does not retry extraction or regenerate an export. Redirects and private-network destinations are rejected.</p>
         <h3>Automation recipes</h3>
-        <p>For Zapier, use a webhook catch step; for Make, use a custom webhook; for n8n, use a Webhook trigger; for Power Automate, use an HTTP request trigger. Map the event's <code>values</code> object to the next action. If the tool cannot verify MaintainFlow's signature, put a verification endpoint you control in front of it.</p>
+        <p>For Zapier, use a webhook catch step; for Make, use a custom webhook; for n8n, use a Webhook trigger; for Power Automate, use an HTTP request trigger. Route by the payload’s <code>event</code> first. Map <code>values</code> for approval events; route failure events to an alert or review step. If the tool cannot verify MaintainFlow's signature, put a verification endpoint you control in front of it.</p>
         <p>External delivery and provider-specific configuration still need to be tested against your chosen account. These instructions describe generic webhook bridges.</p>
       </section>
       <section>

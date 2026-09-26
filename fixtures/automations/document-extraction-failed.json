@@ -1,0 +1,15 @@
+{
+  "event": "document.extraction_failed",
+  "id": "61a819f6-1d79-49b5-805e-4d823ab0e74e",
+  "document": {
+    "id": "1da0132b-a8a4-4da5-9572-756a4ab76fbf",
+    "name": "synthetic-failure-example.txt",
+    "parserId": "6b931781-3a29-4687-87d7-63811583b2e9"
+  },
+  "failedAt": "2026-09-26T12:00:00.000Z",
+  "jobId": "978a1daf-2761-4431-8e19-cc8d279e36a2",
+  "error": {
+    "code": "extraction_failed",
+    "message": "Document processing failed. Open the document to review the failure and retry."
+  }
+}

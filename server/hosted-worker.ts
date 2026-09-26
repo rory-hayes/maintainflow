@@ -90,12 +90,12 @@ export function createHostedWorker(services:HostedWorkerServices,options:{budget
 
 let defaultWorker:ReturnType<typeof createHostedWorker>|undefined;
 async function productionServices():Promise<HostedWorkerServices>{
-  const [{processOneCoreJob,enforceRetention},{processOneFileDeletion},{reconcileInterruptedIntake},{enqueueApprovals,processOneDelivery},{tickProviders},{processOneSchemaSuggestion},{processOneWorkspaceEmail},{processOneSplitSuggestion,reconcileExpiredSplitSuggestions}]=await Promise.all([
+  const [{processOneCoreJob,enforceRetention},{processOneFileDeletion},{reconcileInterruptedIntake},{enqueueIntegrationEvents,processOneDelivery},{tickProviders},{processOneSchemaSuggestion},{processOneWorkspaceEmail},{processOneSplitSuggestion,reconcileExpiredSplitSuggestions}]=await Promise.all([
     import('./core/worker.js'),import('./core/retention.js'),import('./core/object-reconciliation.js'),
     import('./integrations/webhooks.js'),import('./integrations/providers.js'),import('./core/schema-suggestions.js'),import('./core/workspace-email.js'),import('./core/split-suggestions.js'),
   ]);
   return {
-    enqueue:enqueueApprovals,
+    enqueue:enqueueIntegrationEvents,
     core:budget=>processOneCoreJob(undefined,{signal:budget.signal}),
     suggestion:budget=>processOneSchemaSuggestion(undefined,{signal:budget.signal}),
     splitSuggestion:budget=>processOneSplitSuggestion(undefined,{signal:budget.signal}),

@@ -18,9 +18,10 @@ export type Integration = {
   parserId: string | null;
   name: string;
   kind: 'webhook' | 'google_sheets';
-  config: { url?: string; spreadsheetId?: string; sheetName?: string; columns?: { source: string; label: string }[] };
+  config: { url?: string; events?: WebhookEvent[]; spreadsheetId?: string; sheetName?: string; columns?: { source: string; label: string }[] };
   enabled: boolean;
   createdAt: string;
 };
 
 export type ParserOption = { id: string; name: string; archived: boolean };
+import type { WebhookEvent } from '../../../shared/webhook-events';

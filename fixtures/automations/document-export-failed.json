@@ -1,0 +1,18 @@
+{
+  "event": "document.export_failed",
+  "id": "5aa6d2e5-51e7-40e7-8fb8-7f8923a9a609",
+  "document": {
+    "id": "1da0132b-a8a4-4da5-9572-756a4ab76fbf",
+    "name": "synthetic-failure-example.txt",
+    "parserId": "6b931781-3a29-4687-87d7-63811583b2e9"
+  },
+  "failedAt": "2026-09-26T12:00:00.000Z",
+  "exportId": "3b29fba5-08ec-4f8e-bf7e-fc4ae2b1e930",
+  "runId": "f5231541-0a26-4df8-84a4-c8d03b3d2a80",
+  "approvalId": "0b1456d2-5aa6-45e7-a574-7796e2b995c5",
+  "format": "xlsx",
+  "error": {
+    "code": "export_generation_failed",
+    "message": "Export generation failed. Try again or select another format."
+  }
+}
