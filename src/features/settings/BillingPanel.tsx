@@ -8,6 +8,7 @@ import { Button, ErrorState, Loading, Notice, Status } from '../../components/ui
 import { post, useAction, useData } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import type { ProviderStatus } from '../integrations/types';
+import CheckoutTermsRecords from './CheckoutTermsRecords';
 
 export default function BillingPanel() {
   const providers = useData<ProviderStatus>('/api/providers/status');
@@ -66,6 +67,7 @@ export default function BillingPanel() {
       </div>
       {!canManage ? <p className="small muted settings-bottom-note">A workspace owner or administrator can manage billing.</p> : null}
       <p className="small muted settings-bottom-note">{isMock ? 'This preview simulates plan changes. No payments are taken.' : isLive?'Manage payment details and cancellation in the billing portal. Configuration alone does not confirm a successful payment; subscription changes appear after signed Stripe events are processed.':'A configured test provider is separate from a verified checkout. Test-mode actions do not create real payments.'}</p>
+      {canManage&&session?<CheckoutTermsRecords key={`${session.user.id}:${session.workspace.id}:${session.workspace.role}`} workspace={session.workspace.id}/>:null}
     </section>
   );
 }

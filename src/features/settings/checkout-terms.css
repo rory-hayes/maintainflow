@@ -1,0 +1,11 @@
+.checkout-terms-list { list-style: none; margin: 20px 0; padding: 0; }
+.checkout-terms-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px 0; border-top: 1px solid var(--color-line); }
+.checkout-terms-row > div { min-width: 0; overflow-wrap: anywhere; }
+.checkout-terms-row h3 { margin: 0 0 8px; font-size: 15px; }
+.checkout-terms-row p { margin: 6px 0 0; }
+.checkout-terms-state { font-size: 13px; font-weight: 600; }
+.checkout-terms-row > button { flex-shrink: 0; }
+.checkout-terms-error { margin-block: 18px; }
+@media(max-width:760px) {
+  .checkout-terms-row { flex-direction: column; gap: 14px; }
+}
