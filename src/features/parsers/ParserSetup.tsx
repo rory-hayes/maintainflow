@@ -33,7 +33,7 @@ export default function ParserSetup({parserId,canEdit,archived,onEditFields,onAd
   return <section className="parser-setup panel" aria-labelledby={headingId}>
     <div className="parser-setup-heading"><h2 id={headingId}>{titles[setup.state]}</h2><Status value={setup.state==='awaiting_sample'?'waiting for sample':setup.state==='suggesting'?'setting up':setup.state==='ready'?'ready':'failed'}/></div>
     {setup.state==='awaiting_sample'&&<p>The first accepted sample will go to AI to discover and save your initial fields, then extract the document. Choose a sample that represents the documents you expect to receive.</p>}
-    {setup.state==='suggesting'&&<p role="status">AI is discovering your fields. Folio will save them and start extraction automatically. You can leave this page and return; setup progress is saved.</p>}
+    {setup.state==='suggesting'&&<p role="status">AI is discovering your fields. MaintainFlow will save them and start extraction automatically. You can leave this page and return; setup progress is saved.</p>}
     {setup.state==='failed'&&<><p>Your initial fields could not be prepared. Retry with an uploaded sample or choose fields yourself to continue.</p><Notice error={setup.error?.slice(0,500)}/></>}
     {setup.state==='ready'&&<p>Your initial fields are saved. Extraction continues in the background. Review each result before approving or exporting.</p>}
     {setup.sourceDocumentId&&<p className="small">Setup source: <Link className="link" to={`/app/documents/${setup.sourceDocumentId}`}>{setup.sourceDocumentName||'View sample'}</Link></p>}

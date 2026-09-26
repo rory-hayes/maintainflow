@@ -46,7 +46,7 @@ async function issue(a:Account){
  const payload=JSON.parse(decryptSecret(row.payload_ciphertext));
  const link=new URL(payload.text.match(/https?:\/\/[^\s]+/)![0]);
  const token=new URLSearchParams(link.hash.slice(1)).get('token')!;
- assert.equal(link.pathname,'/verify-email/confirm');assert.equal(link.search,'');assert.equal(payload.to,a.email);assert.equal(payload.subject,'Verify your Folio email');
+ assert.equal(link.pathname,'/verify-email/confirm');assert.equal(link.search,'');assert.equal(payload.to,a.email);assert.equal(payload.subject,'Verify your MaintainFlow email');
  return {row,token,link,payload};
 }
 async function user(a:Account){return (await adminPool.query('SELECT * FROM users WHERE id=$1',[a.id])).rows[0];}
@@ -243,7 +243,7 @@ test('valid confirmation works while sending is unavailable; origin, validation,
 
 test('verification mail uses stable provider idempotency, retries safely and is fenced from a late acknowledgement after password change',async()=>{
  const a=await fixture('mail-retry'),issued=await issue(a);let calls=0,firstKey='';
- setAccountEmailSenderForTests({async send(message){calls++;assert.equal(message.subject,'Verify your Folio email');assert.equal(message.to,a.email);if(!firstKey)firstKey=message.idempotencyKey;else assert.equal(message.idempotencyKey,firstKey);if(calls===1)throw new AccountEmailError('temporary_failure',true);return {providerId:randomUUID()};}});
+ setAccountEmailSenderForTests({async send(message){calls++;assert.equal(message.subject,'Verify your MaintainFlow email');assert.equal(message.to,a.email);if(!firstKey)firstKey=message.idempotencyKey;else assert.equal(message.idempotencyKey,firstKey);if(calls===1)throw new AccountEmailError('temporary_failure',true);return {providerId:randomUUID()};}});
  assert.equal(await processOneAccountEmail(),true);assert.equal((await outbox(issued.row.id)).state,'pending');assert.ok((await outbox(issued.row.id)).payload_ciphertext);await adminPool.query('UPDATE account_email_outbox SET available_at=clock_timestamp() WHERE id=$1',[issued.row.id]);assert.equal(await processOneAccountEmail(),true);assert.equal(calls,2);assert.equal((await outbox(issued.row.id)).state,'accepted');assert.equal((await outbox(issued.row.id)).payload_ciphertext,null);assert.equal((await adminPool.query('SELECT 1 FROM email_verification_tokens WHERE user_id=$1',[a.id])).rowCount,1);
  const b=await fixture('mail-late'),session=await makeSession(b),link=await issue(b);let started!:()=>void,release!:()=>void;const entered=new Promise<void>(resolve=>{started=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});setAccountEmailSenderForTests({async send(){started();await gate;return {providerId:randomUUID()};}});
  const work=processOneAccountEmail();await entered;await changeAccountPassword(b.id,session,b.password,'Changed during captured provider call');release();assert.equal(await work,true);assert.equal((await outbox(link.row.id)).state,'cancelled');assert.equal((await outbox(link.row.id)).payload_ciphertext,null);assert.equal((await user(b)).email_verified_at,null);

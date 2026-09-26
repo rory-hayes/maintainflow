@@ -85,7 +85,7 @@ export async function renderExport(records: ExportRecord[], options: ExportOptio
     };
   }
   const book = new ExcelJS.Workbook();
-  book.creator = 'Folio';
+  book.creator = 'MaintainFlow';
   const sheet = book.addWorksheet('Extracted data');
   sheet.addRow(headers);
   sheet.addRows(rows);

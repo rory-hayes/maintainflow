@@ -52,7 +52,7 @@ export default function ExportDialog({ids,open,onOpenChange,parserId,revisions}:
       const response=await fetch(result.downloadUrl,{signal:controller.signal,headers:selectedWorkspace?{'X-Workspace-Id':selectedWorkspace}:undefined,credentials:'same-origin',cache:'no-store'});
       if(!response.ok)throw new Error('The download could not be completed.');
       const blob=await response.blob();if(!current())return;
-      const href=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=href;anchor.download=`folio-export.${format}`;anchor.click();setTimeout(()=>URL.revokeObjectURL(href),5000);
+      const href=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=href;anchor.download=`maintainflow-export.${format}`;anchor.click();setTimeout(()=>URL.revokeObjectURL(href),5000);
       action.setMessage('Export saved and downloaded.');
     }catch(error){if(current())action.setError(error instanceof Error?error.message:'The export could not be completed.');}
     finally{if(current()){exportController.current=null;setExporting(false);}}

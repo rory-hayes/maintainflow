@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {AccountEmailError,createAccountEmailSender,trustedAccountOrigin,type AccountEmailMessage} from '../server/integrations/account-email.js';
 
 const environment={NODE_ENV:'test',APP_ORIGIN:'https://owned-folio.example.test',FOLIO_AUTH_EMAIL_ENABLED:'true',FOLIO_AUTH_EMAIL_FROM:'recovery@example.test',FOLIO_AUTH_EMAIL_API_KEY:'re_owned_fixture_only_not_a_key'};
-const message=():AccountEmailMessage=>({idempotencyKey:`folio-account-email/${randomUUID()}`,to:'owner@example.test',subject:'Reset your Folio password',text:'Open https://owned-folio.example.test/reset-password#token=owned-fixture'});
+const message=():AccountEmailMessage=>({idempotencyKey:`folio-account-email/${randomUUID()}`,to:'owner@example.test',subject:'Reset your MaintainFlow password',text:'Open https://owned-folio.example.test/reset-password#token=owned-fixture'});
 const success=()=>new Response(JSON.stringify({id:randomUUID()}),{status:200,headers:{'content-type':'application/json'}});
 const fails=(code:string,retryable:boolean)=>(error:unknown)=>error instanceof AccountEmailError&&error.code===code&&error.retryable===retryable&&error.message==='Account email delivery could not be completed.';
 
@@ -32,7 +32,7 @@ test('account sender uses the fixed HTTPS endpoint and identical plaintext paylo
   assert.deepEqual(requests[0],requests[1]);
   const request=requests[0]!;assert.equal(request.url,'https://api.resend.com/emails');assert.equal(request.method,'POST');assert.equal(request.redirect,'error');
   assert.equal(request.headers['idempotency-key'],payload.idempotencyKey);
-  assert.deepEqual(request.body,{from:'Folio <recovery@example.test>',to:[payload.to],subject:payload.subject,text:payload.text});
+  assert.deepEqual(request.body,{from:'MaintainFlow <recovery@example.test>',to:[payload.to],subject:payload.subject,text:payload.text});
   assert.ok(!request.url.includes('token'));assert.equal(Object.hasOwn(request.body as object,'html'),false);
 });
 
@@ -79,9 +79,31 @@ test('oversized or malformed account mail fails before transport',async()=>{
 test('verification and invitation mail use the same bounded sender and their dedicated subjects',async()=>{
  const sent:unknown[]=[];
  const sender=createAccountEmailSender(environment,{fetchImpl:(async(_url,options)=>{sent.push(JSON.parse(String(options?.body)));return success();}) as typeof fetch})!;
- for(const [subject,route] of [['Verify your Folio email','verify-email/confirm'],['Join your Folio workspace','invite']]){
+ for(const [subject,route] of [['Verify your MaintainFlow email','verify-email/confirm'],['Join your MaintainFlow workspace','invite']]){
   const payload={...message(),subject,text:`Open https://owned-folio.example.test/${route}#token=owned-fixture`};
   await sender.send(payload);
-  assert.deepEqual(sent.at(-1),{from:'Folio <recovery@example.test>',to:[payload.to],subject:payload.subject,text:payload.text});
+  assert.deepEqual(sent.at(-1),{from:'MaintainFlow <recovery@example.test>',to:[payload.to],subject:payload.subject,text:payload.text});
  }
+});
+
+test('every queued legacy email retains its original sender, subject, body and idempotency key on retry',async()=>{
+ for(const subject of ['Reset your Folio password','Your Folio password was changed','Verify your Folio email','Join your Folio workspace']){
+  const requests:{body:string;key:string|null}[]=[];
+  const payload={...message(),subject,text:'An existing Folio message with its original token and wording.'};
+  const sender=createAccountEmailSender(environment,{fetchImpl:(async(_url,options)=>{
+   requests.push({body:String(options?.body),key:new Headers(options?.headers).get('idempotency-key')});
+   if(requests.length===1)throw new Error('Uncertain legacy acknowledgement');
+   return success();
+  }) as typeof fetch})!;
+  await assert.rejects(sender.send(payload),fails('temporary_failure',true));await sender.send(payload);
+  const originalBody=JSON.stringify({from:'Folio <recovery@example.test>',to:[payload.to],subject:payload.subject,text:payload.text});
+  assert.deepEqual(requests,[{body:originalBody,key:payload.idempotencyKey},{body:originalBody,key:payload.idempotencyKey}]);
+ }
+});
+
+test('new password change notifications use MaintainFlow branding',async()=>{
+ let body:unknown;
+ const sender=createAccountEmailSender(environment,{fetchImpl:(async(_url,options)=>{body=JSON.parse(String(options?.body));return success();}) as typeof fetch})!;
+ const payload={...message(),subject:'Your MaintainFlow password was changed'};await sender.send(payload);
+ assert.deepEqual(body,{from:'MaintainFlow <recovery@example.test>',to:[payload.to],subject:payload.subject,text:payload.text});
 });

@@ -70,7 +70,7 @@ test('manual default stays available during mail outage, uses trusted fragment l
 test('email admission is encrypted and atomic, returns no token, and reports provider acceptance without claiming inbox delivery',async()=>{
  const a=await fixture(),email=address(),result=await issue(a,email);assert.equal(result.delivery,'email');assert.equal(result.message,'Invitation email queued.');assert.equal('token' in result,false);assert.equal('inviteUrl' in result,false);assert.equal(result.invitation.emailStatus,'pending');assert.ok(result.invitation.retryAt);
  const row=await mail(result.invitation.id),token=tokenFrom(row);assert.equal(row.token_hash,hashToken(token));assert.equal(JSON.stringify(row).includes(email),false);assert.equal(JSON.stringify(row).includes(token),false);assert.equal((await adminPool.query('SELECT 1 FROM users WHERE email=$1',[email])).rowCount,0);
- assert.equal(await processOneInvitationEmail(),true);assert.equal(sent.length,1);assert.equal(sent[0].subject,'Join your Folio workspace');assert.equal(sent[0].idempotencyKey,`folio-account-email/${row.id}`);
+ assert.equal(await processOneInvitationEmail(),true);assert.equal(sent.length,1);assert.equal(sent[0].subject,'Join your MaintainFlow workspace');assert.equal(sent[0].idempotencyKey,`folio-account-email/${row.id}`);
  assert.equal((await mail(result.invitation.id)).state,'accepted');assert.equal((await mail(result.invitation.id)).payload_ciphertext,null);assert.equal((await listInvitations(a))[0].emailStatus,'accepted');
  const listing=await request(a,'GET','/api/workspace/members');assert.equal(listing.json().invitationEmail.available,true);assert.equal(listing.body.includes(token),false);
 });
@@ -119,7 +119,7 @@ test('recipient grants, invitation and mail all roll back on an audit failure',a
 test('pending cap counts active invitations, global mail cap is serialized and failed admission has no recipient grant',async()=>{
  const a=await fixture();await adminPool.query("INSERT INTO invitations(workspace_id,email,role,token_hash,expires_at,issuer_id) SELECT $1,'owned-cap-'||n||'@example.test','viewer',encode(digest(random()::text||n::text,'sha256'),'hex'),clock_timestamp()+interval '7 days',$2 FROM generate_series(1,100) n",[a.workspaceId,a.userId]);
  await assert.rejects(issue(a,address(),'manual'),{statusCode:429});await adminPool.query('UPDATE invitations SET expires_at=clock_timestamp() WHERE workspace_id=$1',[a.workspaceId]);const created=await issue(a,address(),'manual');
- const envelope=encryptSecret(JSON.stringify({to:address(),subject:'Join your Folio workspace',text:'Owned cap fixture'}));await adminPool.query("INSERT INTO invitation_email_outbox(invitation_id,workspace_id,token_hash,payload_ciphertext,expires_at) SELECT $1,$2,$3,$4,clock_timestamp()+interval '7 days' FROM generate_series(1,5000)",[created.invitation.id,a.workspaceId,hashToken(created.token!),envelope]);
+ const envelope=encryptSecret(JSON.stringify({to:address(),subject:'Join your MaintainFlow workspace',text:'Owned cap fixture'}));await adminPool.query("INSERT INTO invitation_email_outbox(invitation_id,workspace_id,token_hash,payload_ciphertext,expires_at) SELECT $1,$2,$3,$4,clock_timestamp()+interval '7 days' FROM generate_series(1,5000)",[created.invitation.id,a.workspaceId,hashToken(created.token!),envelope]);
  const email=address();await assert.rejects(issue(a,email),{statusCode:503});assert.equal((await adminPool.query('SELECT 1 FROM invitation_email_limits WHERE address_key=$1',[invitationAddressKey(email)])).rowCount,0);assert.equal((await adminPool.query('SELECT count(*)::int n FROM invitation_email_outbox WHERE workspace_id=$1',[a.workspaceId])).rows[0].n,5000);
 });
 
@@ -151,6 +151,18 @@ test('retries retain a stable idempotency key, scrub terminal payloads, and sani
  const exhausted=await issue(a);await adminPool.query('UPDATE invitation_email_outbox SET attempts=5 WHERE invitation_id=$1',[exhausted.invitation.id]);assert.equal(await processOneInvitationEmail(),false);assert.equal((await mail(exhausted.invitation.id)).failure_code,'attempt_limit');
 });
 
+test('legacy encrypted invitation mail keeps its original message and retry identity',async()=>{
+ const a=await fixture(),created=await issue(a),row=await mail(created.invitation.id),calls:AccountEmailMessage[]=[];
+ const payload=JSON.parse(decryptSecret(row.payload_ciphertext));assert.equal(payload.subject,'Join your MaintainFlow workspace');assert.match(payload.text,/on MaintainFlow as/);
+ payload.subject='Join your Folio workspace';payload.text=payload.text.replace('on MaintainFlow as','on Folio as');
+ const ciphertext=encryptSecret(JSON.stringify(payload));await adminPool.query('UPDATE invitation_email_outbox SET payload_ciphertext=$2 WHERE id=$1',[row.id,ciphertext]);
+ setAccountEmailSenderForTests({async send(message){calls.push(message);if(calls.length===1)throw new AccountEmailError('temporary_failure',true);return {providerId:randomUUID()};}});
+ assert.equal(await processOneInvitationEmail(),true);assert.equal((await mail(created.invitation.id)).state,'pending');assert.equal((await mail(created.invitation.id)).payload_ciphertext,ciphertext);
+ await adminPool.query('UPDATE invitation_email_outbox SET available_at=clock_timestamp() WHERE id=$1',[row.id]);assert.equal(await processOneInvitationEmail(),true);
+ const expected={...payload,idempotencyKey:`folio-account-email/${row.id}`};assert.deepEqual(calls,[expected,expected]);
+ const accepted=await mail(created.invitation.id);assert.equal(accepted.state,'accepted');assert.equal(accepted.attempts,2);assert.equal(accepted.payload_ciphertext,null);
+});
+
 test('lease recovery keeps idempotency and late old acknowledgements cannot overwrite a later accepted attempt',async()=>{
  const a=await fixture(),created=await issue(a),row=await mail(created.invitation.id);let entered!:()=>void,release!:()=>void;const began=new Promise<void>(r=>entered=r),gate=new Promise<void>(r=>release=r);let calls=0;const keys:string[]=[];
  setAccountEmailSenderForTests({async send(message){keys.push(message.idempotencyKey);if(++calls===1){entered();await gate;throw new AccountEmailError('permanent_failure',false);}return {providerId:randomUUID()};}});
@@ -179,11 +191,11 @@ test('cancelled work respects abort and expiry cleanup runs with sending disable
 
 test('account and invitation mail alternate under load and one broken lane cannot starve the other',async()=>{
  const a=await fixture(),b=await fixture();await issue(a,b.email);await transaction(adminPool,async c=>{const user=(await c.query('SELECT id,email,password_hash,email_verified_at FROM users WHERE id=$1 FOR UPDATE',[a.userId])).rows[0];await enqueueEmailVerification(c,user,new Date(Date.now()+86400000));});
- assert.equal(await processOneWorkspaceEmail(),true);assert.equal(await processOneWorkspaceEmail(),true);assert.deepEqual(new Set(sent.map(m=>m.subject)),new Set(['Join your Folio workspace','Verify your Folio email']));
+ assert.equal(await processOneWorkspaceEmail(),true);assert.equal(await processOneWorkspaceEmail(),true);assert.deepEqual(new Set(sent.map(m=>m.subject)),new Set(['Join your MaintainFlow workspace','Verify your MaintainFlow email']));
  await cooldown(b.email);await issue(a,b.email);const query=adminPool.query.bind(adminPool);let failures=0;
  (adminPool as any).query=(sql:any,...args:any[])=>{if(typeof sql==='string'&&sql.includes('FROM account_email_outbox')){failures++;throw new Error('PRIVATE account lane failure');}return (query as any)(sql,...args);};
  try{assert.equal(await processOneWorkspaceEmail(),true);await assert.rejects(processOneWorkspaceEmail(),{message:'Workspace email processing failed.'});}finally{(adminPool as any).query=query;}
- assert.ok(failures>0);assert.equal(sent.filter(m=>m.subject==='Join your Folio workspace').length,2);
+ assert.ok(failures>0);assert.equal(sent.filter(m=>m.subject==='Join your MaintainFlow workspace').length,2);
 });
 
 test('legacy manual issuer-null invitations remain valid and active invitations stay visible amid accepted history',async()=>{

@@ -1,4 +1,6 @@
 .auth-recovery-link{display:flex;justify-content:flex-end;margin:-5px 0 20px;font-size:13px}
+.auth-page>header{gap:20px}
+@media(max-width:760px){.auth-page>header .wordmark{font-size:28px}.auth-page>header .link{text-align:right}}
 .recovery-main{max-width:510px;margin:0 auto;padding:58px 30px 70px}
 .recovery-main h1{font-size:32px;line-height:1.2;margin:18px 0 12px}
 .recovery-main .auth-form>p{margin-bottom:24px}

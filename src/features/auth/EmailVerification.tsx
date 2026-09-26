@@ -27,7 +27,7 @@ export function captureEmailVerificationLink(browser:LinkLocation=window){
   if(tokens.length===1&&/^[A-Za-z0-9_-]{43}$/.test(tokens[0]))pendingVerificationToken=tokens[0];
   if(verificationListeners.size){const token=pendingVerificationToken;pendingVerificationToken='';for(const receive of verificationListeners)receive(token);}
 }
-export function verificationPasswordError(password:string){return password.length>=1&&password.length<=128?'': 'Enter your Folio password to verify your email.';}
+export function verificationPasswordError(password:string){return password.length>=1&&password.length<=128?'': 'Enter your MaintainFlow password to verify your email.';}
 function safeNext(value:string){return(value==='/invite'||value==='/app'||value.startsWith('/app/')||value.startsWith('/app?'))&&!value.includes('\\')?value:'/app';}
 function useVerificationPost(){
   const pending=useRef<AbortController|null>(null),mounted=useRef(true);const [busy,setBusy]=useState(false);
@@ -48,7 +48,7 @@ function useResendCooldown(initial=false){
   return {remaining:Math.max(0,Math.ceil((until-now)/1000)),start:()=>{const current=Date.now();setNow(current);setUntil(current+60_000);}};
 }
 function VerificationLayout({title,description,children}:{title:string;description:string;children:ReactNode}){
-  return <div className="auth-page recovery-page verification-page"><meta name="referrer" content="no-referrer"/><header><Link to="/" className="wordmark">Folio</Link><Link className="link" to="/sign-in" rel="noreferrer">Back to sign in</Link></header><main className="recovery-main"><section className="auth-form" aria-labelledby="verification-title"><span className="recovery-icon" aria-hidden="true"><ShieldCheck size={26}/></span><h1 id="verification-title">{title}</h1><p>{description}</p>{children}</section></main></div>;
+  return <div className="auth-page recovery-page verification-page"><meta name="referrer" content="no-referrer"/><header><Link to="/" className="wordmark">MaintainFlow</Link><Link className="link" to="/sign-in" rel="noreferrer">Back to sign in</Link></header><main className="recovery-main"><section className="auth-form" aria-labelledby="verification-title"><span className="recovery-icon" aria-hidden="true"><ShieldCheck size={26}/></span><h1 id="verification-title">{title}</h1><p>{description}</p>{children}</section></main></div>;
 }
 
 function PublicVerificationRequest({registrationAccepted=false}:{registrationAccepted?:boolean}){
@@ -67,7 +67,7 @@ function PublicVerificationRequest({registrationAccepted=false}:{registrationAcc
     if(result.status===503){setUnavailable(true);return;}
     setError(result.status===400?'Enter a valid email address.':result.status===429?'Too many attempts. Please wait a few minutes and try again.':'We couldn’t confirm your email request. Please try again later.');
   }
-  return <VerificationLayout title={accepted?'Check your email':'Verify your email address'} description={accepted?'Open the verification link and enter your Folio password to confirm your address.':'Enter your account email to request a verification link.'}>
+  return <VerificationLayout title={accepted?'Check your email':'Verify your email address'} description={accepted?'Open the verification link and enter your MaintainFlow password to confirm your address.':'Enter your account email to request a verification link.'}>
     <div ref={feedback} className="recovery-feedback" tabIndex={-1}><Notice error={error||((unavailable||availability===false)?unavailableMessage:'')} message={accepted?(registrationAccepted?registrationMessage:requestMessage):undefined}/></div>
     {accepted?<p className="small">Links expire after 24 hours. Check your spam folder. You can sign in once your account is verified.</p>:null}
     {runtime.isPending?<p role="status">Checking verification availability…</p>:runtime.isError||runtime.isSuccess&&availability===undefined?<><Notice error="We couldn’t check email verification availability."/><Button type="button" variant="secondary" disabled={runtime.isFetching} onClick={()=>void runtime.refetch()}>Check again</Button></>:null}
@@ -119,10 +119,10 @@ function ConfirmEmail(){
     if(result.status===403){setError('This request could not be completed. Reopen the original verification email and try again.');return;}
     token.current='';setState('uncertain');
   }
-  return <VerificationLayout title={state==='complete'?'Email verified':state==='missing'?'Open a verification link':'Confirm your email address'} description={state==='complete'?'You can now sign in with your Folio password.':state==='missing'?'Use the link from your verification email to continue.':'Enter the password for the account that received this verification email.'}>
+  return <VerificationLayout title={state==='complete'?'Email verified':state==='missing'?'Open a verification link':'Confirm your email address'} description={state==='complete'?'You can now sign in with your MaintainFlow password.':state==='missing'?'Use the link from your verification email to continue.':'Enter the password for the account that received this verification email.'}>
     {state==='complete'?<><div ref={feedback} className="recovery-feedback" tabIndex={-1}><Notice message="Your email address is verified. Browser sessions for that account have been signed out."/></div><p className="small">Your password is unchanged. API keys remain separately revocable in Settings.</p><Link className="button primary" to="/sign-in" rel="noreferrer">Sign in<ArrowRight size={18}/></Link></>:state==='missing'?<><div ref={feedback} className="recovery-feedback" tabIndex={-1}><Notice error="This page needs the link from your verification email. If you refreshed or left this page, reopen the original email link."/></div><Link className="button primary" to="/verify-email" rel="noreferrer">Request a verification email</Link></>:state==='uncertain'?<><div ref={feedback} className="recovery-feedback" tabIndex={-1}><Notice error="We couldn’t confirm whether verification finished. Try signing in. If you still cannot sign in, reopen the original email or request a new verification link."/></div><Link className="button primary" to="/sign-in" rel="noreferrer">Try signing in</Link><p className="recovery-return"><Link className="link" to="/verify-email" rel="noreferrer">Check status or request an email</Link></p></>:<form onSubmit={submit} noValidate aria-busy={action.busy}>
       <div ref={feedback} className="recovery-feedback" tabIndex={-1}><Notice error={error}/></div>
-      <label className="field"><span>Your Folio password</span><input ref={input} type="password" autoComplete="current-password" required maxLength={128} value={password} disabled={action.busy} onChange={event=>{setPassword(event.target.value);setError('');}} aria-describedby="verification-password-hint"/><small id="verification-password-hint">Use your existing password. Confirming this link will not switch your signed-in account.</small></label>
+      <label className="field"><span>Your MaintainFlow password</span><input ref={input} type="password" autoComplete="current-password" required maxLength={128} value={password} disabled={action.busy} onChange={event=>{setPassword(event.target.value);setError('');}} aria-describedby="verification-password-hint"/><small id="verification-password-hint">Use your existing password. Confirming this link will not switch your signed-in account.</small></label>
       <Button type="submit" disabled={action.busy}>{action.busy?'Verifying…':'Verify email'}<ShieldCheck size={18}/></Button>
       <p className="small recovery-disclosure">Verification signs out browser sessions for the account being verified.</p>
       <p className="recovery-return"><Link className="link" to="/forgot-password" rel="noreferrer">Forgot password?</Link></p><p className="recovery-return"><Link className="link" to="/verify-email" rel="noreferrer">Request a new verification link</Link></p>

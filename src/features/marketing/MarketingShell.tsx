@@ -19,7 +19,7 @@ export function MarketingHeader() {
   return (
     <header className="marketing-header">
       <div className="marketing-container marketing-header-inner">
-        <Link className="folio-brand" to="/" aria-label="Folio home">Folio</Link>
+        <Link className="folio-brand" to="/" aria-label="MaintainFlow home">MaintainFlow</Link>
         <nav className="marketing-desktop-nav" aria-label="Main navigation">
           {navigation.map((item) => <a key={item.label} href={item.href}>{item.label}</a>)}
           <Link to="/help">Resources</Link>
@@ -67,7 +67,7 @@ export function MarketingFooter() {
     <footer className="marketing-footer marketing-container">
       <div className="marketing-footer-grid">
         <div className="marketing-footer-brand">
-          <Link className="folio-brand" to="/" aria-label="Folio home">Folio</Link>
+          <Link className="folio-brand" to="/" aria-label="MaintainFlow home">MaintainFlow</Link>
           <p>Documents into useful data.</p>
         </div>
         <nav aria-label="Product links">
@@ -87,7 +87,7 @@ export function MarketingFooter() {
           <Link to="/terms">Terms</Link>
         </nav>
       </div>
-      <div className="marketing-footer-bottom">© 2026 Folio</div>
+      <div className="marketing-footer-bottom">© 2026 MaintainFlow</div>
     </footer>
   );
 }
