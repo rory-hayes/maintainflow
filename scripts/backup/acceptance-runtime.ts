@@ -216,7 +216,13 @@ try{
   const {default:JSZip}=await import('jszip');const zip=new JSZip();zip.file('docs/deleted.txt',sourceText.replace('000042','ZIP-DELETED'));zip.file('docs/live.txt',sourceText.replace('000042','ZIP-LIVE'));zip.file('excluded.txt','EXCLUDED ORIGINAL CANARY');const zipBytes=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'}),zipRequestId=randomUUID();
   const previewData=multipart(zipBytes,'retained.zip',{requestId:zipRequestId});const preview=ok(await request(owner,'POST',`/api/parsers/${parser.id}/archive-imports/preview`,previewData.payload,previewData.headers));const zipOptions={mode:'zip',version:1,sourceSha256:hash(zipBytes),entries:preview.entries.filter((e:any)=>e.path==='docs/deleted.txt'||e.path==='docs/live.txt').map((e:any)=>e.index)};
   const archive=await upload(owner,parser.id,zipBytes,'retained.zip',{requestId:zipRequestId,options:JSON.stringify(zipOptions)},'archive-imports');ok(await request(owner,'DELETE',`/api/documents/${archive.documents[0].id}`));
+  // The five preserved lifecycle states need Standard's five-request helper
+  // allowance. Change only this owned synthetic plan ID: retain the smaller
+  // Explore page, concurrency and file limits; no billing route/provider runs.
+  await db.adminPool.query("update workspaces set plan=jsonb_set(plan,'{id}','\"standard\"') where id=$1",[owner.workspace.id]);
   configureControlledSplitSuggestions();
+  const suggestionLimits=ok(await request(owner,'GET',suggestionPath(parser.id))).limits;
+  assert.equal(suggestionLimits.perMonth,5);assert.equal(suggestionLimits.perDay,10);assert.equal(suggestionLimits.pendingPerWorkspace,3);
   const suggestionBefore={usage:await ledger(),documents:(await db.adminPool.query('select count(*)::int n from documents where workspace_id=$1',[owner.workspace.id])).rows[0].n};
   const suggestions:Record<string,any>={};
   // Real local PDF/TIFF decoding with a controlled provider result. Suggestions
@@ -234,6 +240,8 @@ try{
    }
    suggestions[label]={id:suggestion.id,requestId:suggestionRequestId,sha256:hash(bytes)};
   }
+  const cappedSuggestion=await request(owner,'POST',suggestionPath(parser.id),{requestId:randomUUID(),documentId:tiffOriginal.document.id,sourceSha256:hash(tiffBytes)});
+  assert.equal(cappedSuggestion.statusCode,429);assert.match(cappedSuggestion.json().message,/used its 5 AI suggestions for this calendar month/);
   assert.deepEqual(await ledger(),suggestionBefore.usage);
   assert.equal((await db.adminPool.query('select count(*)::int n from documents where workspace_id=$1',[owner.workspace.id])).rows[0].n,suggestionBefore.documents);
   for(const label of ['applied','undone']){
