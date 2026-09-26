@@ -56,6 +56,21 @@ export async function probeDatabase(pool:Pool,sql:string,deadlineMs=probeDeadlin
   finally{clearTimeout(timer);}
 }
 
+/** Column existence alone cannot distinguish the pre-regional policy constraint. */
+export async function probeNormalizationPolicy(pool:Pool){
+  const result=await probeDatabase(pool,`select c.convalidated,pg_get_constraintdef(c.oid) definition
+    from pg_catalog.pg_constraint c join pg_catalog.pg_attribute a
+      on a.attrelid=c.conrelid and a.attnum=any(c.conkey)
+    where c.conrelid='extraction_runs'::regclass and c.conname='extraction_runs_normalization_context_check'
+      and c.contype='c' and a.attname='normalization_context' and not a.attisdropped`);
+  const row=result.rows[0];
+  // PostgreSQL deparses the migration's IN predicate as = ANY (ARRAY[...]).
+  // Accept whitespace/cast formatting, but never a mere mention in another clause.
+  const predicate=typeof row?.definition==='string'?row.definition.match(/\(\s*normalization_context\s*->>\s*'version'(?:::text)?\s*\)\s*=\s*ANY\s*\(\s*ARRAY\[([^\]]+)\]\s*\)/):null;
+  const versions=predicate?.[1].split(',').map((value:string)=>value.trim().match(/^'(timestamp-v1|regional-v2)'(?:::text)?$/)?.[1]);
+  if(result.rows.length!==1||row.convalidated!==true||versions?.length!==2||new Set(versions).size!==2||!versions.includes('timestamp-v1')||!versions.includes('regional-v2'))throw new Error('Probe unavailable');
+}
+
 export async function probePrivateStorage(options:{env?:Record<string,string|undefined>;directory?:string;fetch?:typeof fetch}={}){
   const env=options.env??process.env,driver=env.STORAGE_DRIVER||'filesystem';
   if(driver==='filesystem'){
@@ -105,6 +120,7 @@ function productionServices():OperationalServices{
         probeDatabase(adminPool,'select j.config,d.mime_type,r.template_snapshot,r.normalization_context,r.bank_statement_context,a.bank_review,s.confirmed_request_id,t.revision,b.billing_mode,c.billing_mode,c.idempotency_version from jobs j,documents d,extraction_runs r,approvals a,split_suggestions s,templates t,subscriptions b,billing_checkouts c where false'),
         probeDatabase(appPool,'select a.account_key,a.revision,t.fingerprint,u.bank_locale from bank_statement_accounts a,bank_statement_transactions t,direct_uploads u where false'),
         probeDatabase(appPool,'select d.id,d.workspace_id,b.billing_mode,c.billing_mode,c.idempotency_version from documents d,subscriptions b,billing_checkouts c where false'),
+        probeNormalizationPolicy(adminPool),
       ]);
     },
     storage:()=>probePrivateStorage(),

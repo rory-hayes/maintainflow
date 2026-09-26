@@ -6,7 +6,7 @@ import path from 'node:path';
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import type {Pool} from 'pg';
-import {createReadinessProbe,probeDatabase,probePrivateStorage,registerOperationalHealth,type OperationalServices} from '../server/core/operations.js';
+import {createReadinessProbe,probeDatabase,probeNormalizationPolicy,probePrivateStorage,registerOperationalHealth,type OperationalServices} from '../server/core/operations.js';
 import {installationConfiguration} from '../server/core/installation.js';
 import {registerHostedWorker} from '../server/hosted-worker.js';
 
@@ -82,6 +82,28 @@ test('database probe releases normal connections and destroys a connection obtai
 test('database probe destroys a hung checked-out connection only once',async()=>{
   const releases:boolean[]=[];const client={query:async()=>new Promise(()=>{}),release:(destroy:boolean)=>releases.push(destroy)};
   await assert.rejects(probeDatabase({connect:async()=>client} as unknown as Pool,'select 1',10));assert.deepEqual(releases,[true]);
+});
+
+test('normalization readiness requires the validated current policy constraint without writes or private error details',async()=>{
+  const current="CHECK (((normalization_context IS NULL) OR ((normalization_context ->> 'version'::text) = ANY (ARRAY['timestamp-v1'::text, 'regional-v2'::text]))))";
+  const scenarios=[
+    {rows:[],ready:false},
+    {rows:[{convalidated:true,definition:"CHECK ((normalization_context ->> 'version'::text) = 'timestamp-v1'::text)"}],ready:false},
+    {rows:[{convalidated:false,definition:current}],ready:false},
+    {rows:[{convalidated:true,definition:current.replace('regional-v2','future-v3')}],ready:false},
+    {rows:[{convalidated:true,definition:current.replace('regional-v2','timestamp-v1')}],ready:false},
+    {rows:[{convalidated:true,definition:current.replace("'regional-v2'::text","'regional-v2'::text, 'future-v3'::text")}],ready:false},
+    {rows:[{convalidated:true,definition:current.replace("'version'::text","'locale'::text")}],ready:false},
+    {rows:[{convalidated:true,definition:current}],ready:true},
+    {rows:[{convalidated:true,definition:current.replace(/::text/g,'').replace(/ /g,'\n  ')}],ready:true},
+  ];
+  for(const scenario of scenarios){
+    const queries:string[]=[],releases:boolean[]=[];
+    const pool={connect:async()=>({query:async(sql:string)=>{queries.push(sql);return{rows:sql.includes('pg_catalog.pg_constraint')?scenario.rows:[]};},release:(destroy=false)=>releases.push(destroy)})} as unknown as Pool;
+    if(scenario.ready)await probeNormalizationPolicy(pool);else await assert.rejects(probeNormalizationPolicy(pool),{message:'Probe unavailable'});
+    assert.equal(queries[0],'BEGIN READ ONLY');assert.equal(queries.at(-1),'ROLLBACK');assert.deepEqual(releases,[false]);
+    assert.ok(queries[2].includes("a.attname='normalization_context'"));assert.doesNotMatch(queries.join('\n'),/insert |update |alter |create /i);
+  }
 });
 
 test('storage readiness checks only a fixed private bucket and rejects public or oversized policy without reading an original',async()=>{
