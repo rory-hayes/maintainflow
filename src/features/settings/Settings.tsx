@@ -7,6 +7,7 @@ import { useSession } from '../../lib/session';
 import MembersPanel from './MembersPanel';
 import ApiKeysPanel from './ApiKeysPanel';
 import BillingPanel from './BillingPanel';
+import AccountTermsRecord from './AccountTermsRecord';
 import {EmailVerificationStatus} from '../auth/EmailVerification';
 import './settings.css';
 
@@ -108,7 +109,7 @@ function ActivityPanel() {
 const settingTabs = [
   { id: 'general', label: 'General' }, { id: 'members', label: 'Members' }, { id: 'keys', label: 'API keys', admin: true },
   { id: 'retention', label: 'Retention' }, { id: 'notifications', label: 'Notifications' },
-  { id: 'billing', label: 'Billing' }, { id: 'password', label: 'Password' }, { id: 'activity', label: 'Activity', admin: true },
+  { id: 'billing', label: 'Billing' }, { id: 'password', label: 'Password' }, { id: 'account-terms', label: 'Account terms' }, { id: 'activity', label: 'Activity', admin: true },
 ];
 
 export default function Settings() {
@@ -132,6 +133,7 @@ export default function Settings() {
         {active.id === 'notifications' ? <NotificationsPanel data={query.data} canManage={canManage} /> : null}
         {active.id === 'billing' ? <BillingPanel /> : null}
         {active.id === 'password' ? <><EmailVerificationStatus /><PasswordPanel /></> : null}
+        {active.id === 'account-terms' ? <AccountTermsRecord /> : null}
         {active.id === 'activity' ? <ActivityPanel /> : null}
       </div>
     </div>

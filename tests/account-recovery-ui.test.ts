@@ -15,6 +15,7 @@ function render({reset=false,availability='enabled',auth}:{reset?:boolean;availa
   Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:{getItem:()=>'',setItem:()=>{throw new Error('Recovery cannot write browser storage');}}});
   globalThis.fetch=(async()=>{calls++;throw new Error('Network is forbidden in this UI fixture');}) as typeof fetch;
   const client=new QueryClient({defaultOptions:{queries:{retry:false,staleTime:Infinity,gcTime:Infinity}}});
+  client.setQueryData(['signup-terms'],{enabled:false,policy:null},{updatedAt:Date.now()+60_000});
   const key=['','/api/config'];
   if(availability!=='loading')client.setQueryData(key,{preview:true,inviteRequired:false,hosted:false,passwordRecovery:{available:availability!=='disabled'},emailVerification:{available:availability!=='disabled',requiredForSignup:false}});
   if(availability==='stale-error')client.getQueryCache().find({queryKey:key,exact:true})!.setState({status:'error',error:new Error('Sensitive synthetic provider detail'),fetchStatus:'idle'});

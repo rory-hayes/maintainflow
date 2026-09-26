@@ -18,6 +18,7 @@ function render({signedIn=false,auth,route='/invite'}:{signedIn?:boolean;auth?:'
  Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:{getItem:()=>workspace,setItem:()=>{throw new Error('Credentials must not be persisted');}}});
  globalThis.fetch=(async()=>{calls++;throw new Error('No network in this rendering fixture');}) as typeof fetch;
  const client=new QueryClient({defaultOptions:{queries:{retry:false,staleTime:Infinity,gcTime:Infinity}}});
+ client.setQueryData(['signup-terms'],{enabled:false,policy:null},{updatedAt:Date.now()+60_000});
  client.setQueryData(['session',workspace],signedIn?{user:{id:'owned-user',name:'Owned recipient',email:'recipient@example.test',emailVerifiedAt:null,emailVerificationRequired:false},workspace:{id:workspace,name:'Owned workspace',role:'owner'},workspaces:[]}:null);
  client.setQueryData([workspace,'/api/config'],{preview:false,inviteRequired:false,hosted:false,passwordRecovery:{available:true},emailVerification:{available:true,requiredForSignup:true}});
  try{

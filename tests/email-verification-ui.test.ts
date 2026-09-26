@@ -21,6 +21,7 @@ function render({surface='request',signedIn=false,verified=false,required=true,a
   Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:{getItem:()=>workspace,setItem:()=>{throw new Error('This static fixture cannot persist credentials');}}});
   globalThis.fetch=(async()=>{calls++;throw new Error('Network is forbidden in this component fixture');}) as typeof fetch;
   const client=new QueryClient({defaultOptions:{queries:{retry:false,staleTime:Infinity,gcTime:Infinity}}});
+  client.setQueryData(['signup-terms'],{enabled:false,policy:null},{updatedAt:Date.now()+60_000});
   const configKey=[workspace,'/api/config'];
   if(configuration!=='loading')client.setQueryData(configKey,{preview:true,inviteRequired:false,passwordRecovery:{available},emailVerification:configuration==='missing'?undefined:configuration==='malformed'?{available:'yes'}:{available,requiredForSignup:required}});
   if(configuration==='error')client.getQueryCache().find({queryKey:configKey,exact:true})!.setState({status:'error',error:new Error('PRIVATE synthetic sender detail'),fetchStatus:'idle'});

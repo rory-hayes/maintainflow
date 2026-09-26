@@ -1,5 +1,11 @@
 # Launch capacity facts
 
+**Status update — 27 September 2026:** the invocation-deadline correction described below shipped in [PR54](https://github.com/rory-hayes/maintainflow/pull/54), with canonical revision `2daa2022023600fee8da21f2011aad1bf10258fd` verified on 26 September at 19:55 UTC. It remains included in the subsequently verified [PR58](https://github.com/rory-hayes/maintainflow/pull/58) release, `b7ee471d407ad5f94766428020dc3bef1c65c8b0`, checked at 22:33 UTC. This closes the correction's deployment step; it does not establish hosted workload capacity, memory headroom or throughput.
+
+## Original source audit — historical baseline
+
+The deployment-pending statements below describe the original audit checkpoint and are superseded by the dated status update above. Preserve its source scope and measurement limits.
+
 Audited 26 September 2026 against source commit `8757f8a3dbe78cf67350ba71e57ea70885eee4be`, with the local invocation-deadline correction described below. That correction has not yet been deployed. This is a source/configuration audit, not a load test, throughput promise, SLA or approval to upgrade accounts. No credentials, customer files or provider requests were used.
 
 ## Hosting and timing

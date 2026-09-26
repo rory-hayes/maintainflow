@@ -106,6 +106,12 @@ END $folio_rate_limit_permissions$;`);
   END IF;
  END LOOP;
 END $folio_recovery_permissions$;`);
+ parts.push(`DO $folio_signup_terms_permissions$ BEGIN
+ IF to_regclass(${literal(`${schema}.signup_terms_acceptances`)}) IS NOT NULL THEN
+  REVOKE ALL ON ${s}.signup_terms_acceptances FROM PUBLIC,${u};
+  GRANT SELECT ON ${s}.signup_terms_acceptances TO ${u};
+ END IF;
+END $folio_signup_terms_permissions$;`);
  if(isolated)parts.push(`REVOKE ALL ON SCHEMA ${s} FROM PUBLIC;
 REVOKE CREATE ON SCHEMA ${s} FROM ${a},${u};
 REVOKE ALL ON ALL TABLES IN SCHEMA ${s} FROM PUBLIC;
@@ -147,4 +153,3 @@ END $folio_policies$;`);
 END $folio_watchdog_permissions$;`);
  if(options.transaction!==false)parts.push('COMMIT;');return parts.join('\n\n')+'\n';
 }
-
