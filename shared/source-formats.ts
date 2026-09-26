@@ -7,6 +7,7 @@ export const sourceFormats = [
   {id:'eml',label:'Email (EML)',mimeType:'message/rfc822'},
   {id:'csv',label:'CSV',mimeType:'text/csv'},
   {id:'xlsx',label:'Excel (XLSX)',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},
+  {id:'odt',label:'OpenDocument Text (ODT)',mimeType:'application/vnd.oasis.opendocument.text'},
   {id:'docx',label:'Word (DOCX)',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'},
   {id:'html',label:'HTML',mimeType:'text/html'},
 ] as const;
