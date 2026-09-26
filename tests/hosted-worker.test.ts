@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
-import {acceptsWorkerBearer,createHostedWorker,registerHostedWorker,workerRoute,type HostedWorkerServices} from '../server/hosted-worker.js';
+import {acceptsWorkerBearer,createHostedWorker,createHostedWorkerWake,recordHostedInvocation,registerHostedWorker,workerRoute,type HostedWorkerServices} from '../server/hosted-worker.js';
 
 const secret='controlled-worker-secret-0123456789abcdef';
 const idle=():HostedWorkerServices=>({enqueue:async()=>{},core:async()=>false,suggestion:async()=>false,delivery:async()=>false,provider:async()=>false,deletion:async()=>false,email:async()=>false,maintenance:async()=>{}});
@@ -172,4 +172,88 @@ test('split suggestions obey the provider reserve and receive the hosted deadlin
  };
  const result=await createHostedWorker(active,{budgetMs:20,reserveMs:{splitSuggestion:0}})();
  assert.equal(aborted,true);assert.equal(claims,1);assert.equal(result.splitSuggestion,1);assert.equal(result.stopped,'budget');
+});
+
+test('a 120-second successful intake keeps the original deadline and leaves extraction for another invocation',async()=>{
+ const app=Fastify();let now=0,extractionClaims=0;
+ const deadlines:number[]=[],attached:Promise<unknown>[]=[];
+ const services=idle();
+ for(const lane of aiLanes)services[lane]=async()=>{extractionClaims++;return false;};
+ services.maintenance=async budget=>{deadlines.push(budget.deadlineAt!);};
+ const wake=createHostedWorker(services,{now:()=>now});
+ registerHostedWorker(app,{waitUntil:work=>attached.push(work),wake,wakeAfterMutation:true,now:()=>now});
+ app.post('/slow-intake',async()=>{now+=120_000;return {accepted:true};});
+ try{
+  assert.equal((await app.inject({method:'POST',url:'/slow-intake'})).statusCode,200);
+  assert.equal(attached.length,1);const result=await attached[0] as Awaited<ReturnType<typeof wake>>;
+  assert.equal(extractionClaims,0);assert.equal(result.stopped,'budget');assert.deepEqual(deadlines,[210_000]);
+ }finally{await app.close();}
+});
+
+test('raw invocation time survives slow app and worker initialization',async()=>{
+ const app=Fastify();let now=80_000,initializations=0,claims=0;
+ const deadlines:number[]=[],attached:Promise<unknown>[]=[];
+ const services=idle();services.core=async()=>{claims++;return false;};
+ services.maintenance=async budget=>{deadlines.push(budget.deadlineAt!);};
+ // The raw entry records this before an 80-second app initialization. The
+ // registration hook must preserve it, including for a watchdog invocation.
+ app.addHook('onRequest',async request=>{recordHostedInvocation(request.raw,0);});
+ const wake=createHostedWorkerWake(async()=>{initializations++;now+=30_000;return services;},{now:()=>now});
+ registerHostedWorker(app,{secret:()=>secret,waitUntil:work=>attached.push(work),wake,wakeAfterMutation:true,now:()=>now});
+ try{
+  const response=await app.inject({method:'POST',url:`${workerRoute}?source=watchdog`,headers:{authorization:`Bearer ${secret}`}});
+  assert.equal(response.statusCode,202);assert.equal(attached.length,1);
+  await attached[0];assert.equal(initializations,1);assert.equal(claims,0);assert.deepEqual(deadlines,[210_000]);
+ }finally{await app.close();}
+});
+
+test('expired deadlines skip initialization, enqueue, maintenance and every claim',async()=>{
+ let now=210_000,calls=0,initializations=0;const services=idle();
+ for(const lane of ['core','suggestion','splitSuggestion','delivery','provider','deletion','email'] as const)services[lane]=async()=>{calls++;return false;};
+ services.enqueue=async()=>{calls++;};services.maintenance=async()=>{calls++;};
+ const wake=createHostedWorkerWake(async()=>{initializations++;now=210_001;return services;},{now:()=>now});
+ assert.equal((await wake(210_000)).stopped,'budget');assert.equal(initializations,0);assert.equal(calls,0);
+ now=200_000;
+ assert.equal((await wake(210_000)).stopped,'budget');assert.equal(initializations,1);assert.equal(calls,0);
+ assert.equal((await createHostedWorker(services,{now:()=>now})(210_000)).stopped,'budget');assert.equal(calls,0);
+});
+
+test('expiry before later lanes are entered skips enqueue and maintenance',async()=>{
+ let now=0,enqueued=0,maintained=0;const services=idle();
+ services.core=async()=>{now=210_000;return false;};
+ services.enqueue=async()=>{enqueued++;};services.maintenance=async()=>{maintained++;};
+ const result=await createHostedWorker(services,{now:()=>now})(210_000);
+ assert.equal(result.stopped,'budget');assert.equal(enqueued,0);assert.equal(maintained,0);
+});
+
+test('later and already-expired callers coalesce without extending or aborting the existing deadline',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1_000_000});
+ const services=idle();let claims=0,aborted=false,deadline:number|undefined;
+ services.core=async budget=>{
+  claims++;deadline=budget.deadlineAt;
+  await new Promise<void>(resolve=>budget.signal!.addEventListener('abort',()=>{aborted=true;resolve();},{once:true}));
+  return true;
+ };
+ const wake=createHostedWorker(services),first=wake(1_210_000);
+ t.mock.timers.tick(120_000);
+ assert.equal(wake(Date.now()+210_000),first);assert.equal(wake(Date.now()-1),first);
+ assert.equal(deadline,1_210_000);assert.equal(aborted,false);assert.equal(claims,1);
+ t.mock.timers.tick(89_999);assert.equal(aborted,false);
+ t.mock.timers.tick(1);assert.equal(aborted,true);
+ assert.equal((await first).stopped,'budget');assert.equal(claims,1);
+});
+
+test('a delayed wake arms its abort timer only for the original remaining interval',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:120_000});
+ const services=idle();let aborted=false;
+ services.delivery=async budget=>{
+  await new Promise<void>(resolve=>budget.signal!.addEventListener('abort',()=>{aborted=true;resolve();},{once:true}));
+  return true;
+ };
+ const work=createHostedWorker(services)(210_000);
+ // Delivery starts after the asynchronous enqueue finishes.
+ await Promise.resolve();
+ t.mock.timers.tick(89_999);assert.equal(aborted,false);
+ t.mock.timers.tick(1);assert.equal(aborted,true);
+ assert.equal((await work).stopped,'budget');
 });

@@ -3,10 +3,15 @@ import type {FastifyInstance} from 'fastify';
 import type {WorkBudget} from './core/work-budget.js';
 import {assertStorageRestoreReady} from './core/restore-state.js';
 
-// Vercel Fluid is configured for 300s. Stop claiming before 210s, keeping a
+// Vercel Fluid is configured for 300s. Abort cooperative work 210s after invocation start, keeping a
 // separate grace window for bounded IO and durable lease/retry updates.
 export const hostedWorkBudgetMs=210_000;
 export const workerRoute='/api/internal/worker';
+const invocationDeadlines=new WeakMap<object,number>();
+/** Called before cold app initialization; Fastify receives this same raw request. */
+export function recordHostedInvocation(request:object,startedAt=Date.now()){
+  invocationDeadlines.set(request,startedAt+hostedWorkBudgetMs);
+}
 export type HostedWorkerServices={
   enqueue:()=>Promise<unknown>;
   core:(budget:WorkBudget)=>Promise<boolean>;
@@ -19,19 +24,26 @@ export type HostedWorkerServices={
   maintenance:(budget:WorkBudget)=>Promise<unknown>;
 };
 export type DrainResult={core:number;suggestion:number;splitSuggestion:number;delivery:number;provider:number;deletion:number;email:number;stopped:'idle'|'budget';errors:number};
+type HostedWorkerOptions={budgetMs?:number;now?:()=>number;reserveMs?:Partial<Record<'core'|'suggestion'|'splitSuggestion'|'delivery'|'provider'|'deletion'|'email',number>>;onError?:(lane:string,error:unknown)=>void};
+const emptyResult=(stopped:DrainResult['stopped']):DrainResult=>({core:0,suggestion:0,splitSuggestion:0,delivery:0,provider:0,deletion:0,email:0,stopped,errors:0});
 
 /** One serial consumer per durable queue. No polling, sleeps or process lifetime dependency. */
-export function createHostedWorker(services:HostedWorkerServices,options:{budgetMs?:number;now?:()=>number;reserveMs?:Partial<Record<'core'|'suggestion'|'splitSuggestion'|'delivery'|'provider'|'deletion'|'email',number>>;onError?:(lane:string,error:unknown)=>void}={}){
+export function createHostedWorker(services:HostedWorkerServices,options:HostedWorkerOptions={}){
   const budgetMs=options.budgetMs??hostedWorkBudgetMs;
   if(!Number.isFinite(budgetMs)||budgetMs<=0||budgetMs>hostedWorkBudgetMs)throw new Error('Hosted worker budget must be positive and at most 210 seconds.');
   const now=options.now??Date.now;
   let active:Promise<DrainResult>|undefined;
-  async function drain(){
+  async function drain(deadlineAt:number){
+    const remaining=()=>deadlineAt-now();
+    if(remaining()<=0)return emptyResult('budget');
     const controller=new AbortController();
-    const budget:WorkBudget={signal:controller.signal,deadlineAt:now()+budgetMs};
-    const timer=setTimeout(()=>controller.abort(),budgetMs);
-    const result:DrainResult={core:0,suggestion:0,splitSuggestion:0,delivery:0,provider:0,deletion:0,email:0,stopped:'idle',errors:0};
-    const remaining=()=>budget.deadlineAt!-now();
+    const budget:WorkBudget={signal:controller.signal,deadlineAt};
+    const timer=setTimeout(()=>controller.abort(),Math.max(0,remaining()));
+    const result=emptyResult('idle');
+    const expired=()=>{
+      if(controller.signal.aborted||remaining()<=0){result.stopped='budget';return true;}
+      return false;
+    };
     const report=(lane:string,error:unknown)=>{result.errors++;options.onError?.(lane,error);};
     async function consume(lane:'core'|'suggestion'|'delivery'|'provider'|'deletion'|'email',reserveMs:number){
       // The optional reserve override is only a controlled scheduler test seam.
@@ -68,27 +80,48 @@ export function createHostedWorker(services:HostedWorkerServices,options:{budget
     }
     try{
       async function consumeDeliveries(){
+        if(expired())return;
         try{await services.enqueue();}catch(error){report('enqueue',error);}
         await consume('delivery',70_000);
+      }
+      async function maintain(){
+        if(expired())return;
+        try{await services.maintenance(budget);}catch(error){report('maintenance',error);}
       }
       // Separate lanes prevent a backlog of extraction from starving email, delivery
       // or cleanup. Database leases fence other concurrent function instances.
       await Promise.all([
         consumeExtractionWork(),consumeDeliveries(),
         consume('provider',140_000),consume('deletion',40_000),consume('email',40_000),
-        services.maintenance(budget).catch(error=>report('maintenance',error)),
+        maintain(),
       ]);
       return result;
     }catch(error){report('enqueue',error);return result;}
     finally{clearTimeout(timer);controller.abort();}
   }
-  return ()=>{
-    if(!active)active=drain().finally(()=>{active=undefined;});
+  return (deadlineAt=now()+budgetMs)=>{
+    if(!Number.isFinite(deadlineAt))throw new Error('Hosted worker deadline must be finite.');
+    // A second invocation cannot extend or abort the drain already in flight.
+    if(!active)active=drain(Math.min(deadlineAt,now()+budgetMs)).finally(()=>{active=undefined;});
     return active;
   };
 }
 
-let defaultWorker:ReturnType<typeof createHostedWorker>|undefined;
+/** Initialization consumes the originating invocation's budget too. */
+export function createHostedWorkerWake(initialize:()=>Promise<HostedWorkerServices>,options:HostedWorkerOptions={}){
+  const now=options.now??Date.now;
+  let worker:ReturnType<typeof createHostedWorker>|undefined,initialization:Promise<void>|undefined;
+  return async(deadlineAt=now()+(options.budgetMs??hostedWorkBudgetMs))=>{
+    if(!Number.isFinite(deadlineAt))throw new Error('Hosted worker deadline must be finite.');
+    if(!worker){
+      if(deadlineAt<=now())return emptyResult('budget');
+      initialization??=initialize().then(services=>{worker=createHostedWorker(services,options);}).catch(error=>{initialization=undefined;throw error;});
+      await initialization;
+    }
+    return worker!(deadlineAt);
+  };
+}
+
 async function productionServices():Promise<HostedWorkerServices>{
   const [{processOneCoreJob,enforceRetention},{processOneFileDeletion},{reconcileInterruptedIntake},{enqueueIntegrationEvents,processOneDelivery},{tickProviders},{processOneSchemaSuggestion},{processOneWorkspaceEmail},{processOneSplitSuggestion,reconcileExpiredSplitSuggestions}]=await Promise.all([
     import('./core/worker.js'),import('./core/retention.js'),import('./core/object-reconciliation.js'),
@@ -114,19 +147,12 @@ async function productionServices():Promise<HostedWorkerServices>{
     },
   };
 }
-let initialization:Promise<void>|undefined;
+const wakeInitializedWorker=createHostedWorkerWake(productionServices,{onError:lane=>console.error(`Hosted worker ${lane} failed; durable work remains queued.`)});
 /** Pass this promise to Vercel waitUntil after a successful mutation or watchdog wake. */
-export async function wakeHostedWorker(){
+export async function wakeHostedWorker(deadlineAt=Date.now()+hostedWorkBudgetMs){
   const {config}=await import('./core/config.js');
   await assertStorageRestoreReady(config.storageDir,process.env.STORAGE_DRIVER||'filesystem');
-  if(!defaultWorker){
-    initialization??=(async()=>{
-      const services=await productionServices();
-      defaultWorker=createHostedWorker(services,{onError:lane=>console.error(`Hosted worker ${lane} failed; durable work remains queued.`)});
-    })().catch(error=>{initialization=undefined;throw error;});
-    await initialization;
-  }
-  return defaultWorker!();
+  return wakeInitializedWorker(deadlineAt);
 }
 
 export function acceptsWorkerBearer(header:unknown,secret=process.env.FOLIO_WORKER_SECRET){
@@ -138,12 +164,24 @@ export function acceptsWorkerBearer(header:unknown,secret=process.env.FOLIO_WORK
 }
 
 /** Requires an explicit platform lifetime hook: never silently detach background work. */
-export function registerHostedWorker(app:FastifyInstance,options:{waitUntil:(work:Promise<unknown>)=>void;wake?:()=>Promise<unknown>;secret?:()=>string|undefined}){
+export function registerHostedWorker(app:FastifyInstance,options:{waitUntil:(work:Promise<unknown>)=>void;wake?:(deadlineAt:number)=>Promise<unknown>;secret?:()=>string|undefined;wakeAfterMutation?:boolean;now?:()=>number}){
+  const now=options.now??Date.now;
+  const deadline=(request:{raw:object})=>invocationDeadlines.get(request.raw)!;
+  // Local injection/non-Vercel callers have no raw-handler timestamp. Preserve
+  // any earlier timestamp from hosted-entry rather than resetting cold starts.
+  app.addHook('onRequest',async request=>{
+    if(!invocationDeadlines.has(request.raw))recordHostedInvocation(request.raw,now());
+  });
+  if(options.wakeAfterMutation)app.addHook('onResponse',async(request,reply)=>{
+    if(!['GET','HEAD','OPTIONS'].includes(request.method)&&reply.statusCode>=200&&reply.statusCode<300&&request.routeOptions.url!==workerRoute){
+      options.waitUntil((options.wake??wakeHostedWorker)(deadline(request)));
+    }
+  });
   app.post(workerRoute,{bodyLimit:1024},async(request,reply)=>{
     const secret=options.secret?.()??process.env.FOLIO_WORKER_SECRET;
     if(!secret||secret.length<32)return reply.code(503).send({error:'worker_unconfigured'});
     if(!acceptsWorkerBearer(request.headers.authorization,secret))return reply.code(401).send({error:'unauthorized'});
-    options.waitUntil((options.wake??wakeHostedWorker)());
+    options.waitUntil((options.wake??wakeHostedWorker)(deadline(request)));
     return reply.code(202).send({accepted:true});
   });
 }

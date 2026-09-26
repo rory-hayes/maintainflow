@@ -41,7 +41,7 @@ The worker rereads the customer's current subscriptions under the local customer
 
 `invoice.payment_failed` is a prompt to reconcile, not proof of `past_due`. If Stripe still reports an eligible active subscription, access remains paid. A recovered subscription remains paid when an older failure event is delivered later; an old success must not restore access after actual cancellation.
 
-Downgrading preserves existing documents, original files, parsers and usage history. New work follows the resulting quotas; a workspace already above its new parser limit cannot create another parser. Renewal does **not** reset usage. The current monthly usage query starts at database `date_trunc('month', now())`, not the customer's Stripe renewal date. Approve and disclose this calendar-month model, including the production database timezone, or implement and verify an explicitly chosen billing-period model before selling a different promise.
+Downgrading preserves existing documents, original files, parsers and usage history. New work follows the resulting quotas; a workspace already above its new parser limit cannot create another parser. Renewal does **not** reset usage. PR53 implements and discloses an explicit **UTC calendar-month** cutoff independent of the database session timezone. Page and AI-helper allowances reset on the first day of that month, without rollover; the Stripe renewal date can differ. UTC boundary, concurrent helper admission and durable charge timing passed regression tests. Do not promise a billing-anniversary reset.
 
 ## 1. Local release evidence
 
