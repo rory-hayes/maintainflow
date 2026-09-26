@@ -2,7 +2,21 @@
 
 Updated 26 September 2026. This is the working queue for the user's request to complete parallel work and then continue through dependencies. It distinguishes implementation, local acceptance and actual hosted operation; account upgrades alone do not complete it.
 
-## Current baseline
+## Current disposition — after PR46 and the first hosted bank run
+
+The baseline and queue below retain their earlier planning history. This disposition supersedes their pending-approval/deployment statements:
+
+- **L01/L04–L07:** reviewed stack PR51–PR46 merged and deployed as `e139697a12696324117de14269a589d24a5e661e`; migrations 039–042 applied/read back. Final CI passed 1,070 tests plus runtime and isolated recovery checks. Current health/readiness and a hosted rules-document correction/approval/export/isolation regression passed.
+- **L08:** watchdog delta applied and owner-only permissions verified. Current external failure-event delivery remains unproved.
+- **L09:** two synthetic PDFs/four pages processed automatically. Native literal extraction passed; scanned raw transaction-currency provenance failed its exact check despite correct normalized transactions. Original failure evidence is preserved. Review/export continuation is recorded separately in the [E2E audit](E2E-AUDIT-2026-09-26.md).
+- **L10/L21:** deployed mobile landing/onboarding and generic sign-in error passed. Eight anonymous bank reads returned 401 and eight outsider reads returned 404. This is not the complete four-role, capacity, retry or authenticated browser matrix.
+- **L16:** diagnostics credential and state key installed; hosted probe returned three successful checks. Recipient/sending credential, incident/recovery delivery, initialization and genuine scheduled operation remain open.
+- **L17:** [local read-only stale-run checker](STALE-MONITOR.md) and tests added. Independent hosting, schedule and notification acceptance remain open.
+- **L18–L26:** current hosted recovery/backups, remaining retention/capacity, policies, real sandbox billing, offer decisions, upgrades and final activation remain distinct gates. Six observed workspaces use Explore with no subscription/checkout rows; no paid-allowance cleanup was required by that inventory.
+
+See [current launch status](LAUNCH-STATUS-2026-09-26.md) and [E2E audit](E2E-AUDIT-2026-09-26.md). Preserve the original test failures, fixture history and limits; upgrading accounts cannot resolve these operational gaps.
+
+## Earlier baseline — before approved release
 
 - Active checkout: `/Users/rory/Documents/Ideation/maintainflow-folio-release`; coordination branch `codex/launch-readiness`, based on `cd582feef42367bc35b660bee793c305c63581f8` (PR50).
 - Fresh read-only checks at 15:11–15:12 UTC: canonical domain healthy and ready on `c418f497d8eb24e561a2fe5761951590bfd36e0e`, still private preview. Hosted journal has 29 entries through `038_stripe_billing_modes.sql`; the two bank indexes are absent.
