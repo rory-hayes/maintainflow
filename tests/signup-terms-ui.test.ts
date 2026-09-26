@@ -16,7 +16,8 @@ const cssUrl=new URL('../src/features/settings/settings.css',import.meta.url).hr
 const hooks=registerHooks({load(url,context,next){return url===cssUrl?{format:'module',source:'',shortCircuit:true}:next(url,context);}});
 const Settings=await import('../src/features/settings/Settings').then(module=>module.default).finally(()=>hooks.deregister());
 const workspace='signup-terms-ui',userId='owned-terms-reader';
-const policy:SignupPolicy={version:'synthetic-v1',language:'en-IE',title:'Synthetic signup terms',text:'Synthetic fixture only.\nExact spacing:  two spaces.\n<script>alert("fixture")</script> & literal text.',url:'https://example.test/terms/v1',agreementText:'I agree to the synthetic signup terms.',sha256:'a'.repeat(64)};
+const policy:SignupPolicy={version:'synthetic-v1',language:'en-IE',title:'Synthetic signup terms',text:'Synthetic fixture only.\nExact spacing:  two spaces.\n<script>alert("fixture")</script> & literal text.\n<ScRiPt data-fixture="synthetic">/* synthetic fixture only */</sCrIpT>',url:'https://example.test/terms/v1',agreementText:'I agree to the synthetic signup terms.',sha256:'a'.repeat(64)};
+const escapedPolicyText='Synthetic fixture only.\nExact spacing:  two spaces.\n&lt;script&gt;alert(&quot;fixture&quot;)&lt;/script&gt; &amp; literal text.\n&lt;ScRiPt data-fixture=&quot;synthetic&quot;&gt;/* synthetic fixture only */&lt;/sCrIpT&gt;';
 const record={policy,acceptedAt:'2026-09-26T10:00:00.000Z',recordedAt:'2026-09-26T10:01:00.000Z',evidenceNotice:'This records signup acceptance, not email delivery, payment or a subscription.'};
 type Options={surface?:'signup'|'signin'|'record'|'settings';terms?:unknown;termsState?:'loading'|'error'|'fetching';recordData?:unknown;recordState?:'loading'|'error';role?:'owner'|'admin'|'editor'|'viewer';signedIn?:boolean};
 function render({surface='signup',terms={enabled:false,policy:null},termsState,recordData={record},recordState,role='viewer',signedIn=surface==='record'||surface==='settings'}:Options={}){
@@ -59,10 +60,11 @@ test('enabled terms are unchecked, accessible literal text with a safe separate 
   const html=render({terms:{enabled:true,policy}});assert.match(button(html,'Create workspace'),/disabled/);
   const checkbox=html.match(/<input[^>]*type="checkbox"[^>]*>/)?.[0];assert.ok(checkbox);assert.match(checkbox,/required=""/);assert.doesNotMatch(checkbox,/checked=""/);
   assert.match(html,/<details[^>]*><summary>Read the signup terms<\/summary>/);
-  assert.ok(html.includes('Exact spacing:  two spaces.\n&lt;script&gt;alert(&quot;fixture&quot;)&lt;/script&gt; &amp; literal text.'));
+  assert.ok(html.includes(escapedPolicyText));
   assert.match(html,/href="https:\/\/example.test\/terms\/v1"[^>]*rel="noopener noreferrer"/);
   assert.match(html,/Version synthetic-v1/);assert.match(html,/Language en-IE/);assert.match(html,/I agree to the synthetic signup terms/);
-  assert.doesNotMatch(html,/<script>|privacy consent|consent to processing|aaaaaaaaaaaaaaaa/);
+  assert.doesNotMatch(html,/<\/?script(?=[\s/>])/i);
+  assert.doesNotMatch(html,/privacy consent|consent to processing|aaaaaaaaaaaaaaaa/);
 });
 
 test('unsafe URLs, invalid content and malformed policy digests never become an actionable agreement',()=>{
@@ -87,7 +89,8 @@ test('every session role can view its own recorded policy independent of current
   for(const role of ['owner','admin','editor','viewer'] as const){
     const html=render({surface:'record',role,terms:{enabled:true,policy:null}});assert.match(html,/Your signup terms record/);assert.match(html,/Acceptance received/);assert.match(html,/Record saved/);
     assert.match(html,/dateTime="2026-09-26T10:00:00.000Z"/);assert.match(html,/dateTime="2026-09-26T10:01:00.000Z"/);
-    assert.match(html,/Read the recorded signup terms/);assert.match(html,/Download signup terms record/);assert.match(html,/not email delivery, payment or a subscription/);assert.doesNotMatch(html,/<script>|type="checkbox"/);
+    assert.match(html,/Read the recorded signup terms/);assert.match(html,/Download signup terms record/);assert.match(html,/not email delivery, payment or a subscription/);
+    assert.ok(html.includes(escapedPolicyText));assert.doesNotMatch(html,/<\/?script(?=[\s/>])/i);assert.doesNotMatch(html,/type="checkbox"/);
   }
 });
 
