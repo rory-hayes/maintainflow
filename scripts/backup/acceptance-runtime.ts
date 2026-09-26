@@ -117,7 +117,7 @@ try{
  if(phase==='blocked'){
   assert.ok(await fs.stat(path.join(cfg.storageDir,'.folio-restore-pending.json')));
   let apiRefused=false,workerRefused=false;
-  const pendingMessage='This restored instance is inactive. Verify and activate the backup before starting Folio.';
+  const pendingMessage='This restored instance is inactive. Verify and activate the backup before starting MaintainFlow.';
   const isPending=(error:any)=>{assert.equal(error?.code,'FOLIO_RESTORE_PENDING');assert.equal(error?.message,pendingMessage);return true;};
   await assert.rejects(async()=>{app=await buildApp();await app.ready();},isPending);apiRefused=true;
   await assert.rejects(worker.processOneCoreJob(randomUUID()),isPending);
