@@ -191,6 +191,10 @@ try{
   const mapping=ok(await request(owner,'POST','/api/export-mappings',{parserId:parser.id,name:'Preserved typed columns',columns}));
   const schema2=ok(await request(owner,'POST',`/api/parsers/${parser.id}/schema`,schema)).schema;
   const queued=await upload(owner,parser.id,Buffer.from(sourceText.replace('000042','QUEUED-42')),'queued.txt');
+  const odtBytes=await fs.readFile(path.join(root,'fixtures/source-formats/synthetic-receipt.odt'));
+  const odtQueued=await upload(owner,parser.id,odtBytes,'synthetic-restored.odt');
+  assert.equal(odtQueued.document.mimeType,'application/vnd.oasis.opendocument.text');
+  assert.equal(odtQueued.document.pageCount,1);
   const otherDoc=await upload(other,otherParser.id,Buffer.from(sourceText.replace('000042','OTHER-42')),'other.txt');
   // Model the two pre-region job policies explicitly; restore must not upgrade
   // their selector or manufacture a native-template snapshot.
@@ -250,7 +254,7 @@ try{
   const emailCanary=encryptSecret(JSON.stringify({to:owner.email,subject:'Synthetic restore message',text:'Controlled fixture only'}));await db.adminPool.query("insert into account_email_outbox(user_id,kind,payload_ciphertext,expires_at) values($1,'password_changed',$2,now()+interval '1 day')",[owner.user.id,emailCanary]);
   const native=await seedNativeTemplates(owner),bank=await seedBankStatements(owner);
   const originals=[];for(const row of(await db.adminPool.query('select id,storage_key,sha256,workspace_id from documents order by id')).rows)originals.push({...row,actualSha256:hash(await fs.readFile(path.join(cfg.storageDir,row.storage_key)))});
-  const fixture={accounts,parserId:parser.id,otherParserId:otherParser.id,ordinary,queued,otherDoc,native,bank,runId:runDetail.id,approvalId:approval.id,corrected,normalized:runDetail.normalizedValues,raw:runDetail.rawValues,exports,template,mapping,schema2,split,splitRequestId,splitOptions,pdfSha256:hash(pdfBytes),storedSourceId,storedSourceSha256,storedOptions,storedRequestId,storedSplit,undoneRequestId,undoneSplit,tiffOriginal,tiffOptions,tiffRequestId,tiffUndoneId,tiffSplit,tiffUndone,tiffSha256:hash(tiffBytes),suggestions,splitSuggestionRows,splitSuggestionObjects,archive,zipRequestId,zipOptions,zipSha256:hash(zipBytes),originals,integrationId,canarySha256:hash(canary),deliveryId,deletionKey,usage:await ledger()};
+  const fixture={accounts,parserId:parser.id,otherParserId:otherParser.id,ordinary,queued,odtQueued,otherDoc,native,bank,runId:runDetail.id,approvalId:approval.id,corrected,normalized:runDetail.normalizedValues,raw:runDetail.rawValues,exports,template,mapping,schema2,split,splitRequestId,splitOptions,pdfSha256:hash(pdfBytes),storedSourceId,storedSourceSha256,storedOptions,storedRequestId,storedSplit,undoneRequestId,undoneSplit,tiffOriginal,tiffOptions,tiffRequestId,tiffUndoneId,tiffSplit,tiffUndone,tiffSha256:hash(tiffBytes),suggestions,splitSuggestionRows,splitSuggestionObjects,archive,zipRequestId,zipOptions,zipSha256:hash(zipBytes),originals,integrationId,canarySha256:hash(canary),deliveryId,deletionKey,usage:await ledger()};
   await fs.writeFile(path.join(run,'source.pdf'),pdfBytes,{mode:0o600});await fs.writeFile(path.join(run,'source.zip'),zipBytes,{mode:0o600});await write('fixture-private.json',fixture);
   await write('runtime-seed.json',{accounts:2,workspaces:2,documents:originals.length,exports:8,schemaVersions:6,bankStatements:{documents:2,accountDateRows:2,transactionFingerprints:4,approvedSnapshots:2,controlledProviderCalls:2},nativeTemplates:{completed:1,queuedPinnedRevision:1,savedCurrentRevision:2,independentCopies:1,closedMutations:1},splitSuggestions:{queued:1,ready:1,applied:1,undone:1,expired:1,controlledProviderCalls:controlledSplitCalls},syntheticCanaries:['encrypted integration','pending webhook','pending account email','pending file deletion'],forbiddenNetwork});
  }else{
@@ -321,6 +325,15 @@ try{
   const cipher=(await db.adminPool.query('select secret_ciphertext from integrations where id=$1',[f.integrationId])).rows[0].secret_ciphertext;assert.equal(hash(decryptSecret(cipher)),f.canarySha256);checks.encryptionKeyCanary=true;
   await verifyNativeTemplates(owner,other,f.native,f.usage);
   await verifyBankStatements(owner,other,f.bank);
+  assert.equal((await request(other,'GET',`/api/documents/${f.odtQueued.document.id}`)).statusCode,404);
+  assert.equal(await worker.processOneCoreJob(f.odtQueued.jobId),true);
+  assert.equal(await worker.processOneCoreJob(f.odtQueued.jobId),false);
+  const restoredOdt=ok(await request(owner,'GET',`/api/documents/${f.odtQueued.document.id}`));
+  assert.equal(restoredOdt.document.mimeType,'application/vnd.oasis.opendocument.text');
+  assert.equal(restoredOdt.runs.length,1);assert.equal(restoredOdt.jobs[0].attempts,1);
+  assert.deepEqual(restoredOdt.runs[0].effectiveValues,{reference:'000042',amount:12.5,paid:false,missing_date:null});
+  assert.equal(restoredOdt.runs[0].normalizationContext.version,'regional-v2');
+  assert.deepEqual(await ledger(),f.usage);checks.queuedOdtOriginalAndPinnedNormalizationResumeOnceWithoutRecharging=true;
   assert.equal(await worker.processOneCoreJob(f.queued.jobId),true);assert.equal(await worker.processOneCoreJob(f.queued.jobId),false);const queued=ok(await request(owner,'GET',`/api/documents/${f.queued.document.id}`));assert.equal(queued.runs.length,1);assert.equal(queued.jobs[0].attempts,1);assert.equal(queued.jobs[0].state,'completed');assert.equal(queued.runs[0].effectiveValues.reference,'QUEUED-42');assert.deepEqual(await ledger(),f.usage);checks.deterministicQueuedJobOnceWithoutRecharging=true;
   assert.equal(queued.runs[0].selection.policy,'complete-v1');assert.equal(queued.runs[0].templateSnapshot,null);
   assert.equal(await worker.processOneCoreJob(f.otherDoc.jobId),true);assert.equal(await worker.processOneCoreJob(f.otherDoc.jobId),false);const legacy=ok(await request(other,'GET',`/api/documents/${f.otherDoc.document.id}`));assert.equal(legacy.runs[0].effectiveValues.reference,'OTHER-42');assert.equal(legacy.runs[0].selection,null);assert.equal(legacy.runs[0].templateSnapshot,null);assert.deepEqual(await ledger(),f.usage);checks.legacyAndCompleteV1QueuedSelectorsRemainUnchanged=true;

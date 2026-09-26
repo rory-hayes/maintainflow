@@ -1,10 +1,12 @@
 import {Temporal} from '@js-temporal/polyfill';
 import type {ParserSchema,SchemaField,ValidationIssue} from '../../shared/types.js';
 import {normalizeWrittenDate} from './written-date.js';
+import {regionalSourceLocale} from './source-locale.js';
+import {fieldSourceLocale,normalizationPolicy,legacyNormalizationPolicy,type NormalizationPolicy} from '../../shared/source-formats.js';
 
-export const timestampPolicy='timestamp-v1' as const;
-export interface NormalizationContext {version:typeof timestampPolicy;locale:string;timezone:string|null;tzdbVersion:string|null;}
-type Settings={locale?:string;timezone?:string|null};
+export const timestampPolicy=legacyNormalizationPolicy;
+export interface NormalizationContext {version:NormalizationPolicy;locale:string;timezone:string|null;tzdbVersion:string|null;}
+type Settings={locale?:string;timezone?:string|null;version?:NormalizationPolicy};
 type TimestampResult={value:unknown;issue?:Omit<ValidationIssue,'field'>};
 const instantSyntax=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 export function validTimezone(value:unknown):value is string{
@@ -26,9 +28,11 @@ export function normalizeTimestamp(value:unknown,settings:Settings={}):Timestamp
  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){
   if(!settings.locale)return fail('timestamp_locale_missing','This run has no saved locale. Enter an ISO timestamp with an explicit offset, for example 2026-09-17T14:30:00+01:00.');
   try{
-   if(new Intl.DateTimeFormat(settings.locale).resolvedOptions().calendar!=='gregory')return invalid();
+   const regional=settings.version===legacyNormalizationPolicy?null:regionalSourceLocale(settings.locale);
+   if(settings.version===legacyNormalizationPolicy?new Intl.DateTimeFormat(settings.locale).resolvedOptions().calendar!=='gregory':!regional)return invalid();
+   if(settings.version!==legacyNormalizationPolicy&&/^\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4}$/.test(date)&&!/^\d{1,2}([\/.\-])\d{1,2}\1\d{4}$/.test(date))return invalid();
    const numeric=date.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
-   if(numeric){const us=/^en-US/i.test(settings.locale);date=`${numeric[3]}-${(us?numeric[1]:numeric[2]).padStart(2,'0')}-${(us?numeric[2]:numeric[1]).padStart(2,'0')}`;}
+   if(numeric){if(regional&&!['month-day-year','day-month-year'].includes(regional.dateOrder))return invalid();const us=regional?regional.dateOrder==='month-day-year':/^en-US/i.test(settings.locale);date=`${numeric[3]}-${(us?numeric[1]:numeric[2]).padStart(2,'0')}-${(us?numeric[2]:numeric[1]).padStart(2,'0')}`;}
    else date=normalizeWrittenDate(date,settings.locale)??date;
   }catch{return invalid();}
  }
@@ -57,7 +61,7 @@ export function normalizeTimestamp(value:unknown,settings:Settings={}):Timestamp
 export function normalizeTimestampCorrections(values:Record<string,unknown>,schema:ParserSchema,settings:Settings={}):Record<string,unknown>{
  const fieldValue=(value:unknown,field:SchemaField):unknown=>{
   if(value===null||value===undefined||value==='')return value;
-  if(field.type==='timestamp')return normalizeTimestamp(value,{...settings,timezone:field.timezone??settings.timezone}).value;
+  if(field.type==='timestamp')return normalizeTimestamp(value,{...settings,locale:fieldSourceLocale(field,settings.locale,settings.version??normalizationPolicy),timezone:field.timezone??settings.timezone}).value;
   if(field.type==='array'&&Array.isArray(value))return value.map(row=>record(row,field.fields??[]));
   if(field.type==='object')return record(value,field.fields??[]);
   return value;

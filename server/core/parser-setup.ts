@@ -56,7 +56,7 @@ export async function queueInitialSetup(c:PoolClient,actor:Actor,parser:any,docu
 export async function releaseInitialJobs(c:PoolClient,parser:any,schemaId:string){
  const templates=(await c.query('select * from templates where parser_id=$1 order by created_at,id',[parser.id])).rows;
  const config=pinnedTemplateConfig(parser,templates);
- const {rows}=await c.query("update jobs j set waiting_for_schema=false,schema_version_id=$2,config=$3,state='queued',error=null,available_at=now(),updated_at=now() from documents d where j.document_id=d.id and d.parser_id=$1 and j.waiting_for_schema returning j.document_id",[parser.id,schemaId,JSON.stringify(config)]);
+ const {rows}=await c.query("update jobs j set waiting_for_schema=false,schema_version_id=$2,config=$3::jsonb || jsonb_build_object('normalizationPolicy',coalesce(j.config->>'normalizationPolicy','timestamp-v1')),state='queued',error=null,available_at=now(),updated_at=now() from documents d where j.document_id=d.id and d.parser_id=$1 and j.waiting_for_schema returning j.document_id",[parser.id,schemaId,JSON.stringify(config)]);
  if(rows.length)await c.query("update documents set status='queued',error=null,updated_at=now() where id=any($1::uuid[])",[rows.map(row=>row.document_id)]);
  return rows.length;
 }
