@@ -177,7 +177,8 @@ const endpoints = [
   ['GET', '/api/jobs/:id', 'documents:read', 'Read the durable job state and retry details.'],
   ['GET', '/api/runs/:id', 'results:read', 'Read extracted values, evidence, corrections and approvals.'],
   ['POST', '/api/exports', 'results:read', 'Create an export from approved document revisions.'],
-  ['GET', '/api/exports/:id/download', 'results:read', 'Download the saved CSV, XLSX or JSON file.'],
+  ['GET', '/api/exports', 'exports:read or results:read', 'List saved exports in the key’s workspace.'],
+  ['GET', '/api/exports/:id/download', 'exports:read or results:read', 'Download the saved CSV, XLSX or JSON file.'],
 ];
 
 export function ApiDocs() {

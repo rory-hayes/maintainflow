@@ -4,7 +4,19 @@
 
 This dated record supersedes deployment and branding statements in the [September 20 status](LAUNCH-STATUS-2026-09-20.md). Historical test records retain their original source and coverage. The [47-criterion capability inventory](PARITY-MATRIX.md) remains recorded in the product backlog. The newer [ordered launch backlog](LAUNCH-BACKLOG.md) distinguishes bank-launch requirements from broader product extensions awaiting a scope decision; the inventory does not make every extension a launch prerequisite.
 
-## Current deployment and completed proof
+## Current deployment — update after PR46
+
+The canonical domain now serves **`e139697a12696324117de14269a589d24a5e661e`** from [merged PR46](https://github.com/rory-hayes/maintainflow/pull/46), Vercel Production deployment `dpl_9X7ZC1q1b8zoVwCAiHhHBZNCahpA`. Migrations 039–042 are applied and read back (33 journal entries); bank tables retain forced RLS and the reviewed failure-event watchdog is applied with unchanged owner-only permissions and schedule. Free plans, mock billing and invitation-only preview remain enabled.
+
+[Final release CI](https://github.com/rory-hayes/maintainflow/actions/runs/36256020412) passed 1,070 tests, 17 packaged-runtime checks, 11 filesystem recovery groups and 12 managed-storage recovery groups. A fresh hosted rules-document flow passed automatic processing, correction, stale-revision rejection, approval, exact JSON/CSV/XLSX, private-original bytes, outsider isolation, usage and cleanup. These are distinct from AI quality or current hosted backup coverage.
+
+The 17:11 UTC hosted bank test processed two synthetic two-page PDFs automatically, once each. Native extraction passed its literal-value check. Scanned extraction preserved the correct normalized transactions but incorrectly copied account-level EUR into two raw transaction-currency fields. The first-pass failure and both fixtures are retained; it must not be relabelled as a clean extraction pass. See the [E2E audit](E2E-AUDIT-2026-09-26.md) for current review/export results and open gaps.
+
+The installed monitoring diagnostics/state credentials passed [one hosted probe](https://github.com/rory-hayes/maintainflow/actions/runs/36257131835): health, readiness and diagnostics were all true. Incident email, encrypted-state initialization, genuine scheduled monitoring and independent stale-run alerting are still incomplete. The new [stale-monitor checker](STALE-MONITOR.md) is local tooling, not an activated external service.
+
+The sections below preserve the **earlier pre-approval snapshot**. Their revision, undeployed-extension and pending-migration statements describe that earlier time and are superseded by this update. The operational, account, integration, policy and payment gaps remain open except where the current E2E audit records explicit completion.
+
+## Historical deployment and completed proof — before PR46
 
 - The canonical domain serves operations revision **`c418f497d8eb24e561a2fe5761951590bfd36e0e`**, merged through [PR44](https://github.com/rory-hayes/maintainflow/pull/44), from Vercel deployment **`dpl_JDMqnphrEzjLfPiPDtEC2mno84hV`**. Fresh health and dependency readiness checks passed at **11:35 UTC**. Monitoring code is deployed but remains disabled pending its separate credential/recipient approvals and operational acceptance.
 - [PR45](https://github.com/rory-hayes/maintainflow/pull/45) previously deployed the MaintainFlow rename at **`279f5d798c6871393e0aecca5eaaa1470723eb4c`**. Its merged source tree matched the checked `b7448ba` branch head. Website/account/workspace branding, new account emails and exports use MaintainFlow; stable internal identifiers and old queued-email requests retain compatibility.

@@ -1,4 +1,4 @@
-import type {FastifyInstance} from 'fastify';
+import type {FastifyInstance,FastifyRequest} from 'fastify';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {requireActor} from '../core/auth.js';
@@ -17,6 +17,14 @@ class HostedExportSizeError extends Error {
 }
 function checkHostedExportSize(bytes:Buffer){
   if(process.env.VERCEL==='1'&&bytes.byteLength>hostedExportMaxBytes)throw new HostedExportSizeError();
+}
+
+async function requireExportReader(request:FastifyRequest){
+  const actor=await requireActor(request);
+  if(actor.authType==='api'&&!actor.scopes?.some(scope=>scope==='exports:read'||scope==='results:read')){
+    badRequest('API key requires exports:read or results:read scope',403);
+  }
+  return actor;
 }
 
 export async function registerExports(app:FastifyInstance, services:{render?:typeof renderExport}={}) {
@@ -85,11 +93,11 @@ export async function registerExports(app:FastifyInstance, services:{render?:typ
     return outcome.result;
   });
   app.get('/api/exports',async request=> {
-    const actor=await requireActor(request,{scope:'results:read'});
+    const actor=await requireExportReader(request);
     return withWorkspace(actor.workspaceId,async c=>({exports:(await c.query('SELECT id,format,document_ids,created_at FROM export_snapshots WHERE workspace_id=$1 ORDER BY created_at DESC LIMIT 100',[actor.workspaceId])).rows.map(camel)}));
   });
   app.get<{Params:{id:string}}>('/api/exports/:id/download',async(request,reply)=> {
-    const actor=await requireActor(request,{scope:'results:read'});
+    const actor=await requireExportReader(request);
     const id=z.uuid().parse(request.params.id);
     const row=await withWorkspace(actor.workspaceId,async c=>(await c.query('SELECT format,mime_type,bytes FROM export_snapshots WHERE id=$1 AND workspace_id=$2',[id,actor.workspaceId])).rows[0]);
     if(!row)notFound();

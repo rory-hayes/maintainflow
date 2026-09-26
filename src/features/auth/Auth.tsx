@@ -42,7 +42,7 @@ export default function Auth({signUp=false}:{signUp?:boolean}){
       <Button disabled={action.busy||blocked} type="submit">{action.busy?'Please wait…':signUp?'Create workspace':'Sign in'}<ArrowRight/></Button>
     </form>
     {next==='/invite'?<p className="small">Use the email address your workspace invitation was created for. If you need to verify a new account, reopen the invitation after verification.</p>:null}
-    <p className="small auth-footer">{signUp?(runtime.isSuccess?signupPolicy:'Account setup is being checked.'):'Use the account created on this installation. Remote Parseur accounts are separate.'}</p>
+    <p className="small auth-footer">{signUp?(runtime.isSuccess?signupPolicy:'Account setup is being checked.'):'Sign in with your MaintainFlow account.'}</p>
     {!signUp?<p className="small"><Link className="link" to="/verify-email">Need a verification email?</Link></p>:null}
   </section></main></div>;
 }
