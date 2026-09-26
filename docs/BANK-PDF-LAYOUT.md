@@ -1,0 +1,25 @@
+# Native bank PDF layout input
+
+The retired synthetic bank evaluation found three credits returned as debits in a native PDF. Those wrong directions were already present in the provider's raw response; normalization did not create them. Reconciliation exposed the mismatches and required correction. The native-text decoder joins text without preserving horizontal positions, so an empty debit cell can disappear from flattened text. This is a plausible source of ambiguity, not a proven explanation of the model's error. Keep the original evaluation and corrections as recorded in [bank quality acceptance](BANK-QUALITY-ACCEPTANCE.md).
+
+## Input representation
+
+New bank-statement job snapshots pin a separate native-PDF layout version. For those PDF jobs, the existing isolated geometry decoder supplies literal text blocks with source item IDs, page dimensions, rotation, reading-order separators and normalized page rectangles. The auxiliary input does not recognize tables, assign columns, join transaction rows, interpret signs or calculate money. Blank space is not proof that a value is absent. Repeated headers, wrapped text and legitimate repeated rows remain source material for extraction and review.
+
+The original PDF remains attached. Stored native source text, raw extracted values, normalization and source-quote validation are unchanged. Layout content is untrusted document data, including any instructions printed inside a block. It cannot establish that an extracted amount belongs to a particular column; native text matches and model-read quotations retain their existing evidence labels. Human review remains necessary.
+
+The layout is validated against the actual PDF's hash and page count, with byte size and current document binding checked by the worker. Existing decoder capacity and the extraction attempt's cancellation/deadline apply. Unsupported native geometry and image-only pages carry explicit reasons. An auxiliary representation beyond its size allowance is omitted in full; it is never silently truncated into an apparently complete table. The original visual input remains available. A precisely identified geometry-limit rejection can also use the verified original alone: the actual hash, byte size, PDF header/MIME and sequential stored page metadata must match intake first, and the source is fenced again before saving. That fallback records the intake page count and attempted geometry version; it does not claim a fresh geometry page-count check or invent zero native-item counts. Other decoder errors, cancellation, capacity rejection, malformed output and deadlines are not treated as successful layout fallback.
+
+Auxiliary layout has a 128 KiB serialized-text allowance and shares the provider's existing 512 KiB text-input budget. Version and safe source/count/status metadata accompany the resulting run. Worker-recorded candidate input metadata and the provider's actual inclusion/omission status are separate. They describe input handling, not extraction quality or independent OCR verification. The text allowance is not a measured token or cost ceiling: schema/instruction limits and visual PDF processing remain separate, and all preparation consumes the existing extraction-attempt deadline.
+
+## Compatibility
+
+Jobs without the new pinned layout marker retain the previous request behavior and prompt version. Unknown or incompatible markers fail before provider work. Explicit reprocessing creates a new job with current saved settings and the new version; it does not rewrite earlier raw results, corrections, approvals or exported revisions. New non-PDF bank jobs and existing invoice, rules and template workflows retain their existing paths. No schema migration, separate provider, authentication or billing system is introduced.
+
+## Verification and quality boundary
+
+Controlled verification targets literal block preservation, source/version binding, malformed and oversized geometry, original-PDF retention, combined text limits, historical job behavior, deadline handling and existing document workflows. Execution results are recorded separately; synthetic fixture assertions establish only the contracts they actually exercise. The earlier local seven-header prototype is not the production representation; its fixture-specific column grouping is deliberately excluded from this implementation.
+
+Any provider comparison after this change is a regression on a previously used pack. Record every input, attempt, failure, raw direction, missing value, group, row, source quote and required correction. Preserve the first-pass failures and compare older approved exports separately from any new run. A balanced result alone does not establish correct extraction. New held-out or real-bank accuracy claims require separately reserved and authorized evaluation data.
+
+Release, provider-call and browser evidence are recorded separately. This document does not establish deployment, a successful provider comparison, real-bank compatibility, or public-launch readiness.
