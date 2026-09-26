@@ -8,6 +8,8 @@ import {enqueueEmailVerification} from './email-verification.js';
 import {accountEmailStatus,trustedAccountOrigin} from '../integrations/account-email.js';
 import {decryptSecret,encryptSecret,privateIdentifier} from '../integrations/secrets.js';
 import {requireWorkBudget,type WorkBudget} from './work-budget.js';
+import {signupTermsSnapshotSchema,type SignupTermsSnapshot} from '../../shared/signup-terms.js';
+import {checkedSignupTermsSnapshot,saveSignupTermsAcceptance} from './signup-terms.js';
 
 export const requiredSignupAccepted=Object.freeze({accepted:true,message:'If this address can be registered, a verification email will be sent shortly.'});
 export class RegistrationUnavailableError extends Error {
@@ -19,6 +21,7 @@ const envelopeSchema=z.object({
  email:z.string().email().max(254).refine(value=>value===value.trim().toLowerCase()),
  name:z.string().min(1).max(100),workspaceName:z.string().min(1).max(100),
  passwordHash:z.string().regex(/^[0-9a-f]{32}:[0-9a-f]{128}$/),
+ signupTerms:signupTermsSnapshotSchema.optional(),
 }).strict();
 const available=()=>accountEmailStatus().available&&Boolean(trustedAccountOrigin());
 
@@ -42,20 +45,21 @@ async function grantAddress(c:PoolClient,key:string){
 }
 
 /** Called only after normal signup field/invite validation. Never resolves an account. */
-export async function requestVerifiedRegistration(fields:RegistrationFields){
+export async function requestVerifiedRegistration(fields:RegistrationFields,signupTerms?:SignupTermsSnapshot){
  if(!available())throw new RegistrationUnavailableError();
  const passwordHash=await hashPassword(fields.password);
- const payload=envelopeSchema.parse({email:fields.email,name:fields.name,workspaceName:fields.workspaceName,passwordHash});
+ const payload=envelopeSchema.parse({email:fields.email,name:fields.name,workspaceName:fields.workspaceName,passwordHash,...(signupTerms!==undefined?{signupTerms:checkedSignupTermsSnapshot(signupTerms)}:{})});
  const ciphertext=encryptSecret(JSON.stringify(payload)),key=addressKey(payload.email);
- if(Buffer.byteLength(ciphertext)>8192)throw new RegistrationUnavailableError();
+ const ciphertextBytes=Buffer.byteLength(ciphertext);
+ if(ciphertextBytes>(signupTerms===undefined?8192:32768))throw new RegistrationUnavailableError();
  await transaction(adminPool,async c=>{
   if(!available())throw new RegistrationUnavailableError();
   // Capacity and suppression depend only on global queue/address state. In
   // particular, neither known addresses nor a full queue trigger a user read.
   await c.query("SELECT pg_advisory_xact_lock(hashtextextended('folio:account-registration:request-cap',0))");
   await c.query(`DELETE FROM account_registration_requests WHERE id IN (SELECT id FROM account_registration_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
-  const {rows:[count]}=await c.query('SELECT count(*)::int n FROM account_registration_requests');
-  if(count.n>=5000)throw new RegistrationUnavailableError();
+  const {rows:[count]}=await c.query('SELECT count(*)::int n,coalesce(sum(octet_length(payload_ciphertext)),0)::bigint bytes FROM account_registration_requests');
+  if(count.n>=5000||Number(count.bytes)+ciphertextBytes>5000*8192)throw new RegistrationUnavailableError();
   if(!await grantAddress(c,key))return;
   await c.query(`INSERT INTO account_registration_requests(address_key,payload_ciphertext,expires_at)
    VALUES($1,$2,clock_timestamp()+interval '24 hours')`,[key,ciphertext]);
@@ -77,6 +81,7 @@ export async function processOneAccountRegistration(){
   const parsed=envelopeSchema.safeParse(decoded);
   if(!parsed.success||addressKey(parsed.data.email)!==request.address_key){await discard();return true;}
   const payload=parsed.data;
+  try{if(payload.signupTerms!==undefined)checkedSignupTermsSnapshot(payload.signupTerms);}catch{await discard();return true;}
   await c.query('SAVEPOINT registration_provisioning');
   // The unique email constraint arbitrates simultaneous workers and immediate
   // signup. A conflict must never update the existing account or its profile.
@@ -90,6 +95,7 @@ export async function processOneAccountRegistration(){
   const slug=`${payload.workspaceName.toLowerCase().replace(/[^a-z0-9]+/g,'-')}-${randomUUID()}`;
   const {rows:[workspace]}=await c.query('INSERT INTO workspaces(name,slug,plan) VALUES($1,$2,$3) RETURNING id',[payload.workspaceName,slug,JSON.stringify(defaultPlan)]);
   await c.query("INSERT INTO memberships(workspace_id,user_id,role) VALUES($1,$2,'owner')",[workspace.id,user.id]);
+  await saveSignupTermsAcceptance(c,user.id,payload.signupTerms);
   await enqueueEmailVerification(c,user,request.expires_at);
   // Enqueue deliberately does nothing for an expired deadline. Provisioning
   // must not survive that outcome or a deadline crossed during its DB writes.

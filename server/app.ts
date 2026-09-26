@@ -21,8 +21,9 @@ import {accountEmailStatus} from './integrations/account-email.js';
 import {emailVerificationStatus} from './core/email-verification.js';
 import {installationConfiguration} from './core/installation.js';
 import {registerOperationalHealth} from './core/operations.js';
+import type {SignupPolicyInput} from './core/signup-terms.js';
 
-export async function buildApp(options: {rateLimitStore?: FastifyRateLimitStoreCtor} = {}){
+export async function buildApp(options: {rateLimitStore?: FastifyRateLimitStoreCtor;signupPolicy?:()=>SignupPolicyInput|null} = {}){
   await assertStorageRestoreReady(config.storageDir,process.env.STORAGE_DRIVER||'filesystem');
   validatePreviewConfiguration();
   // Vercel overwrites x-forwarded-for at its edge; local installs use socket IPs.
@@ -46,7 +47,7 @@ export async function buildApp(options: {rateLimitStore?: FastifyRateLimitStoreC
   app.get('/api/health',async()=>({status:'ok',name:'Folio',environment:previewEnabled()?'preview':config.production?'production':'local',revision:process.env.VERCEL_GIT_COMMIT_SHA||null,limits:{maxBytes:config.maxBytes,maxPages:config.maxPages}}));
   registerOperationalHealth(app);
   app.get('/api/config',async()=>({preview:previewEnabled(),inviteRequired:previewEnabled(),hosted:!!process.env.VERCEL,passwordRecovery:accountEmailStatus(),emailVerification:emailVerificationStatus(),publicService:installationConfiguration().publicDetails}));
-  await registerCore(app);await registerExports(app);await registerIntegrations(app);await registerProviders(app);
+  await registerCore(app,{signupPolicy:options.signupPolicy});await registerExports(app);await registerIntegrations(app);await registerProviders(app);
   const dist=path.resolve('dist'),hasStaticFiles=existsSync(dist);
   if(hasStaticFiles){
     await app.register(staticFiles,{root:dist,prefix:'/',index:false});

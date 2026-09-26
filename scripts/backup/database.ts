@@ -121,6 +121,7 @@ async function security(client:pg.Client,config:BackupConfig,_owner:string){
   {table_name:'checkout_contract_receipts',name:'checkout_contract_receipt_immutable',enabled:'O'},
   {table_name:'checkout_contracts',name:'checkout_contract_immutable',enabled:'O'},
   {table_name:'documents',name:'document_status_journal',enabled:'O'},
+  {table_name:'signup_terms_acceptances',name:'signup_terms_acceptance_immutable',enabled:'O'},
  ];
  assert(same(triggers.map(({table_name,name,enabled})=>({table_name,name,enabled})),supportedTriggers),'Application triggers differ from the supported migration template.');
  const internalTriggers=(await client.query("SELECT c.relname table_name,t.tgenabled enabled,t.tgtype type,t.tgdeferrable deferrable,t.tginitdeferred deferred,x.conname constraint_name,p.proname function_name FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_proc p ON p.oid=t.tgfoid LEFT JOIN pg_constraint x ON x.oid=t.tgconstraint WHERE c.relnamespace=$1 AND t.tgisinternal ORDER BY c.relname,x.conname,p.proname,t.tgtype",[oid])).rows;

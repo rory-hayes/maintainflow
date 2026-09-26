@@ -15,6 +15,7 @@ import {openSourceDatabase} from './backup/database.js';
 import {openArchive} from './backup/archive.js';
 import {sha256} from './backup/files.js';
 import type {BackupConfig} from './backup/types.js';
+import {canonicalSignupPolicy} from '../shared/signup-terms.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),exec=promisify(execFile),args=process.argv.slice(2);
 assert.deepEqual(args,['--execute'],'Pass --execute to create and clean an owned socket-only PostgreSQL17 fixture. No hosted credentials are read.');
@@ -34,6 +35,7 @@ const objects=new Map<string,Buffer>(),records=new Map<string,{id:string;updated
 const termsSnapshot=(database:string)=>sql(database,async c=>({
  contracts:(await c.query('SELECT to_jsonb(c) body FROM folio.checkout_contracts c ORDER BY id')).rows,
  receipts:(await c.query('SELECT to_jsonb(r) body FROM folio.checkout_contract_receipts r ORDER BY contract_id')).rows,
+ signup:(await c.query('SELECT to_jsonb(s) body FROM folio.signup_terms_acceptances s ORDER BY user_id')).rows,
 }));
 function transport(){globalThis.fetch=async(input,init={})=>{
  const url=new URL(String(input));assert.equal(url.origin,source.sourceStorage!.url);assert.equal(init.redirect,'error');assert.equal(new Headers(init.headers).get('authorization'),'Bearer owned-fixture-key');requests++;
@@ -59,11 +61,16 @@ try{
    const canonical=JSON.stringify(params,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
    await c.query("INSERT INTO folio.checkout_contracts(id,workspace_id,billing_mode,customer_id,plan_id,policy,offer,create_params,params_sha256,session_id) VALUES($1,$2,'test',$3,'standard',$4,$5,$6,$7,$8)",[contract,workspace,params.customer,JSON.stringify(policy),JSON.stringify(offer),JSON.stringify(params),sha256(canonical),session]);
    await c.query("INSERT INTO folio.checkout_contract_receipts(contract_id,workspace_id,session_id,event_id,state,provider_event_created_at) VALUES($1,$2,$3,$4,$5,'2026-09-20T00:00:00Z')",[contract,workspace,session,'evt_owned_restore_'+i,i===0?'accepted':'not_recorded']);
+   const user=randomUUID();
+   await c.query('INSERT INTO folio.users(id,email,name,password_hash) VALUES($1,$2,$3,$4)',[user,`synthetic-restore-${i}@example.test`,'Synthetic terms restore user','synthetic-unusable-password-hash']);
+   const signupInput={version:'synthetic-signup-restore-v1',language:'en-IE',title:'Synthetic signup terms',text:'SYNTHETIC RESTORE FIXTURE ONLY\nExact signup policy bytes '+i,url:'https://example.test/synthetic-signup-restore-v1',agreementText:'I agree to these synthetic test terms.'};
+   await c.query("INSERT INTO folio.signup_terms_acceptances(user_id,policy,accepted_at) VALUES($1,$2,'2026-09-20T00:00:00Z')",[user,JSON.stringify({...signupInput,sha256:sha256(canonicalSignupPolicy(signupInput))})]);
    if(i===0){const optional=workspace+'/'+randomUUID(),absent=workspace+'/'+randomUUID(),omitted=workspace+'/'+randomUUID();objects.set(optional,Buffer.from('Retained deletion retry'));objects.set(omitted,Buffer.from('Unreferenced physical object'));await c.query('INSERT INTO folio.file_deletions(workspace_id,storage_key) VALUES($1,$2),($1,$3)',[workspace,optional,absent]);}
   }
   await c.query("SELECT setval('folio.document_events_sequence_seq',99,false)");
  });
  const originalTerms=await termsSnapshot('source');assert.equal(originalTerms.contracts.length,2);assert.equal(originalTerms.receipts.length,2);
+ assert.equal(originalTerms.signup.length,2);
  for(const key of objects.keys())records.set(key,{id:randomUUID(),updated_at:'2026-09-20T00:00:00.000Z'});
  await fs.mkdir(source.storageDir,{mode:0o700});await fs.writeFile(source.integrationKeyFile,randomBytes(32),{mode:0o600});await fs.writeFile(source.sourceStorage!.serviceRoleKeyFile,'owned-fixture-key',{mode:0o600});await json('source.json',source);await json('target.json',target);await json('bad-target.json',badTarget);
  observer=connection('source','platform_reader');await observer.connect();transport();checkpoint('OwnedSocketOnlyPostgres17CurrentMigrationsTwoTenantsAndPlatformObserver');
@@ -77,6 +84,10 @@ try{
  await assert.rejects(openSourceDatabase(source,migrations),/triggers differ/);
  await sql('source',c=>c.query('DROP TRIGGER unreviewed_terms_trigger ON folio.checkout_contracts'));
  checkpoint('DisabledOrUnreviewedCheckoutTermsTriggersRefused');
+ await sql('source',c=>c.query('ALTER TABLE folio.signup_terms_acceptances DISABLE TRIGGER signup_terms_acceptance_immutable'));
+ await assert.rejects(openSourceDatabase(source,migrations),/triggers differ/);
+ await sql('source',c=>c.query('ALTER TABLE folio.signup_terms_acceptances ENABLE TRIGGER signup_terms_acceptance_immutable'));
+ checkpoint('DisabledSignupTermsImmutabilityRefused');
  await sql('source',c=>c.query('GRANT EXECUTE ON FUNCTION folio.worker_has_runnable_work() TO backup_admin'));
  await assert.rejects(openSourceDatabase(source,migrations),/only by its owner/);await sql('source',c=>c.query('REVOKE EXECUTE ON FUNCTION folio.worker_has_runnable_work() FROM backup_admin'));checkpoint('WidenedWatchdogPermissionRefused');
  await sql('source',c=>c.query("INSERT INTO folio.intake_files(id,workspace_id,storage_key) SELECT gen_random_uuid(),id,id::text||'/'||gen_random_uuid()::text FROM folio.workspaces LIMIT 1"));
@@ -92,12 +103,27 @@ try{
  await sql('target',async c=>{
   await assert.rejects(c.query("UPDATE folio.checkout_contracts SET policy=policy||'{\"text\":\"changed\"}'"),/immutable/);
   await assert.rejects(c.query("UPDATE folio.checkout_contract_receipts SET state='accepted'"),/immutable/);
+  await assert.rejects(c.query("UPDATE folio.signup_terms_acceptances SET accepted_at=clock_timestamp()"),/immutable/);
  });
  checkpoint('CheckoutTermsBytesBindingsReceiptsAndImmutabilitySurviveEncryptedRestore');
+ checkpoint('SignupPolicyBytesDigestsAcceptanceTimesAndImmutabilitySurviveEncryptedRestore');
  const activated=await runBackup(['activate','--config',path.join(run,'target.json'),'--input',artifact,'--identity-file',identity,'--allow-outbound']);assert.equal(activated.status,'restore_activated');checkpoint('ActivationRechecksFullDatabaseAndObjectsWithoutStartingServices');
  await sql('target',async c=>{assert.equal((await c.query('SELECT count(*)::int n FROM folio.documents')).rows[0].n,2);assert.deepEqual((await c.query('SELECT last_value::text,is_called FROM folio.document_events_sequence_seq')).rows[0],{last_value:'99',is_called:false});const r=(await c.query("SELECT has_function_privilege('backup_admin','folio.worker_has_runnable_work()','EXECUTE') admin,has_function_privilege('backup_app','folio.worker_has_runnable_work()','EXECUTE') app")).rows[0];assert.deepEqual(r,{admin:false,app:false});assert.equal((await c.query("SELECT count(*)::int n FROM pg_namespace WHERE nspname IN ('cron','vault','platform')")).rows[0].n,0);});
  const tenant=connection('target','backup_app');await tenant.connect();try{assert.equal((await tenant.query('SELECT count(*)::int n FROM folio.documents')).rows[0].n,0);for(const table of ['checkout_contracts','checkout_contract_receipts'])assert.equal((await tenant.query(`SELECT count(*)::int n FROM folio.${table}`)).rows[0].n,0);const workspace=[...objects.keys()][0].split('/')[0];await tenant.query("SELECT set_config('app.workspace_id',$1,false)",[workspace]);assert.equal((await tenant.query('SELECT count(*)::int n FROM folio.documents')).rows[0].n,1);for(const table of ['checkout_contracts','checkout_contract_receipts']){const rows=(await tenant.query(`SELECT workspace_id FROM folio.${table}`)).rows;assert.deepEqual(rows,[{workspace_id:workspace}]);assert.equal((await tenant.query(`DELETE FROM folio.${table}`)).rowCount,0);}await assert.rejects(tenant.query('SELECT * FROM folio.schema_migrations'),(error:any)=>error.code==='42501');}finally{await tenant.end();}checkpoint('RestoredTenantIsolationJournalDenialSequenceAndNoSchedulerActivation');
  const baseSnapshot=await openSourceDatabase({...source,sourceStorage:undefined},migrations);await baseSnapshot.close();
+ const accountReader=connection('target','backup_app');await accountReader.connect();
+ try{
+  assert.equal((await accountReader.query('SELECT count(*)::int n FROM folio.signup_terms_acceptances')).rows[0].n,0);
+  // A workspace scope cannot grant access to a personal signup record.
+  await accountReader.query("SELECT set_config('app.workspace_id',$1,false)",[[...objects.keys()][0].split('/')[0]]);
+  assert.equal((await accountReader.query('SELECT count(*)::int n FROM folio.signup_terms_acceptances')).rows[0].n,0);
+  const own=originalTerms.signup[0].body;
+  await accountReader.query("SELECT set_config('app.user_id',$1,false)",[own.user_id]);
+  assert.deepEqual((await accountReader.query('SELECT to_jsonb(s) body FROM folio.signup_terms_acceptances s')).rows,[{body:own}]);
+  await assert.rejects(accountReader.query('DELETE FROM folio.signup_terms_acceptances'),(error:any)=>error.code==='42501');
+  await assert.rejects(accountReader.query("UPDATE folio.signup_terms_acceptances SET accepted_at=clock_timestamp()"),(error:any)=>error.code==='42501');
+ }finally{await accountReader.end();}
+ checkpoint('RestoredSignupEvidenceIsSelfOnlyReadOnlyAndIndependentOfWorkspace');
  await sql('source',c=>c.query('GRANT SELECT ON folio.documents TO PUBLIC'));
  const altered=path.join(run,'altered.age');await runBackup(['create','--config',path.join(run,'source.json'),'--recipient-file',recipient,'--output',altered,'--quiesced']);
  await assert.rejects(runBackup(['restore','--config',path.join(run,'bad-target.json'),'--input',altered,'--identity-file',identity]),/permissions, constraints or definitions differ/);

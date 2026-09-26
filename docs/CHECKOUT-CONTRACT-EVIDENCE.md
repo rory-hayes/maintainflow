@@ -1,6 +1,6 @@
 # Checkout terms records
 
-This increment provides dormant evidence capture, not published terms, legal approval, payment verification, or delivery of contractual information. No production policy catalogue, environment switch, signup acceptance change, email or new billing system is installed. Mock billing is unchanged. Real policy content and customer eligibility remain unresolved; synthetic policies appear only in controlled tests.
+This increment provides dormant evidence capture, not published terms, legal approval, payment verification, or delivery of contractual information. The original PR57 Checkout increment added no production policy catalogue, environment switch, signup acceptance change, email or new billing system. Mock billing is unchanged. Real policy content and customer eligibility remain unresolved; synthetic policies appear only in controlled tests.
 
 ## Stored evidence
 
@@ -30,7 +30,7 @@ Capture may be inactive while older records remain readable, including during in
 
 ## Remaining activation decisions and proof
 
-The owner still needs to settle business-only versus personal-customer eligibility, approve actual contract terms and publication, choose the applicable start/cancellation arrangements, and determine evidence retention. Postal address and phone remain deferred. Privacy-notice presentation is distinct from contract acceptance and must not become blanket processing consent. Free signup acceptance is a separate gap, not closed here.
+The owner still needs to settle business-only versus personal-customer eligibility, approve actual contract terms and publication, choose the applicable start/cancellation arrangements, and determine evidence retention. Postal address and phone remain deferred. Privacy-notice presentation is distinct from contract acceptance and must not become blanket processing consent. A companion [signup terms mechanism](SIGNUP-TERMS-EVIDENCE.md) is now implemented locally and dormant; it does not establish an actual policy catalogue, real customer acceptance, verified identity or delivered-contract proof.
 
 Prefer Stripe's existing invoice/receipt capabilities where their verified content and delivery satisfy the chosen requirements. This increment sends no contract confirmation. Before paid activation, verify actual disclosures, the payment-obligation display, any required start-of-supply request, durable confirmation content/timing, receipt delivery, and portal changes. A local download renderer does not establish any of those outcomes. See [Stripe Checkout](https://docs.stripe.com/api/checkout/sessions/create), [Stripe receipts](https://docs.stripe.com/receipts), and the existing [policy draft](LAUNCH-POLICY-DRAFTS.md).
 
