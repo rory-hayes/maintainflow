@@ -1,0 +1,218 @@
+{
+  "version": 1,
+  "kind": "hosted-manual-invitation-acceptance",
+  "status": "passed",
+  "origin": "https://maintainflow.io",
+  "revision": "c418f497d8eb24e561a2fe5761951590bfd36e0e",
+  "startedAt": "2026-09-26T11:37:59.166Z",
+  "finishedAt": "2026-09-26T11:38:04.548Z",
+  "sourceSha256": "55808fa629d94a18be8265e1b6c068a16129402a287533c901b27aff5c919f9d",
+  "fixture": "Two pre-existing isolated owned QA accounts; one new manual viewer invitation and membership",
+  "checks": {
+    "noActiveTargetWorkspaceApiKeys": true,
+    "preflight": true,
+    "manualReviewAcceptAndViewerRead": true,
+    "viewerMutationRejectedWithoutChanges": true,
+    "reacceptRejectedWithoutDuplicateMembership": true,
+    "membershipRemovedAndAccessDenied": true,
+    "originalWorkspaceAndUsagePreserved": true
+  },
+  "temporarySessions": {
+    "outsiderSession": "removed_and_401_verified",
+    "ownerSession": "removed_and_401_verified"
+  },
+  "cleanup": "New membership removed, original workspaces and usage preserved. Accepted invitation and audit retained by application; audit contents were not independently read back.",
+  "requests": [
+    {
+      "label": "canonical_health",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "canonical_readiness",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "private_preview",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "owner_login",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "label": "owner_identity",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "outsider_login",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "label": "outsider_identity",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "mock_billing",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "outsider_target_before",
+      "method": "GET",
+      "status": 403
+    },
+    {
+      "label": "owner_settings_baseline",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "members_baseline",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "active_key_metadata_gate",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "usage_baseline",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "create_manual_invitation",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "label": "manual_invitation_readback",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "review_manual_invitation",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "label": "accept_manual_invitation",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "label": "accepted_membership_readback",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "viewer_target_read",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "outsider_original_session_after_accept",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "viewer_mutation_denied",
+      "method": "PATCH",
+      "status": 403
+    },
+    {
+      "label": "members_after_denied_write",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "used_invitation_rejected",
+      "method": "POST",
+      "status": 400
+    },
+    {
+      "label": "members_after_reaccept",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "remove_new_viewer_membership",
+      "method": "DELETE",
+      "status": 200
+    },
+    {
+      "label": "members_after_removal",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "outsider_target_after_removal",
+      "method": "GET",
+      "status": 403
+    },
+    {
+      "label": "outsider_original_workspace_preserved",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "unchanged_usage",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "unchanged_settings",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "label": "outsider_logout",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "label": "outsider_session_revoked",
+      "method": "GET",
+      "status": 401
+    },
+    {
+      "label": "owner_logout",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "label": "owner_session_revoked",
+      "method": "GET",
+      "status": 401
+    }
+  ],
+  "sideEffects": {
+    "emails": 0,
+    "passwordChanges": 0,
+    "newApiKeys": 0,
+    "pageCharges": 0,
+    "planChanges": 0,
+    "directDatabaseCalls": 0,
+    "extractionProviderCalls": 0
+  },
+  "limitations": [
+    "API acceptance only; this was not a browser or mobile test.",
+    "Password reset, emailed invitation inbox flow, editor/admin roles and historical session cleanup were not tested.",
+    "Bank workflow remains local/CI verified, pending separate database approval and deployment."
+  ],
+  "earlierAttempt": {
+    "status": "preflight_assertion_failed",
+    "cause": "Test expected display-only monthlyPrice in stored plan; API intentionally omits that field. Corrected test checks Explore capacities and existing mocked provider state.",
+    "invitationCreated": false,
+    "bothSessionsRevoked": true,
+    "receiptRetained": true
+  }
+}

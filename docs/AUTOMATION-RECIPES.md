@@ -1,6 +1,6 @@
 # Automation bridges: Zapier, Make, n8n, and Power Automate
 
-These are concrete **API/webhook recipes**, not published native Folio marketplace connectors. Public platform documentation was checked on 6 September 2026. No workflow, external account, subscription, or destination was activated. The local examples use synthetic data and are validated against Folio's real approval-event contract; account permissions, trigger availability, delivery, and downstream actions remain external checks.
+These are concrete **API/webhook recipes**, not published native MaintainFlow marketplace connectors. Public platform documentation for the outbound examples was checked on 6 September 2026. No external account, subscription, or destination was activated. The local examples use synthetic data and are validated against MaintainFlow's real approval-event contract; account permissions, trigger availability, delivery, and downstream actions remain external checks. The separate [Google Drive → n8n source recipe](SOURCE-INTAKE-RECIPES.md) was added on 26 September and includes an importable workflow and isolated native-runtime checks.
 
 Files:
 
@@ -108,10 +108,10 @@ Create a flow using **When an HTTP request is received** and paste the supplied 
 
 The same platforms can feed documents through an HTTP action using a scoped Folio API key. Retrieve the source file through that platform's authorized file connector, then POST its actual bytes as multipart `file` to `/api/parsers/:id/documents` with `Authorization: Bearer <stored key>` and a stable `Idempotency-Key` derived from the source's file/version ID. Do not send only a storage URL and call it a completed upload. HTTP 202 means accepted; read `/api/jobs/:id` and `/api/documents/:id` until processed/review/failed. Approval is a separate review step.
 
-Use `/help/api` for the exact endpoints/scopes/error codes. This common intake pattern does not establish a native Drive/Dropbox/OneDrive/SharePoint connector or a tested account-specific source recipe.
+Use `/help/api` for the exact endpoints/scopes/error codes. The [Google Drive → n8n recipe](SOURCE-INTAKE-RECIPES.md) now supplies an inactive, credential-free import artifact, stable file-version identity, verified binary download and bounded current-result polling. It accepts ordinary supported files up to 4 MiB; use the application upload screen for larger files. Its controlled tests do not establish a live Google account connection. Dropbox, OneDrive and SharePoint recipes remain open; no native source connector is claimed.
 
 ## Local and external evidence
 
-Run `node --import tsx --test --test-concurrency=1 tests/automations.test.ts` for the two local checks. The integrated suite also compares real `enqueueApprovals()` output with the example schema. These checks verify fixture shape, field paths, scalar types, HMAC compatibility and rejection behavior. They do not compile/import a Zap, Make blueprint, n8n workflow or Power Automate package; `recipes.json` is explicitly a mapping manifest, not a platform export.
+Run `node --import tsx --test --test-concurrency=1 tests/automations.test.ts` for the two outbound checks. The integrated suite also compares real `enqueueApprovals()` output with the example schema. Those checks verify fixture shape, field paths, scalar types, HMAC compatibility and rejection behavior. They do not compile/import a Zap, Make blueprint or Power Automate package; the outbound `recipes.json` is a mapping manifest. The separate Google Drive intake guide describes the actual n8n import artifact, real-engine test and its controlled-provider limits.
 
 For each actual account, record trigger settings, verification/dedupe proof, a real approved-document delivery, destination identifiers and literal values, retry behavior, and execution history before marking its bridge externally verified. No platform-specific success has been claimed from the local fixtures.

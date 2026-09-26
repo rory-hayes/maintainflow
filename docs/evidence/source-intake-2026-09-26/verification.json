@@ -1,0 +1,488 @@
+{
+  "version": 1,
+  "kind": "source-intake-recipe-acceptance",
+  "recordedAt": "2026-09-26T12:01:29.530567+00:00",
+  "status": "passed",
+  "synthetic": true,
+  "existingApplicationRuntimeChanged": false,
+  "hostedOrProviderAccountChanged": false,
+  "bankReleaseBase": "af283e171140f04de24489f8dd7f109684f9bbc8",
+  "sources": {
+    "examples/automations/google-drive-n8n.workflow.json": "ec4987a65c2e8a1020438780d909ba7b593a31696d902f3f289194ab87194b4b",
+    "examples/automations/source-intake/google-drive-n8n.mjs": "90772cc30d10dd9da27875a581272574fed3ff1492946732d054b0f2d7838134",
+    "fixtures/automations/google-drive-intake-source.json": "9855e51d126ce1fc5328af6d89187d6da1e8ddde7836908621d2e568f17d10c5",
+    "fixtures/automations/google-drive-intake-results.json": "97c352830ab62d0064832d64dcfb32ef95c2d337a766aeda4fd9da271bc16fe6",
+    "scripts/source-intake-n8n-fixture.mjs": "e98595a199bf3de74e8900ef5f1fc4eaddf3fcdce4998bf4efd12a8529667034",
+    "scripts/verify-source-intake-n8n.mjs": "b5990829ab8d7d8bbdeb7eed4af54866d35ed9fbe1175026b6b73ab6d1846c03",
+    "tests/source-intake-api.test.ts": "ff58a8ab86d987647485d6907bde66d8918177fd02f88edcdb2bb6920de6cd29",
+    "tests/source-intake-recipe.test.ts": "74802bc073a80cdc911b18e0395ef3f3da05b3e7f407bd0ee7e50b857cf3bde0"
+  },
+  "nativeN8n": {
+    "version": "2.40.7",
+    "image": "docker.n8n.io/n8nio/n8n@sha256:ffeb52485f78b1b06c9a832205853cf75da72a07a514c9a27724df85979d6c34",
+    "imageId": "sha256:ffeb52485f78b1b06c9a832205853cf75da72a07a514c9a27724df85979d6c34",
+    "startedAt": "2026-09-26T11:58:15.897Z",
+    "finishedAt": "2026-09-26T11:59:55.521Z",
+    "workflowSha256": "ec4987a65c2e8a1020438780d909ba7b593a31696d902f3f289194ab87194b4b",
+    "generatorSha256": "90772cc30d10dd9da27875a581272574fed3ff1492946732d054b0f2d7838134",
+    "fixtureSha256": "e98595a199bf3de74e8900ef5f1fc4eaddf3fcdce4998bf4efd12a8529667034",
+    "cases": [
+      {
+        "name": "happy",
+        "status": "passed",
+        "outcome": "completed",
+        "nativeExitCode": 0,
+        "executedNodeCount": 21,
+        "reviewReceipts": 1,
+        "uploadedBytes": [
+          659
+        ],
+        "counters": {
+          "documents": 1,
+          "jobs": 1,
+          "runs": 1,
+          "pageCharges": 1
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0
+      },
+      {
+        "name": "duplicate",
+        "status": "passed",
+        "outcome": "completed",
+        "nativeExitCode": 0,
+        "executedNodeCount": 20,
+        "reviewReceipts": 1,
+        "uploadedBytes": [
+          659
+        ],
+        "counters": {
+          "documents": 1,
+          "jobs": 1,
+          "runs": 1,
+          "pageCharges": 1
+        },
+        "baseline": {
+          "documents": 1,
+          "jobs": 1,
+          "runs": 1,
+          "pageCharges": 1
+        },
+        "unexpectedRequests": 0
+      },
+      {
+        "name": "multipleFiles",
+        "status": "passed",
+        "outcome": "completed",
+        "nativeExitCode": 0,
+        "executedNodeCount": 21,
+        "reviewReceipts": 2,
+        "uploadedBytes": [
+          659,
+          659
+        ],
+        "counters": {
+          "documents": 2,
+          "jobs": 2,
+          "runs": 2,
+          "pageCharges": 2
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0
+      },
+      {
+        "name": "reordered",
+        "status": "passed",
+        "outcome": "completed",
+        "nativeExitCode": 0,
+        "executedNodeCount": 21,
+        "reviewReceipts": 2,
+        "uploadedBytes": [
+          659,
+          659
+        ],
+        "counters": {
+          "documents": 2,
+          "jobs": 2,
+          "runs": 2,
+          "pageCharges": 2
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0
+      },
+      {
+        "name": "drift",
+        "status": "passed",
+        "outcome": "failed",
+        "nativeExitCode": 1,
+        "executedNodeCount": 12,
+        "reviewReceipts": 0,
+        "uploadedBytes": [],
+        "counters": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0,
+        "expectedFailureMessage": "source_version_drift: The Drive file changed during download. Nothing was uploaded. Retry this source from the start after it stops changing. [line 14]"
+      },
+      {
+        "name": "checksumMismatch",
+        "status": "passed",
+        "outcome": "failed",
+        "nativeExitCode": 1,
+        "executedNodeCount": 10,
+        "reviewReceipts": 0,
+        "uploadedBytes": [],
+        "counters": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0,
+        "expectedFailureMessage": "download_checksum_mismatch: Downloaded bytes do not match the recorded Drive checksum. No upload was attempted. [line 14]"
+      },
+      {
+        "name": "checksumMissing",
+        "status": "passed",
+        "outcome": "failed",
+        "nativeExitCode": 1,
+        "executedNodeCount": 6,
+        "reviewReceipts": 0,
+        "uploadedBytes": [],
+        "counters": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0,
+        "expectedFailureMessage": "source_checksum_missing: A binary Drive file checksum is required. Google Docs, Sheets, Slides, folders and shortcuts are outside this recipe. [line 14]"
+      },
+      {
+        "name": "capabilityDenied",
+        "status": "passed",
+        "outcome": "failed",
+        "nativeExitCode": 1,
+        "executedNodeCount": 6,
+        "reviewReceipts": 0,
+        "uploadedBytes": [],
+        "counters": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0,
+        "expectedFailureMessage": "source_not_downloadable: The file is trashed or cannot be downloaded with this credential. [line 14]"
+      },
+      {
+        "name": "oversize",
+        "status": "passed",
+        "outcome": "failed",
+        "nativeExitCode": 1,
+        "executedNodeCount": 6,
+        "reviewReceipts": 0,
+        "uploadedBytes": [],
+        "counters": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0,
+        "expectedFailureMessage": "source_size_limit: This recipe accepts nonempty files up to 4 MiB. Use the MaintainFlow upload screen for larger files. [line 14]"
+      },
+      {
+        "name": "failed",
+        "status": "passed",
+        "outcome": "failed",
+        "nativeExitCode": 1,
+        "executedNodeCount": 19,
+        "reviewReceipts": 0,
+        "uploadedBytes": [
+          659
+        ],
+        "counters": {
+          "documents": 1,
+          "jobs": 1,
+          "runs": 0,
+          "pageCharges": 1
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0,
+        "expectedFailureMessage": "processing_failed: Processing failed for document 20000000-0000-4000-8000-000000000001. Open it in MaintainFlow for the failure detail and any deliberate retry; this workflow will not reprocess it. [line 14]"
+      },
+      {
+        "name": "duplicateFailed",
+        "status": "passed",
+        "outcome": "failed",
+        "nativeExitCode": 1,
+        "executedNodeCount": 17,
+        "reviewReceipts": 0,
+        "uploadedBytes": [
+          659
+        ],
+        "counters": {
+          "documents": 1,
+          "jobs": 1,
+          "runs": 0,
+          "pageCharges": 1
+        },
+        "baseline": {
+          "documents": 1,
+          "jobs": 1,
+          "runs": 0,
+          "pageCharges": 1
+        },
+        "unexpectedRequests": 0,
+        "expectedFailureMessage": "processing_failed: Processing failed for document 20000000-0000-4000-8000-000000000001. Open it in MaintainFlow for the failure detail and any deliberate retry; this workflow will not reprocess it. [line 14]"
+      },
+      {
+        "name": "currentReprocessOldRun",
+        "status": "passed",
+        "outcome": "completed",
+        "nativeExitCode": 0,
+        "executedNodeCount": 21,
+        "reviewReceipts": 1,
+        "uploadedBytes": [
+          659
+        ],
+        "counters": {
+          "documents": 1,
+          "jobs": 2,
+          "runs": 2,
+          "pageCharges": 2
+        },
+        "baseline": {
+          "documents": 1,
+          "jobs": 2,
+          "runs": 1,
+          "pageCharges": 2
+        },
+        "unexpectedRequests": 0
+      },
+      {
+        "name": "failedOldRun",
+        "status": "passed",
+        "outcome": "failed",
+        "nativeExitCode": 1,
+        "executedNodeCount": 19,
+        "reviewReceipts": 0,
+        "uploadedBytes": [
+          659
+        ],
+        "counters": {
+          "documents": 1,
+          "jobs": 2,
+          "runs": 1,
+          "pageCharges": 2
+        },
+        "baseline": {
+          "documents": 1,
+          "jobs": 2,
+          "runs": 1,
+          "pageCharges": 2
+        },
+        "unexpectedRequests": 0,
+        "expectedFailureMessage": "processing_failed: Processing failed for document 20000000-0000-4000-8000-000000000001. Open it in MaintainFlow for the failure detail and any deliberate retry; this workflow will not reprocess it. [line 14]"
+      },
+      {
+        "name": "timeout",
+        "status": "passed",
+        "outcome": "failed",
+        "nativeExitCode": 1,
+        "executedNodeCount": 19,
+        "reviewReceipts": 0,
+        "uploadedBytes": [
+          659
+        ],
+        "counters": {
+          "documents": 1,
+          "jobs": 1,
+          "runs": 0,
+          "pageCharges": 1
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0,
+        "expectedFailureMessage": "poll_timeout: Stopped after bounded status checks for document 20000000-0000-4000-8000-000000000001. Processing may continue in MaintainFlow; inspect its status before retrying. This workflow does not cancel or reprocess it. [line 14]"
+      },
+      {
+        "name": "quota",
+        "status": "passed",
+        "outcome": "failed",
+        "nativeExitCode": 1,
+        "executedNodeCount": 14,
+        "reviewReceipts": 0,
+        "uploadedBytes": [
+          659
+        ],
+        "counters": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0,
+        "expectedFailureMessage": "http_failure: Upload to MaintainFlow returned HTTP 429. Check the workspace quota or rate limit before retrying the same file bytes, source version and parser key. [line 14]"
+      },
+      {
+        "name": "malformedResponse",
+        "status": "passed",
+        "outcome": "failed",
+        "nativeExitCode": 1,
+        "executedNodeCount": 14,
+        "reviewReceipts": 0,
+        "uploadedBytes": [
+          659
+        ],
+        "counters": {
+          "documents": 1,
+          "jobs": 1,
+          "runs": 0,
+          "pageCharges": 1
+        },
+        "baseline": {
+          "documents": 0,
+          "jobs": 0,
+          "runs": 0,
+          "pageCharges": 0
+        },
+        "unexpectedRequests": 0,
+        "expectedFailureMessage": "upload_receipt_invalid: The upload response did not identify the expected parser and document. Inspect MaintainFlow before retrying this same source key. [line 14]"
+      }
+    ],
+    "cleanup": {
+      "engine": "removed",
+      "fixture": "removed",
+      "network": "removed",
+      "syntheticKeyAndCredentials": "removed"
+    },
+    "realProviderCalls": 0,
+    "hostedCalls": 0,
+    "isolation": "Disposable Docker internal-only network; synthetic TLS endpoints and credentials; no host ports or existing containers",
+    "differencesFromArtifact": [
+      "External created/updated Drive polling triggers replaced by manual synthetic item seed",
+      "Configuration placeholders bound to synthetic parser/folder and credentials",
+      "Five-second waits shortened to 0.01 seconds; original 60-read limit and guard logic retained"
+    ]
+  },
+  "actualMaintainFlowApi": {
+    "status": "passed",
+    "testsPassed": 12,
+    "newRecipeCases": 5,
+    "existingRegressionCases": 7,
+    "normalDatabaseTouched": false,
+    "hostedCalls": 0,
+    "isolatedClusterStopped": true,
+    "ownedCheckoutAndDatabaseRemoved": true,
+    "testedFiles": [
+      "tests/source-intake-api.test.ts",
+      "tests/api-workflow.test.ts",
+      "tests/automations.test.ts"
+    ],
+    "scope": [
+      "concurrent duplicate with decoder backpressure and same-key retry",
+      "exact original bytes",
+      "source-version and content dedupe",
+      "quota and scoped key permissions",
+      "workspace isolation even with forged workspace header",
+      "active/failed reprocessing preserves old history without treating it as current success",
+      "deleted source-version receipt remains 410"
+    ]
+  },
+  "pureRecipe": {
+    "testsPassed": 11,
+    "typecheck": "passed",
+    "scope": [
+      "generated graph identity and inactive credential-free import",
+      "actual binary hashes and large string version",
+      "source/configuration/filetype guards",
+      "download/source drift",
+      "typed remote failure handling",
+      "duplicate null-job recovery",
+      "stale results and unresolved states",
+      "bounded polling"
+    ]
+  },
+  "limitations": [
+    "Google OAuth/real scheduled Drive triggers and live customer-account acceptance not exercised",
+    "Native engine uses synthetic Google Drive and MaintainFlow endpoints; actual app API tests are a separate isolated suite",
+    "4 MiB multipart recipe maximum; no Google-native conversion, subfolders or backfill",
+    "No Dropbox, OneDrive or SharePoint source recipe in this change",
+    "Bank migration approval and deployment remain pending"
+  ],
+  "earlierRuns": [
+    {
+      "result": "API test expectation corrected",
+      "detail": "Four concurrent requests can hit the existing decoder-busy429. Test now proves unchanged-key recovery rather than assuming all requests immediately return202."
+    },
+    {
+      "result": "Native16scenarios passed but source-continuity failed",
+      "detail": "A filename-extension guard was hardened during the initial run. This final native run uses unchanged generator/artifact/fixture hashes."
+    }
+  ]
+}
