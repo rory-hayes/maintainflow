@@ -20,3 +20,33 @@
   .workspace-integrations .integration-copy { min-width: calc(100% - 70px); }
   .workspace-integrations .integration-row h3 { font-size: 17px; }
 }
+
+.webhook-event-options { border: 1px solid var(--color-line); border-radius: 9px; padding: 15px; margin: 4px 0 13px; min-inline-size: 0; }
+.webhook-event-options legend { padding: 0 6px; font-size: 13px; font-weight: 600; }
+.webhook-event-choice { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; cursor: pointer; }
+.webhook-event-choice + .webhook-event-choice { border-top: 1px solid var(--color-line); }
+.webhook-event-choice input { flex-shrink: 0; margin: 2px 0 0; }
+.webhook-event-choice span { min-width: 0; }
+.webhook-event-choice strong { display: block; font-size: 13px; line-height: 1.5; font-weight: 600; }
+.webhook-event-choice small { display: block; color: var(--color-muted); font-size: 12px; line-height: 1.6; margin-top: 3px; }
+.webhook-event-note { line-height: 1.7; }
+.webhook-selection-required { color: #a35716; }
+.integration-events-summary { font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; margin-top: 8px !important; }
+.integration-events-summary strong { font-weight: 500; }
+.webhook-delivery-table .delivery-identity { min-width: 225px; max-width: 330px; white-space: normal; overflow-wrap: anywhere; }
+.delivery-identity > strong { display: block; font-size: 13px; line-height: 1.6; }
+.delivery-connection { display: block; color: var(--color-muted); font-size: 12px; margin: 4px 0; }
+.delivery-document { font-size: 12px; line-height: 1.6; }
+@media(max-width:760px) {
+  .webhook-delivery-table { min-width: 0; display: block; }
+  .webhook-delivery-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+  .webhook-delivery-table tbody { display: block; }
+  .webhook-delivery-table tr { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 15px; padding: 18px; border-bottom: 1px solid var(--color-line); }
+  .webhook-delivery-table tr:last-child { border-bottom: 0; }
+  .webhook-delivery-table td { padding: 0; border: 0; min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: 12px; }
+  .webhook-delivery-table td[data-label]::before { content: attr(data-label); display: block; color: var(--color-muted); font-size: 11px; margin-bottom: 7px; }
+  .webhook-delivery-table .delivery-identity { grid-column: 1/-1; min-width: 0; max-width: none; }
+  .webhook-delivery-table .delivery-actions { grid-column: 1/-1; }
+  .webhook-delivery-table .delivery-actions:empty { display: none; }
+  .webhook-event-options { padding: 10px 12px; }
+}

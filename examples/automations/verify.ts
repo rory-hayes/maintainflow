@@ -4,7 +4,9 @@ import {readFileSync} from 'node:fs';
 import {z} from 'zod';
 const schema=JSON.parse(readFileSync(new URL('../../fixtures/automations/document-approved.schema.json',import.meta.url),'utf8'));
 const approvalSchema=z.fromJSONSchema(schema);
-export function verifyApprovalDelivery(input:{body:Buffer;headers:Record<string,string|undefined>},secret:string,nowSeconds=Math.floor(Date.now()/1000)) {
+const failureSchema=z.fromJSONSchema(JSON.parse(readFileSync(new URL('../../fixtures/automations/document-failed.schema.json',import.meta.url),'utf8')));
+type ReceiverInput={body:Buffer;headers:Record<string,string|undefined>};
+function verifySignedBody(input:ReceiverInput,secret:string,nowSeconds:number) {
  if(!secret||input.body.length>1024*1024)throw new Error('Missing receiver secret or payload limit exceeded');
  const headers=Object.fromEntries(Object.entries(input.headers).map(([key,value])=>[key.toLowerCase(),value]));
  const timestamp=headers['x-folio-timestamp']||'',signature=headers['x-folio-signature']||'',deliveryId=headers['x-folio-delivery']||'';
@@ -13,8 +15,18 @@ export function verifyApprovalDelivery(input:{body:Buffer;headers:Record<string,
  if(!/^v1=[a-f0-9]{64}$/i.test(signature))throw new Error('Delivery signature is missing or invalid');
  const expected=createHmac('sha256',secret).update(`${timestamp}.`).update(input.body).digest();
  if(!timingSafeEqual(expected,Buffer.from(signature.slice(3),'hex')))throw new Error('Delivery signature does not match');
- const event=approvalSchema.parse(JSON.parse(input.body.toString('utf8'))) as {id:string;event:'document.approved';document:{id:string;name:string;parserId:string};runId:string;revision:number;correctionId:string|null;approvedAt:string;values:Record<string,unknown>};
+ return {deliveryId,event:JSON.parse(input.body.toString('utf8')) as unknown};
+}
+export function verifyApprovalDelivery(input:ReceiverInput,secret:string,nowSeconds=Math.floor(Date.now()/1000)) {
+ const verified=verifySignedBody(input,secret,nowSeconds);
+ const event=approvalSchema.parse(verified.event) as {id:string;event:'document.approved';document:{id:string;name:string;parserId:string};runId:string;revision:number;correctionId:string|null;approvedAt:string;values:Record<string,unknown>};
  // Caller must atomically persist (connectionId, deliveryId) and an outbox item before
  // acknowledging 2xx. This pure verifier deliberately does not pretend to deduplicate.
- return {deliveryId,event};
+ return {deliveryId:verified.deliveryId,event};
+}
+
+/** For receivers explicitly subscribed to approval and/or terminal failure events. */
+export function verifyWebhookDelivery(input:ReceiverInput,secret:string,nowSeconds=Math.floor(Date.now()/1000)) {
+ const verified=verifySignedBody(input,secret,nowSeconds);
+ return {deliveryId:verified.deliveryId,event:z.union([approvalSchema,failureSchema]).parse(verified.event)};
 }

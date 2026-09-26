@@ -1,0 +1,39 @@
+{
+  "kind": "independent_offline_manifest_and_source_checks",
+  "providerCalls": 0,
+  "applicationCodeImports": 0,
+  "manifestSha256": "f5ae2f0269138f74f199c3b7aeeca09b30c3d40bf4574565de3fafe9b82ebf8e",
+  "accounts": [
+    {
+      "case": "MF-HO-A",
+      "account": "A-EUR",
+      "rows": 10,
+      "computedDebits": "1708.14",
+      "computedCredits": "1475.65",
+      "declaredDebitsMinusComputed": "0.00",
+      "knownAdjacentRunningBalancesChecked": 10,
+      "rawSourceValuesPresent": true
+    },
+    {
+      "case": "MF-HO-B",
+      "account": "B-USD",
+      "rows": 4,
+      "computedDebits": "750.75",
+      "computedCredits": "3450.75",
+      "declaredDebitsMinusComputed": "-0.05",
+      "knownAdjacentRunningBalancesChecked": 1,
+      "rawSourceValuesPresent": true
+    },
+    {
+      "case": "MF-HO-B",
+      "account": "B-EUR",
+      "rows": 4,
+      "computedDebits": "325.35",
+      "computedCredits": "1025.35",
+      "declaredDebitsMinusComputed": "0.00",
+      "knownAdjacentRunningBalancesChecked": 4,
+      "rawSourceValuesPresent": true
+    }
+  ],
+  "visualReview": "All six rendered pages inspected in contact sheet; no clipping, overlap or missing labels observed."
+}

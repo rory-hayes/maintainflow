@@ -8,11 +8,11 @@ Files:
 - [`document-approved.schema.json`](../fixtures/automations/document-approved.schema.json): general approved-event envelope schema; `values` follows each parser's schema.
 - [`recipes.json`](../fixtures/automations/recipes.json): all four platform mappings and expected synthetic values.
 - [`examples/automations/verify.ts`](../examples/automations/verify.ts): server-side raw-body signature/schema verifier, with no listener, forwarding, or account changes.
-- [`tests/automations.test.ts`](../tests/automations.test.ts): two passing local tests for all mappings, literal identifiers, signature compatibility, tampering, timestamp expiry, and stable replay identity. `tests/integrations.test.ts` also validates actual enqueued approval payloads against the supplied envelope schema.
+- [`tests/automations.test.ts`](../tests/automations.test.ts): local tests for all mappings, literal identifiers, signature compatibility, tampering, timestamp expiry, and stable replay identity. `tests/integrations.test.ts` also validates actual enqueued approval payloads against the supplied envelope schema.
 
 ## Shared setup and event contract
 
-Create a parser and a **Webhook** connection under Integrations. Select that parser and enter the public HTTPS receiving URL. Folio permits HTTPS port 443, validates resolved public destinations, pins DNS for requests, and does not follow redirects. Keep the returned connection signing secret in the receiver's protected server credential store; it is shown once. The connection delivers approvals created after the connection was created; it does not automatically backfill old approvals.
+Create a parser and a **Webhook** connection under Integrations. Select that parser, keep **Document approved** selected for these invoice recipes, and enter the public HTTPS receiving URL. Folio permits HTTPS port 443, validates resolved public destinations, pins DNS for requests, and does not follow redirects. Keep the returned connection signing secret in the receiver's protected server credential store; it is shown once. The connection delivers approvals created after the connection was created; it does not automatically backfill old approvals.
 
 The receiving workflow should produce one downstream invoice record per approved revision, with optional separate line-item records. The original fixture contains:
 
@@ -61,6 +61,10 @@ The supplied `verifyApprovalDelivery({body, headers}, secret)` returns `{deliver
 A receiving service should atomically save `(connectionId, deliveryId)` with a unique constraint and a pending downstream/outbox record before returning 2xx. A previously accepted ID returns 2xx without creating another action. Its worker should forward only validated events and retain its own retries/error status. The automation's final destination should additionally upsert by approval ID so replay or a lost response cannot add duplicate invoices. The verifier intentionally does not pretend to implement this persistence.
 
 Folio retries non-2xx/timeouts up to five attempts and keeps the same delivery identity. Manual replay retains that identity too. Folio's Delivered status proves HTTP acceptance by the configured receiver; it does not prove that an asynchronous Zap/scenario/flow's final destination action succeeded. Inspect that platform's execution history and the resulting record separately.
+
+## Failure subscriptions
+
+Webhooks also support final extraction and export-generation failures. See [event choices and contracts](WEBHOOK-EVENTS.md) for their boundaries, safe payloads and synthetic examples. Use `verifyWebhookDelivery` for those subscriptions; the existing `verifyApprovalDelivery` and invoice mappings deliberately remain approval-only. Route verified failure events separately from records built from approved values. No failure receiver or external action is activated by these examples.
 
 ## Zapier recipe
 
@@ -112,6 +116,6 @@ Use `/help/api` for the exact endpoints/scopes/error codes. The [Google Drive â†
 
 ## Local and external evidence
 
-Run `node --import tsx --test --test-concurrency=1 tests/automations.test.ts` for the two outbound checks. The integrated suite also compares real `enqueueApprovals()` output with the example schema. Those checks verify fixture shape, field paths, scalar types, HMAC compatibility and rejection behavior. They do not compile/import a Zap, Make blueprint or Power Automate package; the outbound `recipes.json` is a mapping manifest. The separate Google Drive intake guide describes the actual n8n import artifact, real-engine test and its controlled-provider limits.
+Run `node --import tsx --test --test-concurrency=1 tests/automations.test.ts` for the outbound contract checks. The integrated suite also compares real `enqueueApprovals()` output with the example schema. Those checks verify fixture shape, field paths, scalar types, HMAC compatibility and rejection behavior. They do not compile/import a Zap, Make blueprint or Power Automate package; the outbound `recipes.json` is a mapping manifest. The separate Google Drive intake guide describes the actual n8n import artifact, real-engine test and its controlled-provider limits.
 
 For each actual account, record trigger settings, verification/dedupe proof, a real approved-document delivery, destination identifiers and literal values, retry behavior, and execution history before marking its bridge externally verified. No platform-specific success has been claimed from the local fixtures.

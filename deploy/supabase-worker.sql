@@ -56,7 +56,24 @@ SET search_path=pg_catalog AS $folio_work$
    JOIN folio.documents d ON d.id=r.document_id
    JOIN folio.integrations i ON i.workspace_id=a.workspace_id AND (i.parser_id IS NULL OR i.parser_id=d.parser_id)
    WHERE i.enabled AND a.created_at>=i.created_at
+   AND (i.kind='google_sheets' OR (i.kind='webhook' AND
+    (NOT (i.config ? 'events') OR (jsonb_typeof(i.config->'events')='array' AND (i.config->'events') ? 'document.approved'))))
    AND NOT EXISTS(SELECT 1 FROM folio.webhook_deliveries sent WHERE sent.integration_id=i.id AND sent.event_key='approval:'||a.id::text))
+ -- Failure notifications are immutable journal episodes, not the document's
+ -- current state. Match the worker's subscriptions and usable event identities;
+ -- an already queued episode must not cause repeated idle wakes.
+ OR EXISTS(SELECT 1 FROM folio.document_events e
+   JOIN folio.documents d ON d.id=e.document_id AND d.workspace_id=e.workspace_id
+   JOIN folio.integrations i ON i.workspace_id=e.workspace_id AND (i.parser_id IS NULL OR i.parser_id=d.parser_id)
+   WHERE e.state='failed' AND e.operation_id IS NOT NULL
+   AND (e.phase='processing' OR (e.phase='export'
+    AND e.details->>'format' IN ('csv','xlsx','json')
+    AND e.details->>'runId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    AND e.details->>'approvalId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'))
+   AND i.enabled AND i.kind='webhook' AND e.created_at>=i.created_at
+   AND jsonb_typeof(i.config->'events')='array'
+   AND (i.config->'events') ? (CASE e.phase WHEN 'processing' THEN 'document.extraction_failed' WHEN 'export' THEN 'document.export_failed' END)
+   AND NOT EXISTS(SELECT 1 FROM folio.webhook_deliveries sent WHERE sent.integration_id=i.id AND sent.event_key='document-event:'||e.id::text))
  -- Wake hints do not enable billing. The worker independently enforces mock
  -- configuration and the signed event's test/live mode before provider work.
  OR EXISTS(SELECT 1 FROM folio.provider_events p WHERE

@@ -102,6 +102,18 @@ test('CSV cell extraction of a multiline field remains a single table value', ()
   assert.equal(result.rawValues.company, 'Willow Research');
 });
 
+test('tabular text preserves literal pipes, leading zeros and empty trailing cells', () => {
+  const fields:SchemaField[]=[{key:'items',label:'Items',type:'array',fields:[
+    {key:'description',label:'Description',type:'string'}, {key:'code',label:'Code',type:'string'},
+    {key:'amount',label:'Amount',type:'currency'}, {key:'reference',label:'Reference',type:'string'},
+  ]}];
+  const text='Description\tCode\tAmount\tReference\nPaper | pens\t00017\t12.50\t';
+  const result=run(text,fields);
+  assert.deepEqual(result.rawValues.items,[{description:'Paper | pens',code:'00017',amount:'12.50',reference:''}]);
+  assert.deepEqual(result.normalizedValues.items,[{description:'Paper | pens',code:'00017',amount:12.5,reference:null}]);
+  assert.deepEqual(result.evidence.items,[{page:1,text:'Paper | pens\t00017\t12.50\t'}]);
+});
+
 test('trim, case and defaults normalize independently without replacing raw values', () => {
   const original = '  MiXeD Case  ';
   assert.equal(normalizeValue(original, { key: 'text', label: 'Text', type: 'string', transform: 'trim' }, 'en-IE'), 'MiXeD Case');

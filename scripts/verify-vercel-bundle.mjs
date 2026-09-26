@@ -17,6 +17,7 @@ try{
   const geometryModule=await fs.stat(path.join(directory,'server/core/pdf-geometry.js'));
   if(!geometryModule.isFile())throw new Error('Compiled native PDF geometry module is missing.');
   await fs.cp('fixtures/generated',path.join(directory,'fixtures'),{recursive:true});
+  await fs.copyFile('fixtures/source-formats/synthetic-receipt.odt',path.join(directory,'fixtures/synthetic-receipt.odt'));
   const tiffPages=[{width:80,height:120,color:[30,80,150],compression:'deflate'},{width:96,height:64,orientation:6,color:[200,60,20],compression:'deflate'}];
   await fs.writeFile(path.join(directory,'fixtures/owned-classic.tiff'),makeTiff(tiffPages));
   await fs.writeFile(path.join(directory,'fixtures/owned-big.tiff'),makeTiff(tiffPages,{bigTiff:true,byteOrder:'MM'}));
@@ -39,6 +40,24 @@ try{
       const result=await inspectSource(await fs.readFile('fixtures/'+filename),filename);
       assert.ok(result.pageCount>=1); console.log('PASS packaged decoder '+filename);
     }
+    const odtBytes=await fs.readFile('fixtures/synthetic-receipt.odt');
+    const odt=await inspectSource(odtBytes,'renamed.txt');
+    assert.equal(odt.mimeType,'application/vnd.oasis.opendocument.text');assert.equal(odt.pageCount,1);
+    assert.ok(odt.pages[0].text.includes('Merchant: Cedar & Pine'));
+    assert.ok(odt.pages[0].text.endsWith('Paper | pens\\t00017\\t12.50\\t'));
+    const odtArchive=new JSZip();odtArchive.file('statements/owned.odt',odtBytes,{createFolders:false});
+    const odtZip=await odtArchive.generateAsync({type:'nodebuffer',compression:'DEFLATE'});
+    const odtPreview=await previewArchiveSource(odtZip,'owned.zip');
+    assert.equal(odtPreview.parts.length,1);assert.equal(odtPreview.entries[0].format,'odt');assert.equal(odtPreview.totalPages,1);
+    const odtImported=await importArchiveSource(odtZip,'owned.zip',{mode:'zip',version:1,sourceSha256:createHash('sha256').update(odtZip).digest('hex'),entries:[odtPreview.entries[0].index]});
+    assert.deepEqual(odtImported.parts[0].bytes,odtBytes);assert.deepEqual(odtImported.parts[0].source,odt);
+    await assert.rejects(previewArchiveSource(odtBytes,'renamed.zip'),error=>error.reason==='office_package');
+    console.log('PASS packaged ODT byte-led text, exact table cells and atomic ZIP leaf');
+    const styledOdt=await JSZip.loadAsync(odtBytes),styledContent=await styledOdt.file('content.xml').async('string');
+    styledOdt.file('mimetype','application/vnd.oasis.opendocument.text',{compression:'STORE',createFolders:false});
+    styledOdt.file('content.xml',styledContent.replace('<office:body>','<office:automatic-styles><style:page-layout xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" style:name="ImagePage"><style:page-layout-properties><style:background-image xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="https://never-fetched.example.test/source.png"/></style:page-layout-properties></style:page-layout></office:automatic-styles><office:body>'));
+    await assert.rejects(inspectSource(await styledOdt.generateAsync({type:'nodebuffer',compression:'DEFLATE'}),'style-image.odt'),error=>error.reason==='odt_unsupported');
+    console.log('PASS packaged ODT refuses page-style image omission');
     for(const filename of ['owned-classic.tiff','owned-big.tiff']){
       const bytes=await fs.readFile('fixtures/'+filename),sourceSha256=createHash('sha256').update(bytes).digest('hex');
       const source=await inspectSource(bytes,'misleading.txt');assert.deepEqual(source,{mimeType:'image/tiff',pageCount:2,pages:[{page:1,text:''},{page:2,text:''}]});

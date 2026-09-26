@@ -50,10 +50,10 @@ async function fixture(mode:'rules'|'ai'='rules'){
 
 test('queued and historical runs keep locale/timezone after parser changes, job deletion, corrections and exports',async()=>{
  const f=await fixture(),source=await f.upload('09/10/2026 14:30');
- const queued=(await adminPool.query('select config from jobs where id=$1',[source.jobId])).rows[0].config;assert.equal(queued.normalizationPolicy,'timestamp-v1');assert.equal(queued.timezone,'Europe/Dublin');
+ const queued=(await adminPool.query('select config from jobs where id=$1',[source.jobId])).rows[0].config;assert.equal(queued.normalizationPolicy,'regional-v2');assert.equal(queued.timezone,'Europe/Dublin');
  assert.equal((await f.request('PATCH',`/api/parsers/${f.parser.id}`,{locale:'en-US',timezone:'America/Los_Angeles'})).statusCode,200);
  assert.equal(await processOneCoreJob(source.jobId),true);const run=(await f.detail(source.document.id)).runs[0];assert.ok(run);
- assert.deepEqual(run.normalizationContext,{version:'timestamp-v1',locale:'en-IE',timezone:'Europe/Dublin',tzdbVersion:process.versions.tz??null});
+ assert.deepEqual(run.normalizationContext,{version:'regional-v2',locale:'en-IE',timezone:'Europe/Dublin',tzdbVersion:process.versions.tz??null});
  assert.deepEqual(run.normalizedValues,{occurred_at:'2026-10-09T13:30:00Z',date:'2026-09-17',identifier:'000127'});assert.equal(run.rawValues.occurred_at,'09/10/2026 14:30');assert.deepEqual(run.timestampIssues,[]);
  await adminPool.query('delete from jobs where id=$1',[source.jobId]);assert.equal((await f.detail(source.document.id)).runs[0].jobId,null);
  const localCorrection=await f.request('POST',`/api/runs/${run.id}/corrections`,{values:{...run.effectiveValues,occurred_at:'10/09/2026 14:30'},expectedRevision:run.effectiveRevision});assert.equal(localCorrection.statusCode,200,localCorrection.body);
@@ -89,6 +89,7 @@ test('normalization snapshot constraint rejects null versions and malformed or i
  const f=await fixture(),source=await f.upload('2026-07-15 14:30');await processOneCoreJob(source.jobId);const run=(await f.detail(source.document.id)).runs[0],valid=run.normalizationContext;
  for(const value of [{...valid,version:null},{...valid,version:'future'},{...valid,locale:null},{...valid,timezone:4},{...valid,tzdbVersion:[]},{...valid,extra:true},{version:'timestamp-v1',locale:'en-IE'}])await assert.rejects(adminPool.query('update extraction_runs set normalization_context=$2 where id=$1',[run.id,JSON.stringify(value)]),(error:any)=>error.code==='23514');
  assert.deepEqual((await f.detail(source.document.id)).runs[0].normalizationContext,valid);
+ for(const version of ['timestamp-v1','regional-v2']){await adminPool.query('update extraction_runs set normalization_context=$2 where id=$1',[run.id,JSON.stringify({...valid,version})]);assert.equal((await f.detail(source.document.id)).runs[0].normalizationContext.version,version);}
 });
 
 test('worker forwards pinned timezone to the controlled provider and rejects future normalization policies',async()=>{

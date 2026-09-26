@@ -1,3 +1,4 @@
+import {normalizationPolicy} from '../../shared/source-formats.js';
 import type { Evidence, ExtractionProvider, ExtractionResult, ParserSchema, ProviderInput, SchemaField, ValidationIssue } from '../../shared/types.js';
 import { normalizeValue } from './extraction.js';
 import { decodeCsvRawValues } from './csv-values.js';
@@ -225,10 +226,10 @@ export function createOpenAIProvider(options: ProviderOptions = {}): ExtractionP
         try { decoded = JSON.parse(text[0]); } catch { throw invalid(); }
         const output = validateOutput(decoded, input.schema);
         const normalizationInput = input.mimeType === 'text/csv' ? decodeCsvRawValues(output.rawValues, input.schema, input.pages) : output.rawValues;
-        const normalizedValues = Object.fromEntries(input.schema.fields.map(field => [field.key, normalizeValue(normalizationInput[field.key], field, input.locale, input.timezone)]));
+        const normalizedValues = Object.fromEntries(input.schema.fields.map(field => [field.key, normalizeValue(normalizationInput[field.key], field, input.locale, input.timezone,input.normalizationPolicy??normalizationPolicy)]));
         const evidence = sourceEvidence(output, input, visual);
         if (payload.model !== openAIExtraction.model) throw failed('OpenAI returned a different model version than the pinned extraction model.');
-        return { rawValues: output.rawValues, normalizedValues, evidence: evidence.evidence, issues: [...validateValues(normalizedValues, input.schema,{locale:input.locale,timezone:input.timezone}), ...evidence.issues], engine: 'openai', model: payload.model, promptVersion: openAIExtraction.promptVersion, ...usageDetails(payload) };
+        return { rawValues: output.rawValues, normalizedValues, evidence: evidence.evidence, issues: [...validateValues(normalizedValues, input.schema,{locale:input.locale,timezone:input.timezone,version:input.normalizationPolicy??normalizationPolicy}), ...evidence.issues], engine: 'openai', model: payload.model, promptVersion: openAIExtraction.promptVersion, ...usageDetails(payload) };
       } finally { clearTimeout(timer); }
     },
   };
