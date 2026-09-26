@@ -120,7 +120,7 @@ const attempt=await extractWithDeadline(async signal=>{
  }
  if(decision?.result)result=decision.result;
  else if(job.config.mode==='ai'){
-  const activeProvider=provider;if(!activeProvider?.configured())throw Object.assign(new Error('AI extraction is not configured. Configure the server provider or choose text-anchor rules.'),{permanent:true});
+  const activeProvider=provider;if(!activeProvider?.configured())throw Object.assign(new Error(bank?'Bank statement extraction is unavailable because the AI provider is not configured. Ask your administrator to enable it, then retry the statement.':'AI extraction is not configured. Configure the server provider or choose text-anchor rules.'),{permanent:true});
   const bytes=sourceBytes??await readStoredObject(data.doc.storage_key);signal.throwIfAborted();
   const input={bytes,mimeType:data.doc.mime_type,pages:data.doc.source_text,schema:data.schema,instructions:job.config.instructions,locale:job.config.locale,timezone:job.config.timezone,normalizationPolicy:valuePolicy,signal};
   const visualDocument=await prepareVisualDocument(input,{signal,expectedSha256:data.doc.sha256});signal.throwIfAborted();

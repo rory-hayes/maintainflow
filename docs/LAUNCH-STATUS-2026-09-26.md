@@ -2,7 +2,7 @@
 
 **MaintainFlow is deployed and the hosted large-PDF workflow passes. Public launch is still not cleared: account upgrades alone do not complete the remaining work.**
 
-This dated record supersedes deployment and branding statements in the [September 20 status](LAUNCH-STATUS-2026-09-20.md). Historical test records retain their original source and coverage. The [47-criterion capability inventory](PARITY-MATRIX.md) remains in scope.
+This dated record supersedes deployment and branding statements in the [September 20 status](LAUNCH-STATUS-2026-09-20.md). Historical test records retain their original source and coverage. The [47-criterion capability inventory](PARITY-MATRIX.md) remains recorded in the product backlog. The newer [ordered launch backlog](LAUNCH-BACKLOG.md) distinguishes bank-launch requirements from broader product extensions awaiting a scope decision; the inventory does not make every extension a launch prerequisite.
 
 ## Current deployment and completed proof
 
@@ -25,6 +25,8 @@ The separate [Google Drive → n8n intake recipe](SOURCE-INTAKE-RECIPES.md) exte
 
 Selectable approval/extraction-failure/export-failure webhooks are now locally implemented and verified separately from those drafts: 80 focused tests, 10 desktop/mobile browser groups, hosted package/runtime checks and 12 managed restore checks pass. The [event contract](WEBHOOK-EVENTS.md) describes compatibility, fixed payloads and the required owner-only watchdog body update. This is not hosted activation or real receiver acceptance.
 
+The subsequent [draft PR51](https://github.com/rory-hayes/maintainflow/pull/51), stacked on PR50, clarifies bank correction/provider guidance and adds offline monitoring preparation, controlled billing lifecycle checks and a separately authored synthetic statement quality pack. Its combined local verification passed 151 tests, builds and 17 packaged-runtime checks; six desktop/mobile bank browser groups also passed. This preparation does not activate the hosted bank workflow, monitoring or billing. See the [launch backlog](LAUNCH-BACKLOG.md) for current evidence boundaries and dependencies.
+
 ## Work still required before public launch
 
 | Area | Remaining evidence or implementation |
@@ -32,7 +34,7 @@ Selectable approval/extraction-failure/export-failure webhooks are now locally i
 | Monitoring | Operations code from merged PR44 is deployed but disabled. Install specifically approved scoped credentials, approve the incident recipient, verify test outage/recovery inbox delivery, initialize protected state, observe a real scheduled run and establish an external stale-run check. Preparation and local tests are insufficient. |
 | Backup and recovery | Obtain an owner-capable source connection; quiesce all database/object writers; capture the current hosted database and originals; restore into an isolated destination; establish encrypted off-host schedules, separate key custody, retention and recovery targets. Local/synthetic and historical pre-cutover restores do not prove current hosted recovery. |
 | Accounts and integrations | Complete hosted password reset with session revocation, inbox-to-browser invitation acceptance and broader role transitions. Manual viewer invitation API acceptance now passes as recorded above. Recheck inbound attachment intake through reviewed Google Sheets delivery, restart/refresh/revocation and independent destination readback. Previously delivered auth emails are not completed account workflows. Respect the exact owned fixture, quota and approved outbound-message scopes. |
-| Product capabilities | Finish the open original matrix criteria: hosted timestamp/bank activation; remaining document converters and archives; OCR/image/repeating regions and scaling; preprocessing/language coverage; structured address/geolocation; remaining source-platform recipes and account acceptance; hosted selectable webhook failure-event activation and receiver acceptance; held-out AI extraction/split quality; remaining retention/quota and destination acceptance. Keep each local, hosted and provider result distinct. |
+| Product capabilities | Complete hosted timestamp/bank activation, acceptance of advertised source/destination workflows, selectable webhook failure-event activation and receiver acceptance, representative AI extraction/split evaluation, and remaining retention/quota checks. Additional converters and archives, broader OCR regions/preprocessing/language coverage, geolocation and additional source platforms remain in backlog P01–P06 pending a launch scope decision. Keep each local, hosted and provider result distinct. |
 | Policies and support | Publish accurate approved privacy, terms, subprocessor, retention and processing-location disclosures; establish monitored support/privacy handling. Existing contact settings do not establish these policies or operational handling. |
 | Billing and activation | Billing is mocked. Complete authorized test/live payment, cancellation and entitlement-transition acceptance before deliberately opening public registration. No paid upgrade or real charge has been performed. |
 

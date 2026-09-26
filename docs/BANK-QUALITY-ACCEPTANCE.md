@@ -1,0 +1,46 @@
+# Bank extraction quality acceptance
+
+The application has controlled bank-workflow tests, but a passing local test suite is not a measurement of real-provider extraction quality. The new [synthetic acceptance pack](../fixtures/bank-statements/held-out-2026-09-26/README.md) supplies two newly authored cases outside the existing development fixtures. It has not been submitted to an extraction provider. The sources and expected answers were authored separately as literals; no product extraction, normalization or reconciliation code generated the answer key.
+
+This pack is small and synthetic. Its clean typography, stated date/amount conventions and deliberately selected cases do not represent the diversity of real bank statements, noisy scans, languages or layouts. It can reveal concrete failures and support a documented launch acceptance decision; it cannot justify an accuracy percentage or a supported-bank claim.
+
+## Reserved inputs and answer key
+
+| Case | Inputs | Expected result |
+| --- | --- | --- |
+| MF-HO-A | Two-page native EUR statement plus one image-only derivative | Ten transactions, one EUR account, all page/description content retained, both identical-looking rental payments kept. Debits 1708.14, credits 1475.65, opening 2500.00 and closing 2267.51 reconcile. |
+| MF-HO-B | Two-page native statement with separate USD and EUR sections | Two account/currency groups, four rows each. USD opening and one running balance remain unresolved. USD stated debits 750.70 differ from extracted row debits 750.75 by 0.05. EUR balances/totals reconcile independently. |
+
+The image-only derivative covers a provider's visual-input path, not an independently authored third case. Report two independent cases, three renditions and six source pages. If evaluated separately, case A's ten transactions appear twice; do not describe those repeated observations as independent samples. Native and raster case A may be uploaded together only for a separate overlap/duplicate-warning check.
+
+The raw answer key preserves punctuation, sign conventions and missing values. Canonical expected amounts express the economic debit/credit interpretation as decimal strings and dates as ISO calendar dates. They are reviewer comparison targets, not a claim that the current application will normalize every signed column automatically. The current preset asks for literal signed debit values; the normalizer can preserve a negative debit and raise `signed_column_amount`. For case B, first verify literal sign preservation and the required warning, then record any justified reviewer conversion into positive debit/credit columns as correction effort. Treat this as a compatibility limitation/review burden unless the actual first-pass result establishes otherwise.
+
+Join wrapped descriptions without losing words. Missing values stay null: deriving an opening or intermediate balance from other numbers is not source extraction. Application IDs need not match answer-key labels, but they must remain stable through corrections and reordering.
+
+## First-pass provider run
+
+1. Keep the PDFs and answer key unchanged. Record their SHA-256 hashes, the deployed application revision, extraction provider/model, parser preset/prompt version, source date/number settings and test-workspace identity. If the runtime exposes no model snapshot identifier, record that limitation.
+2. Use an authorized private test workspace and the ordinary bank-statement preset. Upload only the PDFs. Do not provide the answer key or fixture-specific hints to the provider. Do not tune prompts after seeing results and describe the rerun as a first pass.
+3. Capture the original raw response, normalized extraction, warnings, document/run IDs, source-page evidence and initial processing outcome before any correction. Keep this evidence private and separate from the source pack. A provider timeout, truncated table or retry is an outcome to record, not a missing result to omit.
+4. Compare every transaction and account field with `expected.json`. Record source omission, hallucinated row, duplicate removal, wrong sign/date/amount, lost description, wrong group, missing-value invention and source-page mismatch individually. Distinguish the provider's raw error from a normalization or review/export error.
+5. Review through the normal interface. Preserve both legitimate rental payments and retain unresolved values. First verify that the unresolved USD statement-total mismatch blocks approval; acknowledgement must not bypass a blocking error. The source says 750.70 while its rows sum to 750.75: do not change the source total to the computed total merely to obtain approval. Approve only after a separately justified, audited resolution supported by evidence; otherwise keep case B unapproved and record the correct blocked flow. Record literal signed-column warnings and any reviewer amount-convention corrections separately. Capture correction history, approval/refusal results and stable application IDs.
+6. Download CSV and XLSX only for approved statements, including an approved selected batch. Compare exact rows, dates, debit/credit values, account/currency groups and source-statement references with the approved revision. Verify the unresolved case cannot enter an approved export or selected batch. Do not combine USD and EUR totals. For an approved source, re-download an earlier approval after a correction to verify version binding. If case B remains correctly blocked, record that its final export checks were not executed instead of claiming they passed.
+7. For the separate duplicate exercise, upload native and raster case A into the same workspace. Confirm overlapping-period/possible-duplicate warnings without automatically deleting either source or either legitimate repeated transaction. Keep the result separate from the independent-case quality count.
+
+Do not replace the provider with controlled fixture responses in this acceptance run. The existing automated tests already cover controlled responses. This new six-page pack is **not covered by the previously pending four-page hosted-test approval**. Executing it requires its own bounded input/rendition count, provider budget and approval scope, including whether the separate duplicate exercise and retries are included. Real-provider calls, approval mutations and downloads must use that authorized hosted acceptance process; this document does not execute or authorize those external actions.
+
+## Acceptance record and decision
+
+Record counts and concrete failures, not a rounded percentage from two invented cases. Preserve separate columns for first-pass extraction, required review/corrections, approved exports and hosted processing. An honest result may read: “Two synthetic cases across three renditions; eight amount corrections required; all approved exports matched their recorded revisions.” Populate actual counts only after execution.
+
+Compare extraction/review against all 18 independent rows, counting the derivative separately. Case A's approved exports must contain its exact ten rows, including both repeated payments. Case B's unresolved five-cent discrepancy must be visible and block approval/export; its two account/currency groups and eight review rows must stay separate. Only if an evidence-backed resolution later permits approval can its export be assessed, against that specific audited revision rather than silently altered fixture expectations. Missing balances must remain unresolved. A balanced account must not be labelled fully accurate solely because its balance matches. Corrections and approvals must remain auditable and exported rows must bind to the intended approval.
+
+Any silent omission, invented value, automatic duplicate deletion, cross-currency aggregation, lost approved edit or wrong-revision export blocks acceptance until fixed and rechecked. Provider extraction errors requiring visible corrections should be recorded by category and severity; decide whether the resulting review burden fits the launch offer. A completely unrecoverable file or hidden partial result must have a clear failure/retry experience.
+
+Record desktop/mobile review observations and existing-document regression evidence alongside this evaluation, rather than implying that PDF structure checks exercise the application. The new pack does not cover damaged/encrypted files, very long statements, foreign scripts, handwriting, photographs, poor scans or unusual bank layouts.
+
+## Retirement and further evidence
+
+Once anyone views the first-pass extraction results, mark this pack as used for the recorded application/model revision. After results inform code, prompt or rule changes, treat subsequent runs as regression checks. Keep the original files and first-pass evidence intact; obtain a fresh reserved set for another held-out evaluation. “Held out” here means separate from earlier development fixtures, not unseen by its author or independently sampled from real users.
+
+Before broader compatibility claims, obtain an authorized, appropriately handled collection of real statements across relevant banks/layouts and scan conditions, use independently checked ground truth, separate tuning and evaluation samples, and report the observed population and limitations. That future evidence is not supplied by this synthetic pack.
