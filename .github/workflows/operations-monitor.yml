@@ -1,0 +1,138 @@
+name: Operational monitoring
+run-name: >-
+  Folio monitor: ${{ (vars.FOLIO_MONITOR_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && contains(fromJSON('["probe","initialize","delivery-drill"]'), inputs.mode))) && (inputs.mode || 'run') || 'disabled' }}
+
+on:
+  schedule:
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Probe only, normal monitoring, initial state, or approved test alerts
+        type: choice
+        options: [probe, run, initialize, delivery-drill]
+        default: probe
+      drill_id:
+        description: Unique UUID for an approved email drill; reuse only to reconcile a retry
+        type: string
+        default: ''
+      drill_at:
+        description: Fixed UTC ISO timestamp for the drill; reuse with its UUID on retries
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: folio-operational-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    # No pull-request execution, and no dispatch of another ref with production secrets.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (vars.FOLIO_MONITOR_ENABLED == 'true' ||
+      (github.event_name == 'workflow_dispatch' && contains(fromJSON('["probe","initialize","delivery-drill"]'), inputs.mode)))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      FOLIO_MONITOR_ORIGIN: https://maintainflow.io
+      FOLIO_MONITOR_SECRET: ${{ secrets.FOLIO_MONITOR_SECRET }}
+      FOLIO_MONITOR_STATE_KEY: ${{ secrets.FOLIO_MONITOR_STATE_KEY }}
+      FOLIO_MONITOR_STATE_FILE: .monitor/state.enc
+      FOLIO_MONITOR_EMAIL_API_KEY: ${{ secrets.FOLIO_MONITOR_EMAIL_API_KEY }}
+      FOLIO_MONITOR_EMAIL_FROM: no-reply@maintainflow.io
+      FOLIO_MONITOR_EMAIL_TO: ${{ secrets.FOLIO_MONITOR_EMAIL_TO }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.13.0'
+      - name: Select the authoritative encrypted checkpoint
+        if: inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MONITOR_MODE: ${{ inputs.mode || 'run' }}
+        run: |
+          case "$MONITOR_MODE" in
+            initialize) node scripts/monitor-artifact-state.ts --initialize ;;
+            run) node scripts/monitor-artifact-state.ts ;;
+            *) exit 1 ;;
+          esac
+      - name: Download exactly the selected encrypted artifact
+        if: steps.state.outputs.artifact_id != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ steps.state.outputs.artifact_id }}
+          run-id: ${{ steps.state.outputs.run_id }}
+          github-token: ${{ github.token }}
+          repository: rory-hayes/maintainflow
+          path: .monitor
+          merge-multiple: true
+      - name: Validate exact downloaded file shape and authenticate state
+        if: steps.state.outputs.artifact_id != ''
+        run: node scripts/operations-monitor.ts --validate-state
+      # Carry forward the prior immutable outbox before any uncertain resend.
+      # If delivery fails, this run still has an authoritative checkpoint.
+      - name: Preserve the resumed checkpoint before retrying pending notices
+        if: steps.state.outputs.artifact_id != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: folio-monitor-state-v1-${{ github.run_attempt }}-resumed
+          path: .monitor/state.enc
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - name: Retry previously checkpointed pending notices
+        if: steps.state.outputs.artifact_id != ''
+        run: node scripts/operations-monitor.ts --deliver
+      - name: Observe current health and prepare the next encrypted state
+        if: inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
+        env:
+          MONITOR_MODE: ${{ inputs.mode || 'run' }}
+          SELECTED_ARTIFACT_ID: ${{ steps.state.outputs.artifact_id }}
+        run: |
+          if [ "$MONITOR_MODE" = initialize ] && [ -z "$SELECTED_ARTIFACT_ID" ]; then
+            FOLIO_MONITOR_INITIALIZE=true node scripts/operations-monitor.ts --prepare
+          else
+            node scripts/operations-monitor.ts --prepare
+          fi
+      - name: Commit prepared notices before sending new mail
+        if: inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: folio-monitor-state-v1-${{ github.run_attempt }}-prepared
+          path: .monitor/state.enc
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - name: Deliver newly checkpointed incident or recovery notices
+        if: inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
+        run: node scripts/operations-monitor.ts --deliver
+      - name: Commit the delivered checkpoint
+        if: inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: folio-monitor-state-v1-${{ github.run_attempt }}-delivered
+          path: .monitor/state.enc
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+      - name: Read dependencies without incident state or email
+        if: inputs.mode == 'probe'
+        run: node scripts/operations-monitor.ts --probe
+      - name: Deliver approved test notices with a frozen identity and timestamp
+        if: inputs.mode == 'delivery-drill'
+        env:
+          FOLIO_MONITOR_DRILL_ID: ${{ inputs.drill_id }}
+          FOLIO_MONITOR_DRILL_AT: ${{ inputs.drill_at }}
+        run: node scripts/operations-monitor.ts --delivery-drill

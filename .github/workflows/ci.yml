@@ -86,3 +86,7 @@ jobs:
         env:
           FOLIO_BACKUP_QA_PG_BIN: /usr/lib/postgresql/17/bin
         run: npm run verify:backup
+      - name: Capture and restore a managed database with controlled private object storage
+        env:
+          FOLIO_BACKUP_QA_PG_BIN: /usr/lib/postgresql/17/bin
+        run: npm run verify:backup:managed

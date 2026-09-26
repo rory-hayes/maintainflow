@@ -1,6 +1,6 @@
 # Encrypted backup and isolated restore
 
-Folio's operator CLI captures one complete application schema, its referenced private filesystem objects and the stable integration encryption key. It restores into a different, fresh database and leaves that destination inactive until an explicit activation command succeeds. It does not start services, configure a backup destination or schedule backups.
+Folio's operator CLI captures one complete application schema, its referenced private filesystem or Supabase objects and the stable integration encryption key. It restores into a different, fresh database and leaves that destination inactive until an explicit activation command succeeds. It does not start services, configure a backup destination or schedule backups.
 
 This implements a local operating workflow toward the original [P0 backup/restore gate](PRODUCTION-READINESS-2026-09-11.md). It does not establish production restoration, off-host durability, a recovery-time objective or backup-retention enforcement. Keep those release gates separate.
 
@@ -12,7 +12,7 @@ This implements a local operating workflow toward the original [P0 backup/restor
 - Both runtime roles must already exist and be distinct from each other and the backup identity: `LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`. They must have no role memberships or owned database objects. Provision these identities through the database administrator; the CLI does not create a database, runtime role or password.
 - The destination is a **fresh, different database**, not merely an empty schema inside a populated database. Added extensions other than `plpgsql`, user relations, functions, types, collations and unexpected schemas are refused. Connection aliases cannot make the source database a valid restore target.
 - Stop every API, worker, maintenance/deletion process and other storage writer for the selected source before capture. Close other database clients, including idle inspection sessions. The tool refuses other client connections and prepared transactions and takes table locks; `--quiesced` remains an operator assertion that filesystem writers are stopped too. Keep destination services stopped through restore and activation.
-- Originals must be in a private filesystem directory. Each object uses `workspace-UUID/object-UUID`. Use real owner-only directories, normally mode `0700`, and owner-only configuration/key/password files, normally `0600`. Selected file arguments must be absolute paths. Symlink files and symlink storage directories are refused.
+- Filesystem originals must be in a private filesystem directory. The explicit managed-source option below reads the private Supabase originals bucket instead. Each object uses `workspace-UUID/object-UUID`. Use real owner-only directories, normally mode `0700`, and owner-only configuration/key/password files, normally `0600`. Selected file arguments must be absolute paths. Symlink files and symlink storage directories are refused.
 - Keep config, keys, artifacts and temporary directories outside the originals directory. Provide space for a plaintext working copy as well as the encrypted archive or restored files. Temporary working copies use private directories under the OS temporary directory; an operator may select a dedicated private `TMPDIR` outside originals. Successful and handled failed operations remove scratch contents; an interrupted process may leave private scratch files for controlled cleanup.
 
 The backup CLI uses its explicit JSON configuration. It does not load the application's `.env` files. Normal API and worker startup still uses application configuration, so configure the restored runtime deliberately before starting it.
@@ -162,10 +162,63 @@ The CLI emits small JSON status/error records, not database contents or key valu
 - Required objects are live document originals and retained PDF/ZIP parent sources. Pending intake, signed-upload and deletion reservations are included when their files exist; absence is allowed only for optional references. Restored optional bytes preserve their actual content, not an unverified upload declaration.
 - Unreferenced physical objects are recorded as omitted metadata and are not restored. Deleting one PDF/ZIP child does not erase a parent still retained for a live sibling. Older backups can retain originals that were deleted later; live retention does not erase backup copies.
 - Limits are **20 GiB combined payload**, **100,000 payload files**, **10 MiB per stored object**, **32 MiB manifest** and **64 KiB encrypted-header prefix**. Payload files include table streams and the integration key, so the file limit is not an additional 100,000 originals. The physical originals scan also has a 100,000-object limit. These are rejection bounds, not demonstrated recovery-time or capacity commitments.
-- Supported capture is quiesced PostgreSQL 17 plus private filesystem storage. Supabase/other hosted object-bucket backup, live concurrent capture, PostgreSQL major-version conversion, arbitrary schema/extension migration, general archive import, automatic failover and merge/overwrite restore are unsupported.
+- Supported capture is quiesced PostgreSQL 17 plus private filesystem storage, or the explicit managed-source/private Supabase bucket option below. Restoration remains a fresh dedicated PostgreSQL database plus filesystem storage. Restoring into a populated Supabase project or its object bucket, live concurrent capture, PostgreSQL major-version conversion, arbitrary schema/extension migration, general archive import, automatic failover and merge/overwrite restore are unsupported.
 - Off-host storage, independently recoverable key custody, unattended schedules, retention enforcement, filesystem/power-loss durability and restoration on the actual deployment still need their own operational evidence. No production or customer-use proof follows from this tool or an authenticated local artifact. Free-plan and mock-billing decisions are unchanged.
 
-## Verification record
+## Managed PostgreSQL source and private Supabase bucket
+
+The same `create --quiesced` command accepts two additive source settings. This is a source-to-isolated-recovery path; it does not provision a hosted restore target or a scheduled backup.
+
+```json
+{
+  "version": 1,
+  "database": {
+    "host": "db.REPLACE_PROJECT.supabase.co",
+    "port": 5432,
+    "database": "postgres",
+    "user": "postgres",
+    "passwordFile": "/srv/folio/private/source-database-password",
+    "sslCaFile": "/srv/folio/private/source-database-ca.pem"
+  },
+  "schema": "folio",
+  "adminRole": "folio_admin",
+  "appRole": "folio_app",
+  "databaseProfile": "managed-source",
+  "sourceStorage": {
+    "kind": "supabase",
+    "url": "https://REPLACE_PROJECT.supabase.co",
+    "serviceRoleKeyFile": "/srv/folio/private/source-storage-service-key"
+  },
+  "storageDir": "/srv/folio/private/empty-source-directory",
+  "integrationKeyFile": "/srv/folio/private/source-integration-key"
+}
+```
+
+The uppercase project placeholders must be replaced with the actual project reference. Files remain explicit owner-only inputs; the CLI never reads the application's `.env` or saved preview credentials. In this additive configuration, `storageDir` remains a required, existing private local directory for path separation; its contents are not used as the object source. Downloaded objects go into the command's private temporary directory and are removed on handled completion/failure. Keep output artifacts, configuration, keys and temporary directories outside `storageDir` as with filesystem capture.
+
+The source database connection must still be distinct from the runtime roles, have `SUPERUSER` or `BYPASSRLS`, SELECT access to **every** current application table including `schema_migrations`, direct SELECT of the identity sequence, `pg_control_system()` access, and privileges sufficient to acquire the application table SHARE locks. Managed-source mode does not accept the restricted API administrator as a backup identity or manufacture a row-count attestation. No role, grant, migration or credential is created or changed by capture. A schema-only SELECT account is insufficient for these checks. Provisioning a separate bypass identity requires an administrator's security review because `BYPASSRLS` is a role-wide attribute, even when object privileges are narrowly granted. The CLI deliberately provides no blanket grant script that disguises that scope.
+
+Managed-source mode allows unrelated platform connections, schemas and other owners' default ACLs. It still refuses other connections under the configured backup and Folio runtime identities, prepared transactions, custom defaults belonging to the application schema owner, unknown application tables/types/sequences, missing migrations, or unsupported application security. Only the current checked-in migration catalogue is accepted; no historical hard-coded table count substitutes for it.
+
+Stop all Folio API, worker, cron, cleanup and object writers before capture. Drain all processing/sending/finalizing work and wait through outstanding signed-upload and write-lease expiry windows. These conditions are checked from the current queues/reservations in addition to the operator's `--quiesced` assertion. Application tables stay SHARE-locked in a repeatable-read transaction. This does **not** lock Supabase Storage or create a distributed database/object snapshot. Repeated inventory and byte hashing detect observed changes; they are not a substitute for stopping writers and allowing previously issued storage capabilities to expire.
+
+The storage transport accepts only the exact HTTPS `*.supabase.co` project origin and the fixed `folio-originals` bucket. It verifies a private bucket with a size limit no greater than 10 MiB, lists bounded UUID paths with pagination, downloads authenticated originals, and rechecks inventory, policy and every captured object's bytes before publication. Redirects are refused, each whole request including its body has a 45-second deadline, and arbitrary provider response bodies are excluded from errors. Only GET and the provider's read-only list POST are sent; no bucket/object/policy mutation or signed URL is requested. Authentication follows Supabase's [private bucket access model](https://supabase.com/docs/guides/storage/buckets/fundamentals).
+
+All physical originals are temporarily read and hashed to detect changes, including unreferenced objects. The encrypted archive retains required and present optional references; unreferenced objects remain recorded as omitted metadata, matching filesystem semantics. Allow private scratch space for the bucket mirror **and** prepared payloads. Repeated reads incur provider bandwidth and execution time; the configured byte/object bounds do not establish a recovery-time or free-quota guarantee.
+
+If the operational `worker_has_runnable_work()` function exists, capture accepts only its exact current checked-in body, zero-argument SQL/STABLE/invoker signature, `pg_catalog` search path, schema ownership and owner-only EXECUTE. Its digest is authenticated in the archive. Restore recreates this reviewed checkout function before comparing the complete application security fingerprint. It never executes function SQL supplied by an archive. No cron job, Vault secret, `pg_net` extension or external worker URL is restored or enabled. Owners are mapped to the chosen destination migration identity, while runtime roles retain their explicit restricted grants and RLS behavior; arbitrary source ACL drift is refused against the canonical migration template.
+
+Use a normal filesystem destination configuration without `databaseProfile` or `sourceStorage` for `restore` and `activate`. Managed-source configuration is capture-only. Both commands retain full row-byte, sequence, reference, owner/ACL/RLS/constraint/trigger checks and the inactive restore marker. Supabase platform-owned schemas, authentication/storage service internals, global roles, external credentials and platform configuration are outside this application archive. The restored application must be configured for its recovered filesystem originals; the tool does not write a replacement hosted bucket.
+
+### Managed-source verification
+
+Run `node --import tsx scripts/verify-managed-backup.ts --execute` only as an owned local acceptance fixture. It creates a separate socket-only PostgreSQL 17 cluster, uses generated identities/data and an injected in-memory Supabase transport, and cleans its cluster, originals, keys and encrypted test artifacts. It never reads application credentials or contacts a hosted provider. `FOLIO_BACKUP_QA_PG_BIN` can select an existing PostgreSQL 17 binary directory.
+
+The current implementation passed **12/12 isolated acceptance groups** on Node 24.13.0 with **57 application tables and 29 migrations**, including actual encrypted CLI create/restore/activate, two-workspace tenant isolation, exact journal and uncalled sequence state, required/optional/absent object inventory, owner-only watchdog restoration, writer-lease refusal and transaction rollback for widened source ACLs. A separate **24/24** backup transport/archive/runtime test run passed in 2.113 seconds, covering pagination, bounded/stalled responses, same-size mutation, authenticated archive rejection and inactive-startup guards. These are synthetic local proofs, not hosted capture, actual Supabase recovery, scheduling, off-host durability or provider availability evidence. The current production installation still requires a separately available owner-capable backup connection before this capture path can run; SQL Editor access is not such a connection. The historical pre-038 private checkpoint and its archive remain unchanged.
+
+## Historical verification record
+
+The following record describes the earlier filesystem-only increment and its then-current release state. It does not describe today's hosted migration or runtime activation status.
 
 `tests/backup-archive.test.ts` covers actual hybrid age round trips, corruption, wrong identities, hostile manifests, bounded declarations, input preservation and failed extraction cleanup. `scripts/verify-backup-restore.ts` and its fresh runtime helper provide the owned PostgreSQL/filesystem acceptance workflow, including application behavior and controlled outbound transports. Run that harness only against the isolated targets it creates; it is not a command for inspecting or changing the ordinary development or hosted database.
 

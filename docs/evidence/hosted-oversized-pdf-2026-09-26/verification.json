@@ -1,0 +1,292 @@
+{
+  "version": 1,
+  "kind": "hosted-oversized-pdf-qa",
+  "origin": "https://maintainflow.io",
+  "revision": "279f5d798c6871393e0aecca5eaaa1470723eb4c",
+  "startedAt": "2026-09-26T10:11:43.737Z",
+  "finishedAt": "2026-09-26T10:11:54.702Z",
+  "result": "passed",
+  "scriptSha256": "59c1711c83acfc1eaa960d96a234cc85e628eef4d1b6e286e4bb09db18ba825b",
+  "checks": {
+    "integration_gate_before_parser": true,
+    "integration_gate_before_upload": true,
+    "confirmedFinalizeReplay": true,
+    "automaticWorker": true,
+    "exactRules": true,
+    "exactOriginal": {
+      "bytes": 5243969,
+      "sha256": "2c895e6a25e5c4237d389c1a12188bb229cd2e9443b620e132f9efc0b782d607"
+    },
+    "onePageCharge": true,
+    "proofComplete": true
+  },
+  "jobObservations": [
+    {
+      "state": "completed",
+      "attempts": 1,
+      "elapsedMs": 223
+    }
+  ],
+  "cleanup": {
+    "storageDeletion": "complete",
+    "document": "removed",
+    "parser": "archived",
+    "usageAndAudit": "retained",
+    "staging": "provider_capability_retained_until_automatic_expiry_cleanup",
+    "fixture": "confirmed_owned_records_cleaned",
+    "ownerSession": "removed_and_rejected"
+  },
+  "unresolvedMutation": false,
+  "explicitWorkerWakeCalls": 0,
+  "directDatabaseCalls": 0,
+  "mailRequests": 0,
+  "googleRequests": 0,
+  "aiRequests": 0,
+  "backendProviderActivity": "not measured globally; owned rules result requires zero cost and empty token usage; applicable integrations excluded",
+  "fixture": {
+    "byteSize": 5243969,
+    "sha256": "2c895e6a25e5c4237d389c1a12188bb229cd2e9443b620e132f9efc0b782d607",
+    "mimeType": "application/pdf",
+    "pageCount": 1,
+    "nativeText": true,
+    "synthetic": true
+  },
+  "usage": {
+    "before": 3,
+    "after": 4,
+    "delta": 1,
+    "plan": "explore",
+    "billing": "mock"
+  },
+  "requests": [
+    {
+      "label": "revision_gate",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:43.739Z"
+    },
+    {
+      "label": "readiness_gate",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:44.091Z"
+    },
+    {
+      "label": "preview_gate",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:44.343Z"
+    },
+    {
+      "label": "owner_login",
+      "method": "POST",
+      "status": 200,
+      "at": "2026-09-26T10:11:44.437Z"
+    },
+    {
+      "label": "owner_identity",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:44.752Z"
+    },
+    {
+      "label": "mock_gate",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:45.167Z"
+    },
+    {
+      "label": "parser_baseline",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:45.753Z"
+    },
+    {
+      "label": "usage_baseline",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:45.936Z"
+    },
+    {
+      "label": "integration_gate_before_parser",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:46.116Z"
+    },
+    {
+      "label": "create_parser",
+      "method": "POST",
+      "status": 201,
+      "at": "2026-09-26T10:11:46.244Z"
+    },
+    {
+      "label": "integration_gate_before_upload",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:46.468Z"
+    },
+    {
+      "label": "signed_strategy",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:46.757Z"
+    },
+    {
+      "label": "reserve_signed_upload",
+      "method": "POST",
+      "status": 201,
+      "at": "2026-09-26T10:11:46.863Z"
+    },
+    {
+      "label": "signed_put",
+      "method": "PUT",
+      "status": 200,
+      "at": "2026-09-26T10:11:47.278Z"
+    },
+    {
+      "label": "finalize",
+      "method": "POST",
+      "status": 202,
+      "at": "2026-09-26T10:11:49.349Z"
+    },
+    {
+      "label": "confirmed_finalize_replay",
+      "method": "POST",
+      "status": 202,
+      "at": "2026-09-26T10:11:51.305Z"
+    },
+    {
+      "label": "automatic_job",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:51.763Z"
+    },
+    {
+      "label": "processed_document",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:51.986Z"
+    },
+    {
+      "label": "original_capability",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:52.164Z"
+    },
+    {
+      "label": "original_download",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:52.866Z"
+    },
+    {
+      "label": "usage_after",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:53.155Z"
+    },
+    {
+      "label": "cleanup_parser_binding",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:53.291Z"
+    },
+    {
+      "label": "cleanup_document_binding",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:53.408Z"
+    },
+    {
+      "label": "delete_owned_document",
+      "method": "DELETE",
+      "status": 200,
+      "at": "2026-09-26T10:11:53.545Z"
+    },
+    {
+      "label": "document_removed",
+      "method": "GET",
+      "status": 404,
+      "at": "2026-09-26T10:11:53.844Z"
+    },
+    {
+      "label": "empty_owned_parser",
+      "method": "GET",
+      "status": 200,
+      "at": "2026-09-26T10:11:54.086Z"
+    },
+    {
+      "label": "archive_owned_parser",
+      "method": "PATCH",
+      "status": 200,
+      "at": "2026-09-26T10:11:54.207Z"
+    },
+    {
+      "label": "owner_logout",
+      "method": "POST",
+      "status": 200,
+      "at": "2026-09-26T10:11:54.350Z"
+    },
+    {
+      "label": "logged_out_session",
+      "method": "GET",
+      "status": 401,
+      "at": "2026-09-26T10:11:54.475Z"
+    }
+  ],
+  "intents": [
+    {
+      "label": "owner_login",
+      "method": "POST",
+      "state": "confirmed",
+      "status": 200
+    },
+    {
+      "label": "create_parser",
+      "method": "POST",
+      "state": "confirmed",
+      "status": 201
+    },
+    {
+      "label": "reserve_signed_upload",
+      "method": "POST",
+      "state": "confirmed",
+      "status": 201
+    },
+    {
+      "label": "signed_put",
+      "state": "confirmed"
+    },
+    {
+      "label": "finalize",
+      "method": "POST",
+      "state": "confirmed",
+      "status": 202
+    },
+    {
+      "label": "confirmed_finalize_replay",
+      "method": "POST",
+      "state": "confirmed",
+      "status": 202
+    },
+    {
+      "label": "delete_owned_document",
+      "method": "DELETE",
+      "state": "confirmed",
+      "status": 200
+    },
+    {
+      "label": "archive_owned_parser",
+      "method": "PATCH",
+      "state": "confirmed",
+      "status": 200
+    }
+  ],
+  "privateReceiptSha256": "0a959574cb969f5693c112c285e16817e84b5539041c4d075461bd8ee429b3d4",
+  "limitations": [
+    "One padded native-text PDF page; not complex scanned, multipage or AI extraction evidence.",
+    "No global provider activity claim. Owned run required zero AI cost and no applicable enabled integration.",
+    "Staging signed-upload object expiry cleanup was not observed in this test.",
+    "No public signup, payment, email, Google Sheets or disaster recovery acceptance."
+  ]
+}

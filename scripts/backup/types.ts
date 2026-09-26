@@ -1,10 +1,10 @@
 export type BackupConnection={host:string;port:number;database:string;user:string;passwordFile?:string;sslCaFile?:string};
-export type BackupConfig={version:1;database:BackupConnection;schema:string;adminRole:string;appRole:string;storageDir:string;integrationKeyFile:string};
+export type BackupConfig={version:1;database:BackupConnection;schema:string;adminRole:string;appRole:string;storageDir:string;integrationKeyFile:string;databaseProfile?:'managed-source';sourceStorage?:{kind:'supabase';url:string;serviceRoleKeyFile:string}};
 export type BackupColumn={name:string;type:string;generated:string;identity:string};
 export type BackupTable={name:string;columns:BackupColumn[];primaryKey:string[];rows:number};
 export type BackupSequence={name:string;lastValue:string;isCalled:boolean};
 export type BackupMigration={name:string;sha256:string};
-export type BackupDatabaseManifest={schema:string;postgresMajor:number;encoding:string;sourceIdentity:string;securitySha256:string;tables:BackupTable[];sequences:BackupSequence[];migrations:BackupMigration[]};
+export type BackupDatabaseManifest={schema:string;postgresMajor:number;encoding:string;sourceIdentity:string;securitySha256:string;watchdogSha256?:string;tables:BackupTable[];sequences:BackupSequence[];migrations:BackupMigration[]};
 export type BackupObjectReference={key:string;required:boolean;byteSize?:number;sha256?:string};
 export type BackupPayloadFile={name:string;bytes:number;sha256:string};
-export type BackupManifest={format:'folio-backup';version:1;id:string;createdAt:string;capture:'quiesced-filesystem';database:BackupDatabaseManifest;files:BackupPayloadFile[];objects:Array<BackupObjectReference&{present:boolean;bytes?:number;sha256?:string}>;integrationKeySha256:string;omittedObjects:Array<{key:string;bytes:number;sha256:string}>};
+export type BackupManifest={format:'folio-backup';version:1;id:string;createdAt:string;capture:'quiesced-filesystem'|'quiesced-supabase';database:BackupDatabaseManifest;files:BackupPayloadFile[];objects:Array<BackupObjectReference&{present:boolean;bytes?:number;sha256?:string}>;integrationKeySha256:string;omittedObjects:Array<{key:string;bytes:number;sha256:string}>};

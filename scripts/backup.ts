@@ -9,6 +9,7 @@ import {sealArchive,openArchive} from './backup/archive.js';
 import {openSourceDatabase,restoreDatabase,verifyRestoredDatabase} from './backup/database.js';
 import {BackupError,backupAssert} from './backup/errors.js';
 import {absent,backupLimits,configDigest,copyFileChecked,ensurePrivateDirectory,payloadRecord,pendingName,readConfig,readIntegrationKey,readPrivateFile,receiptName,safeDestination,scanStorage,sha256,syncFile,validateManifest} from './backup/files.js';
+import {createSupabaseBackupSource} from './backup/supabase.js';
 import type {BackupConfig,BackupManifest,BackupPayloadFile} from './backup/types.js';
 
 const migrationsDirectory=fileURLToPath(new URL('../migrations/',import.meta.url));
@@ -40,12 +41,21 @@ async function create(values:Values){
  only(values,['config','recipient-file','output','quiesced']);backupAssert(values.quiesced===true,'BACKUP_QUIESCENCE','Stop all API, workers and storage writers, then pass --quiesced.');
  const configFile=selected(values,'config'),recipientFile=selected(values,'recipient-file'),output=selected(values,'output');
  const config=await readConfig(configFile);await freshFile(output);
+ backupAssert(!config.sourceStorage||config.databaseProfile==='managed-source','BACKUP_CONFIG','Supabase capture requires explicit managed-source database checks.');
+ await ensurePrivateDirectory(config.storageDir);
  const directory=await scratch();let source:Awaited<ReturnType<typeof openSourceDatabase>>|undefined;
+ let storageRoot=config.storageDir,remote:Awaited<ReturnType<ReturnType<typeof createSupabaseBackupSource>['capture']>>|undefined;
  try{
-  await separate(config.storageDir,[directory,configFile,recipientFile,output,config.integrationKeyFile,...[config.database.passwordFile,config.database.sslCaFile].filter((s):s is string=>!!s)]);
+  await separate(config.storageDir,[directory,configFile,recipientFile,output,config.integrationKeyFile,...[config.database.passwordFile,config.database.sslCaFile,config.sourceStorage?.serviceRoleKeyFile].filter((s):s is string=>!!s)]);
   const recipient=await textKey(recipientFile),key=await readIntegrationKey(config.integrationKeyFile);
   source=await openSourceDatabase(config,migrationsDirectory);
-  const before=await scanStorage(config.storageDir),inventory=new Map(before.map(record=>[record.key,record]));
+  if(config.sourceStorage){
+   storageRoot=path.join(directory,'bucket-snapshot');await fs.mkdir(storageRoot,{mode:0o700});
+   const credential=(await readPrivateFile(config.sourceStorage.serviceRoleKeyFile,16384)).toString('utf8').trim();
+   remote=await createSupabaseBackupSource({url:config.sourceStorage.url,serviceRoleKey:credential}).capture(storageRoot);
+   await source.verifyQuiescence();
+  }
+  const before=await scanStorage(storageRoot),inventory=new Map(before.map(record=>[record.key,record]));
   const files:BackupPayloadFile[]=[];let totalBytes=0;
   const add=(file:BackupPayloadFile)=>{totalBytes+=file.bytes;backupAssert(totalBytes<=backupLimits.payloadBytes&&files.length<backupLimits.files,'BACKUP_LIMIT','The backup exceeds its supported payload or file limit.');files.push(file);};
   await writePrivate(path.join(directory,'integration-key.bin'),key);add({name:'integration-key.bin',bytes:key.length,sha256:sha256(key)});
@@ -55,18 +65,18 @@ async function create(values:Values){
    backupAssert(!reference.required||actual&&actual.bytes===reference.byteSize&&actual.sha256===reference.sha256,'BACKUP_ORIGINAL','A required original is missing or does not match its stored metadata.');
    if(!actual){objects.push({key:reference.key,required:false,present:false});continue;}
    const name='objects/'+reference.key,destination=await safeDestination(directory,name);
-   const copied=await copyFileChecked(path.join(config.storageDir,reference.key),destination,Math.min(backupLimits.objectBytes,backupLimits.payloadBytes-totalBytes));
+   const copied=await copyFileChecked(path.join(storageRoot,reference.key),destination,Math.min(backupLimits.objectBytes,backupLimits.payloadBytes-totalBytes));
    backupAssert(copied.bytes===actual.bytes&&copied.sha256===actual.sha256,'BACKUP_CHANGED','An original changed during capture. Stop all writers before retrying.');
    add(payloadRecord(name,copied));objects.push({key:reference.key,required:reference.required,...(reference.required?{byteSize:reference.byteSize}:{}),present:true,...copied});
   }
   for(const table of source.manifest.tables){const filename=await safeDestination(directory,'tables/'+table.name+'.bin');add(await source.writeTable(table.name,filename,backupLimits.payloadBytes-totalBytes));}
   const referenced=new Set(source.objects.map(o=>o.key));
-  const manifest=validateManifest({format:'folio-backup',version:1,id:randomUUID(),createdAt:new Date().toISOString(),capture:'quiesced-filesystem',database:source.manifest,files,objects,integrationKeySha256:sha256(key),omittedObjects:before.filter(o=>!referenced.has(o.key))});
-  backupAssert(JSON.stringify(await scanStorage(config.storageDir))===JSON.stringify(before)&&sha256(await readIntegrationKey(config.integrationKeyFile))===manifest.integrationKeySha256,'BACKUP_CHANGED','Storage or the integration key changed during capture. Stop all writers before retrying.');
-  await source.verifyQuiescence();
+  const manifest=validateManifest({format:'folio-backup',version:1,id:randomUUID(),createdAt:new Date().toISOString(),capture:remote?'quiesced-supabase':'quiesced-filesystem',database:source.manifest,files,objects,integrationKeySha256:sha256(key),omittedObjects:before.filter(o=>!referenced.has(o.key))});
+  backupAssert(JSON.stringify(await scanStorage(storageRoot))===JSON.stringify(before)&&sha256(await readIntegrationKey(config.integrationKeyFile))===manifest.integrationKeySha256,'BACKUP_CHANGED','Storage or the integration key changed during capture. Stop all writers before retrying.');
+  await remote?.verify();await source.verifyQuiescence();
   // The pending ciphertext shares the final filesystem so publication is atomic and exclusive.
   const encrypted=path.join(path.dirname(output),'.folio-encrypted-'+randomUUID()+'.tmp');
-  try{await sealArchive(directory,manifest,recipient,encrypted);await source.verifyQuiescence();backupAssert(JSON.stringify(await scanStorage(config.storageDir))===JSON.stringify(before)&&sha256(await readIntegrationKey(config.integrationKeyFile))===manifest.integrationKeySha256,'BACKUP_CHANGED','Storage or the integration key changed during encryption. Stop all writers before retrying.');await fs.link(encrypted,output);await syncFile(output);}
+  try{await sealArchive(directory,manifest,recipient,encrypted);await source.verifyQuiescence();backupAssert(JSON.stringify(await scanStorage(storageRoot))===JSON.stringify(before)&&sha256(await readIntegrationKey(config.integrationKeyFile))===manifest.integrationKeySha256,'BACKUP_CHANGED','Storage or the integration key changed during encryption. Stop all writers before retrying.');await remote?.verify();await source.verifyQuiescence();await fs.link(encrypted,output);await syncFile(output);}
   finally{await fs.unlink(encrypted).catch(()=>{});}
   return {status:'backup_created',...summary(manifest)};
  }finally{try{await source?.close();}finally{await fs.rm(directory,{recursive:true,force:true});}}
@@ -105,6 +115,7 @@ async function restoreOrActivate(values:Values,activate:boolean){
   await separate(config.storageDir,[directory,configFile,input,identityFile,config.integrationKeyFile,...[config.database.passwordFile,config.database.sslCaFile].filter((s):s is string=>!!s)]);
   // Decrypt, check every byte and consume the final age authentication before destination changes.
   const {manifest,ciphertextSha256}=await openArchive(input,await textKey(identityFile),directory);
+  backupAssert(!config.sourceStorage&&!config.databaseProfile,'BACKUP_TARGET','Managed-source configuration is capture-only. Select a fresh dedicated filesystem restore destination.');
   const marker=pending(config,manifest,ciphertextSha256),markerFile=path.join(config.storageDir,pendingName),receiptFile=path.join(config.storageDir,receiptName);
   if(activate){
    const recorded=await matchingReceipt(receiptFile,marker);
