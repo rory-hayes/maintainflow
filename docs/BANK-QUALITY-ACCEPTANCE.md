@@ -1,5 +1,7 @@
 # Bank extraction quality acceptance
 
+**Evaluation update, 26 September 2026:** this pack has now been used once on deployed revision `124cee1b950afc1748d34c58783d1eec1880c538`. It is retired to regression status. The [E2E audit](E2E-AUDIT-2026-09-26.md) records all first-pass results, including three native credit/debit errors, the blocked inconsistent statement and review still required. Source files and the original answer-key preparation status remain unchanged for provenance. The preparation and approval statements below describe the original protocol, not current execution status.
+
 The application has controlled bank-workflow tests, but a passing local test suite is not a measurement of real-provider extraction quality. The new [synthetic acceptance pack](../fixtures/bank-statements/held-out-2026-09-26/README.md) supplies two newly authored cases outside the existing development fixtures. It has not been submitted to an extraction provider. The sources and expected answers were authored separately as literals; no product extraction, normalization or reconciliation code generated the answer key.
 
 This pack is small and synthetic. Its clean typography, stated date/amount conventions and deliberately selected cases do not represent the diversity of real bank statements, noisy scans, languages or layouts. It can reveal concrete failures and support a documented launch acceptance decision; it cannot justify an accuracy percentage or a supported-bank claim.
