@@ -85,7 +85,7 @@ export async function addDocument(actor:Actor,parserId:string,buffer:Buffer,file
    }
    const {rows:[workspace]}=await c.query('select plan from workspaces where id=$1',[actor.workspaceId]);
    const plan=workspace.plan;if(buffer.length>plan.maxBytes||source.pageCount>plan.maxPages)badRequest('Document exceeds the workspace file or page limit',413);
-   const {rows:[usage]}=await c.query("select coalesce(sum(pages),0)::integer used from usage_ledger where workspace_id=$1 and created_at>=date_trunc('month',now())",[actor.workspaceId]);
+   const {rows:[usage]}=await c.query("select coalesce(sum(pages),0)::integer used from usage_ledger where workspace_id=$1 and created_at>=date_trunc('month',now(),'UTC')",[actor.workspaceId]);
    if(usage.used+source.pageCount>plan.monthlyPages)badRequest('Monthly page quota reached. Update the plan before uploading more documents.',429);
    let {rows:[doc]}=await c.query('insert into documents(id,workspace_id,parser_id,name,mime_type,byte_size,sha256,storage_key,status,page_count,source_text) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *',[id,actor.workspaceId,parserId,name,source.mimeType,buffer.length,sha,storageKey,'received',source.pageCount,JSON.stringify(source.pages)]);
    const templates=(await c.query('select * from templates where parser_id=$1 order by created_at,id',[parserId])).rows;

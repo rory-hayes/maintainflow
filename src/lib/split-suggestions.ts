@@ -1,3 +1,4 @@
+import type {AiSuggestionLimits} from '../../shared/ai-suggestion-allowances';
 import {workspaceId} from './api';
 import {confirmPdfSplitReceipt,pdfSha256,type PendingPdfSplit} from './pdf-split';
 import {pdfSplitSpecSchema,type PdfSplitReceipt} from '../../shared/pdf-split';
@@ -5,7 +6,7 @@ import {splitSuggestionLimits,splitSuggestionRanges,type SplitSuggestion,type Sp
 
 export type SuggestionScope={userId:string;workspaceId:string;parserId:string};
 export type SavedSplitSuggestion=SuggestionScope&{version:1;requestId:string;sourceDocumentId:string|null;sha256:string;mimeType:SplitSuggestionMime;suggestionId?:string};
-export type SuggestionAvailability={available:boolean;limits:typeof splitSuggestionLimits;suggestions:SplitSuggestion[]};
+export type SuggestionAvailability={available:boolean;limits:typeof splitSuggestionLimits&AiSuggestionLimits;suggestions:SplitSuggestion[]};
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const key=(scope:SuggestionScope,documentId:string|null)=>`folio.split-suggestion.v1:${scope.userId}:${scope.workspaceId}:${scope.parserId}:${documentId||'upload'}`;
 export function readSavedSplitSuggestion(scope:SuggestionScope,documentId:string|null):SavedSplitSuggestion|null{
@@ -34,7 +35,7 @@ async function request<T>(scope:SuggestionScope,path:string,isCurrent:()=>boolea
  current(scope,isCurrent);const headers=new Headers(options.headers);headers.set('X-Workspace-Id',scope.workspaceId);if(options.body&&!(options.body instanceof FormData))headers.set('Content-Type','application/json');
  let response:Response;try{response=await fetch(path,{...options,signal,headers,credentials:'same-origin',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer'});}catch(error){if(signal.aborted)throw error;throw new Error('AI suggestions could not be checked. Check your connection and retry the saved request.');}
  current(scope,isCurrent);const body=await response.json().catch(()=>null);current(scope,isCurrent);
- if(!response.ok){const code=typeof body?.code==='string'?body.code:'';throw new SplitSuggestionError((body?.message==='Monthly page quota reached. Update the plan before uploading more documents.'?'This workspace does not have enough monthly page credits. Check usage before retrying the same split.':messages[code])||(response.status===401||response.status===403?'Your access changed. Reopen the split dialog before continuing.':response.status===402?'This workspace does not have enough page credits. Check usage before retrying this split.':response.status===429?'The AI request limit is reached. Wait for pending requests to finish or try again later.':response.status===410?'This AI source is no longer available. Start a new suggestion with the original file or use manual ranges.':response.status===413?'Choose one PDF or TIFF up to 10 MB and 30 pages.':'AI suggestions could not be completed. Check the saved request or try again.'),response.status,code);}
+ if(!response.ok){const code=typeof body?.code==='string'?body.code:'';throw new SplitSuggestionError((body?.message==='Monthly page quota reached. Update the plan before uploading more documents.'?'This workspace does not have enough monthly page credits. Check usage before retrying the same split.':messages[code])||(response.status===401||response.status===403?'Your access changed. Reopen the split dialog before continuing.':response.status===402?'This workspace does not have enough page credits. Check usage before retrying this split.':response.status===429?'The AI request limit is reached. Field and split suggestions share monthly, 24-hour and pending limits. Check the allowance shown here before trying a new request.':response.status===410?'This AI source is no longer available. Start a new suggestion with the original file or use manual ranges.':response.status===413?'Choose one PDF or TIFF up to 10 MB and 30 pages.':'AI suggestions could not be completed. Check the saved request or try again.'),response.status,code);}
  return body as T;
 }
 export async function assertSuggestionActor(scope:SuggestionScope,isCurrent:()=>boolean,signal:AbortSignal){const actor=await request<{user:{id:string};workspace:{id:string;role:string}}>(scope,'/api/auth/me',isCurrent,signal);if(actor?.user?.id!==scope.userId||actor?.workspace?.id!==scope.workspaceId||!['owner','admin','editor'].includes(actor.workspace.role))throw new Error('Your account or permissions changed. Reopen the split dialog before continuing.');}

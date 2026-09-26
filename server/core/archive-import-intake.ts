@@ -97,7 +97,7 @@ export async function addArchiveDocuments(actor:Actor,parserId:string,bytes:Buff
  async function quota(c:PoolClient,totalPages:number,parts:Awaited<ReturnType<ImportSource>>['parts']){
   const workspace=(await c.query('select plan from workspaces where id=$1',[actor.workspaceId])).rows[0],plan=workspace.plan;
   if(bytes.length>Math.min(archiveImportLimits.maxBytes,plan.maxBytes)||parts.some(p=>p.bytes.length>plan.maxBytes||p.source.pageCount>plan.maxPages))badRequest('Document exceeds the workspace file or page limit',413);
-  const usage=(await c.query("select coalesce(sum(pages),0)::integer used from usage_ledger where workspace_id=$1 and created_at>=date_trunc('month',now())",[actor.workspaceId])).rows[0];
+  const usage=(await c.query("select coalesce(sum(pages),0)::integer used from usage_ledger where workspace_id=$1 and created_at>=date_trunc('month',now(),'UTC')",[actor.workspaceId])).rows[0];
   if(usage.used+totalPages>plan.monthlyPages)badRequest('Monthly page quota reached. Update the plan before uploading more documents.',429);
  }
  try{

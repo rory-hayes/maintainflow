@@ -126,7 +126,7 @@ test('availability is honest and exact request replays do not create duplicate w
   assert.equal(initial.statusCode, 200, initial.body);
   assert.equal(initial.json().available, false);
   assert.deepEqual(initial.json().suggestions, []);
-  assert.deepEqual(initial.json().limits, { perDay: 10, pendingPerWorkspace: 3 });
+  assert.deepEqual(initial.json().limits, { perDay: 10, perMonth: 3, pendingPerWorkspace: 3 });
   assert.equal((await request(item.account, 'POST', endpoint(item), body(item))).statusCode, 503);
   assert.equal((await adminPool.query('select id from schema_suggestions where workspace_id=$1', [item.account.workspace.id])).rowCount, 0);
   configured();
@@ -190,7 +190,7 @@ test('suggestion routes enforce tenant isolation, editor roles, both API scopes 
 });
 
 test('pending and rolling daily limits serialize concurrent requests without consuming extra page credits', async () => {
-  const item = await fixture('limits'); configured(); const before = await unchangedData(item);
+  const item = await fixture('limits'); await adminPool.query("update workspaces set plan=jsonb_set(plan,'{id}','\"team\"') where id=$1", [item.account.workspace.id]); configured(); const before = await unchangedData(item);
   const replies = await Promise.all(Array.from({ length: 4 }, () => request(item.account, 'POST', endpoint(item), body(item))));
   assert.deepEqual(replies.map(reply => reply.statusCode).sort(), [202, 202, 202, 429]);
   const accepted = replies.filter(reply => reply.statusCode === 202).map(reply => reply.json().suggestion as SchemaSuggestion);

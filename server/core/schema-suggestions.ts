@@ -11,7 +11,7 @@ import {prepareVisualDocument,visualRenderingMetadata} from './visual-source.js'
 import {config} from './config.js';
 import {assertStorageRestoreReady} from './restore-state.js';
 import {parserSchema} from './schema.js';
-import {requireSuggestionCapacity,finishInitialSetup,failInitialSetup,runnableAiWorkSql,type AiWorkCandidate} from './parser-setup.js';
+import {requireSuggestionCapacity,auditSuggestionRequest,workspaceSuggestionLimits,finishInitialSetup,failInitialSetup,runnableAiWorkSql,type AiWorkCandidate} from './parser-setup.js';
 import {SchemaSuggestionProviderError} from './schema-suggestion-errors.js';
 
 let provider:SchemaSuggestionProvider|undefined;
@@ -43,7 +43,7 @@ export async function registerSchemaSuggestions(app:FastifyInstance){
   return withWorkspace(actor.workspaceId,async c=>{
    await parserExists(c,actor,id);
    const {rows}=await c.query(`select ${columns} from ${joined} where s.parser_id=$1 order by s.created_at desc,s.id desc limit 10`,[id]);
-   return {suggestions:rows.map(publicSuggestion),available:schemaSuggestionsConfigured(),limits:{perDay:schemaSuggestionLimits.perDay,pendingPerWorkspace:schemaSuggestionLimits.pendingPerWorkspace}};
+   return {suggestions:rows.map(publicSuggestion),available:schemaSuggestionsConfigured(),limits:await workspaceSuggestionLimits(c,actor.workspaceId)};
   });
  });
  app.get('/api/parsers/:id/schema-suggestions/:suggestionId',async request=>{
@@ -69,9 +69,9 @@ export async function registerSchemaSuggestions(app:FastifyInstance){
    if(!doc)notFound('Document not found in this parser');
    if(!schemaSuggestionsConfigured())badRequest('AI field suggestions are unavailable. Ask your workspace administrator to check the AI connection.',503);
    if(parser.field_setup_state!=='ready')badRequest('AI-assisted setup already manages this parser. Finish setup or save your own fields first.',409);
-   await requireSuggestionCapacity(c,actor.workspaceId);
+   const admittedAt=await requireSuggestionCapacity(c,actor.workspaceId);
    const {rows:[row]}=await c.query('insert into schema_suggestions(workspace_id,parser_id,document_id,base_schema_id,requested_by,request_id,document_sha256,config) values($1,$2,$3,$4,$5,$6,$7,$8) returning *',[actor.workspaceId,id,doc.id,body.baseSchemaId,actor.userId,body.requestId,doc.sha256,JSON.stringify({locale:parser.locale})]);
-   await audit(c,actor.workspaceId,actor.userId,'schema.suggestion_requested',row.id,{parserId:id,documentId:doc.id,baseSchemaId:body.baseSchemaId});
+   await auditSuggestionRequest(c,actor,'schema.suggestion_requested',row.id,{parserId:id,documentId:doc.id,baseSchemaId:body.baseSchemaId},admittedAt);
    return publicSuggestion({...row,document_name:doc.name});
   });
   return reply.code(202).send({suggestion});

@@ -39,7 +39,7 @@ export async function reserveDirectUpload(actor:Actor,parserId:string,input:z.in
     }
     const {rows:[workspace]}=await c.query('select plan from workspaces where id=$1',[actor.workspaceId]);
     if(body.size>Math.min(config.maxBytes,workspace.plan.maxBytes))badRequest('Document exceeds the workspace file limit',413);
-    const {rows:[usage]}=await c.query("select coalesce(sum(pages),0)::int used from usage_ledger where workspace_id=$1 and created_at>=date_trunc('month',now())",[actor.workspaceId]);
+    const {rows:[usage]}=await c.query("select coalesce(sum(pages),0)::int used from usage_ledger where workspace_id=$1 and created_at>=date_trunc('month',now(),'UTC')",[actor.workspaceId]);
     const {rows:[reserved]}=await c.query(`select count(*)::int total,
       coalesce(sum(case when state='complete' then expected_bytes else 10485760 end),0)::bigint bytes,
       count(*) filter(where state in('pending','finalizing') and expires_at>now())::int active,

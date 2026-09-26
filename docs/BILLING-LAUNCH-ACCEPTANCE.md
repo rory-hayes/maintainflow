@@ -11,10 +11,12 @@ The authoritative implementation is [providers.ts](../server/integrations/provid
 | Plan | Current monthly EUR price | Pages per calendar month | Active parsers | Concurrent jobs |
 | --- | ---: | ---: | ---: | ---: |
 | Explore | 0 | 50 | 1 | 1 |
-| Standard | 29 | 1,000 | 10 | 2 |
-| Team | 79 | 5,000 | 50 | 4 |
+| Standard | 19 | 300 | 10 | 2 |
+| Team | 49 | 1,000 | 50 | 4 |
 
-These are the current code values, not an assertion that the commercial terms are final. Paid Prices must match the configured IDs, EUR amount, monthly interval with interval count 1, licensed/per-unit billing, and no quantity transformation. An entitled subscription has exactly one item with quantity 1. Checkout accepts a plan ID, never a client-supplied Price or quantity.
+These launch prices were selected under the operator's authorisation on 26 September 2026. Combined monthly AI field/split suggestion allowances are 3 / 5 / 20 for Explore / Standard / Team; they are separate from page credits. Paid Prices must match the configured IDs, EUR amount, monthly interval with interval count 1, licensed/per-unit billing, and no quantity transformation. An entitled subscription has exactly one item with quantity 1. Checkout accepts a plan ID, never a client-supplied Price or quantity.
+
+The older Stripe test catalogue at €29/€79 is not compatible with this offer and must be replaced with new Price objects before sandbox acceptance. Existing stored workspace allowances and provider objects are not silently rewritten by this source change. The 26 September hosted inventory found no paid entitlements or subscription rows; repeat that check before activation. The operator confirmed Rory Hayes, no current VAT registration, and no discretionary refunds, with mandatory statutory rights preserved. Postal address and telephone details are deferred by the operator and remain unfinished launch disclosures.
 
 | Surface | Actual behavior |
 | --- | --- |

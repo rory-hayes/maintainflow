@@ -3,16 +3,37 @@ import {randomUUID} from 'node:crypto';
 import type {PoolClient} from 'pg';
 import type {Actor} from '../../shared/types.js';
 import {schemaSuggestionLimits} from '../../shared/schema-suggestions.js';
+import {monthlyAiSuggestionLimit,type AiSuggestionLimits} from '../../shared/ai-suggestion-allowances.js';
 import {audit,badRequest,notFound} from './db.js';
+
+export async function workspaceSuggestionLimits(c:PoolClient,workspaceId:string):Promise<AiSuggestionLimits>{
+ const {rows:[workspace]}=await c.query("select plan->>'id' plan_id from workspaces where id=$1",[workspaceId]);
+ if(!workspace)notFound('Workspace not found');
+ return {perDay:schemaSuggestionLimits.perDay,perMonth:monthlyAiSuggestionLimit(workspace.plan_id),pendingPerWorkspace:schemaSuggestionLimits.pendingPerWorkspace};
+}
 
 /** Call under the workspace advisory lock, shared with all suggestion creation. */
 export async function requireSuggestionCapacity(c:PoolClient,workspaceId:string){
- const {rows:[counts]}=await c.query(`select
-  (select count(*)::int from audit_events where workspace_id=$1 and action in('schema.suggestion_requested','split.suggestion_requested') and created_at>clock_timestamp()-interval '24 hours') recent,
+ const {rows:[counts]}=await c.query(`with admission_clock as materialized (select clock_timestamp() instant),
+  period as (select instant,date_trunc('month',instant at time zone 'UTC') month_start from admission_clock)
+ select w.plan->>'id' plan_id,period.instant admitted_at,
+  (select count(*)::int from audit_events where workspace_id=$1 and action in('schema.suggestion_requested','split.suggestion_requested') and created_at>period.instant-interval '24 hours') recent,
+  (select count(*)::int from audit_events where workspace_id=$1 and action in('schema.suggestion_requested','split.suggestion_requested')
+   and created_at>=period.month_start at time zone 'UTC' and created_at<(period.month_start+interval '1 month') at time zone 'UTC') monthly,
   (select count(*)::int from schema_suggestions where workspace_id=$1 and state in('queued','processing'))+
-  (select count(*)::int from split_suggestions where workspace_id=$1 and state in('uploading','queued','processing')) pending`,[workspaceId]);
+  (select count(*)::int from split_suggestions where workspace_id=$1 and state in('uploading','queued','processing')) pending
+ from workspaces w cross join period where w.id=$1`,[workspaceId]);
+ if(!counts)notFound('Workspace not found');
+ const perMonth=monthlyAiSuggestionLimit(counts.plan_id);
+ if(counts.monthly>=perMonth)badRequest(`This workspace has used its ${perMonth} AI suggestions for this calendar month (UTC). Field and split suggestions share this limit. Try again next month.`,429);
  if(counts.recent>=schemaSuggestionLimits.perDay)badRequest('This workspace has used its 10 AI suggestions for the last 24 hours. Field and split suggestions share this limit. Try again later.',429);
  if(counts.pending>=schemaSuggestionLimits.pendingPerWorkspace)badRequest('This workspace already has three AI suggestions in progress. Wait for a field or split suggestion to finish.',429);
+ return counts.admitted_at as Date;
+}
+
+/** Keep the durable charge in the exact period checked after acquiring the workspace lock. */
+export async function auditSuggestionRequest(c:PoolClient,actor:Actor,action:'schema.suggestion_requested'|'split.suggestion_requested',id:string,metadata:unknown,admittedAt:Date){
+ await c.query('insert into audit_events(workspace_id,user_id,action,entity_id,metadata,created_at) values($1,$2,$3,$4,$5,$6)',[actor.workspaceId,actor.userId,action,id,JSON.stringify(metadata),admittedAt]);
 }
 
 /** Application-owned SQL only. All lanes use the same readiness and total order.
@@ -30,7 +51,7 @@ export type AiWorkCandidate={id:string;createdAt:Date|string;lane:0|1|2};
 export async function parserSetupStatus(c:PoolClient,parser:any,available:boolean){
  const {rows:[source]}=await c.query('select s.id,s.document_id,d.name,s.error from schema_suggestions s join documents d on d.id=s.document_id where s.id=$1 and s.parser_id=$2',[parser.field_setup_suggestion_id,parser.id]);
  const {rows:[waiting]}=await c.query('select count(*)::int count from jobs j join documents d on d.id=j.document_id where d.parser_id=$1 and j.waiting_for_schema',[parser.id]);
- return {state:parser.field_setup_state,suggestionId:source?.id??null,sourceDocumentId:source?.document_id??null,sourceDocumentName:source?.name??null,error:parser.field_setup_error??(parser.field_setup_state==='failed'?source?.error:null)??null,waitingDocuments:waiting.count,available};
+ return {state:parser.field_setup_state,suggestionId:source?.id??null,sourceDocumentId:source?.document_id??null,sourceDocumentName:source?.name??null,error:parser.field_setup_error??(parser.field_setup_state==='failed'?source?.error:null)??null,waitingDocuments:waiting.count,available,limits:await workspaceSuggestionLimits(c,parser.workspace_id)};
 }
 
 /** The caller holds workspace and parser locks; upload and setup enqueue commit together. */
@@ -43,12 +64,12 @@ export async function queueInitialSetup(c:PoolClient,actor:Actor,parser:any,docu
  if(parser.archived)badRequest('Restore this parser before setting up its fields.',409);
  if(!['awaiting_sample','failed'].includes(parser.field_setup_state))badRequest('This parser is already set up or field discovery is in progress.',409);
  if(document.parser_id!==parser.id||document.workspace_id!==actor.workspaceId)notFound('Document not found in this parser');
- await requireSuggestionCapacity(c,actor.workspaceId);
+ const admittedAt=await requireSuggestionCapacity(c,actor.workspaceId);
  const {rows:[suggestion]}=await c.query('insert into schema_suggestions(workspace_id,parser_id,document_id,base_schema_id,requested_by,request_id,document_sha256,config,auto_setup) values($1,$2,$3,$4,$5,$6,$7,$8,true) returning *',[actor.workspaceId,parser.id,document.id,parser.active_schema_id,actor.userId,requestId,document.sha256,JSON.stringify({locale:parser.locale})]);
  await c.query("update parsers set field_setup_state='suggesting',field_setup_suggestion_id=$2,field_setup_error=null where id=$1",[parser.id,suggestion.id]);
  const {rows}=await c.query("update jobs j set state='queued',error=null,available_at=now(),updated_at=now() from documents d where j.document_id=d.id and d.parser_id=$1 and j.waiting_for_schema and j.state='failed' returning j.document_id",[parser.id]);
  if(rows.length)await c.query("update documents set status='queued',error=null,updated_at=now() where id=any($1::uuid[])",[rows.map(row=>row.document_id)]);
- await audit(c,actor.workspaceId,actor.userId,'schema.suggestion_requested',suggestion.id,{parserId:parser.id,documentId:document.id,baseSchemaId:parser.active_schema_id,automaticSetup:true});
+ await auditSuggestionRequest(c,actor,'schema.suggestion_requested',suggestion.id,{parserId:parser.id,documentId:document.id,baseSchemaId:parser.active_schema_id,automaticSetup:true},admittedAt);
  return suggestion;
 }
 

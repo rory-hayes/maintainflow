@@ -2,17 +2,21 @@
 
 Updated 26 September 2026. This is the working queue for the user's request to complete parallel work and then continue through dependencies. It distinguishes implementation, local acceptance and actual hosted operation; account upgrades alone do not complete it.
 
-## Current disposition — after PR46 and the first hosted bank run
+## Current disposition — after PR52 and broader hosted E2E
 
 The baseline and queue below retain their earlier planning history. This disposition supersedes their pending-approval/deployment statements:
 
-- **L01/L04–L07:** reviewed stack PR51–PR46 merged and deployed as `e139697a12696324117de14269a589d24a5e661e`; migrations 039–042 applied/read back. Final CI passed 1,070 tests plus runtime and isolated recovery checks. Current health/readiness and a hosted rules-document correction/approval/export/isolation regression passed.
+- **L01/L04–L07:** reviewed stack and PR52 merged; canonical release is `124cee1b950afc1748d34c58783d1eec1880c538`. Migrations 039–042 applied/read back. Latest CI passed 1,087 tests plus runtime and isolated recovery checks. Hosted rules-document correction/approval/export/isolation regression passed on the prior release; PR52 fixed saved-export API scopes and sign-in copy.
 - **L08:** watchdog delta applied and owner-only permissions verified. Current external failure-event delivery remains unproved.
 - **L09:** two synthetic PDFs/four pages processed automatically. Native literal extraction passed; scanned raw transaction-currency provenance failed its exact check despite correct normalized transactions. Original failure evidence is preserved. Review/export continuation is recorded separately in the [E2E audit](E2E-AUDIT-2026-09-26.md).
-- **L10/L21:** deployed mobile landing/onboarding and generic sign-in error passed. Eight anonymous bank reads returned 401 and eight outsider reads returned 404. This is not the complete four-role, capacity, retry or authenticated browser matrix.
+- **L10/L12/L21:** deployed mobile landing/onboarding and generic sign-in error passed. Eight anonymous bank reads returned 401 and eight outsider reads returned 404. The actual viewer/admin/editor role transition, correction/restoration, downgrade and removal/session matrix now passed. Authenticated browser review, password recovery/invitation email, capacity and retry acceptance remain.
+- **L11:** held-out pack executed once: three PDFs/six pages, two independent cases/18 transactions. All rows/groups/repeated transactions retained; three native credits misclassified as debits and blocked by reconciliation. Case B approval refused with HTTP 422. Keep all first-pass results; manual source review and exact reviewed exports remain, along with broader quality/capacity coverage.
 - **L16:** diagnostics credential and state key installed; hosted probe returned three successful checks. Recipient/sending credential, incident/recovery delivery, initialization and genuine scheduled operation remain open.
 - **L17:** [local read-only stale-run checker](STALE-MONITOR.md) and tests added. Independent hosting, schedule and notification acceptance remain open.
-- **L18–L26:** current hosted recovery/backups, remaining retention/capacity, policies, real sandbox billing, offer decisions, upgrades and final activation remain distinct gates. Six observed workspaces use Explore with no subscription/checkout rows; no paid-allowance cleanup was required by that inventory.
+- **L18/L19:** previous hosted archive is intact but predates current schema. Current synthetic restore tests pass; a fresh actual capture requires the existing owner-capable DB connection, absent from the named config. A local isolated recovery target is sufficient for the implemented drill; no new paid account is needed.
+- **L22/L24:** operator confirmed Rory Hayes, no VAT registration and no discretionary refunds with statutory rights preserved. Address and phone are deferred. Chosen offer: free/50, €19/300, €49/1,000 pages; combined helper caps 3/5/20. Implementation passed 132 focused tests, typecheck/build and local pricing/mock-billing browser checks; deployment remains pending. Full privacy/terms/provider/retention disclosures and support handling remain open.
+- **L23:** existing Stripe test dashboard/catalogue accessible; no test server key in named config. Old €29/€79 Prices must be replaced for the selected offer, followed by actual sandbox lifecycle acceptance. No payments or billing-mode changes made.
+- **L20/L25/L26:** remaining cleanup/capacity, upgrades and final activation remain distinct gates. Six observed workspaces use Explore with no subscription/checkout rows; no paid-allowance cleanup was required by that inventory.
 
 See [current launch status](LAUNCH-STATUS-2026-09-26.md) and [E2E audit](E2E-AUDIT-2026-09-26.md). Preserve the original test failures, fixture history and limits; upgrading accounts cannot resolve these operational gaps.
 

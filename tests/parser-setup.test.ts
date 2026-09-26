@@ -290,7 +290,7 @@ test('setup recovery enforces tenant, role, dual-scope and origin boundaries', a
 });
 
 test('pending and daily suggestion caps roll back a first upload without abandoning awaiting-sample setup', async () => {
-  const item = await fixture('quota');
+  const item = await fixture('quota'); await adminPool.query("update workspaces set plan=jsonb_set(plan,'{id}','\"team\"') where id=$1", [item.account.workspace.id]);
   const preset = await request(item.account, 'POST', '/api/parsers', { name: 'Owned existing suggestions', useCase: 'custom' }); assert.equal(preset.statusCode, 201, preset.body);
   const existing = { account: item.account, parserId: preset.json().parser.id, baseSchemaId: preset.json().schema.id }, priorSource = await upload(existing, 'prior');
   for (let i = 0; i < 3; i++) assert.equal((await request(item.account, 'POST', `/api/parsers/${existing.parserId}/schema-suggestions`, { documentId: priorSource.document.id, baseSchemaId: existing.baseSchemaId, requestId: randomUUID() })).statusCode, 202);
