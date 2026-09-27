@@ -129,7 +129,7 @@ async function productionServices():Promise<HostedWorkerServices>{
   ]);
   return {
     enqueue:enqueueIntegrationEvents,
-    core:budget=>processOneCoreJob(undefined,{signal:budget.signal}),
+    core:budget=>processOneCoreJob(undefined,{signal:budget.signal,onAttemptEvent:event=>{console.info(JSON.stringify({event:'core_worker_attempt',jobId:event.jobId,attempt:event.attempt,stage:event.stage,elapsedMs:event.elapsedMs,...('outcome' in event?{outcome:event.outcome}:{})}));}}),
     suggestion:budget=>processOneSchemaSuggestion(undefined,{signal:budget.signal}),
     splitSuggestion:budget=>processOneSplitSuggestion(undefined,{signal:budget.signal}),
     delivery:budget=>processOneDelivery({signal:budget.signal}),
