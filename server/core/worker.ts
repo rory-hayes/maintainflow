@@ -11,6 +11,7 @@ import {fileURLToPath} from 'node:url';
 import {adminPool,appPool,transaction,withWorkspace} from './db.js';
 import {config} from './config.js';
 import {assertStorageRestoreReady} from './restore-state.js';
+import {createWorkerAttemptReporter,type WorkerAttemptObserver} from './worker-attempt-events.js';
 import {prepareVisualDocument,visualRenderingMetadata} from './visual-source.js';
 import {lockParserForDocument,runnableAiWorkSql} from './parser-setup.js';
 import type {NormalizationContext} from './timestamps.js';
@@ -29,7 +30,7 @@ let provider:ExtractionProvider|undefined;
 export function setExtractionProvider(value:ExtractionProvider|undefined){provider=value;}
 export function aiConfigured(){return provider?.configured()===true;}
 const providerDeadlineMs=90_000;
-interface JobOptions {signal?:AbortSignal;providerTimeoutMs?:number;pdfGeometryOptions?:Pick<DecoderOptions,'spawnChild'|'timeoutMs'>;}
+interface JobOptions {signal?:AbortSignal;providerTimeoutMs?:number;pdfGeometryOptions?:Pick<DecoderOptions,'spawnChild'|'timeoutMs'>;onAttemptEvent?:WorkerAttemptObserver;}
 
 async function extractWithDeadline<T>(work:(signal:AbortSignal)=>Promise<T>,options:JobOptions):Promise<T>{
   const timeoutMs=options.providerTimeoutMs??providerDeadlineMs;
@@ -70,6 +71,7 @@ async function recoverExpiredCoreJobs(onlyJobId?:string){
 }
 
 export async function processOneCoreJob(onlyJobId?:string,options:JobOptions={}){
+const reportAttempt=createWorkerAttemptReporter(options.onAttemptEvent);
 await assertStorageRestoreReady(config.storageDir,process.env.STORAGE_DRIVER||'filesystem');
 // Each claim needs its own fence, including overlapping invocations in a warm function.
 const owner=randomUUID();
@@ -94,6 +96,9 @@ await c.query("update jobs set state='processing',attempts=attempts+1,lease_owne
 await c.query("update documents set status='processing',error=null,updated_at=now() where id=$1",[selected.document_id]);
 return {...selected,attempts:selected.attempts+1};});
 if(!job)return false;
+const report=(phase:Parameters<typeof reportAttempt>[2])=>reportAttempt(job.id,job.attempts,phase);
+report({stage:'claimed'});
+let extractionFinished=false;
 try{
 const attempt=await extractWithDeadline(async signal=>{
  const data=await withWorkspace(job.workspace_id,async c=>{const doc=(await c.query('select * from documents where id=$1',[job.document_id])).rows[0];const schema=(await c.query('select schema from schema_versions where id=$1',[job.schema_version_id])).rows[0]?.schema;return {doc,schema};});
@@ -156,10 +161,24 @@ const attempt=await extractWithDeadline(async signal=>{
  if(bank){try{const statement=createBankStatementResult(result.rawValues,result.evidence,job.config.locale);bankContext=statement.context;result={...result,normalizedValues:statement.values as unknown as Record<string,unknown>,issues:[...result.issues,...statement.issues.map(issue=>({field:issue.field??issue.transactionId??issue.accountId??'accounts',code:issue.code,message:issue.message}))]};}catch(error){throw Object.assign(error instanceof Error?error:new Error('Bank statement extraction is invalid'),{permanent:true});}}
  signal.throwIfAborted();return {data,result,selection,bankContext,valuePolicy,sourceVerified:Boolean(geometry||bankPdfLayoutInput),templateSnapshot:decision?.result?.templateSnapshot??null};
 },options);
-if(!attempt)return true;const {data,result,selection,bankContext,valuePolicy,sourceVerified,templateSnapshot}=attempt;
+extractionFinished=true;
+report({stage:'extraction_finished',outcome:attempt?'succeeded':'source_missing'});
+if(!attempt){report({stage:'finished',outcome:'source_missing'});return true;}const {data,result,selection,bankContext,valuePolicy,sourceVerified,templateSnapshot}=attempt;
 const normalizationContext:NormalizationContext={version:valuePolicy,locale:job.config.locale,timezone:job.config.timezone??null,tzdbVersion:process.versions.tz??null};
-await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const lock=(await c.query('select * from jobs where id=$1 and lease_owner=$2 and state=$3 for update',[job.id,owner,'processing'])).rows[0];if(!lock)return;if(sourceVerified){const current=(await c.query('select sha256,storage_key,mime_type,page_count,byte_size from documents where id=$1 for update',[job.document_id])).rows[0];if(!current||current.sha256!==data.doc.sha256||current.storage_key!==data.doc.storage_key||current.mime_type!==data.doc.mime_type||current.page_count!==data.doc.page_count||String(current.byte_size)!==String(data.doc.byte_size))throw Object.assign(new Error('The original PDF changed before its extraction result could be saved. Reprocess a verified source.'),{permanent:true});}const {rows:[run]}=await c.query('insert into extraction_runs(workspace_id,document_id,schema_version_id,job_id,engine,model,prompt_version,document_sha256,raw_values,normalized_values,evidence,issues,token_usage,cost_usd,selection,template_snapshot,normalization_context,bank_statement_context) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning id',[job.workspace_id,job.document_id,job.schema_version_id,job.id,result.engine,result.model,result.promptVersion??'folio-extraction-v1',data.doc.sha256,JSON.stringify(result.rawValues),JSON.stringify(result.normalizedValues),JSON.stringify(result.evidence),JSON.stringify(result.issues),JSON.stringify(result.tokenUsage??{}),result.costUsd??0,selection?JSON.stringify(selection):null,templateSnapshot?JSON.stringify(templateSnapshot):null,JSON.stringify(normalizationContext),bankContext?JSON.stringify(bankContext):null]);await c.query("update documents set latest_run_id=$2,status='needs_review',error=null,updated_at=now() where id=$1",[job.document_id,run.id]);if(bankContext)await indexBankStatement(c,job.workspace_id,job.document_id,run.id,result.normalizedValues as any);await c.query("update jobs set state='completed',lease_until=null,lease_owner=null,updated_at=now() where id=$1",[job.id]);});
-}catch(e){const permanent=(e as any).permanent||job.attempts>=job.max_attempts;const message=e instanceof Error?e.message.slice(0,500):'Processing failed';await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const changed=await c.query("update jobs set state=$3,error=$4,available_at=now()+($5 * interval '1 second'),lease_owner=null,lease_until=null,updated_at=now() where id=$1 and lease_owner=$2 and state='processing' returning id",[job.id,owner,permanent?'failed':'queued',message,Math.min(60,2**job.attempts)]);if(changed.rowCount)await c.query('update documents set status=$2,error=$3,updated_at=now() where id=$1',[job.document_id,permanent?'failed':'queued',message]);});}
+report({stage:'persistence_started',outcome:'completed'});
+const saved=await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const lock=(await c.query('select * from jobs where id=$1 and lease_owner=$2 and state=$3 for update',[job.id,owner,'processing'])).rows[0];if(!lock)return false;if(sourceVerified){const current=(await c.query('select sha256,storage_key,mime_type,page_count,byte_size from documents where id=$1 for update',[job.document_id])).rows[0];if(!current||current.sha256!==data.doc.sha256||current.storage_key!==data.doc.storage_key||current.mime_type!==data.doc.mime_type||current.page_count!==data.doc.page_count||String(current.byte_size)!==String(data.doc.byte_size))throw Object.assign(new Error('The original PDF changed before its extraction result could be saved. Reprocess a verified source.'),{permanent:true});}const {rows:[run]}=await c.query('insert into extraction_runs(workspace_id,document_id,schema_version_id,job_id,engine,model,prompt_version,document_sha256,raw_values,normalized_values,evidence,issues,token_usage,cost_usd,selection,template_snapshot,normalization_context,bank_statement_context) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning id',[job.workspace_id,job.document_id,job.schema_version_id,job.id,result.engine,result.model,result.promptVersion??'folio-extraction-v1',data.doc.sha256,JSON.stringify(result.rawValues),JSON.stringify(result.normalizedValues),JSON.stringify(result.evidence),JSON.stringify(result.issues),JSON.stringify(result.tokenUsage??{}),result.costUsd??0,selection?JSON.stringify(selection):null,templateSnapshot?JSON.stringify(templateSnapshot):null,JSON.stringify(normalizationContext),bankContext?JSON.stringify(bankContext):null]);await c.query("update documents set latest_run_id=$2,status='needs_review',error=null,updated_at=now() where id=$1",[job.document_id,run.id]);if(bankContext)await indexBankStatement(c,job.workspace_id,job.document_id,run.id,result.normalizedValues as any);await c.query("update jobs set state='completed',lease_until=null,lease_owner=null,updated_at=now() where id=$1",[job.id]);return true;});
+report({stage:'finished',outcome:saved?'completed':'fence_lost'});
+}catch(e){
+ if(!extractionFinished)report({stage:'extraction_finished',outcome:'failed'});
+ const permanent=(e as any).permanent||job.attempts>=job.max_attempts;
+ const message=e instanceof Error?e.message.slice(0,500):'Processing failed';
+ const outcome=permanent?'failed':'retry';
+ report({stage:'persistence_started',outcome});
+ try{
+  const persisted=await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const changed=await c.query("update jobs set state=$3,error=$4,available_at=now()+($5 * interval '1 second'),lease_owner=null,lease_until=null,updated_at=now() where id=$1 and lease_owner=$2 and state='processing' returning id",[job.id,owner,permanent?'failed':'queued',message,Math.min(60,2**job.attempts)]);if(changed.rowCount)await c.query('update documents set status=$2,error=$3,updated_at=now() where id=$1',[job.document_id,permanent?'failed':'queued',message]);return Boolean(changed.rowCount);});
+  report({stage:'finished',outcome:persisted?outcome:'fence_lost'});
+ }catch(persistenceError){report({stage:'finished',outcome:'persistence_error'});throw persistenceError;}
+}
 return true;
 }
 export async function enforceRetention(onlyWorkspaceId?:string,options:{signal?:AbortSignal;limit?:number}={}){
