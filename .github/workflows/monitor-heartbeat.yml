@@ -1,0 +1,51 @@
+name: Independent monitor heartbeat
+
+on:
+  workflow_run:
+    workflows: [Operational monitoring]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  heartbeat:
+    # Never checkout a triggering run's code or download its artifacts.
+    if: >-
+      vars.FOLIO_MONITOR_ENABLED == 'true' &&
+      github.event.workflow_run.event == 'schedule' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.display_title == 'Folio monitor: run' &&
+      github.event.workflow_run.run_attempt == 1 &&
+      github.event.workflow_run.repository.full_name == 'rory-hayes/maintainflow' &&
+      github.event.workflow_run.head_repository.full_name == 'rory-hayes/maintainflow'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.13.0'
+      - name: Notify the independent observer of a completed scheduled monitor
+        env:
+          FOLIO_MONITOR_ENABLED: ${{ vars.FOLIO_MONITOR_ENABLED }}
+          FOLIO_MONITOR_HEARTBEAT_URL: ${{ secrets.FOLIO_MONITOR_HEARTBEAT_URL }}
+          SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+          SOURCE_REPOSITORY: ${{ github.event.workflow_run.repository.full_name }}
+          SOURCE_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
+          SOURCE_PATH: ${{ github.event.workflow_run.path }}
+          SOURCE_TITLE: ${{ github.event.workflow_run.display_title }}
+          SOURCE_STATUS: ${{ github.event.workflow_run.status }}
+          SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_CREATED_AT: ${{ github.event.workflow_run.created_at }}
+          SOURCE_UPDATED_AT: ${{ github.event.workflow_run.updated_at }}
+        run: node scripts/monitor-heartbeat.ts --send

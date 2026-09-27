@@ -2,6 +2,8 @@
 
 `scripts/stale-monitor.ts` is a read-only checker for the existing GitHub operational monitor. It closes a local tooling gap: a monitor cannot report its own permanent stoppage. This file does **not** install an external runner, schedule checks, or send notifications. Hosted activation still follows [Monitoring activation](MONITORING-ACTIVATION.md).
 
+An optional [Healthchecks heartbeat](MONITOR-HEARTBEAT.md) can notify an independent service after a genuine scheduled monitor finishes successfully. It remains inactive until its separately approved provider check and protected ping URL are configured. Neither tool alone proves independent alert delivery.
+
 With Node 24, the default command is an offline plan:
 
 ```sh
