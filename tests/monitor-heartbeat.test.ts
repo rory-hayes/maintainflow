@@ -29,7 +29,8 @@ async function rejected(patch: NodeJS.ProcessEnv, reason?: string) {
   assert.equal(report.status, 'rejected');
   if (reason) assert.equal(report.reason, reason);
   assert.equal(f.calls.length, 0); assert.equal(report.requests, 0);
-  assert.equal(JSON.stringify(report).includes(url), false);
+  assert.deepEqual(Object.keys(report).sort(), ['reason', 'requests', 'status']);
+  assert.match(report.reason, /^heartbeat_(?:trigger_invalid|monitor_disabled|source_invalid|completion_invalid|identity_invalid|source_stale|destination_invalid)$/);
 }
 
 test('completed genuine schedule sends one minimal heartbeat without customer data or credentials in headers', async () => {
@@ -40,7 +41,6 @@ test('completed genuine schedule sends one minimal heartbeat without customer da
   assert.equal(init.method, 'GET'); assert.equal(init.redirect, 'error'); assert.equal(init.body, undefined);
   assert.ok(init.signal); assert.equal(init.signal.aborted, true);
   assert.deepEqual(Object.keys(Object.fromEntries(new Headers(init.headers))).sort(), ['accept', 'user-agent']);
-  assert.equal(JSON.stringify(report).includes(url), false);
 });
 
 test('missing configuration and plan mode never use the network or certify activation', async () => {
@@ -121,7 +121,7 @@ test('oversized or misdeclared responses stop within bounded reads', async () =>
 test('transport and streaming deadlines fail without leaking the ping capability', async () => {
   const failed: typeof fetch = async () => { throw new Error(`PRIVATE ${url}`); };
   const report = await sendHeartbeat(fixture(), failed, {now});
-  assert.equal(report.reason, 'heartbeat_transport_failed'); assert.equal(JSON.stringify(report).includes(url), false);
+  assert.deepEqual(report, {status: 'rejected', reason: 'heartbeat_transport_failed', requests: 1});
   const hanging: typeof fetch = async () => new Promise<Response>(() => {});
   assert.equal((await sendHeartbeat(fixture(), hanging, {now, timeoutMs: 10})).reason, 'heartbeat_timeout');
   const streaming: typeof fetch = async () => new Response(new ReadableStream({start(controller) { controller.enqueue(new TextEncoder().encode('O')); }}));
