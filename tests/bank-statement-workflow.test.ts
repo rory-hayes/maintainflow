@@ -1,6 +1,7 @@
 import test,{before,after,afterEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
+import type {Evidence} from '../shared/types.js';
 import Fastify from 'fastify';
 import {buildApp} from '../server/app.js';
 import {adminPool,closeDatabase,withWorkspace} from '../server/core/db.js';
@@ -15,6 +16,51 @@ before(async()=>{await assertBankFixtureDatabase();globalThis.fetch=async()=>{ne
 afterEach(()=>{setExtractionProvider(undefined);assert.equal(networkCalls,0);});
 after(async()=>{setExtractionProvider(undefined);globalThis.fetch=originalFetch;await app?.close();await cleanupBankFixtures();await closeDatabase();});
 const save=(f:Awaited<ReturnType<typeof createBankFixture>>,run:any,values=run.bankValues)=>f.request('POST',`/api/runs/${run.id}/corrections`,{values,expectedRevision:run.effectiveRevision});
+
+async function partialEvidenceFixture(f:Awaited<ReturnType<typeof createBankFixture>>,retainProviderIssue:boolean){
+ const source=await f.queue(),raw=bankRawFixture(),evidence:Record<string,Evidence[]>={};
+ for(const [index,row] of raw.accounts[0].transactions.entries())for(const [field,value] of Object.entries(row))if(value!==null)evidence[`accounts[0].transactions[${index}].${field}`]=[{page:1,text:value,source:'matched-text'}];
+ const field='accounts[0].transactions[0].description';evidence[field]=[{page:1,text:'Office supplies',source:'matched-text'}];
+ const issues=retainProviderIssue?[{field,code:'evidence_incomplete',message:'Retained synthetic provider warning'}]:[];
+ setExtractionProvider({configured:()=>true,async extract(){return {rawValues:structuredClone(raw) as unknown as Record<string,unknown>,normalizedValues:{},evidence:structuredClone(evidence),issues:structuredClone(issues),engine:'controlled-evidence-fixture',model:'synthetic-provider'};}});
+ try{assert.equal(await processOneCoreJob(source.jobId),true);const run=(await f.detail(source.document.id)).runs[0];assert.ok(run);return {...source,run,raw,evidence,issues};}finally{setExtractionProvider(undefined);}
+}
+
+test('bank worker retains evidence warnings and current approval binds them while drafts, exclusions and old exports preserve audit history',async()=>{
+ const f=await createBankFixture(app),source=await partialEvidenceFixture(f,true),initial=source.run;
+ const identity=initial.bankValues.accounts[0].transactions[0].id;
+ const stored=async()=> (await adminPool.query('select raw_values,evidence,issues,bank_statement_context from extraction_runs where id=$1',[initial.id])).rows[0];
+ const before=await stored();assert.ok(before.issues.some((issue:any)=>issue.message==='Retained synthetic provider warning'));assert.deepEqual(before.raw_values,source.raw);assert.deepEqual(before.evidence,source.evidence);
+ const warning=initial.bankIssues.find((issue:any)=>issue.code==='evidence_incomplete');assert.equal(warning.transactionId,identity);assert.equal(warning.field,'description');assert.doesNotMatch(warning.message,/synthetic provider/);
+ const oldToken=createHash('sha256').update(JSON.stringify({version:1,runId:initial.id,revision:initial.effectiveRevision,values:initial.bankValues,issues:initial.bankIssues.filter((issue:any)=>issue.code!=='evidence_incomplete'),relatedRevisions:[]})).digest('hex');
+ assert.notEqual(initial.bankReviewToken,oldToken);
+ assert.equal((await f.request('POST',`/api/runs/${initial.id}/approve`,{expectedRevision:initial.effectiveRevision,bankReviewToken:oldToken,acknowledgeBankWarnings:true})).statusCode,409);
+ assert.equal((await f.request('POST',`/api/runs/${initial.id}/approve`,{expectedRevision:initial.effectiveRevision,bankReviewToken:initial.bankReviewToken})).statusCode,422);
+ const approvalResponse=await f.approve(initial);assert.equal(approvalResponse.statusCode,200,approvalResponse.body);const approval=approvalResponse.json().approval;
+ assert.ok(approval.bankReview.issues.some((issue:any)=>issue.code==='evidence_incomplete'&&issue.transactionId===identity));
+ const exported=await f.request('POST','/api/exports',{format:'csv',workflow:'bank_statement',documentIds:[source.document.id],revisions:[{documentId:source.document.id,approvalId:approval.id}]});assert.equal(exported.statusCode,200,exported.body);
+ const download=await f.request('GET',exported.json().downloadUrl);assert.equal(download.statusCode,200,download.body);
+ const values=structuredClone(initial.bankValues);values.accounts[0].transactions[0].description='Office supplies';values.accounts[0].transactions.reverse();
+ const corrected=await save(f,initial,values);assert.equal(corrected.statusCode,200,corrected.body);let run=corrected.json().run;
+ assert.equal(run.bankIssues.find((issue:any)=>issue.code==='evidence_incomplete').transactionId,identity);assert.deepEqual(run.bankContext,initial.bankContext);
+ const excluded=structuredClone(run.bankValues);const row=excluded.accounts[0].transactions.find((item:any)=>item.id===identity);row.excluded=true;row.exclusion_reason='Synthetic excluded item, retained in audit';
+ const saved=await save(f,run,excluded);assert.equal(saved.statusCode,200,saved.body);run=saved.json().run;assert.ok(!run.bankIssues.some((issue:any)=>issue.code==='evidence_incomplete'));
+ assert.deepEqual(await stored(),before);assert.deepEqual((await adminPool.query('select values,bank_review from approvals where id=$1',[approval.id])).rows[0],{values:approval.values,bank_review:approval.bankReview});
+ const historical=await f.request('GET',exported.json().downloadUrl);assert.equal(historical.statusCode,200,historical.body);assert.ok(historical.rawPayload.equals(download.rawPayload));
+});
+
+test('legacy bank runs derive current partial-quote warnings without rewriting run or older approval snapshots',async()=>{
+ const f=await createBankFixture(app),source=await partialEvidenceFixture(f,false),run=source.run;
+ const before=(await adminPool.query('select raw_values,evidence,issues,bank_statement_context from extraction_runs where id=$1',[run.id])).rows[0];assert.ok(!before.issues.some((issue:any)=>issue.code==='evidence_incomplete'));
+ // Explicit isolated pre-change fixture: the old approval did not know this warning.
+ const legacyReview={version:1,revision:run.effectiveRevision,token:'a'.repeat(64),warningsAcknowledged:true,issues:run.bankIssues.filter((issue:any)=>issue.code!=='evidence_incomplete')};
+ const approval=(await adminPool.query('insert into approvals(workspace_id,run_id,user_id,values,bank_review) values($1,$2,$3,$4,$5) returning *',[f.actor.workspaceId,run.id,f.actor.userId,JSON.stringify(run.bankValues),JSON.stringify(legacyReview)])).rows[0];
+ const current=(await f.detail(source.document.id)).runs[0];assert.equal(current.bankIssues.filter((issue:any)=>issue.code==='evidence_incomplete').length,1);
+ assert.deepEqual((await adminPool.query('select raw_values,evidence,issues,bank_statement_context from extraction_runs where id=$1',[run.id])).rows[0],before);
+ assert.deepEqual((await adminPool.query('select * from approvals where id=$1',[approval.id])).rows[0],approval);
+ const exported=await f.request('POST','/api/exports',{format:'csv',workflow:'bank_statement',documentIds:[source.document.id],revisions:[{documentId:source.document.id,approvalId:approval.id}]});assert.equal(exported.statusCode,200,exported.body);
+ const downloaded=await f.request('GET',exported.json().downloadUrl);assert.equal(downloaded.statusCode,200);assert.match(downloaded.body,/Office supplies/);assert.match(downloaded.body,/Wrapped description/);
+});
 
 test('bank setup is idempotent under contention, pins locale and respects fixed fields and parser quota',async()=>{
  const f=await createBankFixture(app),responses=await Promise.all(Array.from({length:5},()=>f.request('POST','/api/bank-statements/setup',{})));

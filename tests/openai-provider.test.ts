@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createOpenAIProvider, extractionResponseSchema, openAIExtraction } from '../server/core/openai-provider.js';
 import type { ParserSchema, ProviderInput } from '../shared/types.js';
+import {bankStatementSchema} from '../shared/bank-statement-preset.js';
 
 const schema: ParserSchema = { fields: [
   { key: 'identifier', label: 'Identifier', type: 'string', required: true },
@@ -110,6 +111,28 @@ test('A real quote cannot hide a literal value that is absent from the cited pag
   const result = await provider(response({ rawValues: { ...rawValues, amount: '€9.999,99' }, evidence })).extract(input());
   assert.equal(result.evidence.amount, undefined);
   assert.ok(result.issues.some(issue => issue.field === 'amount' && issue.code === 'value_source_mismatch'));
+});
+
+test('fixed bank descriptions keep partial native/visual quotes with coverage warnings without changing money',async()=>{
+ const fields=bankStatementSchema.fields[0].fields!,transactionFields=fields.find(field=>field.key==='transactions')!.fields!;
+ const row={...Object.fromEntries(transactionFields.map(field=>[field.key,null])),description:'Supplier refund\nReturned unused component',debit:'275,25',credit:null};
+ const rawValues={accounts:[{...Object.fromEntries(fields.map(field=>[field.key,null])),transactions:[row]}]};
+ const field='accounts[0].transactions[0].description',evidence=[{field,page:1,text:'Supplier refund'},{field:'accounts[0].transactions[0].debit',page:1,text:'275,25'}];
+ for(const visual of [false,true]){
+  const result=await provider(response({rawValues,evidence})).extract(input({schema:bankStatementSchema,mimeType:visual?'image/png':'text/plain',pages:[{page:1,text:visual?'':'Supplier refund\nReturned unused component\n275,25'}]}));
+  assert.deepEqual(result.rawValues,rawValues);assert.equal((result.normalizedValues.accounts as any[])[0].transactions[0].debit,'275,25');assert.equal((result.normalizedValues.accounts as any[])[0].transactions[0].credit,null);
+  assert.deepEqual(result.evidence[field],[{page:1,text:'Supplier refund',source:visual?'model-visual':'matched-text'}]);
+  assert.equal(result.issues.filter(issue=>issue.field===field&&issue.code==='evidence_incomplete').length,1);
+  assert.equal(result.issues.some(issue=>issue.code==='visual_evidence'),visual);
+ }
+ const complete=await provider(response({rawValues,evidence:[{field,page:1,text:row.description}]})).extract(input({schema:bankStatementSchema,pages:[{page:1,text:row.description+'\n275,25'}]}));
+ assert.ok(!complete.issues.some(issue=>issue.code==='evidence_incomplete'));
+});
+
+test('partial quote coverage leaves general document extraction unchanged',async()=>{
+ const schema:ParserSchema={fields:[{key:'description',label:'Description',type:'string'}]},rawValues={description:'Office supplies\nWrapped description'};
+ const result=await provider(response({rawValues,evidence:[{field:'description',page:1,text:'Office supplies'}]})).extract(input({schema,pages:[{page:1,text:rawValues.description}]}));
+ assert.deepEqual(result.issues,[]);assert.equal(result.evidence.description[0].text,'Office supplies');
 });
 
 test('Image and mixed PDF inputs include original bytes with explicit detail and honest visual evidence', async () => {

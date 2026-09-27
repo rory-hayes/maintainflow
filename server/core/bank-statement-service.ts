@@ -7,6 +7,7 @@ import {BankStatementValidationError,bankAccountKey,bankTransactionFingerprint,c
 import {audit,badRequest,camel,withWorkspace} from './db.js';
 import {requireParserCapacity} from './parser-capacity.js';
 import {publicRun} from './runs.js';
+import {bankEvidenceReviewIssues} from './bank-statement-evidence.js';
 
 import {bankLocales} from './bank-locale.js';
 export {bankLocales} from './bank-locale.js';
@@ -67,7 +68,8 @@ async function bankStatementChecks(c:PoolClient,workspaceId:string,documentId:st
 export async function bankStatementIssues(c:PoolClient,workspaceId:string,documentId:string,values:BankValues,context:BankContext){return (await bankStatementChecks(c,workspaceId,documentId,values,context)).issues;}
 export async function bankReview(c:PoolClient,run:any){
  const context=run.bank_statement_context as BankContext,values=run.effectiveValues as BankValues;
- const {issues,relatedRevisions}=await bankStatementChecks(c,run.workspace_id,run.document_id,values,context);
+ const checks=await bankStatementChecks(c,run.workspace_id,run.document_id,values,context);
+ const issues=orderedIssues([...checks.issues,...bankEvidenceReviewIssues(run.raw_values,run.evidence,run.issues,context,values)]),relatedRevisions=checks.relatedRevisions;
  const token=createHash('sha256').update(JSON.stringify({version:1,runId:run.id,revision:run.effectiveRevision,values,issues,relatedRevisions})).digest('hex');
  return {version:1,revision:run.effectiveRevision,token,issues};
 }
