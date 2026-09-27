@@ -83,7 +83,9 @@ Workspace document retention and retryable object deletion are implemented. Down
 
 ## Backup and restore operations
 
-The [encrypted backup CLI](BACKUP-RESTORE.md) has isolated PostgreSQL 17 and filesystem restore evidence. It does not capture hosted Supabase Storage objects, install a schedule, upload off-host artifacts or enforce backup retention. Do not run it against hosted storage while claiming a complete cloud backup.
+The [encrypted backup CLI](BACKUP-RESTORE.md) supports filesystem capture and explicit managed-source capture of application PostgreSQL data and referenced private Supabase Storage originals. Managed capture requires a separate owner-capable backup connection with the documented table, catalog and lock permissions, private storage/key inputs, quiesced application/object writers, and expiry of outstanding signed uploads and write leases. Its supported restore target is fresh isolated PostgreSQL with filesystem originals; it does not recreate Supabase service internals or replace a hosted bucket.
+
+Isolated capture/restore tests establish the supported mechanics, not completed hosted recovery. The CLI does not install a schedule, upload off-host artifacts or enforce backup retention.
 
 Before public activation, record the actual database/object backup method, stable integration-key custody, encrypted off-host destination, schedule, retention, access owner and recovery targets. Confirm that database backups alone do not omit original objects. Keep backup private keys separately from backup artifacts and runtime secrets.
 
