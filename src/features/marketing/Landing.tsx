@@ -25,7 +25,7 @@ const integrations = [
 const faqs = [
   { question: 'What can I extract?', answer: 'Start with invoices, receipts, purchase orders, lead emails or a custom schema. Define the fields your workflow needs.' },
   { question: 'Can I check the results before exporting?', answer: 'Yes. Open a document to compare extracted fields with the original, correct values and approve a result. Missing values and validation issues stay visible during review.' },
-  { question: 'How are pages counted?', answer: 'An accepted, unique upload uses its page count. PDFs are counted by page; an image or text document counts as one page. Automatic retries do not add usage. Choosing to reprocess a document counts its pages again. Your workspace shows its current allowance and usage.' },
+  { question: 'How are pages counted?', answer: 'An accepted, unique upload uses its page count. PDFs and TIFFs are counted by page; XLSX files by worksheet. PNG, JPEG and supported text documents count as one page. Automatic retries do not add usage. Choosing to reprocess a document counts its pages again. Your workspace shows its current allowance and usage.' },
   { question: 'Can I connect my existing tools?', answer: 'Download CSV, XLSX or JSON, or build a connection with the API and signed webhooks. The automation guides describe webhook bridges, not published native marketplace connectors. Google Sheets needs a configured Google connection.' },
   { question: 'What do I need for AI extraction?', answer: '', ai: true },
 ];
