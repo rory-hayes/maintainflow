@@ -9,6 +9,7 @@ import { decodeCsvRawValues } from './csv-values.js';
 import { parserSchema, validateValues } from './schema.js';
 import {validatedVisualDocument} from './visual-source.js';
 import {bankDescriptionEvidenceIssues} from './bank-statement-evidence.js';
+import {completeNativeBankDescriptionEvidence} from './bank-native-description-evidence.js';
 
 export const openAIExtraction = Object.freeze({
   model: 'gpt-5.4-mini-2026-03-17', promptVersion: 'folio-openai-extraction-v2', bankLayoutPromptVersion:'folio-openai-bank-layout-v1',
@@ -116,8 +117,10 @@ function sourceEvidence(output: Output, input: ProviderInput, visual: boolean) {
   }
   for (const field of present.keys()) if (!evidence[field]?.length && !issues.some(issue => issue.field === field)) issues.push({ field, code: 'evidence_missing', message: 'No matching source quote was verified for this value. Check the original before approval.' });
   if (visualQuote) issues.push({ field: '_source', code: 'visual_evidence', message: 'AI-read source quotes are not independently verified against native text. Check the original image before approval.' });
-  if(isDeepStrictEqual(input.schema,bankStatementSchema))for(const issue of bankDescriptionEvidenceIssues(output.rawValues,evidence))if(!issues.some(existing=>existing.field===issue.field&&existing.code===issue.code))issues.push(issue);
-  return { evidence, issues };
+  const bank=isDeepStrictEqual(input.schema,bankStatementSchema);
+  const completed=bank&&input.mimeType==='application/pdf'&&!input.visualDocument?completeNativeBankDescriptionEvidence(output.rawValues,evidence,input.pages):evidence;
+  if(bank)for(const issue of bankDescriptionEvidenceIssues(output.rawValues,completed))if(!issues.some(existing=>existing.field===issue.field&&existing.code===issue.code))issues.push(issue);
+  return { evidence:completed, issues };
 }
 
 function buildRequest(input: ProviderInput) {

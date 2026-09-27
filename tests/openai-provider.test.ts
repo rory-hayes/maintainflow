@@ -135,6 +135,36 @@ test('partial quote coverage leaves general document extraction unchanged',async
  assert.deepEqual(result.issues,[]);assert.equal(result.evidence.description[0].text,'Office supplies');
 });
 
+test('fresh bank PDF evidence appends a native description span without changing provider request, raw output or money',async()=>{
+ const fields=bankStatementSchema.fields[0].fields!,transactionFields=fields.find(field=>field.key==='transactions')!.fields!;
+ const row={...Object.fromEntries(transactionFields.map(field=>[field.key,null])),description:'Synthetic refund\nReturned component',debit:'275,25',credit:null};
+ const rawValues={accounts:[{...Object.fromEntries(fields.map(field=>[field.key,null])),transactions:[row]}]};
+ const field='accounts[0].transactions[0].description',evidence=[{field,page:1,text:'Synthetic refund'}],payload=response({rawValues,evidence}),before=structuredClone(payload);
+ let calls=0,requestBody:any;
+ const model=createOpenAIProvider({apiKey:'synthetic-fixture-credential',fetch:(async(_url,options)=>{calls++;requestBody=JSON.parse(String(options?.body));return Response.json(payload);}) as typeof fetch});
+ const value=input({schema:bankStatementSchema,mimeType:'application/pdf',bytes:Buffer.from('%PDF-synthetic-controlled-source'),pages:[{page:1,text:'Synthetic refund\r\n  Returned component\n275,25'}]});
+ const result=await model.extract(value);assert.equal(calls,1);assert.deepEqual(payload,before);assert.deepEqual(result.rawValues,rawValues);
+ assert.deepEqual(result.evidence[field][0],{page:1,text:'Synthetic refund',source:'matched-text'});assert.equal(result.evidence[field][1].text,'Synthetic refund\r\n  Returned component');
+ assert.equal(result.evidence[field][1].derivation?.version,'folio-bank-native-description-v1');assert.ok(!result.issues.some(issue=>issue.field===field&&issue.code==='evidence_incomplete'));
+ assert.equal((result.normalizedValues.accounts as any[])[0].transactions[0].debit,'275,25');assert.equal((result.normalizedValues.accounts as any[])[0].transactions[0].credit,null);
+ assert.equal(requestBody.reasoning.effort,'low');assert.equal(requestBody.input[0].content.at(-1).file_data,`data:application/pdf;base64,${value.bytes.toString('base64')}`);
+ assert.doesNotMatch(JSON.stringify(requestBody),/folio-bank-native-description-v1|pageTextSha256|startUtf16/);
+ assert.equal(result.promptVersion,openAIExtraction.promptVersion);
+});
+
+test('scanned PDFs and non-bank PDF descriptions retain their original evidence behavior',async()=>{
+ const fields=bankStatementSchema.fields[0].fields!,transactionFields=fields.find(field=>field.key==='transactions')!.fields!;
+ const row={...Object.fromEntries(transactionFields.map(field=>[field.key,null])),description:'Synthetic refund\nReturned component'};
+ const bankRaw={accounts:[{...Object.fromEntries(fields.map(field=>[field.key,null])),transactions:[row]}]},field='accounts[0].transactions[0].description';
+ const scanned=await provider(response({rawValues:bankRaw,evidence:[{field,page:1,text:'Synthetic refund'}]})).extract(input({schema:bankStatementSchema,mimeType:'application/pdf',pages:[{page:1,text:''}]}));
+ assert.deepEqual(scanned.evidence[field],[{page:1,text:'Synthetic refund',source:'model-visual'}]);assert.ok(scanned.issues.some(issue=>issue.code==='evidence_incomplete'));
+ const generalSchema:ParserSchema={fields:[{key:'description',label:'Description',type:'string'}]};
+ const general=await provider(response({rawValues:{description:row.description},evidence:[{field:'description',page:1,text:'Synthetic refund'}]})).extract(input({schema:generalSchema,mimeType:'application/pdf',pages:[{page:1,text:row.description}]}));
+ assert.deepEqual(general.evidence.description,[{page:1,text:'Synthetic refund',source:'matched-text'}]);assert.deepEqual(general.issues,[]);
+ // The response contract rejects provider-supplied app provenance instead of trusting it.
+ await assert.rejects(provider(response({rawValues:bankRaw,evidence:[{field,page:1,text:'Synthetic refund',derivation:{version:'folio-bank-native-description-v1'}}]})).extract(input({schema:bankStatementSchema,mimeType:'application/pdf',pages:[{page:1,text:row.description}]})),/invalid structured extraction/);
+});
+
 test('Image and mixed PDF inputs include original bytes with explicit detail and honest visual evidence', async () => {
   for (const mimeType of ['image/png', 'image/jpeg', 'application/pdf']) {
     let body: any;

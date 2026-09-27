@@ -5,8 +5,17 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { Evidence, SchemaField } from '../shared/types';
 import OriginalExtractionSources, { SourceQuotes } from '../src/features/documents/ExtractionSources';
 import ValueEditor from '../src/features/documents/ValueEditor';
+import {completeNativeBankDescriptionEvidence} from '../server/core/bank-native-description-evidence';
 
 const onPage = (_page: number) => {};
+
+test('app-completed native evidence is visibly distinguished without exposing hashes or replacing provider quotes',()=>{
+ const field='accounts[0].transactions[0].description',text='Synthetic refund\nReturned component';
+ const completed=completeNativeBankDescriptionEvidence({accounts:[{transactions:[{description:text}]}]},{[field]:[{page:1,text:'Synthetic refund',source:'matched-text'}]},[{page:1,text}]);
+ const html=renderToStaticMarkup(createElement(SourceQuotes,{items:completed[field],onPage}));
+ assert.match(html,/Source · Page 1/);assert.match(html,/Matched in original PDF text · Page 1/);assert.ok(html.includes(text));
+ assert.equal((html.match(/class="evidence-link"/g)||[]).length,2);assert.doesNotMatch(html,/pageTextSha256|folio-bank-native-description|startUtf16|verified|accurate/i);
+});
 function render(field: SchemaField, value: unknown, evidence: Record<string, Evidence[]> = {}) {
   return renderToStaticMarkup(createElement(OriginalExtractionSources, { field, rawValues: { [field.key]: value }, evidence, onPage }));
 }
