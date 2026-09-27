@@ -18,6 +18,8 @@ Filesystem readiness requires an existing accessible directory, refuses a direct
 
 The diagnostics endpoint returns HTTP 401 for an incorrect bearer and HTTP 503 if its secret or dependencies are unavailable. The same secret permits a worker wake; keep it in a server-side monitor secret store. Do not put it in a URL, browser code, command-line argument, screenshot or copied support log. Use an owner-only curl configuration file or the monitor's protected header facility. Rotate the runtime and Vault copies together if compromised.
 
+For each production release, bind the existing host-specific protection exception to the verified current immutable deployment hostname and retire its predecessor. A 27 September review found this rule still referenced the retired PR45 host, demonstrating why deployment success alone is insufficient. Keep only the two approved canonical hostnames plus the verified production hostname; inspect both draft and live rule configuration after the change. Preserve authentication and all other protections, with no wildcard preview exception. Any QA hostname requires its own separately scoped, bounded exception and retirement.
+
 ## Worker observations and alerts
 
 `worker.queues` covers extraction, field suggestions, split suggestions, integration deliveries, provider events, account email, invitation email and private-object deletion. Each lane reports waiting, due, processing, expired-lease and failed counts, plus the age in seconds of the oldest due item. Failed counts are retained terminal rows, not a count of new incidents. Future retries do not contribute to due age.
@@ -33,6 +35,30 @@ Before public activation, configure an independent monitor and test its notifica
 5. During a controlled drill, prevent the immediate wake for one owned synthetic job and let the independent watchdog recover it. Verify one extraction result and one usage reservation, then remove only the owned fixture. Record deployment SHA, UTC timestamps and scheduler/HTTP/result correlation.
 
 This code does not create an external monitor, send an alert, or register its recipient. `alerts.deliveryVerified` remains false until separate operational evidence exists. Use the [hosted worker contract](HOSTED-WORKER.md) and the current reviewed watchdog SQL; do not copy an older queue predicate into production.
+
+## Bounded watchdog history maintenance
+
+`cron.job_run_details` has no automatic retention, according to the [pg_cron monitoring documentation](https://github.com/citusdata/pg_cron#monitoring-jobs). A dashboard observation on 26 September 2026 showed 80.78 MB for that table; it did not establish the age, status or job ownership of those rows. This maintenance procedure targets only the active, minutely `folio-worker-watchdog`, not every job in the table. It is separate from customer document retention, backups and recovery acceptance.
+
+The offline preparer imports no runtime configuration and never connects to a database. It creates a new private directory of SQL and hashes; **running it does not execute the SQL**. Its conservative minimum retention is 30 days for successes and 90 days for failures. Choose explicit UTC cutoffs at or before those limits; no moving cutoff is used during apply. Reviews expire after 24 hours. Each batch contains at most 1,000 exact, completed run IDs. Running, incomplete, unknown-status, other-job, other-owner and other-database rows are retained. Snapshot owner/database labels are limited to 63 characters without controls or dollar signs; unsupported labels are rejected, never rewritten into another identity.
+
+1. Confirm the intended Supabase project and use the existing scheduler owner identity in SQL Editor. Do not change runtime permissions or use a tenant connection. Generate the read-only inventory with reviewed cutoffs and a new output path, for example:
+
+   ```sh
+   node --import tsx scripts/prepare-cron-history-maintenance.ts inventory --success-before 2026-08-28T00:00:00Z --failure-before 2026-06-29T00:00:00Z --limit 1000 --out .local/cron-history-inventory-unique
+   ```
+
+2. Run only `inventory.sql` first. It uses a read-only transaction with bounded statement/lock timeouts. Save its single JSON value privately as `snapshot.json`. It contains job configuration and row digests, IDs, statuses and UTC times; it never returns job commands, return messages or Vault values. Check the project, owner, database, exact watchdog, cutoffs and selected IDs. Preserve any incident/acceptance evidence that depends on these logs before deletion. If no candidates are eligible, stop; do not shorten retention simply to obtain a nonempty batch.
+3. After reviewing the exact snapshot and authorizing that bounded deletion, prepare the apply files in another new directory:
+
+   ```sh
+   node --import tsx scripts/prepare-cron-history-maintenance.ts prepare-apply --snapshot .local/cron-history-inventory-unique/snapshot.json --out .local/cron-history-apply-unique
+   ```
+
+4. Review `apply.sql`, its copied snapshot and `preparation.json` hashes, then execute the whole transaction using the same project and owner. It holds the unchanged watchdog row against concurrent configuration edits, locks only reviewed history IDs, rechecks complete row digests and eligibility, and rolls back on any mismatch. Concurrent maintenance fails rather than broadening the batch. It installs no function/job/schema and changes no watchdog settings, logging configuration or grants. Require a successful `COMMIT`: the returned count describes deletion **inside the transaction**, not an independent durable-commit receipt.
+5. Run `verify.sql` read-only. Require matching database/owner, unchanged watchdog digest and zero remaining reviewed IDs. Preserve execution and verification receipts. On timeout, disconnection or an uncertain result, inspect using this verification query before deciding anything further; never automatically replay apply. Replaying an already deleted batch fails closed. Any further batch requires a fresh inventory and review.
+
+This tool does not install an ongoing schedule or establish a maintenance owner. Review history growth as part of routine operations; record the chosen operator/cadence separately before claiming ongoing maintenance. The table-size measure includes unrelated and retained rows. Row deletion does not promise immediate disk-file shrinkage; no `VACUUM FULL` or storage-capacity change is included. Local tests use disposable PostgreSQL surrogate tables with the documented pg_cron columns; they verify SQL boundaries and rollback, not hosted extension permissions or actual deletion. No hosted history has been removed by adding this tool.
 
 ## Operator and customer disclosures
 
