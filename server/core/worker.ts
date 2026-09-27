@@ -153,7 +153,7 @@ const attempt=await extractWithDeadline(async signal=>{
   result=extractRules(data.doc.source_text,data.schema,job.config.locale,decision?[]:job.config.templates||[],job.config.timezone,valuePolicy);
  }
  let bankContext=null;
- if(bank){try{const statement=createBankStatementResult(result.rawValues,result.evidence,job.config.locale);bankContext=statement.context;result={...result,normalizedValues:statement.values as unknown as Record<string,unknown>,issues:statement.issues.map(issue=>({field:issue.field??issue.transactionId??issue.accountId??'accounts',code:issue.code,message:issue.message}))};}catch(error){throw Object.assign(error instanceof Error?error:new Error('Bank statement extraction is invalid'),{permanent:true});}}
+ if(bank){try{const statement=createBankStatementResult(result.rawValues,result.evidence,job.config.locale);bankContext=statement.context;result={...result,normalizedValues:statement.values as unknown as Record<string,unknown>,issues:[...result.issues,...statement.issues.map(issue=>({field:issue.field??issue.transactionId??issue.accountId??'accounts',code:issue.code,message:issue.message}))]};}catch(error){throw Object.assign(error instanceof Error?error:new Error('Bank statement extraction is invalid'),{permanent:true});}}
  signal.throwIfAborted();return {data,result,selection,bankContext,valuePolicy,sourceVerified:Boolean(geometry||bankPdfLayoutInput),templateSnapshot:decision?.result?.templateSnapshot??null};
 },options);
 if(!attempt)return true;const {data,result,selection,bankContext,valuePolicy,sourceVerified,templateSnapshot}=attempt;
