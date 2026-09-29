@@ -55,3 +55,13 @@ export function bankUploadFailure(error:unknown):BankUploadFailure {
   const temporary=typeof status==='number'&&(status===408||status===429||status>=500);
   return {error:message,retryable:temporary||!correctedFileMessages.has(message)};
 }
+
+/** Receipt is a transport fact; processing comes only from a current document. */
+export function bankUploadProgress(item:{state:'waiting'|'uploading'|'received'|'failed';duplicate?:boolean;error?:string},documentStatus?:string){
+  if(item.state==='waiting')return 'Waiting to upload';
+  if(item.state==='uploading')return 'Uploading and checking file…';
+  if(item.state==='failed')return item.error||'Upload failed. Please retry.';
+  const labels:Record<string,string>={received:'waiting for extraction',queued:'extraction queued',processing:'extracting transactions…',needs_review:'ready for review',processed:'approved · ready to export',exporting:'preparing export',exported:'exported',failed:'extraction could not finish; open for details'};
+  const progress=documentStatus&&Object.hasOwn(labels,documentStatus)?labels[documentStatus]:'open for current status';
+  return `${item.duplicate?'Already uploaded':'Received'} · ${progress}`;
+}
