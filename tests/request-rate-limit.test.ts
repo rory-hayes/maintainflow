@@ -13,7 +13,7 @@ const cleanupCounts:number[]=[];
 const database={query:async(sql:string,values?:any[])=>{
  const result=await adminPool.query(sql,values);
  if(sql.startsWith('WITH instant')&&values?.[0])ownedKeys.add(values[0]);
- if(sql.startsWith('DELETE FROM request_rate_limits WHERE bucket_key IN'))cleanupCounts.push(result.rowCount??0);
+ if(/\bDELETE FROM request_rate_limits\b/.test(sql))cleanupCounts.push(result.rowCount??0);
  return result;
 }} as Pick<Pool,'query'>;
 const ip='192.0.2.211';

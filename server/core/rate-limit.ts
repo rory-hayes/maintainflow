@@ -23,10 +23,10 @@ const incrementSql=`WITH instant AS MATERIALIZED (SELECT clock_timestamp() AS at
     THEN (SELECT at FROM instant)+($2::integer*interval '1 millisecond') ELSE request_rate_limits.expires_at END
   RETURNING hits,expires_at
  ) SELECT hits AS current,greatest(1,ceil(extract(epoch FROM (expires_at-clock_timestamp()))*1000))::integer AS ttl FROM counted`;
-const cleanupSql=`DELETE FROM request_rate_limits WHERE bucket_key IN (
+const cleanupSql=`WITH expired_batch AS MATERIALIZED (
  SELECT bucket_key FROM request_rate_limits WHERE expires_at<=statement_timestamp()
  ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED
-)`;
+) DELETE FROM request_rate_limits USING expired_batch WHERE request_rate_limits.bucket_key=expired_batch.bucket_key`;
 
 function positiveInteger(value:unknown,name:string,maximum:number){
  if(!Number.isInteger(value)||Number(value)<1||Number(value)>maximum)throw new Error(`Invalid request rate limit ${name}.`);

@@ -52,7 +52,7 @@ export async function requestEmailVerification(email:string){
   // Public admission never queries account existence. Global capacity failure is
   // identical for every address and does not consume an address grant.
   await c.query("SELECT pg_advisory_xact_lock(hashtextextended('folio:email-verification:request-cap',0))");
-  await c.query('DELETE FROM email_verification_requests WHERE id IN (SELECT id FROM email_verification_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)');
+  await c.query('WITH expired_batch AS MATERIALIZED (SELECT id FROM email_verification_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM email_verification_requests USING expired_batch WHERE email_verification_requests.id=expired_batch.id');
   const {rows:[count]}=await c.query('SELECT count(*)::int n FROM email_verification_requests');
   if(count.n>=5000)throw new EmailVerificationUnavailableError();
   if(!await grantAddress(c,email))return;
@@ -141,7 +141,7 @@ export async function cleanupEmailVerification(budget:WorkBudget={}){
   });
  }
  requireWorkBudget(budget);
- await adminPool.query('DELETE FROM email_verification_requests WHERE id IN (SELECT id FROM email_verification_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)');
+ await adminPool.query('WITH expired_batch AS MATERIALIZED (SELECT id FROM email_verification_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM email_verification_requests USING expired_batch WHERE email_verification_requests.id=expired_batch.id');
  requireWorkBudget(budget);
- await adminPool.query('DELETE FROM email_verification_limits WHERE address_key IN (SELECT address_key FROM email_verification_limits WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)');
+ await adminPool.query('WITH expired_batch AS MATERIALIZED (SELECT address_key FROM email_verification_limits WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM email_verification_limits USING expired_batch WHERE email_verification_limits.address_key=expired_batch.address_key');
 }

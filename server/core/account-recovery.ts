@@ -56,7 +56,7 @@ export async function requestPasswordReset(email:string){
   // All valid addresses take the same path. No account existence lookup occurs
   // in this request transaction, even when the bounded queue is full (a uniform service error).
   await c.query("SELECT pg_advisory_xact_lock(hashtextextended('folio:account-recovery:request-cap',0))");
-  await c.query(`DELETE FROM account_recovery_requests WHERE id IN (SELECT id FROM account_recovery_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+  await c.query(`WITH expired_batch AS MATERIALIZED (SELECT id FROM account_recovery_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM account_recovery_requests USING expired_batch WHERE account_recovery_requests.id=expired_batch.id`);
   const {rows:[count]}=await c.query('SELECT count(*)::int n FROM account_recovery_requests');
   if(count.n>=5000)throw new AccountRecoveryUnavailableError();
   if(!await grantAddress(c,email))return;
