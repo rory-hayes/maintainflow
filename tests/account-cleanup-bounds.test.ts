@@ -49,7 +49,7 @@ async function assertIsolatedDatabase(){
   assert.equal(row.db,'folio');assert.equal(row.schema,'public');assert.equal(row.role,role);assert.equal(row.port,urlMode?5432:55432);if(!urlMode)assert.equal(row.address,null);
  }
  // Global cleanup functions must never touch unrelated fixture or application data.
- for(const table of tables)assert.equal((await adminPool.query(`SELECT count(*)::int n FROM ${table}`)).rows[0].n,0,`${table} must be empty in this isolated suite`);
+ for(const table of [...tables,'account_recovery_tokens','email_verification_tokens'])assert.equal((await adminPool.query(`SELECT count(*)::int n FROM ${table}`)).rows[0].n,0,`${table} must be empty in this isolated suite`);
 }
 before(async()=>{
  await assertIsolatedDatabase();guarded=true;
