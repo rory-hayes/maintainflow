@@ -44,11 +44,11 @@ export async function cleanupInvitationEmail(budget:WorkBudget={}){
   });
  }
  requireWorkBudget(budget);
- await adminPool.query(`DELETE FROM invitation_email_limits WHERE address_key IN (SELECT address_key FROM invitation_email_limits WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+ await adminPool.query(`WITH expired_batch AS MATERIALIZED (SELECT address_key FROM invitation_email_limits WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM invitation_email_limits USING expired_batch WHERE invitation_email_limits.address_key=expired_batch.address_key`);
  // Keep the latest status while its invitation still exists. Older attempts have a finite retention.
- await adminPool.query(`DELETE FROM invitation_email_outbox WHERE id IN (SELECT old.id FROM invitation_email_outbox old
+ await adminPool.query(`WITH expired_batch AS MATERIALIZED (SELECT old.id FROM invitation_email_outbox old
   WHERE old.finished_at<clock_timestamp()-interval '7 days' AND EXISTS(SELECT 1 FROM invitation_email_outbox newer WHERE newer.invitation_id=old.invitation_id AND newer.created_at>old.created_at)
-  ORDER BY old.finished_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+  ORDER BY old.finished_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM invitation_email_outbox USING expired_batch WHERE invitation_email_outbox.id=expired_batch.id`);
 }
 
 async function claim(budget:WorkBudget):Promise<Claim|undefined>{

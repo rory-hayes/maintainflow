@@ -63,10 +63,10 @@ export async function cleanupAccountRecovery(budget:WorkBudget={}){
   });
  }
  requireWorkBudget(budget);
- await adminPool.query(`DELETE FROM account_recovery_requests WHERE id IN (SELECT id FROM account_recovery_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
- await adminPool.query(`DELETE FROM account_recovery_limits WHERE address_key IN (SELECT address_key FROM account_recovery_limits WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
- await adminPool.query(`DELETE FROM account_email_outbox WHERE id IN (SELECT id FROM account_email_outbox WHERE finished_at<clock_timestamp()-interval '7 days' ORDER BY finished_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
- await adminPool.query(`DELETE FROM account_security_events WHERE id IN (SELECT id FROM account_security_events WHERE created_at<clock_timestamp()-interval '90 days' ORDER BY created_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+ await adminPool.query(`WITH expired_batch AS MATERIALIZED (SELECT id FROM account_recovery_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM account_recovery_requests USING expired_batch WHERE account_recovery_requests.id=expired_batch.id`);
+ await adminPool.query(`WITH expired_batch AS MATERIALIZED (SELECT address_key FROM account_recovery_limits WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM account_recovery_limits USING expired_batch WHERE account_recovery_limits.address_key=expired_batch.address_key`);
+ await adminPool.query(`WITH expired_batch AS MATERIALIZED (SELECT id FROM account_email_outbox WHERE finished_at<clock_timestamp()-interval '7 days' ORDER BY finished_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM account_email_outbox USING expired_batch WHERE account_email_outbox.id=expired_batch.id`);
+ await adminPool.query(`WITH expired_batch AS MATERIALIZED (SELECT id FROM account_security_events WHERE created_at<clock_timestamp()-interval '90 days' ORDER BY created_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM account_security_events USING expired_batch WHERE account_security_events.id=expired_batch.id`);
 }
 
 async function claim(budget:WorkBudget):Promise<Claim|undefined>{

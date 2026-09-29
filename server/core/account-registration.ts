@@ -57,7 +57,7 @@ export async function requestVerifiedRegistration(fields:RegistrationFields,sign
   // Capacity and suppression depend only on global queue/address state. In
   // particular, neither known addresses nor a full queue trigger a user read.
   await c.query("SELECT pg_advisory_xact_lock(hashtextextended('folio:account-registration:request-cap',0))");
-  await c.query(`DELETE FROM account_registration_requests WHERE id IN (SELECT id FROM account_registration_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+  await c.query(`WITH expired_batch AS MATERIALIZED (SELECT id FROM account_registration_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM account_registration_requests USING expired_batch WHERE account_registration_requests.id=expired_batch.id`);
   const {rows:[count]}=await c.query('SELECT count(*)::int n,coalesce(sum(octet_length(payload_ciphertext)),0)::bigint bytes FROM account_registration_requests');
   if(count.n>=5000||Number(count.bytes)+ciphertextBytes>5000*8192)throw new RegistrationUnavailableError();
   if(!await grantAddress(c,key))return;
@@ -105,10 +105,12 @@ export async function processOneAccountRegistration(){
  });
 }
 
-/** Bounded ciphertext/limit cleanup also works while delivery is disabled. */
+/** Bounded ciphertext/limit cleanup also works while delivery is disabled.
+ * Materialize the locked batch once: a rescanned locking subquery can otherwise
+ * select more rows as earlier rows are deleted, exceeding its LIMIT. */
 export async function cleanupAccountRegistrations(budget:WorkBudget={}){
  requireWorkBudget(budget);
- await adminPool.query(`DELETE FROM account_registration_requests WHERE id IN (SELECT id FROM account_registration_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+ await adminPool.query(`WITH expired_batch AS MATERIALIZED (SELECT id FROM account_registration_requests WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM account_registration_requests USING expired_batch WHERE account_registration_requests.id=expired_batch.id`);
  requireWorkBudget(budget);
- await adminPool.query(`DELETE FROM account_registration_limits WHERE address_key IN (SELECT address_key FROM account_registration_limits WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+ await adminPool.query(`WITH expired_batch AS MATERIALIZED (SELECT address_key FROM account_registration_limits WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM account_registration_limits USING expired_batch WHERE account_registration_limits.address_key=expired_batch.address_key`);
 }
