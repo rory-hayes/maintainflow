@@ -65,6 +65,11 @@ export async function decodePdfGeometry(bytes:Buffer):Promise<PdfGeometry>{
      if(typeof item.str!=='string'||item.str.includes('\0'))return invalid();
      if(item.str.length>pdfRegionLimits.maxItemText||(totalText+=Buffer.byteLength(item.str))>pdfRegionLimits.maxTextBytes)return limit();
      if(!normalizePdfRegionText(item.str)){if(item.hasEOL)breakBefore=true;continue;}
+     // A zero font size can emit nonempty PDF.js items with a fully collapsed
+     // transform. They have no visible extent and cannot form a source block.
+     // Require every metric and translation to be finite; partially collapsed,
+     // rotated, skewed and mirrored text still follows the strict path below.
+     if(item.width===0&&item.height===0&&finite(item.transform)&&item.transform.length===6&&item.transform.slice(0,4).every(value=>value===0)){if(item.hasEOL)breakBefore=true;continue;}
      const style=styles[item.fontName];if(!style){unsupported=true;continue;}
      const rect=nativePdfItemRect(item,style,viewport);if(!rect){unsupported=true;continue;}
      // Text completely beyond the displayed crop is not a visible source block.
