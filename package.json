@@ -44,7 +44,7 @@
     "ipaddr.js": "^2.5.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.41.0",
-    "mailparser": "^3.9.22",
+    "mailparser": "^3.9.33",
     "mammoth": "^1.12.2",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.3.289",
