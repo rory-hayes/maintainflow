@@ -91,9 +91,14 @@ function normalizeConvention(value:BankScalar):BankBalanceConvention{
   if(!normalized||/\b(?:not|never|may|might|could|unknown|unclear)\b/.test(normalized))return 'unknown';
   let credit=/\bcredits?\s+(?:increase[sd]?|raise[sd]?|adds? to)\s+(?:(?:the|your|account|statement|available|displayed)\s+)*(?:balance|amount owed)\b/.test(normalized);
   let debit=/\bdebits?\s+(?:increase[sd]?|raise[sd]?|adds? to)\s+(?:(?:the|your|account|statement|available|displayed)\s+)*(?:balance|amount owed)\b/.test(normalized);
-  for(const match of normalized.matchAll(/\b(credits?|debits?)\s+(increase[sd]?|decrease[sd]?)\s+and\s+(credits?|debits?)\s+(increase[sd]?|decrease[sd]?)\s+(?:(?:the|your|account|statement|available|displayed)\s+)*(?:balance|amount owed)\b/g)){
-    if(match[1][0]===match[3][0]||match[2][0]===match[4][0])return 'unknown';
-    const increasing=match[2].startsWith('increase')?match[1]:match[3];if(increasing.startsWith('credit'))credit=true;else debit=true;
+  for(const match of normalized.matchAll(/\b(credits?|debits?)\s+(increase[sd]?|decrease[sd]?|reduce[sd]?)\s+and\s+(credits?|debits?)\s+(increase[sd]?|decrease[sd]?|reduce[sd]?)\s+(?:(?:the|your|account|statement|available|displayed)\s+)*(?:balance|amount owed)\b/g)){
+    const firstIncreases=match[2].startsWith('increase'),secondIncreases=match[4].startsWith('increase');
+    if(match[1][0]===match[3][0]||firstIncreases===secondIncreases)return 'unknown';
+    const increasing=firstIncreases?match[1]:match[3];if(increasing.startsWith('credit'))credit=true;else debit=true;
+  }
+  // Standalone reductions constrain an established direction; they never establish its opposite.
+  for(const match of normalized.matchAll(/\b(credits?|debits?)\s+(?:decrease[sd]?|reduce[sd]?)\s+(?:(?:the|your|account|statement|available|displayed)\s+)*(?:balance|amount owed)\b/g)){
+    if(match[1].startsWith('credit')?credit:debit)return 'unknown';
   }
   return credit===debit?'unknown':credit?'credit_increases':'debit_increases';
 }

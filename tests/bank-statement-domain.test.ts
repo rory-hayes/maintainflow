@@ -51,6 +51,88 @@ test('explicit compound convention prose reconciles while conflicting directions
   for(const [prose,expected] of [['Credits increase and debits decrease the displayed account balance.','credit_increases'],['Debits increase and credits decrease the displayed account balance.','debit_increases'],['Debits decrease and credits increase your account balance.','credit_increases'],['Credits decrease and debits increase the amount owed.','debit_increases'],['Credits increase and debits increase the displayed account balance.','unknown'],['Credits increase and credits decrease the displayed account balance.','unknown'],['Credits increase and debits decrease the displayed account balance. Debits increase the balance.','unknown']]){const raw=await fixture('debit-increases-card');raw.accounts[0].balance_convention=prose;const result=createBankStatementResult(raw,{},'en-IE',{id:ids()});assert.equal(result.values.accounts[0].balance_convention,expected,prose);}
 });
 
+test('explicit compound reduce wording retains both balance polarities and either subject order',async()=>{
+  for(const reducing of ['reduce','reduces','reduced'])for(const [prose,expected] of [
+    [`Debits increase and credits ${reducing} the displayed balance.`,'debit_increases'],
+    [`Credits ${reducing} and debits increase the displayed balance.`,'debit_increases'],
+    [`Credits increase and debits ${reducing} your account balance.`,'credit_increases'],
+    [`Debits ${reducing} and credits increase the amount owed.`,'credit_increases'],
+  ]){
+    const raw=await fixture('debit-increases-card');raw.accounts[0].balance_convention=prose;const before=clone(raw);
+    const result=createBankStatementResult(raw,{},'en-IE',{id:ids()});assert.equal(result.values.accounts[0].balance_convention,expected,prose);assert.deepEqual(raw,before);
+  }
+});
+
+test('literal synthetic QS1 reduce prose reconciles positive DR balances without changing raw values or evidence',()=>{
+  // Authored raw extraction and page evidence exercise normalization only, not OCR or provider accuracy.
+  const prose='This is an amount owed: debits increase and credits reduce the displayed balance.';
+  const raw:RawBankValues={accounts:[{
+    bank_name:'Example Lantern Card Bank',account_identifier:'SYN-QS1-GBP-OCT',currency:'GBP',statement_start:'1 October 2026',statement_end:'31 October 2026',
+    opening_balance:'40.00 DR',closing_balance:'41.25 DR',total_debits:'21.25 GBP',total_credits:'20.00 GBP',balance_convention:prose,
+    transactions:[
+      {date:'5 October 2026',description:'Workshop supplies\nReplacement gloves and protective covers',reference:'QS-001',debit:'15.75 DR',credit:null,balance:'55.75 DR',currency:'GBP'},
+      {date:'October 6, 2026',description:'Card repayment\nBank transfer receipt',reference:'QS-002',debit:null,credit:'20.00 CR',balance:'35.75 DR',currency:'GBP'},
+      {date:'12 Oct 2026',description:'Equipment locker rental\nSeparate daily booking',reference:'QS-RENT',debit:'2.75 DR',credit:null,balance:'38.50 DR',currency:'GBP'},
+      {date:'12 Oct 2026',description:'Equipment locker rental\nSeparate daily booking',reference:'QS-RENT',debit:'2.75 DR',credit:null,balance:'41.25 DR',currency:'GBP'},
+    ],
+  }]};
+  const source:Record<string,Evidence[]>={'accounts[0].balance_convention':[{page:1,text:prose,source:'model-visual'},{page:2,text:prose,source:'model-visual'}]};
+  raw.accounts[0].transactions.forEach((row,index)=>{source[`accounts[0].transactions[${index}].balance`]=[{page:index<2?1:2,text:row.balance!,source:'model-visual'}];});
+  const before=clone(raw),sourceBefore=clone(source),result=createBankStatementResult(raw,source,'en-IE',{id:ids()}),account=result.values.accounts[0];
+  assert.equal(account.balance_convention,'debit_increases');assert.equal(account.opening_balance,'40.00');assert.equal(account.closing_balance,'41.25');assert.equal(account.total_debits,'21.25');assert.equal(account.total_credits,'20.00');
+  assert.deepEqual(account.transactions.map(row=>[row.debit,row.credit,row.balance]),[['15.75',null,'55.75'],[null,'20.00','35.75'],['2.75',null,'38.50'],['2.75',null,'41.25']]);
+  assert.equal(errors(result).length,0);assert.ok(codes(result.issues).includes('source_review_required'));assert.notEqual(account.transactions[2].id,account.transactions[3].id);
+  assert.deepEqual(raw,before);assert.deepEqual(source,sourceBefore);assert.deepEqual(result.context.accounts[account.id].evidence['accounts[0].balance_convention'],sourceBefore['accounts[0].balance_convention']);
+  account.transactions.forEach((row,index)=>{assert.equal(row.origin,'extracted');assert.equal(result.context.transactions[row.id].rawPath,`accounts[0].transactions[${index}]`);assert.deepEqual(result.context.transactions[row.id].sourcePages,[index<2?1:2]);assert.deepEqual(result.context.transactions[row.id].evidence[`accounts[0].transactions[${index}].balance`],sourceBefore[`accounts[0].transactions[${index}].balance`]);});
+  const changed=clone(result.values);changed.accounts[0].closing_balance='41.26';assert.ok(codes(checkBankStatement(changed,result.context)).includes('closing_balance_mismatch'),'Exact decimal reconciliation must still detect a one-penny discrepancy.');
+});
+
+test('reduce prose with uncertainty, negation or conflicting directions stays unresolved despite matching balances',async()=>{
+  for(const prose of [
+    'Debits may increase and credits reduce the displayed balance.',
+    'Debits increase and credits might reduce the displayed balance.',
+    'Debits increase and credits could reduce the displayed balance.',
+    'Debits do not increase and credits reduce the displayed balance.',
+    'Debits increase and credits never reduce the displayed balance.',
+    'Debits increase and credits reduce the displayed balance; the convention is unclear.',
+    'Debits increase and credits reduce the displayed balance. Credits increase the balance.',
+    'Debits increase and credits reduce the displayed balance. Credits increase and debits reduce the displayed balance.',
+    'Debits decrease and credits reduce the displayed balance.',
+    'Debits reduce and credits decrease the displayed balance.',
+    'Credits reduce and debits reduce the displayed balance.',
+    'Credits reduce and credits increase the displayed balance.',
+    'Credits reduce the displayed balance.',
+  ]){
+    const raw=await fixture('debit-increases-card');raw.accounts[0].balance_convention=prose;const before=clone(raw),result=createBankStatementResult(raw,{},'en-IE',{id:ids()});
+    assert.equal(result.values.accounts[0].balance_convention,'unknown',prose);assert.equal(result.values.accounts[0].opening_balance,'100.00 DR');assert.ok(codes(result.issues).includes('balance_convention_unknown'));assert.ok(codes(result.issues).includes('amount_direction_ambiguous'));assert.deepEqual(raw,before);
+  }
+});
+
+test('standalone reductions only constrain an explicit increasing subject and never infer a convention',async()=>{
+  for(const convention of ['debit_increases','credit_increases'])for(const reducing of ['decrease','decreases','decreased','reduce','reduces','reduced']){
+    const raw=await fixture('debit-increases-card'),account=raw.accounts[0],creditIncreases=convention==='credit_increases',increasingSubject=creditIncreases?'Credits':'Debits',reducingSubject=creditIncreases?'Debits':'Credits';
+    if(creditIncreases){
+      [account.total_debits,account.total_credits]=[account.total_credits,account.total_debits];account.opening_balance=account.opening_balance!.replace('DR','CR');account.closing_balance=account.closing_balance!.replace('DR','CR');
+      for(const row of account.transactions){[row.debit,row.credit]=[row.credit?.replace('CR','DR')??null,row.debit?.replace('DR','CR')??null];row.balance=row.balance!.replace('DR','CR');}
+    }
+    const compound=`${increasingSubject} increase and ${reducingSubject.toLowerCase()} reduce the displayed balance.`;
+    for(const [prose,expected] of [
+      [`${compound} ${increasingSubject} ${reducing} the amount owed.`,'unknown'],
+      [`${compound} ${reducingSubject} ${reducing} the displayed balance.`,convention],
+      [`${reducingSubject} ${reducing} the displayed balance.`,'unknown'],
+    ]){
+      account.balance_convention=prose;const before=clone(raw),result=createBankStatementResult(raw,{},'en-IE',{id:ids()}),normalized=result.values.accounts[0];
+      assert.equal(normalized.balance_convention,expected,prose);assert.deepEqual(raw,before);
+      if(expected==='unknown'){
+        assert.equal(normalized.opening_balance,account.opening_balance);assert.equal(normalized.closing_balance,account.closing_balance);assert.deepEqual(normalized.transactions.map(row=>row.balance),account.transactions.map(row=>row.balance));
+        assert.ok(codes(result.issues).includes('balance_convention_unknown'));assert.ok(result.issues.some(issue=>issue.severity==='error'&&issue.code==='amount_direction_ambiguous'));
+      }else{
+        assert.equal(normalized.opening_balance,'100.00');assert.equal(normalized.closing_balance,'69.99');assert.deepEqual(normalized.transactions.map(row=>row.balance),['120.01','69.99']);assert.equal(errors(result).length,0);
+      }
+    }
+  }
+});
+
 test('bad grouping, currency signs and dual signs are not silently repaired',async()=>{
   for(const value of ['1,23,4.00','EUR 1.00','(−1.00)','1e3','1.234.56','NaN']){const raw=await fixture('usd-large-values');raw.accounts[0].transactions[0].credit=value;const result=createBankStatementResult(raw,{},'en-US',{id:ids()});assert.equal(result.values.accounts[0].transactions[0].credit,value);assert.ok(result.issues.some(i=>i.severity==='error'&&i.transactionId===result.values.accounts[0].transactions[0].id&&i.field==='credit'),value);}
 });
