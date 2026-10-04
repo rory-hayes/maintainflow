@@ -1,4 +1,5 @@
 import type {BankContext,BankIssue,BankValues} from '../../shared/bank-statements.js';
+import {bankFormatFields} from './bank-source-formats.js';
 import type {ValidationIssue} from '../../shared/types.js';
 
 const limits={accounts:100,transactions:20_000,description:4000,quotes:20,quoteText:2000,textWork:1024*1024,issues:150_000};
@@ -52,7 +53,7 @@ export function bankDescriptionEvidenceIssues(rawValues:unknown,evidence:unknown
  return issues;
 }
 
-const accountFields=new Set(['bank_name','account_identifier','currency','statement_start','statement_end','opening_balance','closing_balance','total_debits','total_credits','balance_convention']);
+const accountFields=new Set(['bank_name','account_identifier','currency','statement_start','statement_end','opening_balance','closing_balance','total_debits','total_credits','balance_convention',...bankFormatFields]);
 const transactionFields=new Set(['date','description','reference','debit','credit','balance','currency']);
 type Binding={accountId:string;transactionId?:string};
 
