@@ -31,8 +31,9 @@ export async function requireActor(request:FastifyRequest,options:{roles?:Role[]
  }else{
   const token=request.cookies?.folio_session;if(!token)badRequest('Sign in to continue',401);
   const {rows}=await adminPool.query('select s.* from sessions s join users u on u.id=s.user_id where s.token_hash=$1 and s.expires_at>now() and (not u.email_verification_required or u.email_verified_at is not null)',[hashToken(token)]);const session=rows[0];if(!session)badRequest('Your session has expired. Sign in again.',401);
-  const workspaceHeader=request.headers['x-workspace-id'];const workspaceId=typeof workspaceHeader==='string'?workspaceHeader:session.workspace_id;
-  if(!/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(workspaceId))badRequest('Invalid workspace',400);
+  const workspaceHeader=request.headers['x-workspace-id'];const selectedWorkspaceId=typeof workspaceHeader==='string'?workspaceHeader:session.workspace_id;
+  if(selectedWorkspaceId.length!==36||!/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(selectedWorkspaceId))badRequest('Invalid workspace',400);
+  const workspaceId=selectedWorkspaceId.toLowerCase();
   const {rows:members}=await adminPool.query('select role from memberships where user_id=$1 and workspace_id=$2',[session.user_id,workspaceId]);if(!members[0])badRequest('Workspace access denied',403);
   if(!['GET','HEAD','OPTIONS'].includes(request.method)){
    const origin=request.headers.origin;if(origin&&origin!==config.origin)badRequest('Request origin is not allowed',403);

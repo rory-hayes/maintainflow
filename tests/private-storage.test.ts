@@ -17,6 +17,16 @@ test('private storage accepts only two UUID key segments and an exact workspace'
  assert.equal(safeDownloadName('../invoice\r\nInjected.txt'),'invoiceInjected.txt');
  assert.throws(()=>createSupabaseStorage({url:'http://127.0.0.1',serviceRoleKey:'fixture'}));
 });
+test('workspace case variants preserve historical object keys without admitting foreign or malformed prefixes',async()=>{
+ const canonical='abcdefab-cdef-4abc-8def-abcdefabcdef',document='12345678-1234-4123-8123-123456789abc';
+ const historical=`${canonical.toUpperCase()}/${document.toUpperCase()}`,prefixes:string[]=[];
+ for(const selected of [canonical,canonical.toUpperCase(),'Abcdefab-cdef-4abc-8def-abcdefabcdef'])assert.equal(validateStorageKey(historical,selected),historical);
+ for(const selected of ['01234567-89ab-4cde-8fab-0123456789ab',`${canonical}\n`,`${canonical}/..`,` ${canonical}`,`${canonical} `])assert.throws(()=>validateStorageKey(historical,selected),(error:any)=>error.statusCode===400);
+ for(const invalid of [`${historical}/extra`,`${canonical.toUpperCase()}/../${document}`,`${canonical.toUpperCase()}\\${document}`,`${canonical.toUpperCase()}/${document}\n`])assert.throws(()=>validateStorageKey(invalid,canonical),(error:any)=>error.statusCode===400);
+ const client=storage(endpoint=>{prefixes.push(endpoint.pathname);if(endpoint.pathname.includes('/bucket/'))return json(bucket);return new Response('owned historical original');});
+ assert.equal((await client.read(validateStorageKey(historical,canonical))).toString(),'owned historical original');
+ assert.equal(prefixes.at(-1),`/storage/v1/object/authenticated/${ORIGINALS_BUCKET}/${historical}`);
+});
 test('filesystem operations reject traversal and absolute keys while preserving owned storage and outside files',async()=>{
  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'folio-storage-containment-'));
  const previousRoot=config.storageDir,previousDriver=process.env.STORAGE_DRIVER;
