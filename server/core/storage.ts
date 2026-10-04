@@ -54,7 +54,7 @@ function diagnosedError(code:StorageCode,message:string,operation?:StorageOperat
 }
 export function validateStorageKey(key:string,workspaceId?:string){
   const parts=key.split('/');
-  if(parts.length!==2||!parts.every(part=>part.length===36&&uuid.test(part))||(workspaceId&&parts[0]!==workspaceId))throw storageError('Invalid private storage key',400);
+  if(parts.length!==2||!parts.every(part=>part.length===36&&uuid.test(part))||(workspaceId&&(workspaceId.length!==36||!uuid.test(workspaceId)||parts[0].toLowerCase()!==workspaceId.toLowerCase())))throw storageError('Invalid private storage key',400);
   return key;
 }
 function filesystemPath(key:string){
