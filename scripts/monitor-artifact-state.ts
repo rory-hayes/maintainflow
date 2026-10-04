@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {createHash} from 'node:crypto';
 
 const repository='rory-hayes/maintainflow';
 const workflow='operations-monitor.yml';
@@ -12,10 +13,10 @@ const runLimit=30;
 const artifactLimit=100;
 const phases={resumed:0,prepared:1,delivered:2} as const;
 type Phase=keyof typeof phases;
-type Run={id:number;run_number:number;run_attempt:number;display_title:string;head_branch:string;event:string;status:string;conclusion:string|null;repository:{full_name:string};head_repository:{full_name:string}};
+type Run={id:number;run_number:number;run_attempt:number;display_title:string;head_sha:string;head_branch:string;event:string;status:string;conclusion:string|null;repository:{full_name:string};head_repository:{full_name:string}};
 type Artifact={id:number;name:string;expired:boolean;size_in_bytes:number;workflow_run?:{id:number;head_branch:string}};
 export type ArtifactSelection={artifactId:number;runId:number;name:string};
-export type SelectionOptions={token:string;runId:number;runAttempt:number;runNumber:number;initialize?:boolean;timeoutMs?:number};
+export type SelectionOptions={token:string;runId:number;runAttempt:number;runNumber:number;initialize?:boolean;timeoutMs?:number;onSkippedRun?:(runId:number)=>void};
 export class ArtifactStateError extends Error{readonly code:string;constructor(code:string){super(code);this.code=code;}}
 function requireValue(value:unknown,code:string):asserts value{if(!value)throw new ArtifactStateError(code);}
 const positive=(value:unknown):value is number=>Number.isSafeInteger(value)&&Number(value)>0;
@@ -42,7 +43,7 @@ async function json(url:string,token:string,transport:typeof fetch,signal:AbortS
 function runsResponse(value:unknown):{runs:Run[];total:number}{
   requireValue(object(value)&&count(value.total_count)&&Array.isArray(value.workflow_runs)&&value.workflow_runs.length<=runLimit&&value.total_count>=value.workflow_runs.length,'artifact_runs_invalid');
   const runs:Run[]=value.workflow_runs.map((entry:unknown)=>{
-    requireValue(object(entry)&&positive(entry.id)&&positive(entry.run_number)&&positive(entry.run_attempt)&&typeof entry.display_title==='string'&&entry.head_branch==='main'&&typeof entry.event==='string'&&typeof entry.status==='string'&&(entry.conclusion===null||typeof entry.conclusion==='string')&&object(entry.repository)&&entry.repository.full_name===repository&&object(entry.head_repository)&&entry.head_repository.full_name===repository,'artifact_runs_invalid');
+    requireValue(object(entry)&&positive(entry.id)&&positive(entry.run_number)&&positive(entry.run_attempt)&&typeof entry.display_title==='string'&&typeof entry.head_sha==='string'&&/^[0-9a-f]{40}$/.test(entry.head_sha)&&entry.head_branch==='main'&&typeof entry.event==='string'&&typeof entry.status==='string'&&(entry.conclusion===null||typeof entry.conclusion==='string')&&object(entry.repository)&&entry.repository.full_name===repository&&object(entry.head_repository)&&entry.head_repository.full_name===repository,'artifact_runs_invalid');
     return entry as unknown as Run;
   });
   requireValue(new Set(runs.map(run=>run.id)).size===runs.length&&new Set(runs.map(run=>run.run_number)).size===runs.length,'artifact_runs_ambiguous');
@@ -82,6 +83,60 @@ function artifactResponse(value:unknown,run:Run,maximumAttempt:number):ArtifactS
   return {artifactId:selected.artifact.id,runId:run.id,name:selected.artifact.name};
 }
 
+// These names bind the exemption to the existing, read-only selector and fixed workflow.
+// A run that reached state download or any delivery step remains authoritative even if
+// its artifacts later disappear. Unknown workflow steps are never safe to skip.
+const selectorOnlySteps=[
+  'Set up job',
+  'Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683',
+  'Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020',
+  'Select the authoritative encrypted checkpoint',
+  'Download exactly the selected encrypted artifact',
+  'Validate exact downloaded file shape and authenticate state',
+  'Preserve the resumed checkpoint before retrying pending notices',
+  'Retry previously checkpointed pending notices',
+  'Observe current health and prepare the next encrypted state',
+  'Commit prepared notices before sending new mail',
+  'Deliver newly checkpointed incident or recovery notices',
+  'Commit the delivered checkpoint',
+  'Read dependencies without incident state or email',
+  'Deliver approved test notices with a frozen identity and timestamp',
+  'Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020',
+  'Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683',
+  'Complete job',
+] as const;
+function failedBeforeState(value:unknown,run:Run):boolean{
+  if(run.run_attempt!==1||run.conclusion!=='failure'||!object(value)||value.total_count!==1||!Array.isArray(value.jobs)||value.jobs.length!==1)return false;
+  const job=value.jobs[0];
+  if(!object(job)||job.run_id!==run.id||job.run_attempt!==1||job.head_sha!==run.head_sha||job.name!=='monitor'||job.status!=='completed'||job.conclusion!=='failure'||!Array.isArray(job.steps)||job.steps.length!==selectorOnlySteps.length)return false;
+  let previousNumber=0;
+  return job.steps.every((step:unknown,index:number)=>{
+    if(!object(step)||!positive(step.number)||step.number<=previousNumber||step.name!==selectorOnlySteps[index]||step.status!=='completed')return false;
+    previousNumber=step.number;
+    if(index<3)return step.conclusion==='success';
+    if(index===3)return step.conclusion==='failure';
+    if(index<15)return step.conclusion==='skipped';
+    return step.conclusion==='success';
+  });
+}
+
+const digest=(value:Uint8Array)=>createHash('sha256').update(value).digest('hex');
+// The original selector was independently checked at the released PR71 commit.
+// It could not read state or send notices before its failed selection step.
+const originalSelectorDigest='36d48bfae9039bc891147c7d06ec659a15ac69a3b2574525d6113a967eba95ad';
+async function verifySelectorOnlySource(run:Run,token:string,transport:typeof fetch,signal:AbortSignal):Promise<void>{
+  const paths=['.github/workflows/operations-monitor.yml','scripts/monitor-artifact-state.ts'] as const;
+  const local=[await fs.readFile(new URL('../.github/workflows/operations-monitor.yml',import.meta.url)),await fs.readFile(new URL(import.meta.url))];
+  for(const [index,sourcePath] of paths.entries()){
+    const value=await json(`https://api.github.com/repos/${repository}/contents/${sourcePath}?ref=${run.head_sha}`,token,transport,signal);
+    requireValue(object(value)&&value.type==='file'&&value.path===sourcePath&&value.encoding==='base64'&&typeof value.content==='string','artifact_selector_source_untrusted');
+    const encoded=value.content.replace(/\n/g,'');
+    requireValue(encoded.length>0&&/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded),'artifact_selector_source_untrusted');
+    const source=Buffer.from(encoded,'base64'),actual=digest(source);
+    requireValue(source.byteLength<=responseLimit&&(actual===digest(local[index]!)||index===1&&actual===originalSelectorDigest),'artifact_selector_source_untrusted');
+  }
+}
+
 /** A null result is permitted only for explicit first-ever initialization with complete history. */
 export async function selectMonitorArtifact(options:SelectionOptions,transport:typeof fetch=fetch):Promise<ArtifactSelection|null>{
   requireValue(typeof options.token==='string'&&options.token.length>=16,'artifact_token_missing');
@@ -106,8 +161,28 @@ export async function selectMonitorArtifact(options:SelectionOptions,transport:t
       requireValue(priorAttempt.id===selected.id&&priorAttempt.run_number===selected.run_number&&priorAttempt.run_attempt===maximumAttempt&&isStateful(priorAttempt),'artifact_attempt_invalid');
       selected=priorAttempt;
     }
-    requireValue(selected.status==='completed'&&selected.conclusion!==null,'prior_monitor_run_incomplete');
-    return artifactResponse(await json(`${api}/runs/${selected.id}/artifacts?per_page=${artifactLimit}`,options.token,transport,controller.signal),selected,maximumAttempt);
+    const candidates=selected.id===options.runId?[selected]:previous,verifiedSources=new Set<string>();
+    for(const candidate of candidates){
+      if(!isStateful(candidate))continue;
+      requireValue(candidate.status==='completed'&&candidate.conclusion!==null,'prior_monitor_run_incomplete');
+      const artifacts=await json(`${api}/runs/${candidate.id}/artifacts?per_page=${artifactLimit}`,options.token,transport,controller.signal);
+      try{return artifactResponse(artifacts,candidate,candidate.id===options.runId?maximumAttempt:candidate.run_attempt);}
+      catch(error){
+        if(!(error instanceof ArtifactStateError)||error.code!=='latest_monitor_checkpoint_missing'||candidate.id===options.runId||candidate.run_attempt!==1||candidate.conclusion!=='failure')throw error;
+        requireValue(object(artifacts)&&artifacts.total_count===0&&Array.isArray(artifacts.artifacts)&&artifacts.artifacts.length===0,'latest_monitor_checkpoint_missing');
+        const jobs=await json(`${api}/runs/${candidate.id}/attempts/1/jobs?per_page=100`,options.token,transport,controller.signal);
+        requireValue(failedBeforeState(jobs,candidate),'latest_monitor_checkpoint_missing');
+        if(!verifiedSources.has(candidate.head_sha)){
+          await verifySelectorOnlySource(candidate,options.token,transport,controller.signal);
+          verifiedSources.add(candidate.head_sha);
+        }
+        options.onSkippedRun?.(candidate.id);
+      }
+    }
+    // Selector-only failures do not authorize first-ever initialization or hide a
+    // checkpoint beyond the bounded history window.
+    requireValue(total===runs.length,'artifact_history_incomplete');
+    throw new ArtifactStateError('latest_monitor_checkpoint_missing');
   })();
   try{return await Promise.race([work,new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new ArtifactStateError('artifact_api_timeout'));},milliseconds);})]);}
   catch(error){if(error instanceof ArtifactStateError)throw error;throw new ArtifactStateError('artifact_api_unavailable');}
@@ -119,7 +194,7 @@ export async function main(args=process.argv.slice(2),env=process.env){
   requireValue(env.GITHUB_REPOSITORY===repository&&env.GITHUB_REF==='refs/heads/main','artifact_environment_invalid');
   requireValue(typeof env.GITHUB_OUTPUT==='string'&&path.isAbsolute(env.GITHUB_OUTPUT),'artifact_output_missing');
   const parse=(value:string|undefined)=>value&&/^[1-9][0-9]*$/.test(value)?Number(value):NaN;
-  const result=await selectMonitorArtifact({token:env.GH_TOKEN??'',runId:parse(env.GITHUB_RUN_ID),runAttempt:parse(env.GITHUB_RUN_ATTEMPT),runNumber:parse(env.GITHUB_RUN_NUMBER),initialize:args[0]==='--initialize'});
+  const result=await selectMonitorArtifact({token:env.GH_TOKEN??'',runId:parse(env.GITHUB_RUN_ID),runAttempt:parse(env.GITHUB_RUN_ATTEMPT),runNumber:parse(env.GITHUB_RUN_NUMBER),initialize:args[0]==='--initialize',onSkippedRun:runId=>console.error(JSON.stringify({monitorState:'checkpoint_not_created',runId,code:'selector_failed_before_state'}))});
   await fs.appendFile(env.GITHUB_OUTPUT,`artifact_id=${result?.artifactId??''}\nrun_id=${result?.runId??''}\nartifact_name=${result?.name??''}\n`);
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)main().catch(error=>{console.error(JSON.stringify({monitorState:'unavailable',code:error instanceof ArtifactStateError?error.code:'artifact_selector_failed'}));process.exitCode=1;});

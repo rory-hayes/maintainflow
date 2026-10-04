@@ -7,19 +7,46 @@ import {selectMonitorArtifact,main,type SelectionOptions} from '../scripts/monit
 
 const repo='rory-hayes/maintainflow',root=`https://api.github.com/repos/${repo}/actions`;
 const options:SelectionOptions={token:'synthetic_owned_github_token',runId:30,runNumber:30,runAttempt:1};
-const run=(id:number,mode='run',attempt=1)=>({id,run_number:id,run_attempt:attempt,display_title:`Folio monitor: ${mode}`,head_branch:'main',event:'workflow_dispatch',status:id===30?'in_progress':'completed',conclusion:id===30?null:'failure',repository:{full_name:repo},head_repository:{full_name:repo}});
+const fixtureHead='ab34186f3619dff95b0cbd623352114e6b3a3dab';
+const run=(id:number,mode='run',attempt=1)=>({id,run_number:id,run_attempt:attempt,display_title:`Folio monitor: ${mode}`,head_sha:fixtureHead,head_branch:'main',event:'workflow_dispatch',status:id===30?'in_progress':'completed',conclusion:id===30?null:'failure',repository:{full_name:repo},head_repository:{full_name:repo}});
 const artifact=(id:number,attempt=1,phase='delivered',extra:Record<string,unknown>={})=>({id,name:`folio-monitor-state-v1-${attempt}-${phase}`,expired:false,size_in_bytes:512,...extra});
-function transport(runs:ReturnType<typeof run>[],artifacts:ReturnType<typeof artifact>[],extra:{totalRuns?:number;totalArtifacts?:number;previousConclusion?:string}={}){
+function transport(runs:ReturnType<typeof run>[],artifacts:ReturnType<typeof artifact>[],extra:{totalRuns?:number;totalArtifacts?:number;previousConclusion?:string;jobs?:Record<number,unknown>;artifactsByRun?:Record<number,ReturnType<typeof artifact>[]>;sourceOverrides?:Record<string,string>}={}){
   const calls:string[]=[];
   const fetcher:typeof fetch=async(input,init)=>{
     const url=String(input);calls.push(url);assert.equal(init?.method,'GET');assert.equal(init?.redirect,'error');assert.ok(init?.signal);const headers=new Headers(init?.headers);assert.equal(headers.get('authorization'),`Bearer ${options.token}`);assert.equal(headers.get('x-github-api-version'),'2022-11-28');
     const attempt=/\/runs\/(\d+)\/attempts\/(\d+)$/.exec(url);
-    assert.ok(url===`${root}/workflows/operations-monitor.yml/runs?branch=main&per_page=30`||new RegExp(`^${root}/runs/[0-9]+/artifacts\\?per_page=100$`).test(url)||attempt);
+    const jobs=/\/runs\/(\d+)\/attempts\/1\/jobs\?per_page=100$/.exec(url);
+    const source=new RegExp(`^https://api.github.com/repos/${repo}/contents/(\\.github/workflows/operations-monitor\\.yml|scripts/monitor-artifact-state\\.ts)\\?ref=[0-9a-f]{40}$`).exec(url);
+    assert.ok(url===`${root}/workflows/operations-monitor.yml/runs?branch=main&per_page=30`||new RegExp(`^${root}/runs/[0-9]+/artifacts\\?per_page=100$`).test(url)||attempt||jobs||source);
+    if(source){const sourcePath=source[1],bytes=extra.sourceOverrides?.[sourcePath]??await fs.readFile(new URL(`../${sourcePath}`,import.meta.url),'utf8');return Response.json({type:'file',path:sourcePath,encoding:'base64',content:Buffer.from(bytes).toString('base64')});}
     if(attempt)return Response.json({...runs.find(r=>r.id===Number(attempt[1]))!,run_attempt:Number(attempt[2]),status:'completed',conclusion:extra.previousConclusion??'failure'});
-    return Response.json(url.includes('/workflows/')?{total_count:extra.totalRuns??runs.length,workflow_runs:runs}:{total_count:extra.totalArtifacts??artifacts.length,artifacts});
+    if(jobs)return Response.json(extra.jobs?.[Number(jobs[1])]??{total_count:0,jobs:[]});
+    const runId=/\/runs\/(\d+)\/artifacts/.exec(url),items=runId?extra.artifactsByRun?.[Number(runId[1])]??artifacts:artifacts;
+    return Response.json(url.includes('/workflows/')?{total_count:extra.totalRuns??runs.length,workflow_runs:runs}:{total_count:extra.totalArtifacts??items.length,artifacts:items});
   };
   return {calls,fetcher};
 }
+
+// Synthetic GitHub metadata reproduces the hosted selector-only failure shape.
+const selectorFailedJob=(runId:number)=>({total_count:1,jobs:[{run_id:runId,run_attempt:1,head_sha:fixtureHead,name:'monitor',status:'completed',conclusion:'failure',steps:[
+  ['Set up job','success'],
+  ['Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683','success'],
+  ['Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020','success'],
+  ['Select the authoritative encrypted checkpoint','failure'],
+  ['Download exactly the selected encrypted artifact','skipped'],
+  ['Validate exact downloaded file shape and authenticate state','skipped'],
+  ['Preserve the resumed checkpoint before retrying pending notices','skipped'],
+  ['Retry previously checkpointed pending notices','skipped'],
+  ['Observe current health and prepare the next encrypted state','skipped'],
+  ['Commit prepared notices before sending new mail','skipped'],
+  ['Deliver newly checkpointed incident or recovery notices','skipped'],
+  ['Commit the delivered checkpoint','skipped'],
+  ['Read dependencies without incident state or email','skipped'],
+  ['Deliver approved test notices with a frozen identity and timestamp','skipped'],
+  ['Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020','skipped'],
+  ['Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683','success'],
+  ['Complete job','success'],
+].map(([name,conclusion],index)=>({number:index<14?index+1:index+13,name,status:'completed',conclusion}))}]});
 
 test('selects latest stateful main run by run number and ignores newer probes or drills',async()=>{
   const {fetcher,calls}=transport([run(28,'probe'),run(30),run(26),run(29,'delivery-drill'),run(27)], [artifact(101)]);
@@ -59,7 +86,104 @@ test('a historical rerun cannot roll back a newer stateful run',async()=>{
 });
 
 test('missing latest checkpoint refuses fallback to an older run, including initialize',async()=>{
-  for(const initialize of [false,true]){const fixture=transport([run(30),run(29),run(28)],[]);await assert.rejects(selectMonitorArtifact({...options,initialize},fixture.fetcher),/latest_monitor_checkpoint_missing/);assert.equal(fixture.calls.length,2);assert.ok(fixture.calls[1].includes('/runs/29/'));}
+  for(const initialize of [false,true]){const fixture=transport([run(30),run(29),run(28)],[]);await assert.rejects(selectMonitorArtifact({...options,initialize},fixture.fetcher),/latest_monitor_checkpoint_missing/);assert.equal(fixture.calls.length,3);assert.ok(fixture.calls[1].includes('/runs/29/'));assert.ok(fixture.calls[2].includes('/runs/29/attempts/1/jobs'));}
+});
+
+test('a chain of proven selector-only failures resumes the latest untouched encrypted checkpoint',async()=>{
+  const skipped:number[]=[],fixture=transport([run(30),run(29),run(28),{...run(27),conclusion:'success'}],[],{
+    jobs:{29:selectorFailedJob(29),28:selectorFailedJob(28)},artifactsByRun:{27:[artifact(101)]},
+  });
+  assert.deepEqual(await selectMonitorArtifact({...options,onSkippedRun:id=>skipped.push(id)},fixture.fetcher),{artifactId:101,runId:27,name:'folio-monitor-state-v1-1-delivered'});
+  assert.deepEqual(skipped,[29,28]);assert.equal(fixture.calls.length,8);assert.ok(fixture.calls[7].includes('/runs/27/artifacts'));
+  assert.equal(fixture.calls.filter(url=>url.includes('/contents/')).length,2);
+});
+
+test('the observed eighteen-failure cascade remains within the bounded history and uses one source proof',async()=>{
+  const failed=Array.from({length:18},(_,index)=>29-index),skipped:number[]=[],jobs=Object.fromEntries(failed.map(id=>[id,selectorFailedJob(id)]));
+  const fixture=transport([run(30),...failed.map(id=>run(id)),{...run(11),conclusion:'success'}],[],{jobs,artifactsByRun:{11:[artifact(101)]}});
+  assert.equal((await selectMonitorArtifact({...options,onSkippedRun:id=>skipped.push(id)},fixture.fetcher))?.runId,11);
+  assert.deepEqual(skipped,failed);assert.equal(fixture.calls.length,40);assert.equal(fixture.calls.filter(url=>url.includes('/contents/')).length,2);
+});
+
+test('a valid latest checkpoint does not inspect irrelevant older unrecognized modes',async()=>{
+  const fixture=transport([run(30),run(29),run(28,'unrecognized')],[artifact(101)]);
+  assert.equal((await selectMonitorArtifact(options,fixture.fetcher))?.runId,29);assert.equal(fixture.calls.length,2);
+});
+
+test('familiar step names cannot bypass drifted immutable workflow or selector commands',async()=>{
+  for(const sourcePath of ['.github/workflows/operations-monitor.yml','scripts/monitor-artifact-state.ts']){
+    const fixture=transport([run(30),run(29),run(28)],[],{jobs:{29:selectorFailedJob(29)},artifactsByRun:{28:[artifact(101)]},sourceOverrides:{[sourcePath]:'// synthetic modified command: send alerts before selector failure'}});
+    await assert.rejects(selectMonitorArtifact(options,fixture.fetcher),/artifact_selector_source_untrusted/);
+    assert.ok(!fixture.calls.some(url=>url.includes('/runs/28/')));
+  }
+});
+
+test('source proof is cached per immutable commit, not across different run heads',async()=>{
+  const otherHead='a'.repeat(40),olderJob=selectorFailedJob(28);olderJob.jobs[0].head_sha=otherHead;
+  const fixture=transport([run(30),run(29),{...run(28),head_sha:otherHead},{...run(27),conclusion:'success'}],[],{jobs:{29:selectorFailedJob(29),28:olderJob},artifactsByRun:{27:[artifact(101)]}});
+  assert.equal((await selectMonitorArtifact(options,fixture.fetcher))?.runId,27);
+  assert.equal(fixture.calls.filter(url=>url.includes('/contents/')).length,4);
+});
+
+test('selector-only failure exemption never initializes or searches beyond bounded history',async()=>{
+  for(const initialize of [false,true]){
+    const fixture=transport([run(30),run(29)],[],{jobs:{29:selectorFailedJob(29)}});
+    await assert.rejects(selectMonitorArtifact({...options,initialize},fixture.fetcher),/latest_monitor_checkpoint_missing/);
+    const incomplete=transport([run(30),run(29)],[],{jobs:{29:selectorFailedJob(29)},totalRuns:31});
+    await assert.rejects(selectMonitorArtifact({...options,initialize},incomplete.fetcher),/artifact_history_incomplete/);
+  }
+});
+
+test('deleted checkpoints cannot fall through once download, state work or delivery began',async()=>{
+  for(const index of [4,5,6,7,8,9,10,11]){
+    const metadata=selectorFailedJob(29);metadata.jobs[0].steps[index].conclusion='success';
+    const fixture=transport([run(30),run(29),run(28)],[],{jobs:{29:metadata},artifactsByRun:{28:[artifact(101)]}});
+    await assert.rejects(selectMonitorArtifact(options,fixture.fetcher),/latest_monitor_checkpoint_missing/);
+    assert.equal(fixture.calls.length,3);assert.ok(!fixture.calls.some(url=>url.includes('/runs/28/')));
+  }
+});
+
+test('selector-only recovery requires exact complete single-job scope and step order',async()=>{
+  const mutations:Array<(value:ReturnType<typeof selectorFailedJob>)=>void>=[
+    value=>{value.total_count=2;},
+    value=>{value.jobs.push(structuredClone(value.jobs[0]));},
+    value=>{value.jobs[0].run_id=28;},
+    value=>{value.jobs[0].run_attempt=2;},
+    value=>{value.jobs[0].head_sha='a'.repeat(40);},
+    value=>{value.jobs[0].name='other';},
+    value=>{value.jobs[0].status='in_progress';},
+    value=>{value.jobs[0].conclusion='success';},
+    value=>{value.jobs[0].steps.pop();},
+    value=>{value.jobs[0].steps[4].name='Unknown state step';},
+    value=>{[value.jobs[0].steps[5],value.jobs[0].steps[6]]=[value.jobs[0].steps[6],value.jobs[0].steps[5]];},
+    value=>{value.jobs[0].steps[4].number=4;},
+    value=>{value.jobs[0].steps[3].conclusion='success';},
+    value=>{value.jobs[0].steps[4].status='in_progress';},
+  ];
+  for(const mutate of mutations){
+    const metadata=selectorFailedJob(29);mutate(metadata);
+    const fixture=transport([run(30),run(29),run(28)],[],{jobs:{29:metadata},artifactsByRun:{28:[artifact(101)]}});
+    await assert.rejects(selectMonitorArtifact(options,fixture.fetcher),/latest_monitor_checkpoint_missing/);assert.equal(fixture.calls.length,3);
+  }
+});
+
+test('unrelated artifacts, reruns and a still-running predecessor remain authoritative',async()=>{
+  const unrelated=transport([run(30),run(29),run(28)],[artifact(102,1,'delivered',{name:'other-artifact'})],{jobs:{29:selectorFailedJob(29)}});
+  await assert.rejects(selectMonitorArtifact(options,unrelated.fetcher),/latest_monitor_checkpoint_missing/);assert.equal(unrelated.calls.length,2);
+  const priorRerun=transport([run(30),run(29,'run',2),run(28)],[],{jobs:{29:selectorFailedJob(29)}});
+  await assert.rejects(selectMonitorArtifact(options,priorRerun.fetcher),/latest_monitor_checkpoint_missing/);assert.equal(priorRerun.calls.length,2);
+  const currentRerun=transport([run(30,'run',2),run(29)],[],{jobs:{30:selectorFailedJob(30)}});
+  await assert.rejects(selectMonitorArtifact({...options,runAttempt:2},currentRerun.fetcher),/latest_monitor_checkpoint_missing/);assert.equal(currentRerun.calls.length,3);
+  const running=transport([run(30),{...run(29),status:'in_progress',conclusion:null},run(28)],[],{jobs:{29:selectorFailedJob(29)}});
+  await assert.rejects(selectMonitorArtifact(options,running.fetcher),/prior_monitor_run_incomplete/);assert.equal(running.calls.length,1);
+});
+
+test('a selector-only failure cannot bypass an expired or deleted successful checkpoint',async()=>{
+  for(const items of [[],[artifact(101,1,'delivered',{expired:true})]]){
+    const fixture=transport([run(30),run(29),{...run(28),conclusion:'success'},run(27)],[],{jobs:{29:selectorFailedJob(29)},artifactsByRun:{28:items,27:[artifact(102)]}});
+    await assert.rejects(selectMonitorArtifact(options,fixture.fetcher),/latest_monitor_checkpoint_(missing|expired)/);
+    assert.ok(!fixture.calls.some(url=>url.includes('/runs/27/')));
+  }
 });
 
 test('expired authoritative generation refuses fallback to a valid older phase or attempt',async()=>{
@@ -109,7 +233,7 @@ test('artifact generation, payload size and optional run binding are validated',
 });
 
 test('duplicate runs, foreign repository or branch and unknown stateful titles fail closed',async()=>{
-  for(const runs of [[run(30),run(29),run(29)],[run(30),{...run(29),head_branch:'branch'}],[run(30),{...run(29),head_repository:{full_name:'foreign/repo'}}],[run(30),run(29,'unrecognized')]]){
+  for(const runs of [[run(30),run(29),run(29)],[run(30),{...run(29),head_sha:'invalid'}],[run(30),{...run(29),head_branch:'branch'}],[run(30),{...run(29),head_repository:{full_name:'foreign/repo'}}],[run(30),run(29,'unrecognized')]]){
     const fixture=transport(runs,[artifact(1)]);await assert.rejects(selectMonitorArtifact(options,fixture.fetcher),/artifact_(runs_ambiguous|runs_invalid|run_unrecognized)/);
   }
 });
