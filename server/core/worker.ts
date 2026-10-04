@@ -1,5 +1,5 @@
 import {isDeepStrictEqual} from 'node:util';
-import {bankStatementWorkflow,bankStatementSchema} from '../../shared/bank-statement-preset.js';
+import {bankStatementWorkflow,bankStatementSchema,legacyBankStatementSchema} from '../../shared/bank-statement-preset.js';
 import {bankPdfLayoutVersion,serializeBankPdfLayout,type BankPdfLayoutInput,type BankPdfLayoutProvenance} from '../../shared/bank-pdf-layout.js';
 import {PdfGeometryError,pdfRegionLimits} from '../../shared/pdf-regions.js';
 import {createBankStatementResult} from './bank-statement-domain.js';
@@ -109,7 +109,8 @@ const attempt=await extractWithDeadline(async signal=>{
  const bank=job.config.useCase==='bank_statement';
  if(Object.hasOwn(job.config,'bankPdfLayoutVersion')&&(!bank||job.config.bankPdfLayoutVersion!==bankPdfLayoutVersion))throw Object.assign(new Error('This job uses an unsupported bank PDF input version. Reprocess with current saved settings.'),{permanent:true});
  if(job.config.bankWorkflow!=null&&job.config.bankWorkflow!==bankStatementWorkflow||bank&&job.config.bankWorkflow!==bankStatementWorkflow||job.config.bankWorkflow===bankStatementWorkflow&&!bank)throw Object.assign(new Error('This job uses an unsupported bank statement workflow. Reprocess with current saved settings.'),{permanent:true});
- if(bank&&(job.config.mode!=='ai'||!isDeepStrictEqual(data.schema,bankStatementSchema)))throw Object.assign(new Error('This bank statement job has incompatible extraction settings. Reprocess with the bank statement workflow.'),{permanent:true});
+ const sourceBankFormats=bank&&isDeepStrictEqual(data.schema,bankStatementSchema);
+ if(bank&&(job.config.mode!=='ai'||!sourceBankFormats&&!isDeepStrictEqual(data.schema,legacyBankStatementSchema)))throw Object.assign(new Error('This bank statement job has incompatible extraction settings. Reprocess with the bank statement workflow.'),{permanent:true});
  const valuePolicy=resolveJobNormalizationPolicy(job.config.normalizationPolicy);assertJobSourceFormats(data.schema,valuePolicy);
  if(policy!=null&&policy!==templatePolicy&&policy!==regionTemplatePolicy)throw Object.assign(new Error('This job uses an unsupported template version. Reprocess the document with current saved settings.'),{permanent:true});
  let sourceBytes:Buffer|undefined,geometry:Awaited<ReturnType<typeof readPdfGeometry>>|undefined;
@@ -158,7 +159,7 @@ const attempt=await extractWithDeadline(async signal=>{
   result=extractRules(data.doc.source_text,data.schema,job.config.locale,decision?[]:job.config.templates||[],job.config.timezone,valuePolicy);
  }
  let bankContext=null;
- if(bank){try{const statement=createBankStatementResult(result.rawValues,result.evidence,job.config.locale);bankContext=statement.context;result={...result,normalizedValues:statement.values as unknown as Record<string,unknown>,issues:[...result.issues,...statement.issues.map(issue=>({field:issue.field??issue.transactionId??issue.accountId??'accounts',code:issue.code,message:issue.message}))]};}catch(error){throw Object.assign(error instanceof Error?error:new Error('Bank statement extraction is invalid'),{permanent:true});}}
+ if(bank){try{const statement=createBankStatementResult(result.rawValues,result.evidence,job.config.locale,{sourceFormats:sourceBankFormats});bankContext=statement.context;result={...result,normalizedValues:statement.values as unknown as Record<string,unknown>,issues:[...result.issues,...statement.issues.map(issue=>({field:issue.field??issue.transactionId??issue.accountId??'accounts',code:issue.code,message:issue.message}))]};}catch(error){throw Object.assign(error instanceof Error?error:new Error('Bank statement extraction is invalid'),{permanent:true});}}
  signal.throwIfAborted();return {data,result,selection,bankContext,valuePolicy,sourceVerified:Boolean(geometry||bankPdfLayoutInput),templateSnapshot:decision?.result?.templateSnapshot??null};
 },options);
 extractionFinished=true;

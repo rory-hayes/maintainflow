@@ -1,6 +1,8 @@
 import {createHash,randomUUID} from 'node:crypto';
 import type {Evidence} from '../../shared/types.js';
-import type {BankAccount,BankBalanceConvention,BankContext,BankIssue,BankScalar,BankSource,BankStatementExportRow,BankStatementRecord,BankTransaction,BankValues} from '../../shared/bank-statements.js';
+import type {BankAccount,BankAccountFormats,BankBalanceConvention,BankContext,BankIssue,BankScalar,BankSource,BankStatementExportRow,BankStatementRecord,BankTransaction,BankValues} from '../../shared/bank-statements.js';
+
+import {resolveBankSourceFormats,validBankSourceFormats} from './bank-source-formats.js';
 
 const accountFields=['bank_name','account_identifier','currency','statement_start','statement_end','opening_balance','closing_balance','total_debits','total_credits','balance_convention'] as const;
 const rowFields=['date','description','reference','debit','credit','balance','currency'] as const;
@@ -36,7 +38,7 @@ type AmountRole='debit'|'credit'|'balance';
 type ParsedAmount={value:BankScalar;error?:string;warning?:string};
 
 /** Only locale-valid grouping is accepted. Canonical correction values take precedence over locale grouping. */
-function parseAmount(raw:BankScalar,locale:string,currency:BankScalar,role:AmountRole,convention:BankBalanceConvention,correction:boolean):ParsedAmount{
+function parseAmount(raw:BankScalar,locale:string,currency:BankScalar,role:AmountRole,convention:BankBalanceConvention,correction:boolean,formats?:BankAccountFormats,movement=false):ParsedAmount{
   if(!text(raw)||absentAmount.test(raw!.trim().replace(/\s+/g,' ')))return {value:null};let value=raw!.trim(),negative=false,explicitSign=false;
   if(correction&&canonicalMoney.test(value)){const parsed=canonical(value)!;return {value:parsed,...(role!=='balance'&&parsed.startsWith('-')?{warning:'signed_column_amount'}:{})};}
   if(value.length>160)return {value:raw,error:'amount_invalid'};
@@ -57,7 +59,17 @@ function parseAmount(raw:BankScalar,locale:string,currency:BankScalar,role:Amoun
       negative=directionNegative;
     }
   }
-  const parts=new Intl.NumberFormat(locale).formatToParts(12345.6),decimalSeparator=parts.find(p=>p.type==='decimal')?.value??'.',groupSeparator=parts.find(p=>p.type==='group')?.value;
+  let decimalSeparator:string,groupSeparator:string|undefined;
+  if(formats){
+    if(formats.numberStatus==='unresolved')return {value:null,error:'amount_format_unresolved'};
+    if(formats.numberStatus==='supported'){decimalSeparator=formats.decimalSeparator!;groupSeparator=formats.groupSeparator??undefined;}
+    // Without a printed rule only integers and a single 1–2 digit fractional
+    // separator are self-contained. Three-digit punctuation may be grouping.
+    else if(/^\d{1,70}$/.test(value)){decimalSeparator='.';}
+    else {const standalone=value.match(/^\d{1,70}([.,])\d{1,2}$/);if(!standalone)return {value:null,error:'amount_format_unresolved'};decimalSeparator=standalone[1];}
+  }
+  else {const parts=new Intl.NumberFormat(locale).formatToParts(12345.6);decimalSeparator=parts.find(p=>p.type==='decimal')?.value??'.';groupSeparator=parts.find(p=>p.type==='group')?.value;}
+
   if(groupSeparator&&/\s/u.test(groupSeparator))value=value.replace(/[\s\u00a0\u202f]/gu,groupSeparator);
   const pieces=value.split(decimalSeparator);if(pieces.length>2)return {value:raw,error:'amount_invalid'};
   let integer=pieces[0];const fraction=pieces[1]??'';
@@ -67,15 +79,32 @@ function parseAmount(raw:BankScalar,locale:string,currency:BankScalar,role:Amoun
     integer=groups.join('');
   }
   if(!/^\d{1,70}$/.test(integer))return {value:raw,error:'amount_invalid'};
-  const result=canonicalDecimal(integer,fraction,negative);
+  let result=canonicalDecimal(integer,fraction,negative);
+  if(movement&&formats&&!correction&&formats.movement!=='columns'){
+    if(formats.movement==='unresolved')return {value:null,error:'movement_convention_unresolved'};
+    const expectsNegative=formats.movement==='positive_credit'?role==='debit':role==='credit';
+    if(exact(result)!.units!==0n&&negative!==expectsNegative)return {value:null,error:'movement_direction_conflict'};
+    // Only a source-proven single signed movement layout has magnitudes in the
+    // debit/credit exports. Separate signed columns retain genuine reversals.
+    if(result.startsWith('-'))result=result.slice(1);
+  }
   return {value:result,...(role!=='balance'&&result.startsWith('-')?{warning:'signed_column_amount'}:{})};
 }
 function isoDate(value:string){if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;const [year,month,day]=value.split('-').map(Number);if(year<1||month<1||month>12||day<1)return false;const leap=year%4===0&&(year%100!==0||year%400===0);return day<=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31][month-1];}
 const dateString=(y:number,m:number,d:number)=>`${String(y).padStart(4,'0')}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-function parseDate(raw:BankScalar,locale:string):{value:BankScalar;error?:string}{
+function parseDate(raw:BankScalar,locale:string,formats?:BankAccountFormats):{value:BankScalar;error?:string}{
   const input=text(raw);if(!input)return {value:null};if(isoDate(input))return {value:input};
+  if(formats?.dateStatus==='unresolved')return {value:null,error:'date_format_unresolved'};
+  if(formats?.dateOrder==='ymd'){
+    const match=input.match(/^(\d{4})([/.\-])(\d{1,2})\2(\d{1,2})$/);if(match){const result=dateString(Number(match[1]),Number(match[3]),Number(match[4]));return isoDate(result)?{value:result}:{value:raw,error:'date_invalid'};}
+  }
   const numeric=input.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$/);
   if(numeric){const first=Number(numeric[1]),second=Number(numeric[2]),year=Number(numeric[3]);
+    if(formats){
+      const order=formats.dateOrder??(first>12&&second<=12?'dmy':second>12&&first<=12?'mdy':first===second?'dmy':null);
+      if(!order||order==='ymd')return {value:null,error:'date_ambiguous'};
+      const result=dateString(year,order==='mdy'?first:second,order==='mdy'?second:first);return isoDate(result)?{value:result}:{value:raw,error:'date_invalid'};
+    }
     const region=new Intl.Locale(locale).region;if(!region&&first<=12&&second<=12&&first!==second)return {value:raw,error:'date_ambiguous'};
     const order=new Intl.DateTimeFormat(locale,{day:'numeric',month:'numeric',year:'numeric',timeZone:'UTC'}).formatToParts(new Date(Date.UTC(2001,10,23))).filter(p=>['day','month','year'].includes(p.type)).map(p=>p.type);
     const monthFirst=order.indexOf('month')<order.indexOf('day'),result=dateString(year,monthFirst?first:second,monthFirst?second:first);return isoDate(result)?{value:result}:{value:raw,error:'date_invalid'};
@@ -113,34 +142,34 @@ function indexSources(evidence:Record<string,Evidence[]>):Map<string,BankSource>
   return sources;
 }
 const sourceAt=(sources:Map<string,BankSource>,rawPath:string):BankSource=>sources.get(rawPath)??{rawPath,sourcePages:[],evidence:{}};
-function normalizeValues(values:BankValues,locale:string,correction:boolean):{values:BankValues;issues:BankIssue[]}{
+function normalizeValues(values:BankValues,locale:string,correction:boolean,context?:BankContext):{values:BankValues;issues:BankIssue[]}{
   const result=structuredClone(values),issues:BankIssue[]=[];
-  for(const account of result.accounts){account.bank_name=text(account.bank_name);account.account_identifier=text(account.account_identifier);account.currency=normalizeCurrency(account.currency);
-    for(const field of ['statement_start','statement_end'] as const){const parsed=parseDate(account[field],locale);account[field]=parsed.value;if(parsed.error&&!account.excluded)issues.push(issue(parsed.error,'Use a complete, unambiguous calendar date.','error',account.id,undefined,field));}
-    for(const field of accountMoney){const role=field==='total_debits'?'debit':field==='total_credits'?'credit':'balance',parsed=parseAmount(account[field],locale,account.currency,role,account.balance_convention,correction);account[field]=parsed.value;if(!account.excluded&&parsed.error)issues.push(issue(parsed.error,'The amount cannot be interpreted safely; enter an exact decimal amount and check its sign and currency.','error',account.id,undefined,field));if(!account.excluded&&parsed.warning)issues.push(issue(parsed.warning,'A signed debit or credit may be a reversal. Verify the source before accepting it.','warning',account.id,undefined,field));}
-    for(const row of account.transactions){row.description=text(row.description);row.reference=text(row.reference);row.currency=normalizeCurrency(row.currency)??account.currency;const parsedDate=parseDate(row.date,locale);row.date=parsedDate.value;if(parsedDate.error&&!account.excluded&&!row.excluded)issues.push(issue(parsedDate.error,'Use a complete, unambiguous transaction date.','error',account.id,row.id,'date'));
-      for(const field of ['debit','credit','balance'] as const){const parsed=parseAmount(row[field],locale,row.currency,field,account.balance_convention,correction);row[field]=parsed.value;if(!account.excluded&&!row.excluded&&parsed.error)issues.push(issue(parsed.error,'The amount cannot be interpreted safely; enter an exact decimal amount and check its sign and currency.','error',account.id,row.id,field));if(!account.excluded&&!row.excluded&&parsed.warning)issues.push(issue(parsed.warning,'A signed debit or credit may be a reversal. Verify the source before accepting it.','warning',account.id,row.id,field));}
+  for(const account of result.accounts){const formats=context?.accounts[account.id]?.formats;account.bank_name=text(account.bank_name);account.account_identifier=text(account.account_identifier);account.currency=normalizeCurrency(account.currency);
+    for(const field of ['statement_start','statement_end'] as const){const parsed=parseDate(account[field],locale,formats);account[field]=parsed.value;if(parsed.error&&!account.excluded)issues.push(issue(parsed.error,'Use a complete, unambiguous calendar date.','error',account.id,undefined,field));}
+    for(const field of accountMoney){const role=field==='total_debits'?'debit':field==='total_credits'?'credit':'balance',parsed=parseAmount(account[field],locale,account.currency,role,account.balance_convention,correction,formats);account[field]=parsed.value;if(!account.excluded&&parsed.error)issues.push(issue(parsed.error,'The amount cannot be interpreted safely; enter an exact decimal amount and check its sign and currency.','error',account.id,undefined,field));if(!account.excluded&&parsed.warning)issues.push(issue(parsed.warning,'A signed debit or credit may be a reversal. Verify the source before accepting it.','warning',account.id,undefined,field));}
+    for(const row of account.transactions){row.description=text(row.description);row.reference=text(row.reference);row.currency=normalizeCurrency(row.currency)??account.currency;const parsedDate=parseDate(row.date,locale,formats);row.date=parsedDate.value;if(parsedDate.error&&!account.excluded&&!row.excluded)issues.push(issue(parsedDate.error,'Use a complete, unambiguous transaction date.','error',account.id,row.id,'date'));
+      for(const field of ['debit','credit','balance'] as const){const parsed=parseAmount(row[field],locale,row.currency,field,account.balance_convention,correction,formats,field!=='balance');row[field]=parsed.value;if(!account.excluded&&!row.excluded&&parsed.error)issues.push(issue(parsed.error,'The amount cannot be interpreted safely; enter an exact decimal amount and check its sign and currency.','error',account.id,row.id,field));if(!account.excluded&&!row.excluded&&parsed.warning)issues.push(issue(parsed.warning,'A signed debit or credit may be a reversal. Verify the source before accepting it.','warning',account.id,row.id,field));}
     }
   }
   return {values:result,issues};
 }
 
-export function createBankStatementResult(rawValues:unknown,evidence:Record<string,Evidence[]>,locale:string,options:{id?:()=>string}={}):{values:BankValues;context:BankContext;issues:BankIssue[]}{
+export function createBankStatementResult(rawValues:unknown,evidence:Record<string,Evidence[]>,locale:string,options:{id?:()=>string;sourceFormats?:boolean}={}):{values:BankValues;context:BankContext;issues:BankIssue[]}{
   locale=normalizedLocale(locale);const raw=object(rawValues);requireValue(Array.isArray(raw.accounts)&&raw.accounts.length<=limits.accounts,'Statements must contain an accounts array of at most 100 accounts.');object(evidence);
   const context:BankContext={version:1,locale,accounts:{},transactions:{}},sources=indexSources(evidence),ids=new Set<string>(),newId=()=>{const id=(options.id??randomUUID)().toLowerCase();requireValue(uuidPattern.test(id)&&!ids.has(id),'Generated bank identity must be a unique UUID.');ids.add(id);return id;};let count=0;
-  const accounts=raw.accounts.map((candidate,index)=>{const row=object(candidate);requireValue(Array.isArray(row.transactions),'Each statement account must have a transactions array.');count+=row.transactions.length;requireValue(count<=limits.transactions,'Statement transaction limit exceeded.');const id=newId(),rawPath=`accounts[${index}]`;context.accounts[id]=sourceAt(sources,rawPath);
+  const accounts=raw.accounts.map((candidate,index)=>{const row=object(candidate);requireValue(Array.isArray(row.transactions),'Each statement account must have a transactions array.');count+=row.transactions.length;requireValue(count<=limits.transactions,'Statement transaction limit exceeded.');const id=newId(),rawPath=`accounts[${index}]`;context.accounts[id]=sourceAt(sources,rawPath);if(options.sourceFormats){for(const field of ['date_format','number_format','transaction_layout','movement_convention'])scalar(row[field]);context.accounts[id].formats=resolveBankSourceFormats(row,context.accounts[id]);}
     const fields=Object.fromEntries(accountFields.map(field=>[field,scalar(row[field])]));const convention=normalizeConvention(fields.balance_convention);
     const transactions=row.transactions.map((candidate,position)=>{const item=object(candidate),rowId=newId();context.transactions[rowId]={...sourceAt(sources,`${rawPath}.transactions[${position}]`),accountId:id};return {...Object.fromEntries(rowFields.map(field=>[field,scalar(item[field])])),id:rowId,origin:'extracted',excluded:false,exclusion_reason:null} as BankTransaction;});
     return {...fields,balance_convention:convention,id,origin:'extracted',excluded:false,exclusion_reason:null,transactions} as BankAccount;
   });
-  const normalized=normalizeValues({version:1,accounts},locale,false);return {values:normalized.values,context:freeze(context),issues:uniqueIssues([...normalized.issues,...checkBankStatement(normalized.values,context)])};
+  const normalized=normalizeValues({version:1,accounts},locale,false,context);return {values:normalized.values,context:freeze(context),issues:uniqueIssues([...normalized.issues,...checkBankStatement(normalized.values,context)])};
 }
 function identity(value:Record<string,unknown>,all:Set<string>){requireValue(typeof value.id==='string'&&uuidPattern.test(value.id),'Every account and transaction needs a UUID.');const id=value.id.toLowerCase();requireValue(!all.has(id),'Account and transaction UUIDs must be globally unique.');all.add(id);requireValue(['extracted','user'].includes(String(value.origin))&&typeof value.excluded==='boolean','Invalid row origin or exclusion state.');const reason=scalar(value.exclusion_reason);requireValue(!value.excluded||Boolean(text(reason)),'Excluded accounts and transactions require a reason.');return {id,origin:value.origin as 'extracted'|'user',excluded:value.excluded,exclusion_reason:text(reason)};}
 function parseValues(input:unknown):BankValues{
   const raw=object(input);onlyKeys(raw,['version','accounts']);requireValue(raw.version===1&&Array.isArray(raw.accounts)&&raw.accounts.length<=limits.accounts,'Invalid bank statement version or accounts.');const all=new Set<string>();let count=0;
   const accounts=raw.accounts.map(candidate=>{const account=object(candidate);onlyKeys(account,[...accountFields,...identityFields,'transactions']);const accountIdentity=identity(account,all);requireValue(conventions.includes(String(account.balance_convention))&&Array.isArray(account.transactions),'Invalid balance convention or transactions.');count+=account.transactions.length;requireValue(count<=limits.transactions,'Statement transaction limit exceeded.');const fields=Object.fromEntries(accountFields.map(field=>[field,scalar(account[field])]));const transactions=account.transactions.map(candidate=>{const row=object(candidate);onlyKeys(row,[...rowFields,...identityFields]);return {...Object.fromEntries(rowFields.map(field=>[field,scalar(row[field])])),...identity(row,all)} as BankTransaction;});return {...fields,...accountIdentity,balance_convention:account.balance_convention,transactions} as BankAccount;});return {version:1,accounts};
 }
-function validateContext(context:BankContext){requireValue(context?.version===1&&typeof context.locale==='string','Invalid server statement context.');object(context.accounts);object(context.transactions);const all=new Set<string>();for(const [id,source] of Object.entries(context.accounts)){requireValue(uuidPattern.test(id)&&!all.has(id)&&/^accounts\[\d+\]$/.test(source.rawPath),'Invalid original account provenance.');all.add(id);}for(const [id,source] of Object.entries(context.transactions)){requireValue(uuidPattern.test(id)&&!all.has(id)&&Object.hasOwn(context.accounts,source.accountId)&&source.rawPath.startsWith(context.accounts[source.accountId].rawPath+'.transactions['),'Invalid original transaction provenance.');all.add(id);}}
+function validateContext(context:BankContext){requireValue(context?.version===1&&typeof context.locale==='string','Invalid server statement context.');object(context.accounts);object(context.transactions);const all=new Set<string>();for(const [id,source] of Object.entries(context.accounts)){requireValue(uuidPattern.test(id)&&!all.has(id)&&/^accounts\[\d+\]$/.test(source.rawPath),'Invalid original account provenance.');requireValue(source.formats===undefined||validBankSourceFormats(source.formats),'Invalid original account format policy.');all.add(id);}for(const [id,source] of Object.entries(context.transactions)){requireValue(uuidPattern.test(id)&&!all.has(id)&&Object.hasOwn(context.accounts,source.accountId)&&source.rawPath.startsWith(context.accounts[source.accountId].rawPath+'.transactions['),'Invalid original transaction provenance.');all.add(id);}}
 function bindIdentities(values:BankValues,context:BankContext,previous?:BankValues){
   validateContext(context);const accounts=new Map(values.accounts.map(a=>[a.id,a])),rows=new Map(values.accounts.flatMap(a=>a.transactions.map(r=>[r.id,{accountId:a.id,row:r}] as const)));
   for(const id of Object.keys(context.accounts)){const account=accounts.get(id);requireValue(account?.origin==='extracted','Original accounts must retain their identities; exclude instead of deleting.');}
@@ -149,7 +178,7 @@ function bindIdentities(values:BankValues,context:BankContext,previous?:BankValu
   if(previous)for(const account of previous.accounts){const current=accounts.get(account.id);requireValue(current&&current.origin===account.origin,'Previously saved account identities must be retained; exclude instead of deleting.');for(const row of account.transactions){const currentRow=rows.get(row.id);requireValue(currentRow?.accountId===account.id&&currentRow.row.origin===row.origin,'Previously saved transaction identities must be retained; exclude instead of deleting or moving.');}}
 }
 export function normalizeBankStatementCorrections(input:unknown,context:BankContext,previousValues:BankValues):{values:BankValues;issues:BankIssue[]}{
-  const values=parseValues(input),previous=parseValues(previousValues);bindIdentities(previous,context);bindIdentities(values,context,previous);const normalized=normalizeValues(values,normalizedLocale(context.locale),true);return {values:normalized.values,issues:uniqueIssues([...normalized.issues,...checkBankStatement(normalized.values,context)])};
+  const values=parseValues(input),previous=parseValues(previousValues);bindIdentities(previous,context);bindIdentities(values,context,previous);const normalized=normalizeValues(values,normalizedLocale(context.locale),true,context);return {values:normalized.values,issues:uniqueIssues([...normalized.issues,...checkBankStatement(normalized.values,context)])};
 }
 
 function accountIdentity(account:BankAccount):{bank:string;identifier:string}|null{
@@ -169,6 +198,10 @@ export function checkBankStatement(input:BankValues,context:BankContext):BankIss
   const values=parseValues(input);bindIdentities(values,context);const issues:BankIssue[]=[];
   if(!values.accounts.some(a=>!a.excluded))issues.push(issue('no_active_accounts','Keep at least one account in the statement.','error',undefined,undefined,'accounts'));
   for(const account of values.accounts){if(account.excluded)continue;const accountIssue=(code:string,message:string,severity:'error'|'warning',field?:string)=>issues.push(issue(code,message,severity,account.id,undefined,field));
+    const formats=context.accounts[account.id]?.formats;
+    if(formats?.dateStatus==='unresolved')accountIssue('date_format_unresolved','The printed date rule is unsupported, conflicting or lacks its own source quote. Enter complete ISO dates and review the original.','warning');
+    if(formats?.numberStatus==='unresolved')accountIssue('amount_format_unresolved','The printed number rule is unsupported, conflicting or lacks its own source quote. Enter exact decimal amounts and review the original.','warning');
+    if(formats?.movement==='unresolved')accountIssue('movement_convention_unresolved','A single signed movement rule or its column header could not be verified. Review the source and enter debit/credit magnitudes explicitly.','warning');
     if(!text(account.bank_name))accountIssue('bank_name_missing','The bank name is missing; cross-file account matching is unavailable.','warning','bank_name');
     if(!text(account.account_identifier))accountIssue('account_identifier_missing','The account identifier is missing; keep this account separate and verify it manually.','warning','account_identifier');
     else if(!accountIdentity(account))accountIssue('account_identity_unresolved','A full, unambiguous bank and account identifier is needed for cross-file matching; masked identifiers are not merged.','warning','account_identifier');

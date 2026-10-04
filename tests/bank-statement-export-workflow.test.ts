@@ -7,14 +7,14 @@ import {buildApp} from '../server/app.js';
 import {adminPool,closeDatabase} from '../server/core/db.js';
 import {addDocument} from '../server/core/intake.js';
 import {processOneCoreJob,setExtractionProvider} from '../server/core/worker.js';
-import {bankStatementExportColumns} from '../shared/bank-statement-preset.js';
+import {bankStatementExportColumns,legacyBankStatementSchema} from '../shared/bank-statement-preset.js';
 import type {BankValues,RawBankValues} from '../shared/bank-statements.js';
 import {presets} from '../shared/presets.js';
 import {createBankSourceFixtures,syntheticBankRaw,syntheticBankEvidence} from '../scripts/bank-statement-fixtures.js';
-import {assertBankFixtureDatabase,createBankFixture,cleanupBankFixtures,setBankFixtureProvider} from './bank-statement-fixtures.js';
+import {assertBankFixtureDatabase,createLegacyBankFixture,cleanupBankFixtures,setBankFixtureProvider,createBankFixture} from './bank-statement-fixtures.js';
 import type {Evidence} from '../shared/types.js';
 
-type Fixture=Awaited<ReturnType<typeof createBankFixture>>;
+type Fixture=Awaited<ReturnType<typeof createLegacyBankFixture>>;
 type Format='csv'|'xlsx';
 let app:Awaited<ReturnType<typeof buildApp>>,verified=false,networkCalls=0;
 let sources:Awaited<ReturnType<typeof createBankSourceFixtures>>;
@@ -69,7 +69,7 @@ async function readTable(bytes:Buffer,format:Format){
 const selection=(documentId:string,approvalId:string)=>({documentId,approvalId});
 
 test('actual PDF extraction, corrections and reprocessing preserve exact explicitly selected historical exports',async()=>{
-  const f=await createBankFixture(app),item=await source(f),run=item.run;
+  const f=await createLegacyBankFixture(app),item=await source(f),run=item.run;
   assert.equal(item.document.pageCount,2);assert.deepEqual(run.bankContext.transactions[run.bankValues.accounts[0].transactions[1].id].sourcePages,[2]);
   const originalRaw=clone(run.rawValues),originalContext=clone(run.bankContext),first=await approve(f,run.id);
   const initial=await exported(f,'csv',[selection(item.document.id,first.id)]);assert.equal(initial.table.rows.length,2);assert.equal(initial.table.rows[0].Debit,'10.00');assert.equal(initial.table.rows[1].Credit,'20.00');
@@ -82,7 +82,7 @@ test('actual PDF extraction, corrections and reprocessing preserve exact explici
   assert.deepEqual(reviewed.values.accounts[0].transactions.map((row:any)=>row.id),[originalCredit.id,originalDebit.id,addedId]);
   const newer:BankValues=clone(reviewed.values);newer.accounts[0].transactions[0].description='NEWER REVIEW MUST NOT REPLACE HISTORICAL APPROVAL';await correct(f,run.id,newer);const latestApproval=await approve(f,run.id);assert.notEqual(latestApproval.id,reviewed.id);
 
-  const reprocessed=ok(await f.request('POST',`/api/documents/${item.document.id}/reprocess`));const laterRaw=clone(syntheticBankRaw);laterRaw.accounts[0].transactions[0].description='NEW EXTRACTION MUST NOT REPLACE HISTORICAL APPROVAL';setBankFixtureProvider(laterRaw);
+  const reprocessed=ok(await f.request('POST',`/api/documents/${item.document.id}/reprocess`));const laterRaw=clone(syntheticBankRaw);laterRaw.accounts[0].transactions[0].description='NEW EXTRACTION MUST NOT REPLACE HISTORICAL APPROVAL';setBankFixtureProvider(laterRaw,legacyBankStatementSchema);
   try{assert.equal(await processOneCoreJob(reprocessed.job.id),true);}finally{setExtractionProvider(undefined);}
   const after=await f.detail(item.document.id);assert.equal(after.document.status,'needs_review');assert.notEqual(after.document.latestRunId,run.id);assert.equal(after.document.approvedRunId,run.id);
   const laterRun=after.runs.find((candidate:any)=>candidate.id===after.document.latestRunId);assert.ok(laterRun?.bankContext);assert.equal(laterRun.rawValues.accounts[0].transactions[0].description,laterRaw.accounts[0].transactions[0].description);
@@ -101,7 +101,7 @@ test('actual PDF extraction, corrections and reprocessing preserve exact explici
 });
 
 test('selected native/scanned batch exports retain account/currency identity and exact large monetary text',async()=>{
-  const f=await createBankFixture(app),first=await source(f),firstApproval=await approve(f,first.run.id),raw=clone(syntheticBankRaw);
+  const f=await createLegacyBankFixture(app),first=await source(f),firstApproval=await approve(f,first.run.id),raw=clone(syntheticBankRaw);
   raw.accounts[0].account_identifier='BATCH-EUR-00001234';raw.accounts[0].opening_balance='200.00';raw.accounts[0].closing_balance='201.00';raw.accounts[0].total_debits='0.00';raw.accounts[0].total_credits='1.00';raw.accounts[0].transactions=[{date:'2026-09-06',description:'Batch euro credit',reference:'BATCH-EUR',debit:null,credit:'1.00',balance:'201.00',currency:'EUR'}];
   raw.accounts.push({...clone(raw.accounts[0]),account_identifier:'0000987654321',currency:'USD',opening_balance:'9007199254740993.00',closing_balance:'9007199254740993.01',total_credits:'0.01',transactions:[{date:'2026-09-06',description:'Batch exact dollar credit',reference:'BATCH-USD',debit:null,credit:'0.01',balance:'9007199254740993.01',currency:'USD'}]});
   const second=await source(f,raw,'scanned'),secondApproval=await approve(f,second.run.id);
@@ -113,7 +113,7 @@ test('selected native/scanned batch exports retain account/currency identity and
 });
 
 test('unapproved, JSON, generic-column and mixed-workflow requests create no bank export snapshots',async()=>{
-  const f=await createBankFixture(app),item=await source(f);const before=(await adminPool.query('select count(*)::int count from export_snapshots where workspace_id=$1',[f.actor.workspaceId])).rows[0].count;
+  const f=await createLegacyBankFixture(app),item=await source(f);const before=(await adminPool.query('select count(*)::int count from export_snapshots where workspace_id=$1',[f.actor.workspaceId])).rows[0].count;
   assert.equal((await f.request('POST','/api/exports',{documentIds:[item.document.id],format:'csv',workflow:'bank_statement'})).statusCode,400);
   const approval=await approve(f,item.run.id),base={documentIds:[item.document.id],revisions:[selection(item.document.id,approval.id)]};
   for(const options of [{format:'json'},{format:'csv',columns:[{source:'accounts',label:'Generic accounts'}]},{format:'xlsx',lineItems:'accounts.transactions'},{format:'csv',workflow:'generic'}])assert.equal((await f.request('POST','/api/exports',{...base,...options})).statusCode,400);
@@ -126,7 +126,7 @@ test('unapproved, JSON, generic-column and mixed-workflow requests create no ban
 });
 
 test('foreign workspaces cannot select or download snapshots; viewers export the same approved read-only result',async()=>{
-  const f=await createBankFixture(app),foreign=await createBankFixture(app),item=await source(f),approval=await approve(f,item.run.id),foreignItem=await foreign.upload(),foreignApproval=await approve(foreign,foreignItem.run.id),chosen=selection(item.document.id,approval.id),owned=await exported(f,'csv',[chosen]);
+  const f=await createLegacyBankFixture(app),foreign=await createLegacyBankFixture(app),item=await source(f),approval=await approve(f,item.run.id),foreignItem=await foreign.upload(),foreignApproval=await approve(foreign,foreignItem.run.id),chosen=selection(item.document.id,approval.id),owned=await exported(f,'csv',[chosen]);
   assert.equal((await foreign.request('GET',owned.created.downloadUrl)).statusCode,404);assert.equal((await foreign.request('POST','/api/exports',{documentIds:[item.document.id],revisions:[chosen],format:'csv'})).statusCode,404);
   assert.equal((await f.request('POST','/api/exports',{documentIds:[item.document.id],revisions:[selection(item.document.id,foreignApproval.id)],format:'csv'})).statusCode,400);
   assert.equal((await f.request('POST','/api/exports',{documentIds:[item.document.id,foreignItem.document.id],format:'csv'})).statusCode,404);
@@ -137,4 +137,15 @@ test('foreign workspaces cannot select or download snapshots; viewers export the
   const view=await exported(f,'csv',[chosen],viewerHeaders);assert.deepEqual(view.download.rawPayload,owned.download.rawPayload);assert.deepEqual(view.table.rows,owned.table.rows);
   const memberDownload=await app.inject({method:'GET',url:owned.created.downloadUrl,headers:viewerHeaders});assert.equal(memberDownload.statusCode,200);assert.deepEqual(memberDownload.rawPayload,owned.download.rawPayload);
   assert.equal((await adminPool.query('select id from corrections where run_id=$1',[run.id])).rowCount,0);assert.equal((await adminPool.query('select id from approvals where run_id=$1',[run.id])).rowCount,1);
+});
+
+
+test('controlled modern source formats approve and export exact signed movements after later corrections',async()=>{
+ // Controlled provider output proves application mechanics, not real extraction
+ // accuracy. Original native/scanned PDF fixture bytes above remain unchanged.
+ const f=await createBankFixture(app),raw:RawBankValues={accounts:[{bank_name:'Synthetic Signed Format Bank',account_identifier:'SYN-MODERN-0001',currency:'EUR',statement_start:'07/01/2026',statement_end:'07/31/2026',opening_balance:'100.00',closing_balance:'125.50',total_debits:'20.00',total_credits:'45.50',balance_convention:null,date_format:'Dates use MM/DD/YYYY.',number_format:'Amounts use a decimal point.',transaction_layout:'Signed amount',movement_convention:'Positive signed amounts are credits; parentheses or minus signs are debits.',transactions:[{date:'07/03/2026',description:'=SUM(1,2)',reference:'+command',debit:null,credit:'+45.50',balance:'145.50',currency:null},{date:'07/09/2026',description:'Literal synthetic purchase',reference:'@reference',debit:'(20.00)',credit:null,balance:'125.50',currency:null}]}]};
+ const source=await f.upload(raw,'modern-export'),run=source.run,rawBefore=clone(run.rawValues),contextBefore=clone(run.bankContext);assert.equal(contextBefore.accounts[run.bankValues.accounts[0].id].formats.movement,'positive_credit');assert.deepEqual(run.bankValues.accounts[0].transactions.map((r:any)=>[r.date,r.debit,r.credit]),[['2026-07-03',null,'45.50'],['2026-07-09','20.00',null]]);assert.equal(run.bankValues.accounts[0].balance_convention,'unknown');
+ const approved=await approve(f,run.id),newer=clone(approved.values);newer.accounts[0].transactions[0].description='Later corrected draft';await correct(f,run.id,newer);const chosen=selection(source.document.id,approved.id);
+ for(const format of ['csv','xlsx']as const){const output=await exported(f,format,[chosen]);assert.deepEqual(output.table.rows.map(row=>row.Date),['2026-07-03','2026-07-09']);assert.deepEqual(output.table.rows.map(row=>[row.Debit,row.Credit]),format==='csv'?[['','45.50'],['20.00','']]:[['',45.5],[20,'']]);assert.deepEqual(output.table.rows.map(row=>row['Transaction ID']),approved.values.accounts[0].transactions.map((r:any)=>r.id));assert.equal(output.table.rows[0].Description,"'=SUM(1,2)");assert.equal(output.table.rows[0].Reference,"'+command");assert.equal(output.table.rows[1].Reference,"'@reference");assert.deepEqual(output.table.rows.map(row=>row['Approval ID']),[approved.id,approved.id]);const snapshot=(await adminPool.query('select records from export_snapshots where id=$1',[output.created.id])).rows[0];assert.deepEqual(snapshot.records[0].values,approved.values);}
+ const stored=(await adminPool.query('select raw_values,bank_statement_context from extraction_runs where id=$1',[run.id])).rows[0];assert.deepEqual(stored.raw_values,rawBefore);assert.deepEqual(stored.bank_statement_context,contextBefore);
 });

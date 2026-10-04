@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {bankPdfLayoutVersion,serializeBankPdfLayout,type BankPdfLayoutInput} from '../shared/bank-pdf-layout.js';
 import {pdfGeometryVersion,type PdfGeometry} from '../shared/pdf-regions.js';
-import {bankStatementSchema} from '../shared/bank-statement-preset.js';
+import {bankStatementSchema,legacyBankStatementSchema} from '../shared/bank-statement-preset.js';
 import type {ProviderInput} from '../shared/types.js';
 import {createOpenAIProvider,openAIExtraction} from '../server/core/openai-provider.js';
 
@@ -12,7 +12,7 @@ const bytes=Buffer.from('%PDF-synthetic provider contract only');
 const sha=createHash('sha256').update(bytes).digest('hex');
 function geometry(text='Synthetic Bank'):PdfGeometry{return {version:pdfGeometryVersion,sourceSha256:sha,pageCount:1,pages:[{page:1,width:600,height:800,rotation:0,reason:null,items:[{id:1,text,rect:{x:.125,y:.25,width:.375,height:.025},separator:''}]}]};}
 function input(overrides:Partial<ProviderInput>={}):ProviderInput{return {bytes:Buffer.from(bytes),mimeType:'application/pdf',pages:[{page:1,text:'Synthetic Bank'}],schema:structuredClone(bankStatementSchema),instructions:'Owned synthetic bank extraction.',locale:'en-IE',...overrides};}
-const raw={accounts:[{bank_name:'Synthetic Bank',account_identifier:null,currency:null,statement_start:null,statement_end:null,opening_balance:null,closing_balance:null,total_debits:null,total_credits:null,balance_convention:null,transactions:[]}]};
+const raw={accounts:[{bank_name:'Synthetic Bank',account_identifier:null,currency:null,statement_start:null,statement_end:null,opening_balance:null,closing_balance:null,total_debits:null,total_credits:null,balance_convention:null,date_format:null,number_format:null,transaction_layout:null,movement_convention:null,transactions:[]}]};
 function response(){return {status:'completed',model:openAIExtraction.model,output:[{type:'message',status:'completed',content:[{type:'output_text',text:JSON.stringify({rawValues:raw,evidence:[{field:'accounts[0].bank_name',page:1,text:'Synthetic Bank'}]})}]}],usage:{input_tokens:10,output_tokens:5}};}
 async function capture(value:ProviderInput){let body:any;const provider=createOpenAIProvider({apiKey:'synthetic-unused-key',fetch:async(_url,options)=>{body=JSON.parse(String(options!.body));return new Response(JSON.stringify(response()));}});return {body:()=>body,result:await provider.extract(value)};}
 const layout=(g=geometry()):BankPdfLayoutInput=>({version:bankPdfLayoutVersion,geometry:g});
@@ -87,4 +87,14 @@ test('layout size omission and verified geometry-limit omission have distinct pr
  const p=(limit.result.tokenUsage as any).bankPdfLayout;assert.equal(p.status,'omitted_geometry_limit');assert.equal(p.geometryVersion,pdfGeometryVersion);assert.equal(p.candidateCombinedTextBytes,null);
  for(const field of ['itemCount','pagesWithNativeText','unavailablePages','serializedBytes'])assert.equal(Object.hasOwn(p,field),false);
  assert.equal(limit.result.promptVersion,openAIExtraction.bankLayoutPromptVersion);
+});
+
+
+test('exact legacy schema retains layout transport while new preset exposes literal source rules',async()=>{
+ const modern=await capture(input({bankPdfLayout:layout()}));
+ const legacyRaw=structuredClone(raw);delete (legacyRaw.accounts[0] as any).date_format;delete (legacyRaw.accounts[0] as any).number_format;delete (legacyRaw.accounts[0] as any).transaction_layout;delete (legacyRaw.accounts[0] as any).movement_convention;
+ let body:any;const provider=createOpenAIProvider({apiKey:'synthetic-unused-key',fetch:async(_url,options)=>{body=JSON.parse(String(options!.body));const payload=response();payload.output[0].content[0].text=JSON.stringify({rawValues:legacyRaw,evidence:[{field:'accounts[0].bank_name',page:1,text:'Synthetic Bank'}]});return new Response(JSON.stringify(payload));}});
+ const result=await provider.extract(input({schema:legacyBankStatementSchema,bankPdfLayout:layout()}));assert.equal(result.promptVersion,openAIExtraction.bankLayoutPromptVersion);assert.deepEqual(result.rawValues,legacyRaw);assert.deepEqual(texts(body),texts(modern.body()));assert.deepEqual(file(body),file(modern.body()));
+ const modernFields=modern.body().text.format.schema.properties.rawValues.properties.accounts.items.properties,legacyFields=body.text.format.schema.properties.rawValues.properties.accounts.items.properties;
+ assert.equal(modernFields.date_format.type[0],'string');assert.equal(legacyFields.date_format,undefined);assert.match(modernFields.number_format.description,/literal/);
 });

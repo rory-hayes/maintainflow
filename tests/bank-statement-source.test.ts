@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {createBankSourceFixtures,syntheticBankRaw,syntheticBankEvidence} from '../scripts/bank-statement-fixtures.js';
+const currentRaw=structuredClone(syntheticBankRaw);for(const account of currentRaw.accounts)Object.assign(account,{date_format:null,number_format:null,transaction_layout:null,movement_convention:null});
 import {inspectSource} from '../server/core/source.js';
 import {createOpenAIProvider,openAIExtraction} from '../server/core/openai-provider.js';
 import {createBankStatementResult} from '../server/core/bank-statement-domain.js';
@@ -19,10 +20,10 @@ test('real synthetic native and image-only multipage PDFs reach the provider unc
    requests++;assert.equal(url,'https://api.openai.com/v1/responses');const request=JSON.parse(String(options?.body));
    assert.equal(request.store,false);assert.ok(request.instructions.includes(bankStatementInstructions));
    const visual=request.input[0].content.find((entry:any)=>entry.type==='input_file');assert.equal(visual.file_data,`data:application/pdf;base64,${bytes.toString('base64')}`);
-   return new Response(JSON.stringify({id:'synthetic-bank-response',status:'completed',model:openAIExtraction.model,usage:{input_tokens:100,output_tokens:100},output:[{type:'message',status:'completed',content:[{type:'output_text',text:JSON.stringify({rawValues:syntheticBankRaw,evidence:syntheticBankEvidence})}]}]}));
+   return new Response(JSON.stringify({id:'synthetic-bank-response',status:'completed',model:openAIExtraction.model,usage:{input_tokens:100,output_tokens:100},output:[{type:'message',status:'completed',content:[{type:'output_text',text:JSON.stringify({rawValues:currentRaw,evidence:syntheticBankEvidence})}]}]}));
   }) as typeof fetch});
   const extracted=await provider.extract({bytes,mimeType:source.mimeType,pages:source.pages,schema:bankStatementSchema,instructions:bankStatementInstructions,locale:'en-IE'});
-  assert.equal(requests,1);assert.deepEqual(extracted.rawValues,syntheticBankRaw);
+  assert.equal(requests,1);assert.deepEqual(extracted.rawValues,currentRaw);
   const result=createBankStatementResult(extracted.rawValues,extracted.evidence,'en-IE'),account=result.values.accounts[0];
   assert.equal(account.transactions.length,2);assert.equal(account.transactions[0].description,'Coffee supply monthly office stock');
   assert.equal(account.balance_convention,'credit_increases');assert.equal(account.closing_balance,'1010.00');assert.equal(result.issues.filter(issue=>issue.severity==='error').length,0);
@@ -34,7 +35,7 @@ test('real synthetic native and image-only multipage PDFs reach the provider unc
 test('synthetic scanned PNG remains image input, without fabricated native text or second-page transactions',async()=>{
  const bytes=(await createBankSourceFixtures()).images[0],source=await inspectSource(bytes,'synthetic-page-one.png');
  assert.equal(source.pageCount,1);assert.deepEqual(source.pages,[{page:1,text:''}]);
- const raw=structuredClone(syntheticBankRaw);raw.accounts[0].transactions.splice(1);raw.accounts[0].closing_balance=null;raw.accounts[0].total_debits=null;raw.accounts[0].total_credits=null;
+ const raw=structuredClone(currentRaw);raw.accounts[0].transactions.splice(1);raw.accounts[0].closing_balance=null;raw.accounts[0].total_debits=null;raw.accounts[0].total_credits=null;
  let visual:any;
  const provider=createOpenAIProvider({apiKey:'synthetic-only',fetch:(async(_url,options)=>{visual=JSON.parse(String(options?.body)).input[0].content.find((entry:any)=>entry.type==='input_image');return new Response(JSON.stringify({status:'completed',model:openAIExtraction.model,usage:{input_tokens:100,output_tokens:100},output:[{type:'message',status:'completed',content:[{type:'output_text',text:JSON.stringify({rawValues:raw,evidence:syntheticBankEvidence.slice(0,2)})}]}]}));}) as typeof fetch});
  const extracted=await provider.extract({bytes,mimeType:source.mimeType,pages:source.pages,schema:bankStatementSchema,instructions:bankStatementInstructions,locale:'en-IE'});

@@ -1,8 +1,9 @@
+import {isDeepStrictEqual} from 'node:util';
 import {createHash} from 'node:crypto';
 import type {PoolClient} from 'pg';
 import type {Actor} from '../../shared/types.js';
 import type {BankContext,BankIssue,BankValues} from '../../shared/bank-statements.js';
-import {bankStatementInstructions,bankStatementSchema} from '../../shared/bank-statement-preset.js';
+import {bankStatementInstructions,bankStatementSchema,legacyBankStatementSchema,legacyBankStatementInstructions} from '../../shared/bank-statement-preset.js';
 import {BankStatementValidationError,bankAccountKey,bankTransactionFingerprint,checkBankStatement,compareBankStatements,normalizeBankStatementCorrections} from './bank-statement-domain.js';
 import {audit,badRequest,camel,withWorkspace} from './db.js';
 import {requireParserCapacity} from './parser-capacity.js';
@@ -12,13 +13,25 @@ import {bankEvidenceReviewIssues} from './bank-statement-evidence.js';
 import {bankLocales} from './bank-locale.js';
 export {bankLocales} from './bank-locale.js';
 export function bankDomain<T>(work:()=>T):T{try{return work();}catch(error){if(error instanceof BankStatementValidationError)badRequest(error.message);throw error;}}
+/** Caller owns the workspace lock. Only the exact historical preset can be
+ * upgraded; pinned versions and arbitrary custom schemas are immutable. */
+export async function adoptBankStatementPreset(c:PoolClient,actor:Actor,parser:any,requireCurrent=false){
+ let schema=(await c.query('select id,version,schema from schema_versions where id=$1 and parser_id=$2 and workspace_id=$3',[parser.active_schema_id,parser.id,actor.workspaceId])).rows[0];
+ if(schema&&isDeepStrictEqual(schema.schema,legacyBankStatementSchema)){
+  schema=(await c.query('insert into schema_versions(workspace_id,parser_id,version,schema,created_by) select $1,$2,coalesce(max(version),0)+1,$3,$4 from schema_versions where parser_id=$2 and workspace_id=$1 returning *',[actor.workspaceId,parser.id,JSON.stringify(bankStatementSchema),actor.userId])).rows[0];
+  parser=(await c.query('update parsers set active_schema_id=$2,instructions=case when instructions=$4 then $5 else instructions end where id=$1 and workspace_id=$3 returning *',[parser.id,schema.id,actor.workspaceId,legacyBankStatementInstructions,bankStatementInstructions])).rows[0];
+  await audit(c,actor.workspaceId,actor.userId,'parser.schema_updated',parser.id,{schemaVersionId:schema.id,source:'bank_statement_preset',preservedHistoricalSchemas:true});
+ }
+ if(!schema||requireCurrent&&!isDeepStrictEqual(schema.schema,bankStatementSchema))badRequest('The saved bank schema is not a supported preset. Its fields have been preserved; review them before choosing the current preset.',409);
+ return {parser,schema};
+}
 export async function setupBankStatements(actor:Actor,locale?:typeof bankLocales[number]){
  return withWorkspace(actor.workspaceId,async c=>{
   await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[actor.workspaceId]);
   let parser=(await c.query("select * from parsers where workspace_id=$1 and use_case='bank_statement' and not archived order by created_at,id limit 1 for update",[actor.workspaceId])).rows[0];
   if(parser){
    if(locale&&locale!==parser.locale){parser=(await c.query('update parsers set locale=$2 where id=$1 returning *',[parser.id,locale])).rows[0];await audit(c,actor.workspaceId,actor.userId,'parser.updated',parser.id,{locale});}
-   const schema=(await c.query('select id,version,schema from schema_versions where id=$1',[parser.active_schema_id])).rows[0];
+   const adopted=await adoptBankStatementPreset(c,actor,parser);parser=adopted.parser;const schema=adopted.schema;
    return {parser:camel(parser),schema:{id:schema.id,version:schema.version,...schema.schema}};
   }
   await requireParserCapacity(c,actor.workspaceId);
