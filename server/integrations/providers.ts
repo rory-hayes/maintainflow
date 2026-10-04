@@ -27,6 +27,10 @@ type Integration={id:string;workspace_id:string;parser_id:string|null;kind:strin
 type StripePointer={id:string;type:string;created:number;customerId:string;mode?:StripeMode;checkout?:CheckoutCompletionPointer};
 type ResendPointer={emailId:string;recipients:string[]};
 const uuid=z.string().uuid();
+/** UUID identity only; preserve stored Stripe payloads and all non-UUID bindings. */
+function sameWorkspaceUuid(value:unknown,workspaceId:string){
+ return typeof value==='string'&&value.length===36&&workspaceId.length===36&&uuid.safeParse(value).success&&uuid.safeParse(workspaceId).success&&value.toLowerCase()===workspaceId.toLowerCase();
+}
 type BillingConfiguration=ReturnType<typeof stripeConfiguration>;
 function billingConfiguration():BillingConfiguration {requireRealBilling();try{return stripeConfiguration(process.env,config.origin);}catch{badRequest('Stripe billing configuration is incomplete or does not match the selected mode.',503);}}
 const stripeClient=(settings:BillingConfiguration)=>new Stripe(settings.key,{timeout:15_000,maxNetworkRetries:2});
@@ -40,7 +44,7 @@ async function verifyBillingCustomer(client:Stripe,customerId:string,workspaceId
  const customer=await client.customers.retrieve(customerId);
  if(customer.deleted)badRequest('The Stripe billing customer is no longer available.',409);
  assertStripeMode(customer,mode);
- if(customer.metadata.folio_workspace!==workspaceId)badRequest('The Stripe customer does not match this workspace.',409);
+ if(!sameWorkspaceUuid(customer.metadata.folio_workspace,workspaceId))badRequest('The Stripe customer does not match this workspace.',409);
  return customer;
 }
 function verifySubscriptionModes(subscriptions:Stripe.Subscription[],mode:StripeMode,customerId?:string){
@@ -404,7 +408,7 @@ export async function registerProviders(app:FastifyInstance,dependencies:{stripe
    if(checkout?.session_id){
     const existing=await client.checkout.sessions.retrieve(checkout.session_id);assertStripeMode(existing,mode);
     const customer=typeof existing.customer==='string'?existing.customer:existing.customer?.id;
-    if(customer!==subscription.customer_id||existing.client_reference_id!==actor.workspaceId)throw new Error('Stripe Checkout does not match this workspace.');
+    if(customer!==subscription.customer_id||!sameWorkspaceUuid(existing.client_reference_id,actor.workspaceId))throw new Error('Stripe Checkout does not match this workspace.');
     if(existing.status==='open'&&checkout.plan_id===planId){if(contract)await bindCheckoutContract(c,contract,existing);return {url:existing.url};}
     if(existing.status==='open')await client.checkout.sessions.expire(existing.id);checkout=null;contract=null;
    }
@@ -422,7 +426,7 @@ export async function registerProviders(app:FastifyInstance,dependencies:{stripe
   // Persist the nonce before external creation; retry the same mode-bound Session after a lost response.
   const session=await client.checkout.sessions.create(reservation.contract?.create_params??{customer:reservation.customerId,mode:'subscription',line_items:[{price:priceId,quantity:1}],success_url:`${config.origin}/app/usage?checkout=returned`,cancel_url:`${config.origin}/app/usage?checkout=canceled`,client_reference_id:actor.workspaceId},{idempotencyKey:reservation.contract?contractSessionKey(reservation.contract):reservation.idempotencyVersion===1?`folio-checkout:${reservation.requestId}`:`folio-checkout:${mode}:${reservation.requestId}`});
   assertStripeMode(session,mode);
-  if((typeof session.customer==='string'?session.customer:session.customer?.id)!==reservation.customerId||session.client_reference_id!==actor.workspaceId)throw new Error('Stripe Checkout does not match this workspace.');
+  if((typeof session.customer==='string'?session.customer:session.customer?.id)!==reservation.customerId||!sameWorkspaceUuid(session.client_reference_id,actor.workspaceId))throw new Error('Stripe Checkout does not match this workspace.');
   await transaction(adminPool,async c=>{
    if(reservation.contract)await bindCheckoutContract(c,reservation.contract,session);
    const result=await c.query('update billing_checkouts set session_id=$4 where workspace_id=$1 and billing_mode=$2 and request_id=$3',[actor.workspaceId,mode,reservation.requestId,session.id]);if(!result.rowCount)throw new Error('Checkout reservation changed.');
