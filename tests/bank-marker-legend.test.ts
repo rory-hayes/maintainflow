@@ -76,3 +76,52 @@ test('marker legends do not override unknown signed layouts, absent currency or 
  const missing={accounts:[account()]};missing.accounts[0].currency=null;const result=extract(missing);assert.ok(result.issues.some(i=>i.code==='currency_missing'||i.code==='amount_currency_conflict'));
  const foreign={accounts:[account()]};foreign.accounts[0].transactions[0].debit='USD 15.75 DR';const conflict=extract(foreign);assert.ok(conflict.issues.some(i=>i.code==='amount_currency_conflict'));assert.notEqual(conflict.values.accounts[0].transactions[0].debit,'15.75');
 });
+
+// Synthetic metadata-shaped hints observed in the printed QS1 source. These
+// tests read no hosted output and never rewrite old runs or their context.
+function metadataAccount():RawBankAccount {const a=account();return {...a,date_format:`Statement period: ${a.statement_start} to ${a.statement_end}`,number_format:'All amounts are GBP.'};}
+
+test('exact quoted statement-period/currency metadata permits independently unambiguous QS1 values',()=>{
+ const raw={accounts:[metadataAccount()]},evidence=quotes(raw),rawBefore=structuredClone(raw),evidenceBefore=structuredClone(evidence),r=extract(raw,evidence),a=r.values.accounts[0],formats=r.context.accounts[a.id].formats!;
+ assert.equal(formats.dateStatus,'missing');assert.equal(formats.numberStatus,'missing');assert.equal(formats.dateOrder,null);assert.equal(formats.decimalSeparator,null);assert.equal(formats.movement,'columns');
+ assert.deepEqual([a.statement_start,a.statement_end,a.opening_balance,a.closing_balance,a.total_debits,a.total_credits],['2026-10-01','2026-10-31','40.00','41.25','21.25','20.00']);
+ assert.deepEqual(a.transactions.map(t=>[t.date,t.debit,t.credit,t.balance]),[['2026-10-05','15.75',null,'55.75'],['2026-10-06',null,'20.00','35.75'],['2026-10-12','2.75',null,'38.50'],['2026-10-12','2.75',null,'41.25']]);
+ assert.equal(r.issues.filter(i=>i.severity==='error').length,0);assert.equal(a.balance_convention,'debit_increases');assert.equal(new Set(a.transactions.map(t=>t.id)).size,4);
+ assert.ok(r.issues.some(i=>i.code==='source_review_required'));assert.ok(bankEvidenceReviewIssues(raw,evidence,[],r.context,r.values).some(i=>i.code==='visual_evidence'));
+ assert.deepEqual(raw,rawBefore);assert.deepEqual(evidence,evidenceBefore);assert.equal(r.context.accounts[a.id].evidence['accounts[0].number_format'][0].text,'All amounts are GBP.');assert.ok(Object.isFrozen(formats));
+});
+
+test('non-format metadata never supplies an order/grouping rule for ambiguous numeric values',()=>{
+ const a=metadataAccount();a.statement_start='03/04/2026';a.statement_end='30/04/2026';a.date_format=`Statement period: ${a.statement_start} to ${a.statement_end}`;a.transactions[0].date='04/05/2026';a.opening_balance='1,234 DR';a.total_debits='1.234 GBP';const r=extract({accounts:[a]}),v=r.values.accounts[0];
+ assert.equal(r.context.accounts[v.id].formats!.dateStatus,'missing');assert.equal(v.statement_start,null);assert.equal(v.transactions[0].date,null);assert.equal(v.statement_end,'2026-04-30');assert.equal(v.transactions[1].date,'2026-10-06');assert.equal(v.opening_balance,null);assert.equal(v.total_debits,null);assert.ok(r.issues.some(i=>i.code==='date_ambiguous'));assert.ok(r.issues.some(i=>i.code==='amount_format_unresolved'));
+});
+
+test('metadata classification needs complete own-field bounded page/provenance evidence',()=>{
+ for(const mode of ['absent','other-field','wrong-literal','wrong-page','unverified','too-many']as const){const raw={accounts:[metadataAccount()]},evidence=quotes(raw),key='accounts[0].number_format';
+  if(mode==='absent')delete evidence[key];if(mode==='other-field'){delete evidence[key];evidence['accounts[0].transactions[0].description']=[{page:1,text:raw.accounts[0].number_format!,source:'model-visual'}];}
+  if(mode==='wrong-literal')evidence[key]=[{page:1,text:'All amounts are USD.',source:'model-visual'}];if(mode==='wrong-page')evidence[key]=[{page:31,text:raw.accounts[0].number_format!,source:'model-visual'}];if(mode==='unverified')evidence[key]=[{page:1,text:raw.accounts[0].number_format!}];if(mode==='too-many')evidence[key]=Array.from({length:21},()=>({page:1,text:raw.accounts[0].number_format!,source:'model-visual'}));
+  const r=extract(raw,evidence),a=r.values.accounts[0];assert.equal(r.context.accounts[a.id].formats!.numberStatus,'unresolved',mode);assert.equal(a.transactions[0].debit,null,mode);
+ }
+});
+
+test('opposed aliases and appended rules cannot be hidden by a metadata-shaped scalar',()=>{
+ for(const field of ['date_format','number_format']as const){for(const mode of ['opposed-alias','appended-quote','negated-scalar','unsupported-scalar']as const){const raw={accounts:[metadataAccount()]},evidence=quotes(raw),key='accounts[0].'+field,opposed=field==='date_format'?'Dates use MM/DD/YYYY.':'Amounts use a decimal comma.';
+  if(mode==='opposed-alias')evidence['accounts.0.'+field]=[{page:1,text:opposed,source:'model-visual'}];if(mode==='appended-quote')evidence[key][0].text+=' '+opposed;
+  if(mode==='negated-scalar'){raw.accounts[0][field]='Not '+raw.accounts[0][field];evidence[key][0].text=raw.accounts[0][field]!;}
+  if(mode==='unsupported-scalar'){raw.accounts[0][field]=field==='date_format'?'Dates may use DD/MM/YYYY.':'Amounts use three decimal places.';evidence[key][0].text=raw.accounts[0][field]!;}
+  const r=extract(raw,evidence),a=r.values.accounts[0],formats=r.context.accounts[a.id].formats!;assert.equal(field==='date_format'?formats.dateStatus:formats.numberStatus,'unresolved',field+':'+mode);assert.equal(field==='date_format'?a.transactions[0].date:a.transactions[0].debit,null);
+ }}
+});
+
+test('currency/boundary disagreement and cropped metadata stay unresolved',()=>{
+ for(const mode of ['foreign-currency','missing-currency','different-boundary','cropped-period','cropped-currency']as const){const a=metadataAccount();let field:'date_format'|'number_format'='number_format';
+  if(mode==='foreign-currency')a.number_format='All amounts are USD.';if(mode==='missing-currency')a.currency=null;if(mode==='different-boundary'){field='date_format';a.statement_end='30 October 2026';}if(mode==='cropped-period'){field='date_format';a.date_format='Statement period: 1 October 2026';}if(mode==='cropped-currency')a.number_format='Amounts are GBP';
+  const r=extract({accounts:[a]}),v=r.values.accounts[0],f=r.context.accounts[v.id].formats!;assert.equal(field==='date_format'?f.dateStatus:f.numberStatus,'unresolved',mode);
+ }
+});
+
+test('metadata fallback does not bypass DR/CR own-amount evidence or role conflict guards',()=>{
+ for(const mode of ['missing-legend','wrong-role','missing-amount-quote']as const){const raw={accounts:[metadataAccount()]};if(mode==='wrong-role')raw.accounts[0].transactions[0].debit='15.75 CR';const evidence=quotes(raw);if(mode==='missing-legend')delete evidence['accounts[0].movement_convention'];if(mode==='missing-amount-quote')delete evidence['accounts[0].transactions[0].debit'];
+  const r=extract(raw,evidence),a=r.values.accounts[0];assert.equal(r.context.accounts[a.id].formats!.numberStatus,'missing');assert.ok(r.issues.some(i=>i.severity==='error'));assert.notEqual(a.transactions[0].debit,'15.75',mode);
+ }
+});

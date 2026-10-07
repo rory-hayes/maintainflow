@@ -28,9 +28,10 @@ export default function Upload({parserId,onComplete,compact=false}:{parserId?:st
     if(input.current)input.current.value='';
     if(!response)return;
     const results=response.results||[response],accepted=results.filter(result=>result.document),failures=results.filter(result=>result.error),duplicates=accepted.filter(result=>result.duplicate).length;
-    const summary=`${accepted.length} document${accepted.length===1?'':'s'} received${duplicates?` (${duplicates} already present)`:''}.`;
+    const newDocuments=accepted.length-duplicates,duplicateSummary=duplicates?`${duplicates} file${duplicates===1?' is':'s are'} already present.`:'';
+    const summary=`${newDocuments} new document${newDocuments===1?'':'s'} received.${duplicateSummary?` ${duplicateSummary}`:''}`;
     if(failures.length)action.setError(`${summary} ${failures.map(result=>`${result.name||'File'}: ${result.error}`).join(' ')}`);
-    else action.setMessage(`${summary} Processing continues in the background.`);
+    else action.setMessage(newDocuments?`${summary} Processing continues in the background.`:duplicates?`${duplicateSummary} No new processing was started.`:'No new documents were received.');
     if(accepted.length)onComplete?.();
     if(compact&&accepted.length===1&&!failures.length)navigate(`/app/documents/${accepted[0].document!.id}`);
   }
