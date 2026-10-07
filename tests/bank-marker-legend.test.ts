@@ -125,3 +125,62 @@ test('metadata fallback does not bypass DR/CR own-amount evidence or role confli
   const r=extract(raw,evidence),a=r.values.accounts[0];assert.equal(r.context.accounts[a.id].formats!.numberStatus,'missing');assert.ok(r.issues.some(i=>i.severity==='error'));assert.notEqual(a.transactions[0].debit,'15.75',mode);
  }
 });
+
+// The complete printed QS1 line includes a benign account-currency fact.
+// These synthetic literals never read or modify hosted runs or their history.
+const currencyLegend=legend+' All amounts are GBP.';
+test('a complete own-field role and same-account currency quotation preserves all QS1 movements',()=>{
+ const raw={accounts:[account()]};raw.accounts[0].movement_convention=currencyLegend;
+ const evidence=quotes(raw),rawBefore=structuredClone(raw),evidenceBefore=structuredClone(evidence),r=extract(raw,evidence),a=r.values.accounts[0];
+ assert.equal(movement(r),'columns');assert.deepEqual(money(r),amounts);assert.equal(r.issues.filter(i=>i.severity==='error').length,0);
+ assert.deepEqual(a.transactions.map(t=>[t.date,t.balance]),[['2026-10-05','55.75'],['2026-10-06','35.75'],['2026-10-12','38.50'],['2026-10-12','41.25']]);
+ assert.equal(a.balance_convention,'debit_increases');assert.equal(new Set(a.transactions.map(t=>t.id)).size,4);assert.deepEqual(raw,rawBefore);assert.deepEqual(evidence,evidenceBefore);
+ assert.equal(raw.accounts[0].transaction_layout,null);assert.equal(r.context.accounts[a.id].evidence['accounts[0].movement_convention'][0].text,currencyLegend);assert.ok(Object.isFrozen(r.context.accounts[a.id].formats!));
+ assert.ok(r.issues.some(i=>i.code==='source_review_required'));assert.ok(bankEvidenceReviewIssues(raw,evidence,[],r.context,r.values).some(i=>i.code==='visual_evidence'));
+ const values=structuredClone(r.values);values.accounts[0].transactions.reverse();const corrected=normalizeBankStatementCorrections(values,r.context,r.values);
+ assert.deepEqual(corrected.values.accounts[0].transactions.map(t=>t.id),a.transactions.map(t=>t.id).toReversed());assert.deepEqual(bankStatementRows([{documentId:'SYNTHETIC',filename:'synthetic.pdf',values:corrected.values}]).map(t=>[t.debit,t.credit]),amounts.toReversed());
+});
+
+test('complete currency-bearing role legends retain both role orders, own aliases and supported provenance',()=>{
+ for(const [rule,currency]of [[currencyLegend,'GBP'],['CR means credit; DR means debit; All amounts are GBP.','GBP'],['DR indicates a debit. CR indicates a credit. All amounts are EUR.','EUR']]as const){
+  for(const source of ['matched-text','matched-region','model-visual']as const){const a=account();a.currency=currency;a.total_debits='21.25 '+currency;a.total_credits='20.00 '+currency;a.transactions.forEach(t=>t.currency=currency);a.movement_convention=rule;
+   const raw={accounts:[a]},evidence=quotes(raw,source);evidence['accounts.0.movement_convention']=structuredClone(evidence['accounts[0].movement_convention']);assert.deepEqual(money(extract(raw,evidence)),amounts,rule+':'+source);
+  }
+ }
+});
+
+test('currency-bearing legends reject missing or foreign currencies and all extra or qualified instructions',()=>{
+ for(const rule of [legend+' All amounts are USD.',legend+' All amounts are GB.',legend+' All amounts may be GBP.',legend+' Not all amounts are GBP.',legend+' All amounts are GBP except repayments.',legend+' All amounts are GBP. All amounts are GBP.','All amounts are GBP. '+legend,legend+' All amounts are GBP. Positive amounts are credits; negative amounts are debits.',legend+' All amounts are GBP. DR means credit.']){
+  const raw={accounts:[account()]};raw.accounts[0].movement_convention=rule;assert.equal(movement(extract(raw)),'unresolved',rule);
+ }
+ for(const currency of [null,'GB']as const){const raw={accounts:[account()]};raw.accounts[0].movement_convention=currencyLegend;raw.accounts[0].currency=currency;assert.equal(movement(extract(raw)),'unresolved');}
+});
+
+test('every currency-bearing legend quote must preserve the complete own-field scalar',()=>{
+ for(const mode of ['missing','foreign-account','wrong-field','cropped-quote','cropped-alias','foreign-alias','extra-rule-alias','unverified','wrong-page','too-many','cropped-scalar']as const){
+  const raw={accounts:[account()]};raw.accounts[0].movement_convention=currencyLegend;const evidence=quotes(raw),key='accounts[0].movement_convention';
+  if(mode==='missing')delete evidence[key];if(mode==='foreign-account'){evidence['accounts[1].movement_convention']=evidence[key];delete evidence[key];}
+  if(mode==='wrong-field'){evidence['accounts[0].number_format']=evidence[key];delete evidence[key];}if(mode==='cropped-quote')evidence[key][0].text=legend;
+  if(mode==='cropped-alias')evidence['accounts.0.movement_convention']=[{page:1,text:legend,source:'model-visual'}];
+  if(mode==='foreign-alias')evidence['accounts.0.movement_convention']=[{page:1,text:legend+' All amounts are USD.',source:'model-visual'}];
+  if(mode==='extra-rule-alias')evidence['accounts.0.movement_convention']=[{page:1,text:currencyLegend+' Positive amounts are credits; negative amounts are debits.',source:'model-visual'}];
+  if(mode==='unverified')delete evidence[key][0].source;if(mode==='wrong-page')evidence[key][0].page=31;if(mode==='too-many')evidence[key]=Array.from({length:21},()=>({page:1,text:currencyLegend,source:'model-visual'}));
+  if(mode==='cropped-scalar')raw.accounts[0].movement_convention=legend;assert.equal(movement(extract(raw,evidence)),'unresolved',mode);
+ }
+});
+
+test('the appended currency fact cannot bypass literal amount proof or establish a signed layout',()=>{
+ for(const mode of ['unmarked','wrong-marker','missing-quote','wrong-literal','conflicting-alias','signed-layout']as const){
+  const raw={accounts:[account()]};raw.accounts[0].movement_convention=currencyLegend;if(mode==='unmarked')raw.accounts[0].transactions[0].debit='15.75';if(mode==='wrong-marker')raw.accounts[0].transactions[0].debit='15.75 CR';if(mode==='signed-layout')raw.accounts[0].transaction_layout='Signed amount';
+  const evidence=quotes(raw),key='accounts[0].transactions[0].debit';if(mode==='missing-quote')delete evidence[key];if(mode==='wrong-literal')evidence[key][0].text='15.76 DR';if(mode==='conflicting-alias')evidence['accounts.0.transactions.0.debit']=[{page:1,text:'15.75 CR',source:'model-visual'}];
+  const r=extract(raw,evidence);assert.equal(movement(r),'unresolved',mode);assert.ok(r.issues.some(i=>i.severity==='error'),mode);assert.notEqual(r.values.accounts[0].transactions[0].debit,'15.75',mode);
+ }
+ const raw={accounts:[account()]};raw.accounts[0].movement_convention=currencyLegend;raw.accounts[0].transactions[0].debit='USD 15.75 DR';const r=extract(raw);assert.ok(r.issues.some(i=>i.code==='amount_currency_conflict'));assert.notEqual(r.values.accounts[0].transactions[0].debit,'15.75');
+ const source=structuredClone(r.context.accounts[r.values.accounts[0].id]);source.sourcePages=[1];assert.equal(resolveBankSourceFormats(raw.accounts[0]as unknown as Record<string,unknown>,source).movement,'unresolved');
+});
+
+test('same-account currency legend preserves explicit negative debit reversals and their review warning',()=>{
+ for(const debit of ['-2.75 DR','(2.75) DR','2.75- DR']){const a=account();a.movement_convention=currencyLegend;a.closing_balance='37.25 DR';a.total_debits='-2.75 GBP';a.total_credits='0.00 GBP';a.transactions=[{...a.transactions[0],debit,balance:'37.25 DR'}];const raw={accounts:[a]},before=structuredClone(raw),r=extract(raw);
+  assert.equal(movement(r),'columns');assert.deepEqual(money(r),[['-2.75',null]]);assert.ok(r.issues.some(i=>i.code==='signed_column_amount'));assert.equal(r.issues.filter(i=>i.severity==='error').length,0);assert.deepEqual(raw,before);
+ }
+});

@@ -24,6 +24,7 @@ try{
   const result=spawnSync(process.execPath,['--input-type=module','-e',`
     import assert from 'node:assert/strict';
     import fs from 'node:fs/promises';
+    import path from 'node:path';
     import {inspectSource,decoderLaunchSpec,splitPdfSource,previewArchiveSource,importArchiveSource,renderTiffPage,convertTiffForAI,readPdfGeometry} from './server/core/source.js';
     import {createHash} from 'node:crypto';
     import {tiffRenderVersion} from './shared/tiff.js';
@@ -38,7 +39,22 @@ try{
     }
     for(const filename of ['invoice-multipage.pdf','receipt-scan.png','receipt.docx','receipt.xlsx','lead.eml','freeform-receipt.txt']){
       const result=await inspectSource(await fs.readFile('fixtures/'+filename),filename);
-      assert.ok(result.pageCount>=1); console.log('PASS packaged decoder '+filename);
+      assert.ok(result.pageCount>=1);
+      if(filename==='receipt.docx'){
+        // Keep actual DOCX extraction while excluding its unused CLI-only chain,
+        // including nested node_modules copies, from this standalone bundle.
+        assert.equal(result.mimeType,'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        assert.match(result.pages[0].text,/Merchant: Rowan Kitchen/);
+        for(const relative of await fs.readdir('node_modules',{recursive:true})){
+          const parts=['node_modules',...relative.split(path.sep)];
+          const cliOnly=parts.some((part,index)=>part==='node_modules'&&(
+            ['argparse','sprintf-js'].includes(parts[index+1])||
+            parts[index+1]==='mammoth'&&parts[index+2]==='bin'
+          ));
+          assert.equal(cliOnly,false,'Unused DOCX command-line dependency in function bundle: '+relative);
+        }
+      }
+      console.log('PASS packaged decoder '+filename);
     }
     const odtBytes=await fs.readFile('fixtures/synthetic-receipt.odt');
     const odt=await inspectSource(odtBytes,'renamed.txt');

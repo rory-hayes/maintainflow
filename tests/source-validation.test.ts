@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
-import { decodeSource } from '../server/core/decoder-engine.js';
+import { decodeSource, detectSourceFormat } from '../server/core/decoder-engine.js';
 import { inspectSource, runDecoder } from '../server/core/source.js';
 import { decoderLimits } from '../server/core/decoder-limits.js';
 import { SourceValidationError, isSourceValidationReason, sourceValidationReasons, type SourceValidationReason } from '../server/core/source-validation.js';
@@ -154,4 +154,40 @@ test('ambiguous native image-library errors retain no permanent validation type'
   const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   await assert.rejects(decodeSource(bytes, 'owned.png'), retryable(400));
   await assert.rejects(inspectSource(bytes, 'owned.png'), retryable(503));
+});
+
+// Clearly synthetic SVG only; the child loader refuses Sharp itself, proving
+// non-raster rejection occurs before any native image-library initialization.
+test('renamed non-raster SVG cannot initialize Sharp through PNG, JPEG or TIFF fallback', async () => {
+  const bytes=Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="6"><text>SYNTHETIC raster boundary fixture</text></svg>');
+  const original=Buffer.from(bytes);
+  const hook=`import {registerHooks} from 'node:module';registerHooks({resolve(specifier,context,nextResolve){if(specifier==='sharp')throw new Error('Synthetic non-raster data reached Sharp');return nextResolve(specifier,context);}});`;
+  const spawnChild:DecoderSpawn=(command,args,options)=>spawn(command,['--import',`data:text/javascript,${encodeURIComponent(hook)}`,...args],options);
+  for(const [filename,reason]of [
+    ['synthetic.png','image_format_unsupported'],['synthetic.jpg','image_format_unsupported'],['synthetic.jpeg','image_format_unsupported'],
+    ['synthetic.tif','tiff_invalid'],['synthetic.tiff','tiff_invalid'],
+  ]as const){
+    assert.throws(()=>detectSourceFormat(bytes,filename),permanent(reason));
+    await assert.rejects(runDecoder(bytes,filename,{spawnChild}),permanent(reason));
+  }
+  assert.deepEqual(bytes,original);
+  assert.equal(detectSourceFormat(bytes,'synthetic.txt'),'txt');
+  const text=await inspectSource(bytes,'synthetic.txt');
+  assert.equal(text.mimeType,'text/plain');assert.equal(text.pages[0].text,bytes.toString());
+});
+
+test('genuine PNG, JPEG and TIFF remain byte-led under misleading raster filenames', async () => {
+  const {makeTiff}=await import('./fixtures/tiff.js');
+  const inputs=[
+    {bytes:await fs.readFile('fixtures/generated/receipt-scan.png'),format:'png',mime:'image/png',filename:'synthetic.tiff'},
+    {bytes:await fs.readFile('fixtures/source-formats/receipt-image.jpg'),format:'jpeg',mime:'image/jpeg',filename:'synthetic.png'},
+    {bytes:makeTiff([{width:8,height:6,color:[40,120,200]}]),format:'tiff',mime:'image/tiff',filename:'synthetic.jpg'},
+  ]as const;
+  for(const input of inputs){
+    const original=Buffer.from(input.bytes);
+    assert.equal(detectSourceFormat(input.bytes,input.filename),input.format);
+    const source=await inspectSource(input.bytes,input.filename);
+    assert.equal(source.mimeType,input.mime);assert.equal(source.pageCount,1);
+    assert.deepEqual(source.pages,[{page:1,text:''}]);assert.deepEqual(input.bytes,original);
+  }
 });
