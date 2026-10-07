@@ -17,9 +17,10 @@ function evidenced(raw:Record<string,unknown>,source:BankSource,field:typeof ban
   if(field==='date_format')return dateOrder(input);
   if(field==='number_format'){const rule=numberFormat(input);return rule?JSON.stringify(rule):null;}
   if(field==='transaction_layout')return /^(?:signed amount|signed movement|signed transaction amount)$/.test(input)?'signed':null;
-  const rule=movementRule(input);return rule==='unresolved'?null:rule;
+  const rule=movementRule(input);return rule!=='unresolved'?rule:markerLegend(input)||markerClause(input)?'marker_legend':null;
  };
  const selected=signature(clean(value));if(!selected)return null;
+ if(selected==='marker_legend'&&entries.some(item=>!source.sourcePages.includes(item.page)))return null;
  // Every retained own-field quote must consist of supported, unconditional
  // literal rules. A cropped scalar cannot discard a qualification, opposing
  // alias or a different grouping example in the same source quotation.
@@ -60,13 +61,44 @@ function movementRule(value:string|null):BankAccountFormats['movement'] {
  if(!match||match[1]===match[2])return 'unresolved';
  return match[1]==='credits'?'positive_credit':'positive_debit';
 }
+function markerClause(value:string):'DR'|'CR'|null {
+ if(/^dr (?:marks|means|indicates|denotes) (?:a )?debit(?: or balance owed)?$/.test(value))return 'DR';
+ return /^cr (?:marks|means|indicates|denotes) (?:a )?(?:payment )?credit$/.test(value)?'CR':null;
+}
+function markerLegend(value:string|null):boolean {
+ if(!value)return false;
+ const clauses=value.split(/[.;]/).map(clean).filter(Boolean),markers=clauses.map(markerClause);
+ return clauses.length===2&&markers.includes('DR')&&markers.includes('CR');
+}
+/** A suffix legend establishes literal debit/credit roles, never a source
+ * column layout or signed polarity. Every present movement needs its own
+ * complete, matching amount quote; existing parsing retains explicit signs. */
+function taggedMovements(raw:Record<string,unknown>,source:BankSource):boolean {
+ if(!Array.isArray(raw.transactions)||raw.transactions.length>20_000)return false;
+ let present=false;
+ for(const [index,row]of raw.transactions.entries()){
+  if(!row||typeof row!=='object'||Array.isArray(row))return false;
+  for(const role of ['debit','credit']as const){
+   const value=row[role];if(value===null||value===undefined||typeof value==='string'&&!value.trim())continue;
+   if(typeof value!=='string'||value.length>160||value.match(/\s+(DR|CR)\.?$/i)?.[1].toUpperCase()!==(role==='debit'?'DR':'CR'))return false;
+   present=true;
+   const path=`${source.rawPath}.transactions[${index}].${role}`,aliases=[path,path.replace(/\[(\d+)\]/g,'.$1')];
+   const lists=aliases.filter((key,i)=>aliases.indexOf(key)===i).map(key=>source.evidence[key]).filter(entries=>entries!==undefined);
+   if(!lists.length||lists.some(entries=>!Array.isArray(entries)))return false;
+   const entries=lists.flat();
+   if(!entries.length||entries.length>20||!entries.every(item=>item&&Number.isInteger(item.page)&&item.page>=1&&item.page<=30&&source.sourcePages.includes(item.page)&&typeof item.text==='string'&&item.text.length<=2000&&collapse(item.text)===collapse(value)&&['matched-text','matched-region','model-visual'].includes(item.source??'')))return false;
+  }
+ }
+ return present;
+}
 export function resolveBankSourceFormats(raw:Record<string,unknown>,source:BankSource):BankAccountFormats {
  const date=dateOrder(evidenced(raw,source,'date_format')),number=numberFormat(evidenced(raw,source,'number_format'));
  const hasMovement=provided(raw,'transaction_layout')||provided(raw,'movement_convention');
- const layout=evidenced(raw,source,'transaction_layout'),signed=layout!==null&&/^(?:signed amount|signed movement|signed transaction amount)$/.test(layout);
+ const layout=evidenced(raw,source,'transaction_layout'),signed=layout!==null&&/^(?:signed amount|signed movement|signed transaction amount)$/.test(layout),movement=evidenced(raw,source,'movement_convention');
+ const tagged=!provided(raw,'transaction_layout')&&markerLegend(movement)&&taggedMovements(raw,source);
  return {version:1,dateStatus:date?'supported':provided(raw,'date_format')?'unresolved':'missing',dateOrder:date,
   numberStatus:number?'supported':provided(raw,'number_format')?'unresolved':'missing',decimalSeparator:number?.decimalSeparator??null,groupSeparator:number?.groupSeparator??null,
-  movement:hasMovement?signed?movementRule(evidenced(raw,source,'movement_convention')):'unresolved':'columns'};
+  movement:hasMovement?signed?movementRule(movement):tagged?'columns':'unresolved':'columns'};
 }
 export function validBankSourceFormats(value:unknown):value is BankAccountFormats {
  if(!value||typeof value!=='object'||Array.isArray(value))return false;const v=value as BankAccountFormats;

@@ -16,7 +16,8 @@ type Phase=keyof typeof phases;
 type Run={id:number;run_number:number;run_attempt:number;display_title:string;head_sha:string;head_branch:string;event:string;status:string;conclusion:string|null;repository:{full_name:string};head_repository:{full_name:string}};
 type Artifact={id:number;name:string;expired:boolean;size_in_bytes:number;workflow_run?:{id:number;head_branch:string}};
 export type ArtifactSelection={artifactId:number;runId:number;name:string};
-export type SelectionOptions={token:string;runId:number;runAttempt:number;runNumber:number;initialize?:boolean;timeoutMs?:number;onSkippedRun?:(runId:number)=>void};
+export type SkippedRunReason='selector_failed_before_state'|'hosted_runner_not_acquired';
+export type SelectionOptions={token:string;runId:number;runAttempt:number;runNumber:number;initialize?:boolean;timeoutMs?:number;onSkippedRun?:(runId:number,reason:SkippedRunReason)=>void};
 export class ArtifactStateError extends Error{readonly code:string;constructor(code:string){super(code);this.code=code;}}
 function requireValue(value:unknown,code:string):asserts value{if(!value)throw new ArtifactStateError(code);}
 const positive=(value:unknown):value is number=>Number.isSafeInteger(value)&&Number(value)>0;
@@ -120,10 +121,38 @@ function failedBeforeState(value:unknown,run:Run):boolean{
   });
 }
 
+
+// Empty steps or unassigned runner fields alone do not prove non-execution.
+// Accept only the provider-owned check attached to this exact attempt's single job.
+function neverAcquiredCheckId(value:unknown,run:Run):number|null{
+  if(run.run_attempt!==1||run.conclusion!=='failure'||!object(value)||value.total_count!==1||!Array.isArray(value.jobs)||value.jobs.length!==1)return null;
+  const job=value.jobs[0];
+  if(!object(job)||!positive(job.id)||job.run_id!==run.id||job.run_attempt!==1||job.head_sha!==run.head_sha||job.name!=='monitor'||job.status!=='completed'||job.conclusion!=='cancelled'||!Array.isArray(job.steps)||job.steps.length!==0||job.runner_id!==0||job.runner_name!==''||job.runner_group_id!==0||job.runner_group_name!==''||typeof job.check_run_url!=='string')return null;
+  const checkPrefix=`https://api.github.com/repos/${repository}/check-runs/`;
+  if(!job.check_run_url.startsWith(checkPrefix))return null;
+  const suffix=job.check_run_url.slice(checkPrefix.length);
+  if(!/^[1-9][0-9]*$/.test(suffix)||!positive(Number(suffix)))return null;
+  return Number(suffix);
+}
+async function proveNeverAcquired(checkId:number,run:Run,token:string,transport:typeof fetch,signal:AbortSignal):Promise<boolean>{
+  const check=await json(`https://api.github.com/repos/${repository}/check-runs/${checkId}`,token,transport,signal);
+  if(!object(check)||check.id!==checkId||check.head_sha!==run.head_sha||check.name!=='monitor'||check.status!=='completed'||check.conclusion!=='cancelled'||!object(check.app)||check.app.id!==15368||check.app.slug!=='github-actions'||!object(check.output)||check.output.annotations_count!==1)return false;
+  const annotations=await json(`https://api.github.com/repos/${repository}/check-runs/${checkId}/annotations?per_page=100`,token,transport,signal);
+  if(!Array.isArray(annotations)||annotations.length!==1)return false;
+  const annotation=annotations[0];
+  if(!object(annotation)||annotation.annotation_level!=='failure'||typeof annotation.message!=='string')return false;
+  // Normalize presentation only; no substring, other error, or user text is trusted.
+  const message=annotation.message.replace(/\s+/g,' ').trim().replace(/\.+$/,'').toLowerCase();
+  return message==='the job was not acquired by runner of type hosted even after multiple attempts';
+}
+
 const digest=(value:Uint8Array)=>createHash('sha256').update(value).digest('hex');
 // The original selector was independently checked at the released PR71 commit.
 // It could not read state or send notices before its failed selection step.
 const originalSelectorDigest='36d48bfae9039bc891147c7d06ec659a15ac69a3b2574525d6113a967eba95ad';
+// These released PR79 bytes were independently checked before this recovery change.
+const releasedSelectorDigest='ecaacf7b935d187b4957c33823b142a205e427b8838bd74a2879b863df563daa';
+const releasedWorkflowDigest='b04ebabb35917e47b0ecb7756a838596ca27747a98d4b15fabfb20e31dbb6047';
 async function verifySelectorOnlySource(run:Run,token:string,transport:typeof fetch,signal:AbortSignal):Promise<void>{
   const paths=['.github/workflows/operations-monitor.yml','scripts/monitor-artifact-state.ts'] as const;
   const local=[await fs.readFile(new URL('../.github/workflows/operations-monitor.yml',import.meta.url)),await fs.readFile(new URL(import.meta.url))];
@@ -133,7 +162,7 @@ async function verifySelectorOnlySource(run:Run,token:string,transport:typeof fe
     const encoded=value.content.replace(/\n/g,'');
     requireValue(encoded.length>0&&/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded),'artifact_selector_source_untrusted');
     const source=Buffer.from(encoded,'base64'),actual=digest(source);
-    requireValue(source.byteLength<=responseLimit&&(actual===digest(local[index]!)||index===1&&actual===originalSelectorDigest),'artifact_selector_source_untrusted');
+    requireValue(source.byteLength<=responseLimit&&(actual===digest(local[index]!)||index===0&&actual===releasedWorkflowDigest||index===1&&(actual===originalSelectorDigest||actual===releasedSelectorDigest)),'artifact_selector_source_untrusted');
   }
 }
 
@@ -171,12 +200,14 @@ export async function selectMonitorArtifact(options:SelectionOptions,transport:t
         if(!(error instanceof ArtifactStateError)||error.code!=='latest_monitor_checkpoint_missing'||candidate.id===options.runId||candidate.run_attempt!==1||candidate.conclusion!=='failure')throw error;
         requireValue(object(artifacts)&&artifacts.total_count===0&&Array.isArray(artifacts.artifacts)&&artifacts.artifacts.length===0,'latest_monitor_checkpoint_missing');
         const jobs=await json(`${api}/runs/${candidate.id}/attempts/1/jobs?per_page=100`,options.token,transport,controller.signal);
-        requireValue(failedBeforeState(jobs,candidate),'latest_monitor_checkpoint_missing');
+        const selectorFailed=failedBeforeState(jobs,candidate),checkId=selectorFailed?null:neverAcquiredCheckId(jobs,candidate);
+        requireValue(selectorFailed||checkId!==null,'latest_monitor_checkpoint_missing');
         if(!verifiedSources.has(candidate.head_sha)){
           await verifySelectorOnlySource(candidate,options.token,transport,controller.signal);
           verifiedSources.add(candidate.head_sha);
         }
-        options.onSkippedRun?.(candidate.id);
+        if(!selectorFailed)requireValue(await proveNeverAcquired(checkId!,candidate,options.token,transport,controller.signal),'latest_monitor_checkpoint_missing');
+        options.onSkippedRun?.(candidate.id,selectorFailed?'selector_failed_before_state':'hosted_runner_not_acquired');
       }
     }
     // Selector-only failures do not authorize first-ever initialization or hide a
@@ -194,7 +225,7 @@ export async function main(args=process.argv.slice(2),env=process.env){
   requireValue(env.GITHUB_REPOSITORY===repository&&env.GITHUB_REF==='refs/heads/main','artifact_environment_invalid');
   requireValue(typeof env.GITHUB_OUTPUT==='string'&&path.isAbsolute(env.GITHUB_OUTPUT),'artifact_output_missing');
   const parse=(value:string|undefined)=>value&&/^[1-9][0-9]*$/.test(value)?Number(value):NaN;
-  const result=await selectMonitorArtifact({token:env.GH_TOKEN??'',runId:parse(env.GITHUB_RUN_ID),runAttempt:parse(env.GITHUB_RUN_ATTEMPT),runNumber:parse(env.GITHUB_RUN_NUMBER),initialize:args[0]==='--initialize',onSkippedRun:runId=>console.error(JSON.stringify({monitorState:'checkpoint_not_created',runId,code:'selector_failed_before_state'}))});
+  const result=await selectMonitorArtifact({token:env.GH_TOKEN??'',runId:parse(env.GITHUB_RUN_ID),runAttempt:parse(env.GITHUB_RUN_ATTEMPT),runNumber:parse(env.GITHUB_RUN_NUMBER),initialize:args[0]==='--initialize',onSkippedRun:(runId,reason)=>console.error(JSON.stringify({monitorState:'checkpoint_not_created',runId,code:reason}))});
   await fs.appendFile(env.GITHUB_OUTPUT,`artifact_id=${result?.artifactId??''}\nrun_id=${result?.runId??''}\nartifact_name=${result?.name??''}\n`);
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)main().catch(error=>{console.error(JSON.stringify({monitorState:'unavailable',code:error instanceof ArtifactStateError?error.code:'artifact_selector_failed'}));process.exitCode=1;});
