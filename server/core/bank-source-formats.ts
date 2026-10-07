@@ -35,6 +35,25 @@ function evidenced(raw:Record<string,unknown>,source:BankSource,field:typeof ban
  }
  return clean(value);
 }
+/** These exact quoted metadata forms declare no date order or separators.
+ * Treat them as no printed format rule, never as a supported format. Every
+ * own-field alias must contain only the same complete metadata quotation. */
+function nonFormatMetadata(raw:Record<string,unknown>,source:BankSource,field:'date_format'|'number_format'):boolean {
+ const value=scalar(raw[field]);if(!value?.trim())return false;
+ if(field==='date_format'){
+  const start=scalar(raw.statement_start),end=scalar(raw.statement_end);
+  const dateLiteral=/^(?:\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{1,2}[./-]\d{1,2}[./-]\d{4}|\d{1,2} [\p{L}.]+ \d{4}|[\p{L}.]+ \d{1,2},? \d{4})$/u;
+  if(!start||!end||!dateLiteral.test(collapse(start))||!dateLiteral.test(collapse(end))||clean(value)!==clean(`Statement period: ${start} to ${end}`))return false;
+ }else{
+  const match=clean(value).match(/^all amounts are ([a-z]{3})$/),currency=scalar(raw.currency)?.trim().toLowerCase();
+  if(!match||match[1]!==currency)return false;
+ }
+ const aliases=[`${source.rawPath}.${field}`,`${source.rawPath.replace(/\[(\d+)\]/g,'.$1')}.${field}`];
+ const lists=aliases.filter((key,i)=>aliases.indexOf(key)===i).map(key=>source.evidence[key]).filter(entries=>entries!==undefined);
+ if(!lists.length||lists.some(entries=>!Array.isArray(entries)))return false;
+ const entries=lists.flat();
+ return entries.length>0&&entries.length<=20&&entries.every(item=>item&&Number.isInteger(item.page)&&item.page>=1&&item.page<=30&&source.sourcePages.includes(item.page)&&typeof item.text==='string'&&item.text.length<=2000&&['matched-text','matched-region','model-visual'].includes(item.source??'')&&collapse(item.text)===collapse(value));
+}
 const provided=(raw:Record<string,unknown>,field:typeof bankFormatFields[number])=>Boolean(scalar(raw[field])?.trim());
 function dateOrder(value:string|null):BankAccountFormats['dateOrder'] {
  if(!value)return null;
@@ -96,8 +115,8 @@ export function resolveBankSourceFormats(raw:Record<string,unknown>,source:BankS
  const hasMovement=provided(raw,'transaction_layout')||provided(raw,'movement_convention');
  const layout=evidenced(raw,source,'transaction_layout'),signed=layout!==null&&/^(?:signed amount|signed movement|signed transaction amount)$/.test(layout),movement=evidenced(raw,source,'movement_convention');
  const tagged=!provided(raw,'transaction_layout')&&markerLegend(movement)&&taggedMovements(raw,source);
- return {version:1,dateStatus:date?'supported':provided(raw,'date_format')?'unresolved':'missing',dateOrder:date,
-  numberStatus:number?'supported':provided(raw,'number_format')?'unresolved':'missing',decimalSeparator:number?.decimalSeparator??null,groupSeparator:number?.groupSeparator??null,
+ return {version:1,dateStatus:date?'supported':provided(raw,'date_format')&&!nonFormatMetadata(raw,source,'date_format')?'unresolved':'missing',dateOrder:date,
+  numberStatus:number?'supported':provided(raw,'number_format')&&!nonFormatMetadata(raw,source,'number_format')?'unresolved':'missing',decimalSeparator:number?.decimalSeparator??null,groupSeparator:number?.groupSeparator??null,
   movement:hasMovement?signed?movementRule(movement):tagged?'columns':'unresolved':'columns'};
 }
 export function validBankSourceFormats(value:unknown):value is BankAccountFormats {
