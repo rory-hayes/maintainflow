@@ -24,6 +24,7 @@ on:
 permissions:
   contents: read
   actions: read
+  checks: read
 
 concurrency:
   group: folio-operational-monitor
