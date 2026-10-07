@@ -17,10 +17,13 @@ function evidenced(raw:Record<string,unknown>,source:BankSource,field:typeof ban
   if(field==='date_format')return dateOrder(input);
   if(field==='number_format'){const rule=numberFormat(input);return rule?JSON.stringify(rule):null;}
   if(field==='transaction_layout')return /^(?:signed amount|signed movement|signed transaction amount)$/.test(input)?'signed':null;
-  const rule=movementRule(input);return rule!=='unresolved'?rule:markerLegend(input)||markerClause(input)?'marker_legend':null;
+  const rule=movementRule(input);return rule!=='unresolved'?rule:markerLegend(input,raw.currency)||markerClause(input)?'marker_legend':null;
  };
  const selected=signature(clean(value));if(!selected)return null;
  if(selected==='marker_legend'&&entries.some(item=>!source.sourcePages.includes(item.page)))return null;
+ // A currency-bearing role legend is useful only as one complete quotation;
+ // no alias may crop its currency fact or hide an additional instruction.
+ if(field==='movement_convention'&&markerLegend(clean(value),raw.currency)==='currency')return entries.every(item=>collapse(item.text)===collapse(value))?clean(value):null;
  // Every retained own-field quote must consist of supported, unconditional
  // literal rules. A cropped scalar cannot discard a qualification, opposing
  // alias or a different grouping example in the same source quotation.
@@ -84,10 +87,13 @@ function markerClause(value:string):'DR'|'CR'|null {
  if(/^dr (?:marks|means|indicates|denotes) (?:a )?debit(?: or balance owed)?$/.test(value))return 'DR';
  return /^cr (?:marks|means|indicates|denotes) (?:a )?(?:payment )?credit$/.test(value)?'CR':null;
 }
-function markerLegend(value:string|null):boolean {
- if(!value)return false;
- const clauses=value.split(/[.;]/).map(clean).filter(Boolean),markers=clauses.map(markerClause);
- return clauses.length===2&&markers.includes('DR')&&markers.includes('CR');
+function markerLegend(value:string|null,currency?:unknown):'roles'|'currency'|null {
+ if(!value)return null;
+ const clauses=value.split(/[.;]/).map(clean).filter(Boolean),markers=clauses.slice(0,2).map(markerClause);
+ if(!markers.includes('DR')||!markers.includes('CR'))return null;
+ if(clauses.length===2)return 'roles';
+ const code=scalar(currency)?.trim().toLowerCase();
+ return clauses.length===3&&code&&/^[a-z]{3}$/.test(code)&&clauses[2]===`all amounts are ${code}`?'currency':null;
 }
 /** A suffix legend establishes literal debit/credit roles, never a source
  * column layout or signed polarity. Every present movement needs its own
@@ -114,7 +120,7 @@ export function resolveBankSourceFormats(raw:Record<string,unknown>,source:BankS
  const date=dateOrder(evidenced(raw,source,'date_format')),number=numberFormat(evidenced(raw,source,'number_format'));
  const hasMovement=provided(raw,'transaction_layout')||provided(raw,'movement_convention');
  const layout=evidenced(raw,source,'transaction_layout'),signed=layout!==null&&/^(?:signed amount|signed movement|signed transaction amount)$/.test(layout),movement=evidenced(raw,source,'movement_convention');
- const tagged=!provided(raw,'transaction_layout')&&markerLegend(movement)&&taggedMovements(raw,source);
+ const tagged=!provided(raw,'transaction_layout')&&markerLegend(movement,raw.currency)&&taggedMovements(raw,source);
  return {version:1,dateStatus:date?'supported':provided(raw,'date_format')&&!nonFormatMetadata(raw,source,'date_format')?'unresolved':'missing',dateOrder:date,
   numberStatus:number?'supported':provided(raw,'number_format')&&!nonFormatMetadata(raw,source,'number_format')?'unresolved':'missing',decimalSeparator:number?.decimalSeparator??null,groupSeparator:number?.groupSeparator??null,
   movement:hasMovement?signed?movementRule(movement):tagged?'columns':'unresolved':'columns'};

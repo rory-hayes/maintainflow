@@ -114,6 +114,10 @@ function classifySource(bytes:Buffer,filename:string):{format:SourceFormat;text?
   const recognized=strongTextFormat(text!);
   const format=recognized||textExtensions[ext]||binaryExtensions[ext];
   if(!format)invalid('format_unsupported');
+  // Genuine raster headers already returned above. A filename must never route
+  // arbitrary UTF-8 (including SVG) into an auto-detecting native image loader.
+  if(format==='png'||format==='jpeg')invalid('image_format_unsupported');
+  if(format==='tiff')invalid('tiff_invalid');
   return {format,text:text!};
 }
 /** Byte-led classification without loading document-conversion dependencies. */
