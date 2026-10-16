@@ -1,4 +1,4 @@
-import type {BankAccountFormats,BankSource,BankScalar} from '../../shared/bank-statements.js';
+import type {BankAccountFormats,BankSource,BankScalar,BankNativeColumns} from '../../shared/bank-statements.js';
 
 export const bankFormatFields=['date_format','number_format','transaction_layout','movement_convention'] as const;
 const scalar=(value:unknown):BankScalar=>typeof value==='string'&&value.length<=4000?value:null;
@@ -138,15 +138,69 @@ function taggedMovements(raw:Record<string,unknown>,source:BankSource):boolean {
  }
  return present;
 }
+/** A native balance-only note misfiled in the movement field is not a signed
+ * polarity rule. Recover only this complete owed-balance statement with its
+ * own matching account/page anchors; retain every raw value and quote. */
+function nativeQuotedBalanceRule(raw:Record<string,unknown>,source:BankSource):'credit_increases'|'debit_increases'|null {
+ if(raw.transaction_layout!=null||clean(scalar(raw.balance_convention)??'')!=='positive balance is the amount owed')return null;
+ const rule=scalar(raw.movement_convention),match=rule&&clean(rule).match(/^(credits|debits) increase and (credits|debits) decrease the amount owed$/);
+ if(!match||match[1]===match[2])return null;
+ const identifier=scalar(raw.account_identifier);if(!identifier?.trim())return null;
+ function quotes(field:'account_identifier'|'balance_convention'|'movement_convention'){
+  const value=scalar(raw[field]);if(!value?.trim())return null;
+  const aliases=[`${source.rawPath}.${field}`,`${source.rawPath.replace(/\[(\d+)\]/g,'.$1')}.${field}`];
+  const lists=aliases.filter((key,i)=>aliases.indexOf(key)===i).map(key=>source.evidence[key]).filter(entries=>entries!==undefined);
+  if(!lists.length||lists.some(entries=>!Array.isArray(entries)))return null;
+  const entries=lists.flat();
+  if(!entries.length||entries.length>20||!entries.every(item=>item&&Number.isInteger(item.page)&&item.page>=1&&item.page<=30&&source.sourcePages.includes(item.page)&&item.source==='matched-text'&&typeof item.text==='string'&&item.text.length<=2000&&(collapse(item.text)===collapse(value)||field==='account_identifier'&&collapse(item.text)===`Account identifier: ${collapse(value)}`)))return null;
+  return entries;
+ }
+ const identityQuotes=quotes('account_identifier'),balanceQuotes=quotes('balance_convention'),movementQuotes=quotes('movement_convention');
+ if(!identityQuotes||!balanceQuotes||!movementQuotes)return null;
+ const identityPages=new Set(identityQuotes.map(item=>item.page)),balancePages=new Set(balanceQuotes.map(item=>item.page));
+ if(!balanceQuotes.every(item=>identityPages.has(item.page))||!movementQuotes.every(item=>identityPages.has(item.page)&&balancePages.has(item.page)))return null;
+ return match[1]==='credits'?'credit_increases':'debit_increases';
+}
+const nativeHeader='date|description|reference|debit|credit|balance';
+export function validBankNativeColumns(value:unknown):value is BankNativeColumns {
+ if(!value||typeof value!=='object'||Array.isArray(value))return false;const proof=value as BankNativeColumns;
+ return Object.keys(proof).sort().join(',')==='header,mimeType,page,version'&&proof.version===1&&proof.mimeType==='text/plain'&&proof.page===1&&typeof proof.header==='string'&&proof.header.length<=2000&&separateColumnsHeader(proof.header)===nativeHeader;
+}
+/** This optional recovery reads trusted decoded TXT, never provider-supplied
+ * page text. One account/page and one exact six-column header keep the proof
+ * local; any competing header, account anchor or qualified rule refuses it. */
+export function nativeBankCardColumns(raw:Record<string,unknown>,source:BankSource,native?:{mimeType:string;pages:readonly {page:number;text:string}[]}):BankNativeColumns|null {
+ if(!nativeQuotedBalanceRule(raw,source)||source.rawPath!=='accounts[0]'||native?.mimeType!=='text/plain'||!Array.isArray(native.pages)||native.pages.length!==1||native.pages[0]?.page!==1||typeof native.pages[0]?.text!=='string'||native.pages[0].text.length>64000||source.sourcePages.length!==1||source.sourcePages[0]!==1)return null;
+ const text:string=native.pages[0].text;const lines=text.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
+ const anchors=[['bank_name','Bank: ',/^bank\s*:/i],['account_identifier','Account identifier: ',/^account(?:\s+(?:identifier|number|no\.?))?\s*:/i],['currency','Currency: ',/^currency\s*:/i]] as const;
+ for(const [field,prefix,pattern]of anchors){const value=scalar(raw[field]);if(!value?.trim())return null;const found=lines.filter(line=>pattern.test(line));if(found.length!==1||collapse(found[0])!==prefix+collapse(value))return null;}
+ const headerLines=lines.filter(line=>['|',',','\t'].some(separator=>line.includes(separator)&&line.split(separator).some(column=>/^(?:date|description|reference|debit|credit|balance|amount|signed amount|signed movement|signed transaction amount)$/i.test(collapse(column)))));
+ if(headerLines.length!==1||separateColumnsHeader(headerLines[0])!==nativeHeader)return null;
+ if(!lines.some(line=>collapse(line)===collapse(String(raw.balance_convention)))||!lines.some(line=>collapse(line)===collapse(String(raw.movement_convention))))return null;
+ // Refuse any additional balance/role prose, even wording the rule parser
+ // cannot interpret. Inflected or reversed-order opposing clauses must not
+ // disappear merely because their verbs are outside the supported rule.
+ const balanceRoles=lines.filter(line=>line!==headerLines[0]&&/\b(?:debits?|credits?)\b/i.test(line)&&/\b(?:balance|owed|debt|liability)\b/i.test(line));
+ // A known six-column ISO-date transaction line is data, not a global
+ // qualification. Other pipe-separated prose still receives the checks.
+ const prose=lines.filter(line=>line.split('|').length!==6||!/^\d{4}-\d{2}-\d{2}\s*\|/.test(line));
+ const qualified=prose.some(line=>/^not\b|\b(?:except|unless|usually|sometimes|only|never|may|might|could|typically|reverse|reverses|reversed|reversing)\b|\b(?:does|do)\s+not\s+apply\b|\b(?:rules?|conventions?)\b.*\bnot\b|\bnot\b.*\b(?:rules?|conventions?)\b/i.test(line));
+ if(balanceRoles.length!==1||collapse(balanceRoles[0])!==collapse(String(raw.movement_convention))||qualified||prose.some(line=>/\bsigned (?:amount|movement|transaction amount)\b/i.test(line)))return null;
+ return {version:1,mimeType:'text/plain',page:1,header:headerLines[0]};
+}
+export function bankBalanceRuleFromMovement(raw:Record<string,unknown>,source:BankSource):'credit_increases'|'debit_increases'|null {
+ return validBankNativeColumns(source.nativeColumns)?nativeQuotedBalanceRule(raw,source):null;
+}
 export function resolveBankSourceFormats(raw:Record<string,unknown>,source:BankSource):BankAccountFormats {
  const date=dateOrder(evidenced(raw,source,'date_format')),number=numberFormat(evidenced(raw,source,'number_format'));
  const hasMovement=provided(raw,'transaction_layout')||provided(raw,'movement_convention');
  const layout=evidenced(raw,source,'transaction_layout'),signed=layout!==null&&/^(?:signed amount|signed movement|signed transaction amount)$/.test(layout),movement=evidenced(raw,source,'movement_convention');
  const columns=layout!==null&&separateColumnsHeader(layout)!==null&&raw.movement_convention==null;
+ const nativeBalanceRule=bankBalanceRuleFromMovement(raw,source);
  const tagged=!provided(raw,'transaction_layout')&&markerLegend(movement,raw.currency)&&taggedMovements(raw,source);
  return {version:1,dateStatus:date?'supported':provided(raw,'date_format')&&!nonFormatMetadata(raw,source,'date_format')?'unresolved':'missing',dateOrder:date,
   numberStatus:number?'supported':provided(raw,'number_format')&&!nonFormatMetadata(raw,source,'number_format')?'unresolved':'missing',decimalSeparator:number?.decimalSeparator??null,groupSeparator:number?.groupSeparator??null,
-  movement:hasMovement?signed?movementRule(movement):columns||tagged?'columns':'unresolved':'columns'};
+  movement:hasMovement?signed?movementRule(movement):columns||tagged||nativeBalanceRule?'columns':'unresolved':'columns'};
 }
 export function validBankSourceFormats(value:unknown):value is BankAccountFormats {
  if(!value||typeof value!=='object'||Array.isArray(value))return false;const v=value as BankAccountFormats;
