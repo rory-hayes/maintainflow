@@ -71,7 +71,7 @@ export async function probeNormalizationPolicy(pool:Pool){
   if(result.rows.length!==1||row.convalidated!==true||versions?.length!==2||new Set(versions).size!==2||!versions.includes('timestamp-v1')||!versions.includes('regional-v2'))throw new Error('Probe unavailable');
 }
 
-/** ODT can be advertised only after policy and durable rejection rows accept it. */
+/** Advertised formats require both policy support and current durable rejection reasons. */
 export async function probeSourceFormatPolicy(pool:Pool){
   const result=await probeDatabase(pool,`select c.conname,c.convalidated,pg_get_constraintdef(c.oid) definition
     from pg_catalog.pg_constraint c join (values
@@ -89,7 +89,7 @@ export async function probeSourceFormatPolicy(pool:Pool){
     if(row.convalidated!==true||typeof row.definition!=='string'||!formats.has(row.conname)&&!rejections.has(row.conname))throw new Error('Probe unavailable');
     const literals=new Set([...row.definition.matchAll(/'([a-z_]+)'(?:::text)?/g)].map(match=>match[1]));
     if(formats.has(row.conname)&&!literals.has('odt'))throw new Error('Probe unavailable');
-    if(rejections.has(row.conname)&&['odt_invalid','odt_unsupported','odt_encrypted','odt_structure_limit','odt_text_limit','odt_empty'].some(reason=>!literals.has(reason)))throw new Error('Probe unavailable');
+    if(rejections.has(row.conname)&&['odt_invalid','odt_unsupported','odt_encrypted','odt_structure_limit','odt_text_limit','odt_empty','xlsx_date_encoding_unsupported'].some(reason=>!literals.has(reason)))throw new Error('Probe unavailable');
     if(row.conname==='parsers_allowed_formats'&&!/cardinality\(allowed_formats\)\s*<=\s*11\b/.test(row.definition))throw new Error('Probe unavailable');
   }
 }

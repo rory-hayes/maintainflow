@@ -41,6 +41,7 @@ const correctedFileMessages=new Set([
   'The XLSX file does not contain a worksheet',
   'Spreadsheets must contain 30 sheets or fewer',
   'Spreadsheet dimensions exceed the supported limit',
+  'This XLSX date encoding is not supported. Re-save it as an XLSX workbook or upload a CSV copy.',
   'Choose a non-empty file of 10 MB or less.',
   'Each file must contain data and be 10 MB or smaller.',
   'File exceeds 10 MB limit',

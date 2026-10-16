@@ -28,7 +28,7 @@ test('temporary and ambiguous upload failures remain retryable without broad sta
   assert.deepEqual(bankUploadFailure(null),{error:'Upload failed. Please retry.',retryable:true});
 });
 
-async function controlledUpload(strategy:'signed'|'multipart',outcome:{status:number;body:unknown}|Error){
+async function controlledUpload(strategy:'signed'|'multipart',outcome:{status:number;body:unknown}|Error,file=new File(['synthetic malformed bytes'],'synthetic.pdf',{type:'application/pdf'})){
   const previousFetch=globalThis.fetch,storage=Object.getOwnPropertyDescriptor(globalThis,'sessionStorage');
   const calls:{path:string;method:string}[]=[];
   Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:{getItem:()=> 'synthetic-workspace'}});
@@ -44,7 +44,7 @@ async function controlledUpload(strategy:'signed'|'multipart',outcome:{status:nu
   }) as typeof fetch;
   try{
     try{
-      const response=await uploadDocuments('synthetic-parser',[new File(['synthetic malformed bytes'],'synthetic.pdf',{type:'application/pdf'})],{bankLocale:'de-DE'});
+      const response=await uploadDocuments('synthetic-parser',[file],{bankLocale:'de-DE'});
       const result=response.results[0];
       return {result,failure:result.error?bankUploadFailure(new Error(result.error)):null,calls};
     }catch(error){return {failure:bankUploadFailure(error),calls};}
@@ -60,6 +60,17 @@ test('the existing signed-upload transport classifies malformed PDF results with
 test('the existing multipart transport classifies malformed PDF results without re-uploading',async()=>{
   const {failure,calls}=await controlledUpload('multipart',{status:400,body:{error:'The file does not contain a valid PDF'}});
   assert.equal(failure?.retryable,false);assert.deepEqual(calls.map(call=>call.method),['GET','POST']);
+});
+
+for(const strategy of ['signed','multipart']as const)test(`${strategy} XLSX date-encoding rejection needs a corrected file while unknown server failure stays retryable`,async()=>{
+  const file=new File(['synthetic unsupported date-encoding fixture'],'synthetic-date-encoding.xlsx',{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const message='This XLSX date encoding is not supported. Re-save it as an XLSX workbook or upload a CSV copy.';
+  const rejected=await controlledUpload(strategy,{status:400,body:{error:'request_error',message}},file);
+  assert.deepEqual(rejected.failure,{error:message,retryable:false});
+  assert.deepEqual(rejected.calls.map(call=>call.method),strategy==='signed'?['GET','POST','PUT','POST']:['GET','POST']);
+  const temporary=await controlledUpload(strategy,{status:503,body:{error:'server_error',message:'The request could not be completed. Check the server status and try again.'}},file);
+  assert.deepEqual(temporary.failure,{error:'The request could not be completed. Check the server status and try again.',retryable:true});
+  assert.deepEqual(temporary.calls.map(call=>call.method),strategy==='signed'?['GET','POST','PUT','POST']:['GET','POST']);
 });
 
 test('both upload transports retain retry for network loss, storage failure and admission backoff',async()=>{
