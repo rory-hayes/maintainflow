@@ -4,6 +4,16 @@ export const bankFormatFields=['date_format','number_format','transaction_layout
 const scalar=(value:unknown):BankScalar=>typeof value==='string'&&value.length<=4000?value:null;
 const collapse=(value:string)=>value.replace(/\s+/g,' ').trim();
 const clean=(value:string)=>collapse(value).toLowerCase().replace(/[.!]$/,'');
+/** Native table evidence can include the rule's own metadata label. Remove only
+ * that exact leading label and bounded empty trailing worksheet cells; the
+ * complete remaining rule must still pass all existing clause and alias checks. */
+function formatRuleText(value:string,field:typeof bankFormatFields[number]):string {
+ const text=collapse(value).toLowerCase();
+ const labelled=field==='date_format'?text.match(/^date format\s*([,|])\s*(.*)$/):field==='number_format'?text.match(/^number format\s*([,|])\s*(.*)$/):null;
+ // The native worksheet decoder supports 200 columns: label, rule, then at
+ // most 198 empty cells. A nonempty cell or repeated leading separator stays.
+ return clean(labelled?labelled[1]==='|'?labelled[2].replace(/(?:\s*\|){1,198}\s*$/,''):labelled[2]:text);
+}
 /** A rule belongs to its own account/field and must be covered by that field's
  * literal quote. Image quotations remain model evidence and require review. */
 function evidenced(raw:Record<string,unknown>,source:BankSource,field:typeof bankFormatFields[number]):string|null {
@@ -25,7 +35,7 @@ function evidenced(raw:Record<string,unknown>,source:BankSource,field:typeof ban
   if(field==='transaction_layout')return /^(?:signed amount|signed movement|signed transaction amount)$/.test(input)?'signed':null;
   const rule=movementRule(input);return rule!=='unresolved'?rule:markerLegend(input,raw.currency)||markerClause(input)?'marker_legend':null;
  };
- const selected=signature(clean(value));if(!selected)return null;
+ const ruleValue=formatRuleText(value,field),selected=signature(ruleValue);if(!selected)return null;
  if(selected==='marker_legend'&&entries.some(item=>!source.sourcePages.includes(item.page)))return null;
  // A currency-bearing role legend is useful only as one complete quotation;
  // no alias may crop its currency fact or hide an additional instruction.
@@ -34,7 +44,7 @@ function evidenced(raw:Record<string,unknown>,source:BankSource,field:typeof ban
  // literal rules. A cropped scalar cannot discard a qualification, opposing
  // alias or a different grouping example in the same source quotation.
  for(const entry of entries){
-  const sentences=clean(entry.text).split(/(?<=[a-z0-9])[.!](?=\s|$)/i).map(clean).filter(Boolean);
+  const sentences=formatRuleText(entry.text,field).split(/(?<=[a-z0-9])[.!](?=\s|$)/i).map(clean).filter(Boolean);
   if(!sentences.length)return null;
   for(const sentence of sentences){
    const quoted=signature(sentence);
@@ -42,7 +52,7 @@ function evidenced(raw:Record<string,unknown>,source:BankSource,field:typeof ban
    else if(!(field==='date_format'&&numberFormat(sentence)||field==='number_format'&&dateOrder(sentence)))return null;
   }
  }
- return clean(value);
+ return ruleValue;
 }
 /** These exact quoted metadata forms declare no date order or separators.
  * Treat them as no printed format rule, never as a supported format. Every

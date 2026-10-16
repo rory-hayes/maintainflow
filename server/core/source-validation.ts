@@ -39,6 +39,7 @@ export const sourceValidationReasons = Object.freeze({
   xlsx_empty: { message: 'The XLSX file does not contain a worksheet', statusCode: 400 },
   xlsx_sheet_limit: { message: 'Spreadsheets must contain 30 sheets or fewer', statusCode: 400 },
   xlsx_dimensions: { message: 'Spreadsheet dimensions exceed the supported limit', statusCode: 400 },
+  xlsx_date_encoding_unsupported: { message: 'This XLSX date encoding is not supported. Re-save it as an XLSX workbook or upload a CSV copy.', statusCode: 400 },
 } as const);
 
 export type SourceValidationReason = keyof typeof sourceValidationReasons;
