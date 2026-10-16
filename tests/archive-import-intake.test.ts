@@ -21,6 +21,7 @@ import {reserveDirectUpload,finalizeDirectUpload,previewDirectArchive,confirmDir
 import {deleteStoredFile,purgeArchiveImport} from '../server/core/retention.js';
 import {reconcileInterruptedIntake} from '../server/core/object-reconciliation.js';
 import {readArchiveImportReceipt} from '../server/core/archive-import-records.js';
+import {sourceValidationReasons} from '../server/core/source-validation.js';
 
 type Account={user:{id:string};workspace:{id:string};cookie:string};
 type Fixture={account:Account;parserId:string;schemaId:string};
@@ -242,6 +243,18 @@ test('database constraints preserve archive tenant ownership, finite rejection r
  assert.equal((await withWorkspace(foreign.account.workspace.id,c=>c.query('select id from archive_imports'))).rowCount,0);assert.equal((await withWorkspace(foreign.account.workspace.id,c=>c.query('select document_id from archive_import_entries'))).rowCount,0);
  const newId=randomUUID();await assert.rejects(adminPool.query("insert into archive_imports(id,workspace_id,parser_id,request_id,source_sha256,canonical_spec,spec_hash,state,rejection_code,rejection_reason,source_byte_size) values($1,$2,$3,$4,$5,$6,$7,'rejected','archive_import_validation_failed','invalid_archive',1)",[newId,foreign.account.workspace.id,f.parserId,randomUUID(),hash(zipBytes),canonicalArchiveImportSpec(one),hash(canonicalArchiveImportSpec(one))]),(e:any)=>e.code==='23503');
  await assert.rejects(adminPool.query("insert into archive_imports(workspace_id,parser_id,request_id,source_sha256,canonical_spec,spec_hash,state,rejection_code,rejection_reason,source_byte_size) values($1,$2,$3,$4,$5,$6,'rejected','archive_import_validation_failed','arbitrary diagnostic',1)",[f.account.workspace.id,f.parserId,randomUUID(),hash(zipBytes),canonicalArchiveImportSpec(one),hash(canonicalArchiveImportSpec(one))]),(e:any)=>e.code==='23514');
+ // The archive path must durably replay every fixed source rejection too,
+ // including encodings rejected before any archive child can be accepted.
+ await withWorkspace(f.account.workspace.id,async c=>{
+  const ids:string[]=[];
+  for(const [reason,definition] of Object.entries(sourceValidationReasons)){
+   const id=randomUUID();
+   await c.query("insert into archive_imports(id,workspace_id,parser_id,request_id,source_sha256,canonical_spec,spec_hash,state,rejection_code,rejection_reason,source_byte_size) values($1,$2,$3,$4,$5,$6,$7,'rejected','source_validation_failed',$8,0)",[id,f.account.workspace.id,f.parserId,randomUUID(),hash(zipBytes),canonicalArchiveImportSpec(one),hash(canonicalArchiveImportSpec(one)),reason]);
+   ids.push(id);
+   await assert.rejects(readArchiveImportReceipt(c,f.account.workspace.id,id),(e:any)=>e.code==='source_validation_failed'&&e.reason===reason&&e.statusCode===definition.statusCode&&e.message===definition.message);
+  }
+  assert.equal((await c.query('delete from archive_imports where workspace_id=$1 and id=any($2::uuid[])',[f.account.workspace.id,ids])).rowCount,ids.length);
+ });
  await assert.rejects(adminPool.query('update documents set pdf_split_id=$2,pdf_split_index=1 where id=$1',[result.documents[0].id,randomUUID()]),(e:any)=>e.code==='23514');
  const relations=(await adminPool.query("select relname,relrowsecurity,relforcerowsecurity from pg_class where oid=any($1::regclass[])",[['archive_imports','archive_import_entries']])).rows;assert.equal(relations.length,2);assert.ok(relations.every(row=>row.relrowsecurity&&row.relforcerowsecurity));
  const before=await counts(f);assert.equal(before.archive_imports,1);assert.equal(before.documents,1);assert.equal(before.pages,1);

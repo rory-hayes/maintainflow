@@ -130,8 +130,8 @@ test('operator contacts and policy URLs reject controls, unsafe schemes and cred
 });
 
 
-test('format readiness refuses pre-ODT constraints, incomplete receipts and unvalidated policies without writes',async()=>{
-  const reasons="'odt_invalid'::text,'odt_unsupported'::text,'odt_encrypted'::text,'odt_structure_limit'::text,'odt_text_limit'::text,'odt_empty'::text";
+test('format readiness refuses outdated XLSX or ODT rejection constraints, incomplete receipts and unvalidated policies without writes',async()=>{
+  const reasons="'odt_invalid'::text,'odt_unsupported'::text,'odt_encrypted'::text,'odt_structure_limit'::text,'odt_text_limit'::text,'odt_empty'::text,'xlsx_date_encoding_unsupported'::text";
   const definitions={
     parsers_allowed_formats:"CHECK ((cardinality(allowed_formats) <= 11) AND allowed_formats <@ ARRAY['pdf'::text,'odt'::text])",
     intake_rejection_shape:`CHECK ((rejection_format = ANY (ARRAY['pdf'::text,'odt'::text])) OR (rejection_reason = ANY (ARRAY[${reasons}])))`,
@@ -145,6 +145,9 @@ test('format readiness refuses pre-ODT constraints, incomplete receipts and unva
     {rows:rows.map(row=>({...row,definition:row.definition.replace('<= 11','<= 10')})),ready:false},
     ...rows.map((_,i)=>({rows:rows.map((row,j)=>({...row,convalidated:i!==j})),ready:false})),
     ...['odt_invalid','odt_unsupported','odt_encrypted','odt_structure_limit','odt_text_limit','odt_empty'].map(reason=>({rows:rows.map(row=>({...row,definition:row.definition.replace(reason,'old_reason')})),ready:false})),
+    // Every durable rejection path must accept the current XLSX reason. One
+    // upgraded relation must not conceal another relation's older constraint.
+    ...['intake_rejection_shape','archive_import_receipt_shape','pdf_split_receipt_shape'].map(name=>({rows:rows.map(row=>({...row,definition:row.conname===name?row.definition.replace('xlsx_date_encoding_unsupported','old_xlsx_reason'):row.definition})),ready:false})),
   ];
   for(const scenario of cases){
     const queries:string[]=[],releases:boolean[]=[];

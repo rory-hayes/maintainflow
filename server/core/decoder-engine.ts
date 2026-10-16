@@ -5,13 +5,14 @@ import type {SourceFormat} from '../../shared/source-formats.js';
 import {nativePdfPageText} from '../../shared/pdf-split.js';
 import {decoderError,decoderLimits as config} from './decoder-limits.js';
 import {SourceValidationError,type SourceValidationReason} from './source-validation.js';
+import {inflateZipEntry,type ZipEntry} from './zip-reader.js';
 const invalid=(reason:SourceValidationReason):never=>{throw new SourceValidationError(reason);};
 const textExtensions:Record<string,SourceFormat>={'.txt':'txt','.csv':'csv','.eml':'eml','.html':'html','.htm':'html'};
 const binaryExtensions:Record<string,SourceFormat>={'.pdf':'pdf','.png':'png','.jpg':'jpeg','.jpeg':'jpeg','.docx':'docx','.xlsx':'xlsx','.odt':'odt','.tif':'tiff','.tiff':'tiff'};
 const begins=(bytes:Buffer,signature:number[]|string)=>{const prefix=typeof signature==='string'?Buffer.from(signature):Buffer.from(signature);return bytes.subarray(0,prefix.length).equals(prefix);};
 
 /** Read bounded directory metadata without inflating or writing archive entries. */
-function officeEntries(bytes:Buffer):Set<string>{
+function officeEntries(bytes:Buffer):Map<string,ZipEntry>{
   let end=-1;
   for(let offset=bytes.length-22;offset>=Math.max(0,bytes.length-65_557);offset--){
     if(bytes.readUInt32LE(offset)===0x06054b50&&offset+22+bytes.readUInt16LE(offset+20)===bytes.length){end=offset;break;}
@@ -22,7 +23,7 @@ function officeEntries(bytes:Buffer):Set<string>{
   if(count>2000)invalid('office_entry_limit');
   if(directoryOffset+directoryBytes!==end)invalid('office_directory_invalid');
   let cursor=directoryOffset,total=0;
-  const names=new Set<string>();
+  const names=new Map<string,ZipEntry>();
   for(let index=0;index<count;index++){
     if(cursor+46>end||bytes.readUInt32LE(cursor)!==0x02014b50)invalid('office_archive_invalid');
     const flags=bytes.readUInt16LE(cursor+8),method=bytes.readUInt16LE(cursor+10),compressed=bytes.readUInt32LE(cursor+20);
@@ -39,12 +40,35 @@ function officeEntries(bytes:Buffer):Set<string>{
     const localNameLength=bytes.readUInt16LE(local+26),localExtraLength=bytes.readUInt16LE(local+28);
     const dataOffset=local+30+localNameLength+localExtraLength;
     if(localNameLength!==nameLength||dataOffset+compressed>directoryOffset||bytes.readUInt16LE(local+6)!==flags||bytes.readUInt16LE(local+8)!==method||!bytes.subarray(local+30,local+30+localNameLength).equals(rawName))invalid('office_entry_mismatch');
-    names.add(name!);cursor=next;
+    names.set(name!,{index:index+1,path:name!,directory:name!.endsWith('/'),localOffset:local,dataOffset,compressedSize:compressed,byteSize:bytes.readUInt32LE(cursor+24),crc32:bytes.readUInt32LE(cursor+16),method,flags});cursor=next;
   }
   if(cursor!==end)invalid('office_directory_size');
   return names;
 }
 export function validateZipExpansion(bytes:Buffer){officeEntries(bytes);}
+async function requireSupportedXlsxDates(bytes:Buffer,entries:Iterable<ZipEntry>):Promise<void>{
+  const {SaxesParser}=await import('saxes');
+  let expanded=0;
+  for(const entry of entries){
+    // Also cover every path the installed ExcelJS reader's unanchored matcher loads.
+    if(entry.directory||!(/^xl\/worksheets\/[^/]+\.xml$/.test(entry.path)||/xl\/worksheets\/sheet\d+\.xml/.test(entry.path)))continue;
+    let unsupported=false;
+    try{
+      const xml=inflateZipEntry(bytes,entry,40*1024*1024-expanded);expanded+=xml.length;
+      const parser=new SaxesParser({xmlns:true});
+      parser.on('doctype',()=>{decoderError('The XLSX file could not be read');});
+      parser.on('opentag',tag=>{
+        // ExcelJS consumes unprefixed cells even with a foreign/default URI.
+        const cell=tag.name==='c'||tag.uri==='http://schemas.openxmlformats.org/spreadsheetml/2006/main'&&tag.local==='c';
+        if(cell&&Object.values(tag.attributes).some(attribute=>attribute.uri===''&&attribute.local==='t'&&attribute.value==='d'))unsupported=true;
+      });
+      parser.write(new TextDecoder('utf-8',{fatal:true}).decode(xml)).close();
+    }catch{decoderError('The XLSX file could not be read');}
+    // ExcelJS interprets ISO-valued cells as numeric serials. Refuse that known
+    // encoding rather than turn the resulting Date into plausible wrong text.
+    if(unsupported)invalid('xlsx_date_encoding_unsupported');
+  }
+}
 function officeFormat(bytes:Buffer):SourceFormat{
   const names=officeEntries(bytes);
   const word=names.has('word/document.xml'),sheet=names.has('xl/workbook.xml');
@@ -208,7 +232,8 @@ export async function decodeSource(bytes:Buffer,filename:string):Promise<{mimeTy
     }catch{decoderError('The DOCX file could not be read');}
   }
   if(format==='xlsx'){
-    validateZipExpansion(bytes);
+    const entries=officeEntries(bytes);
+    await requireSupportedXlsxDates(bytes,entries.values());
     const ExcelJS=(await import('exceljs')).default;
     const wb=new ExcelJS.Workbook();
     try{await wb.xlsx.load(bytes as any);}catch{decoderError('The XLSX file could not be read');}
@@ -217,7 +242,21 @@ export async function decodeSource(bytes:Buffer,filename:string):Promise<{mimeTy
     const pages=wb.worksheets.map((sheet,i)=>{
       const rows:string[]=[];
       if(sheet.rowCount>10000||sheet.columnCount>200)invalid('xlsx_dimensions');
-      sheet.eachRow(row=>{const cells=(row.values as any[]).slice(1).map(v=>v&&typeof v==='object'?(v.text??v.result??''):v??'');rows.push(cells.join(' | '));});
+      sheet.eachRow(row=>{
+        const cells=(row.values as any[]).slice(1).map((v,index)=>{
+          const value=v&&typeof v==='object'&&!(v instanceof Date)?(v.text??row.getCell(index+1).result??v.result??''):v??'';
+          if(!(value instanceof Date))return value;
+          if(!Number.isFinite(value.getTime()))return '';
+          // These are canonical typed values, not Excel's formatted display.
+          // Excel cells have no timezone; preserve UTC components and fractions.
+          const calendar=value.toISOString().slice(0,-1);
+          const format=(row.getCell(index+1).numFmt||'').trim();
+          if(/^hh?:mm(?::ss(?:\.0{1,3})?)?(?:\s+am\/pm)?$/i.test(format))return calendar.slice(calendar.indexOf('T')+1);
+          const explicitClock=/[hs]/i.test(format.replace(/"[^"]*"|\\.|\[[^\]]*\]/g,''));
+          return calendar.endsWith('T00:00:00.000')&&!explicitClock?calendar.slice(0,calendar.indexOf('T')):calendar;
+        });
+        rows.push(cells.join(' | '));
+      });
       return {page:i+1,text:rows.join('\n')};
     });
     return {mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',pages,pageCount:Math.max(pages.length,1)};
