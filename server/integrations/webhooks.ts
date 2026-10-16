@@ -2,10 +2,11 @@ import type {FastifyInstance} from 'fastify';
 import {createHmac,randomBytes,randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {requireActor} from '../core/auth.js';
-import {adminPool,withWorkspace,audit,notFound,camel,badRequest} from '../core/db.js';
+import {adminPool,transaction,withWorkspace,audit,notFound,camel,badRequest} from '../core/db.js';
 import {encryptSecret,decryptSecret} from './secrets.js';
 import {validateDestination,publicRequest} from './network.js';
 import {webhookEvents} from '../../shared/webhook-events.js';
+import {recordDeliveryAttemptAudit,deliveryAttemptElapsed,deliveryResponseStatus,type DeliveryAttemptStage,type DeliveryAttemptPath,type DeliveryAttemptErrorKind} from './delivery-attempt-audit.js';
 
 const eventsInput=z.array(z.enum(webhookEvents)).min(1).max(webhookEvents.length)
   .refine(events=>new Set(events).size===events.length,'Choose each webhook event only once.');
@@ -116,36 +117,73 @@ export async function enqueueIntegrationEvents(options:EnqueueOptions={}) {
 
 export async function processOneDelivery(options: {transport?: typeof publicRequest; workspaceId?: string;signal?:AbortSignal} = {}) {
   if(options.signal?.aborted)return false;
-  await adminPool.query("UPDATE webhook_deliveries SET status='failed',error='The final delivery attempt expired before completion.',lease_until=null,lease_token=null WHERE status='delivering' AND lease_until<now() AND attempts>=5 AND ($1::uuid IS NULL OR workspace_id=$1)",[options.workspaceId||null]);
-  const token=randomUUID();
-  const found=await adminPool.query(`UPDATE webhook_deliveries SET status='delivering',attempts=attempts+1,lease_token=$1,lease_until=now()+interval '90 seconds'
-    WHERE id=(SELECT d.id FROM webhook_deliveries d JOIN integrations i ON i.id=d.integration_id
+  await transaction(adminPool,async client=>{
+    // Bound diagnostic work and locks per invocation. The scheduled watchdog
+    // still sees remaining expired leases, including disabled integrations.
+    const expired=await client.query(`WITH expired_candidates AS MATERIALIZED (
+      SELECT id FROM webhook_deliveries
+      WHERE status='delivering' AND lease_until<now() AND attempts>=5 AND ($1::uuid IS NULL OR workspace_id=$1)
+      ORDER BY lease_until,id FOR UPDATE SKIP LOCKED LIMIT 25
+    ) UPDATE webhook_deliveries d SET status='failed',error='The final delivery attempt expired before completion.',lease_until=null,lease_token=null
+      FROM expired_candidates e WHERE d.id=e.id RETURNING d.id,d.workspace_id,d.integration_id,d.attempts`,[options.workspaceId||null]);
+    for(const row of expired.rows)await recordDeliveryAttemptAudit(client,{workspaceId:row.workspace_id,deliveryId:row.id},{version:1,integrationId:row.integration_id,phase:'lease_expired',attempt:row.attempts,priorLeaseExpired:true});
+  });
+  const token=randomUUID();let attemptId=randomUUID();while(attemptId===token)attemptId=randomUUID();
+  const started=performance.now();
+  const delivery=await transaction(adminPool,async client=>{
+    const found=await client.query(`WITH candidate AS MATERIALIZED (
+      SELECT d.id,d.status prior_status,d.attempts prior_attempts,
+        coalesce(d.status='delivering' AND d.lease_until<now(),false) prior_lease_expired
+      FROM webhook_deliveries d JOIN integrations i ON i.id=d.integration_id
       WHERE i.enabled AND ($2::uuid IS NULL OR d.workspace_id=$2) AND ((d.status IN ('queued','retry') AND d.next_attempt_at<=now()) OR (d.status='delivering' AND d.lease_until<now())) AND d.attempts<5
-      ORDER BY d.created_at FOR UPDATE OF d SKIP LOCKED LIMIT 1) RETURNING *`,[token,options.workspaceId||null]);
-  const delivery=found.rows[0];
+      ORDER BY d.created_at FOR UPDATE OF d SKIP LOCKED LIMIT 1
+    ) UPDATE webhook_deliveries d SET status='delivering',attempts=d.attempts+1,lease_token=$1,lease_until=now()+interval '90 seconds'
+      FROM candidate WHERE d.id=candidate.id RETURNING d.*,candidate.prior_status,candidate.prior_attempts,candidate.prior_lease_expired`,[token,options.workspaceId||null]);
+    const row=found.rows[0];
+    if(row)await recordDeliveryAttemptAudit(client,{workspaceId:row.workspace_id,deliveryId:row.id},{version:1,integrationId:row.integration_id,attemptId,attempt:row.attempts,elapsedMs:deliveryAttemptElapsed(started),phase:'claimed',priorAttempts:row.prior_attempts,acquiredFrom:row.prior_status==='delivering'?'expired_lease':row.prior_status,priorLeaseExpired:row.prior_lease_expired});
+    return row;
+  });
   if(!delivery)return false;
+  const identity={workspaceId:delivery.workspace_id,deliveryId:delivery.id};
+  let stage:DeliveryAttemptStage='integration_lookup',path:DeliveryAttemptPath='not_started',errorKind:DeliveryAttemptErrorKind='none',observedStatus:number|null=null;
+  const finish=async(client:Parameters<typeof recordDeliveryAttemptAudit>[0],changed:boolean,outcome:'delivered'|'retry'|'failed')=>recordDeliveryAttemptAudit(client,identity,{version:1,integrationId:delivery.integration_id,attemptId,attempt:delivery.attempts,elapsedMs:deliveryAttemptElapsed(started),phase:'finished',stage,path,outcome:changed?outcome:'fence_lost',errorKind,responseStatus:observedStatus});
   try {
     options.signal?.throwIfAborted();
     const integration=(await adminPool.query('SELECT * FROM integrations WHERE id=$1',[delivery.integration_id])).rows[0];
     if(!integration?.enabled)throw new Error('Integration is disabled.');
     let status:number;
     if(integration.kind==='google_sheets') {
+      // This encompasses the delivered-reservation shortcut too; it is not proof of provider I/O.
+      stage='sheets_delivery';path='sheets_unobserved';
       // Failure notifications must never become spreadsheet rows, even if an
       // invalid outbox row was restored or inserted outside the normal enqueue.
       if(delivery.payload.event!=='document.approved')throw new Error('Google Sheets accepts document approval events only.');
       const {sendGoogleSheets}=await import('./providers.js');
-      status=(await sendGoogleSheets(integration,delivery,{signal:options.signal})).status;
+      const result=await sendGoogleSheets(integration,delivery,{signal:options.signal}) as {status:number;deliveryPath?:unknown};
+      status=result.status;
+      if(result.deliveryPath==='sheets_already_delivered'||result.deliveryPath==='sheets_range_write')path=result.deliveryPath;
     } else {
+      stage='webhook_request';path='webhook_request';
       const body=JSON.stringify(delivery.payload), timestamp=String(Math.floor(Date.now()/1000));
       const response=await (options.transport||publicRequest)(integration.config.url,{body,signal:options.signal,headers:{'Content-Type':'application/json','User-Agent':'Folio-Webhooks/1.0','X-Folio-Delivery':delivery.id,'X-Folio-Timestamp':timestamp,'X-Folio-Signature':`v1=${signDelivery(decryptSecret(integration.secret_ciphertext),timestamp,body)}`,'Idempotency-Key':delivery.id}});
       status=response.status;
     }
-    if(status<200||status>=300)throw Object.assign(new Error(`Destination returned HTTP ${status}.`),{status});
-    await adminPool.query("UPDATE webhook_deliveries SET status='delivered',delivered_at=now(),response_status=$1,error=null,lease_until=null,lease_token=null WHERE id=$2 AND lease_token=$3",[status,delivery.id,token]);
+    observedStatus=deliveryResponseStatus(status);
+    if(status<200||status>=300){errorKind='http_status';throw Object.assign(new Error(`Destination returned HTTP ${status}.`),{status});}
+    stage='delivery_commit';
+    await transaction(adminPool,async client=>{
+      const changed=await client.query("UPDATE webhook_deliveries SET status='delivered',delivered_at=now(),response_status=$1,error=null,lease_until=null,lease_token=null WHERE id=$2 AND lease_token=$3",[status,delivery.id,token]);
+      await finish(client,Boolean(changed.rowCount),'delivered');
+    });
   }catch(error) {
+    if(errorKind==='none')errorKind=options.signal?.aborted?'aborted':stage==='delivery_commit'?'persistence_error':'operation_failed';
     const status=(error as {status?:number}).status||null;
     const message=error instanceof Error?error.message:'Delivery failed.';
-    await adminPool.query("UPDATE webhook_deliveries SET status=$1,error=$2,response_status=$3,next_attempt_at=now()+($4::int*interval '1 second'),lease_until=null,lease_token=null WHERE id=$5 AND lease_token=$6",[delivery.attempts>=5?'failed':'retry',message.slice(0,300),status,Math.min(3600,30*2**delivery.attempts),delivery.id,token]);
+    await transaction(adminPool,async client=>{
+      const outcome=delivery.attempts>=5?'failed':'retry';
+      const changed=await client.query("UPDATE webhook_deliveries SET status=$1,error=$2,response_status=$3,next_attempt_at=now()+($4::int*interval '1 second'),lease_until=null,lease_token=null WHERE id=$5 AND lease_token=$6",[outcome,message.slice(0,300),status,Math.min(3600,30*2**delivery.attempts),delivery.id,token]);
+      await finish(client,Boolean(changed.rowCount),outcome);
+    });
   }
   return true;
 }

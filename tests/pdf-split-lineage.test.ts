@@ -257,6 +257,64 @@ test('failed remote split cleanup keeps reserved bytes until physical removal, i
  assert.equal((await adminPool.query('select id from file_deletions where workspace_id=$1',[t.workspace])).rowCount,0);
 });
 
+test('terminal deletion retry requires the owning browser role and retains bytes until physical removal',async()=>{
+ const t=await tenant(),other=await tenant(),id=randomUUID(),foreignId=randomUUID();
+ const key=`${t.workspace}/${id}`,foreignKey=`${other.workspace}/${foreignId}`;
+ const bytes=Buffer.from('SYNTHETIC ONLY failed cleanup; not customer content');
+ const foreignBytes=Buffer.from('SYNTHETIC ONLY other-workspace cleanup sentinel');
+ objects.set(key,Buffer.from(bytes));objects.set(foreignKey,Buffer.from(foreignBytes));
+ await transaction(adminPool,async c=>{
+  for(const [intent,workspace,storageKey,reserved] of [[id,t.workspace,key,1024],[foreignId,other.workspace,foreignKey,512]] as const){
+   await c.query("insert into intake_files(id,workspace_id,storage_key,split_attempt_id,reserved_bytes,lease_expires_at) values($1,$2,$3,$4,$5,now()-interval '2 hours')",[intent,workspace,storageKey,randomUUID(),reserved]);
+   await c.query("insert into file_deletions(workspace_id,storage_key,attempts,available_at) values($1,$2,9,now()+interval '1 hour')",[workspace,storageKey]);
+  }
+ });
+ let failures=0;
+ useStorage({...remote,async remove(candidate){assert.equal(candidate,key);failures++;throw new Error('SYNTHETIC PRIVATE STORAGE DIAGNOSTIC');}});
+ assert.equal(await deleteStoredFile(t.workspace,key),'failed');assert.equal(failures,1);
+ const deletion=async()=> (await adminPool.query('select * from file_deletions where workspace_id=$1 and storage_key=$2',[t.workspace,key])).rows[0];
+ const intent=async()=> (await adminPool.query('select * from intake_files where id=$1',[id])).rows[0];
+ const failed=await deletion(),intentBefore=await intent();
+ const foreignBefore=(await adminPool.query('select * from file_deletions where workspace_id=$1 and storage_key=$2',[other.workspace,foreignKey])).rows[0];
+ const foreignIntent=(await adminPool.query('select * from intake_files where id=$1',[foreignId])).rows[0];
+ const usageBefore=await usage(t),foreignUsageBefore=await usage(other);
+ assert.equal(failed.status,'failed');assert.equal(failed.attempts,10);
+ assert.equal(failed.last_error,'Private file removal failed. Check storage permissions and retry.');
+ const url=`/api/workspace/storage-deletions/${failed.id}/retry`;
+ const retry=(caller:Tenant,headers:Record<string,string>={})=>app.inject({method:'POST',url,headers:{cookie:`folio_session=${caller.token}`,origin:config.origin,...headers}});
+ const list=await request(t,'GET','/api/workspace/storage-deletions');assert.equal(list.statusCode,200,list.body);
+ assert.deepEqual(list.json().deletions.map((row:any)=>row.id),[failed.id]);
+ assert.deepEqual(Object.keys(list.json().deletions[0]).sort(),['attempts','availableAt','createdAt','id','lastError','status']);
+ assert.equal(list.json().deletions[0].status,'failed');assert.equal(list.json().deletions[0].attempts,10);
+ assert.equal(list.body.includes(key),false);assert.equal(list.body.includes('SYNTHETIC PRIVATE'),false);
+ for(const headers of [
+  {cookie:`folio_session=${t.viewerToken}`},
+  {cookie:'',authorization:`Bearer ${t.writeToken}`},
+  {origin:'https://foreign.example.test'},
+ ] as Record<string,string>[]){const response=await retry(t,headers);assert.equal(response.statusCode,403,response.body);assert.deepEqual(await deletion(),failed);}
+ assert.equal((await retry(other)).statusCode,404);assert.deepEqual(await deletion(),failed);
+ assert.equal((await request(t,'GET','/api/workspace/storage-deletions',{cookie:`folio_session=${t.viewerToken}`})).statusCode,403);
+ const otherList=await request(other,'GET','/api/workspace/storage-deletions');assert.equal(otherList.statusCode,200,otherList.body);
+ assert.deepEqual(otherList.json().deletions.map((row:any)=>row.id),[foreignBefore.id]);
+ assert.deepEqual(await intent(),intentBefore);assert.deepEqual(objects.get(key),bytes);assert.equal(failures,1);
+ const reset=await retry(t);assert.equal(reset.statusCode,200,reset.body);assert.deepEqual(reset.json(),{ok:true});
+ const pending=await deletion();
+ assert.deepEqual({...pending,status:failed.status,attempts:failed.attempts,last_error:failed.last_error,available_at:failed.available_at},failed);
+ assert.equal(pending.status,'pending');assert.equal(pending.attempts,0);assert.equal(pending.last_error,null);
+ assert.equal((await adminPool.query('select available_at<=now() due from file_deletions where id=$1',[failed.id])).rows[0].due,true);
+ // Resetting the queue is not physical erasure and must not release its reservation.
+ assert.deepEqual(await intent(),intentBefore);assert.deepEqual(objects.get(key),bytes);assert.equal(failures,1);
+ const removalsBefore=removals.length;useStorage(remote);
+ assert.equal(await deleteStoredFile(t.workspace,key),'complete');assert.deepEqual(removals.slice(removalsBefore),[key]);
+ assert.equal(await deletion(),undefined);assert.equal(await intent(),undefined);assert.equal(objects.has(key),false);
+ assert.deepEqual((await adminPool.query('select * from file_deletions where id=$1',[foreignBefore.id])).rows[0],foreignBefore);
+ assert.deepEqual((await adminPool.query('select * from intake_files where id=$1',[foreignId])).rows[0],foreignIntent);
+ assert.deepEqual(objects.get(foreignKey),foreignBytes);assert.deepEqual(await usage(t),usageBefore);assert.deepEqual(await usage(other),foreignUsageBefore);
+ assert.deepEqual((await request(t,'GET','/api/workspace/storage-deletions')).json(),{deletions:[]});
+ assert.equal((await retry(t)).statusCode,404);assert.equal(await deletion(),undefined);assert.equal(objects.has(key),false);
+ for(const table of ['documents','jobs'])assert.equal((await adminPool.query(`select id from ${table} where workspace_id=$1`,[t.workspace])).rowCount,0);
+});
+
 test('filesystem split reservations survive queued deletion failures and release only after removal or confirmed old absence',async()=>{
  const t=await tenant(),id=randomUUID(),key=`${t.workspace}/${id}`,old=new Date(Date.now()-2*60*60*1000);
  useStorage(filesystem);await storage.write(key,Buffer.from('Owned abandoned split child'));await fs.utimes(path.join(config.storageDir,key),old,old);
