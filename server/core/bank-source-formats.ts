@@ -12,7 +12,13 @@ function evidenced(raw:Record<string,unknown>,source:BankSource,field:typeof ban
  const lists=aliases.filter((key,index)=>aliases.indexOf(key)===index).map(key=>source.evidence[key]).filter(entries=>entries!==undefined);
  if(!lists.length||lists.some(entries=>!Array.isArray(entries)))return null;
  const entries=lists.flat();
- if(entries.length>20||!entries.length||!entries.every(item=>item&&Number.isInteger(item.page)&&item.page>=1&&item.page<=30&&typeof item.text==='string'&&item.text.length<=2000&&['matched-text','matched-region','model-visual'].includes(item.source??''))||!entries.some(item=>collapse(item.text).includes(collapse(value))))return null;
+ if(entries.length>20||!entries.length||!entries.every(item=>item&&Number.isInteger(item.page)&&item.page>=1&&item.page<=30&&typeof item.text==='string'&&item.text.length<=2000&&['matched-text','matched-region','model-visual'].includes(item.source??'')))return null;
+ // Providers can copy an ordinary table header into this signed-layout field.
+ // Accept only the complete same header, including its order, in every alias;
+ // no cropped quote or extra instruction may be discarded as header metadata.
+ const columns=field==='transaction_layout'?separateColumnsHeader(value):null;
+ if(columns)return entries.every(item=>source.sourcePages.includes(item.page)&&separateColumnsHeader(item.text)===columns)?columns:null;
+ if(!entries.some(item=>collapse(item.text).includes(collapse(value))))return null;
  const signature=(input:string):string|null=>{
   if(field==='date_format')return dateOrder(input);
   if(field==='number_format'){const rule=numberFormat(input);return rule?JSON.stringify(rule):null;}
@@ -58,6 +64,12 @@ function nonFormatMetadata(raw:Record<string,unknown>,source:BankSource,field:'d
  return entries.length>0&&entries.length<=20&&entries.every(item=>item&&Number.isInteger(item.page)&&item.page>=1&&item.page<=30&&source.sourcePages.includes(item.page)&&typeof item.text==='string'&&item.text.length<=2000&&['matched-text','matched-region','model-visual'].includes(item.source??'')&&collapse(item.text)===collapse(value));
 }
 const provided=(raw:Record<string,unknown>,field:typeof bankFormatFields[number])=>Boolean(scalar(raw[field])?.trim());
+function separateColumnsHeader(value:string|null):string|null {
+ if(!value)return null;
+ const columns=value.split('|').map(column=>collapse(column).toLowerCase());
+ const labels=['date','description','reference','debit','credit','balance','currency'];
+ return columns.includes('debit')&&columns.includes('credit')&&new Set(columns).size===columns.length&&columns.every(column=>labels.includes(column))?columns.join('|'):null;
+}
 function dateOrder(value:string|null):BankAccountFormats['dateOrder'] {
  if(!value)return null;
  const match=value.match(/^(?:(?:dates? (?:use|uses|format(?: is)?))|date format:)\s*(dd([./-])mm\2yyyy|mm([./-])dd\3yyyy|yyyy([./-])mm\4dd)$/);
@@ -120,10 +132,11 @@ export function resolveBankSourceFormats(raw:Record<string,unknown>,source:BankS
  const date=dateOrder(evidenced(raw,source,'date_format')),number=numberFormat(evidenced(raw,source,'number_format'));
  const hasMovement=provided(raw,'transaction_layout')||provided(raw,'movement_convention');
  const layout=evidenced(raw,source,'transaction_layout'),signed=layout!==null&&/^(?:signed amount|signed movement|signed transaction amount)$/.test(layout),movement=evidenced(raw,source,'movement_convention');
+ const columns=layout!==null&&separateColumnsHeader(layout)!==null&&raw.movement_convention==null;
  const tagged=!provided(raw,'transaction_layout')&&markerLegend(movement,raw.currency)&&taggedMovements(raw,source);
  return {version:1,dateStatus:date?'supported':provided(raw,'date_format')&&!nonFormatMetadata(raw,source,'date_format')?'unresolved':'missing',dateOrder:date,
   numberStatus:number?'supported':provided(raw,'number_format')&&!nonFormatMetadata(raw,source,'number_format')?'unresolved':'missing',decimalSeparator:number?.decimalSeparator??null,groupSeparator:number?.groupSeparator??null,
-  movement:hasMovement?signed?movementRule(movement):tagged?'columns':'unresolved':'columns'};
+  movement:hasMovement?signed?movementRule(movement):columns||tagged?'columns':'unresolved':'columns'};
 }
 export function validBankSourceFormats(value:unknown):value is BankAccountFormats {
  if(!value||typeof value!=='object'||Array.isArray(value))return false;const v=value as BankAccountFormats;
