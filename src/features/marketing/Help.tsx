@@ -35,7 +35,7 @@ function supportedFormats(configured: boolean | undefined) {
     ['TXT, CSV, HTML and EML', 'UTF-8 text. EML upload extracts the email body; provider-based inbound attachments are a separate intake path.'],
     ['ODT', 'Unencrypted OpenDocument Text 1.2 and 1.3. Body paragraphs and simple tables are read as one extraction page, up to 2 MiB of text. Images, embedded objects, merged or nested tables and unsupported structures return an error. Physical page layout is not reproduced.'],
     ['DOCX', 'Text is read as one extraction page. The original Word layout is not a page-coordinate model.'],
-    ['XLSX', 'Each worksheet counts as one page, up to 30 worksheets, 10,000 rows and 200 columns per worksheet.'],
+    ['XLSX', 'Each worksheet counts as one page, up to 30 worksheets, 10,000 rows and 200 columns per worksheet. Some Excel date encodings are not supported. If rejected for this reason, try re-saving the workbook as XLSX or upload a CSV copy.'],
   ];
 }
 

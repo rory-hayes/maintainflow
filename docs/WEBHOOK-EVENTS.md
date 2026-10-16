@@ -34,6 +34,14 @@ Use [verifyWebhookDelivery](../examples/automations/verify.ts) for a receiver su
 
 The signing headers, five-attempt limit and manual-replay identity are unchanged. Persist the connection/delivery ID atomically before acknowledging. Retries and replay use the stored JSON payload with the same delivery ID; the timestamp/signature can change on each attempt. Delivery is at least once, so a receiver must deduplicate. A delivered HTTP response proves receiver acceptance, not completion of its downstream automation.
 
+## Delivery attempt diagnostics
+
+Worker claims and finished attempts add bounded `delivery.attempt_claimed` and `delivery.attempt_finished` records to the existing workspace audit history. Each claim has a fresh public attempt ID, separate from the private lease token, so Replay can restart the counter without making two attempts look identical. The claim records the locked row's prior state; completion distinguishes a saved outcome from loss of its lease fence. Exhausted expired leases are handled in bounded batches and record `delivery.lease_expired` once per affected delivery. A later reclaim establishes lease expiry, not why the earlier execution stopped.
+
+Metadata contains fixed stage, path and outcome labels, elapsed time, attempt counts and bounded observed HTTP status. It excludes payloads, provider errors, headers and credentials. A Sheets `sheets_already_delivered` path means the previously delivered reservation was reused without an OAuth or range request; it is not fresh provider or token-refresh evidence. `sheets_unobserved` does not establish which internal provider step failed.
+
+Audit inserts use a savepoint within short delivery-state transactions; a rejected diagnostic insert does not undo a successful state change or cause another send. Database connection or transaction failure still follows the existing retry and lease behavior. Diagnostics are best effort and do not guarantee complete history. The owner/admin browser-session audit endpoint remains scoped to the workspace and its latest 100 events. No new endpoint, table, grant or receiver is introduced.
+
 ## Release and evidence boundaries
 
 The application reuses the existing JSON configuration, document journal and delivery tables; no application migration or new runtime grant is required for these event choices. The hosted watchdog needs the matching owner-only function-body update from `deploy/supabase-worker.sql` so unqueued failures wake the worker and approval events do not wake connections subscribed only to failures. Its existing owner, invoker security, fixed search path and execute restrictions must be preserved. Do not reconfigure Vault, cron, extensions or credentials to apply this body update.

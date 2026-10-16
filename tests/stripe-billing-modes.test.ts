@@ -12,7 +12,7 @@ import {config} from '../server/core/config.js';
 import {registerProviders,reconcileStripeCustomer,storeProviderEvent} from '../server/integrations/providers.js';
 import {stripeMode,stripeConfiguration,requireStripeKey,verifyStripePayload,stripePlan,stripePriceMatches,assertStripePortalConfiguration,type StripeMode} from '../server/integrations/provider-policy.js';
 
-const keys=['STRIPE_MODE','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_PRICE_STANDARD','STRIPE_PRICE_TEAM','STRIPE_ACCOUNT_ID','STRIPE_PORTAL_CONFIGURATION_ID','FOLIO_BILLING_MOCK','FOLIO_PREVIEW_MODE','RESEND_API_KEY','RESEND_INBOUND_ENABLED'] as const;
+const keys=['STRIPE_MODE','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_PRICE_STANDARD','STRIPE_PRICE_TEAM','STRIPE_ACCOUNT_ID','STRIPE_PORTAL_CONFIGURATION_ID','STRIPE_TEST_CLOCK_ID','FOLIO_BILLING_MOCK','FOLIO_PREVIEW_MODE','RESEND_API_KEY','RESEND_INBOUND_ENABLED'] as const;
 const original=Object.fromEntries(keys.map(key=>[key,process.env[key]])),originalOrigin=config.origin;
 const signing='whsec_owned_billing_mode_fixture';
 const accounts:any[]=[],events:string[]=[],sessions=new Map<string,any>(),customers=new Map<string,any>();
@@ -20,7 +20,7 @@ const calls:{operation:string;mode:StripeMode;input:any;options?:any}[]=[];
 let app:FastifyInstance,actor:any,outsider:any,reader:any,fault='',loseResponse=false;
 function mode(value:StripeMode){
  Object.assign(process.env,{STRIPE_MODE:value,STRIPE_SECRET_KEY:`sk_${value}_controlled`,STRIPE_WEBHOOK_SECRET:signing,STRIPE_PRICE_STANDARD:`price_${value}_standard`,STRIPE_PRICE_TEAM:`price_${value}_team`,STRIPE_ACCOUNT_ID:'acct_approved',STRIPE_PORTAL_CONFIGURATION_ID:'bpc_approved',FOLIO_BILLING_MOCK:'false',FOLIO_PREVIEW_MODE:'false',RESEND_INBOUND_ENABLED:'false'});
- delete process.env.RESEND_API_KEY;
+ delete process.env.RESEND_API_KEY;delete process.env.STRIPE_TEST_CLOCK_ID;
 }
 function price(id:string,live:boolean){return {id,livemode:live,active:true,currency:'eur',unit_amount:id.endsWith('team')?4900:1900,recurring:{interval:'month',interval_count:1,usage_type:'licensed'},billing_scheme:'per_unit',transform_quantity:null} as Stripe.Price;}
 function subscription(customer:string,value:StripeMode,status='active'){return {id:`sub_${value}_${customer}`,customer,created:100,livemode:value==='live',status,items:{data:[{quantity:1,price:price(`price_${value}_standard`,value==='live')}]}} as Stripe.Subscription;}
@@ -30,7 +30,7 @@ function client(value:StripeMode):Stripe {
  return {
   accounts:{retrieve:async()=>{call('account',null);return {id:fault==='account'?'acct_wrong':'acct_approved',charges_enabled:fault!=='disabled',payouts_enabled:true,details_submitted:true};}},
   prices:{retrieve:async(id:string)=>{call('price',id);return price(id,fault==='price-mode'?value!=='live':value==='live');}},
-  customers:{create:async(input:any,options:any)=>{call('customer-create',input,options);const id=`cus_${value}_${input.metadata.folio_workspace}`;const customer={id,livemode:value==='live',metadata:input.metadata};customers.set(id,customer);return customer;},retrieve:async(id:string)=>{call('customer-read',id);const result=customers.get(id);return fault==='customer-mode'?{...result,livemode:value!=='live'}:result;}},
+  customers:{create:async(input:any,options:any)=>{call('customer-create',input,options);const id=`cus_${value}_${input.metadata.folio_workspace}`;const customer={id,livemode:value==='live',metadata:input.metadata,...(input.test_clock?{test_clock:fault==='created-clock-missing'?null:fault==='created-clock-wrong'?'clock_other':input.test_clock}:{})};customers.set(id,customer);return customer;},retrieve:async(id:string)=>{call('customer-read',id);const result=customers.get(id);return fault==='customer-mode'?{...result,livemode:value!=='live'}:result;}},
   subscriptions:{list:async(input:any)=>{call('subscriptions',input);return {data:fault==='active'?[subscription(input.customer,value)]:[],has_more:false};}},
   checkout:{sessions:{
    create:async(input:any,options:any)=>{call('checkout-create',input,options);let result=sessions.get(options.idempotencyKey);if(!result){result={id:`cs_${randomUUID()}`,livemode:value==='live',status:'open',customer:input.customer,client_reference_id:input.client_reference_id,url:'https://checkout.stripe.com/c/pay/controlled'};sessions.set(options.idempotencyKey,result);}if(loseResponse){loseResponse=false;throw new Error('Controlled lost Checkout response');}return fault==='session-mode'?{...result,livemode:value!=='live'}:result;},
@@ -102,6 +102,88 @@ test('lost Checkout response replays the persisted nonce once, and legacy test n
  const legacy=await signup(),customerId=`cus_test_${legacy.workspace.id}`,requestId=randomUUID();customers.set(customerId,{id:customerId,livemode:false,metadata:{folio_workspace:legacy.workspace.id}});
  await adminPool.query('insert into subscriptions(workspace_id,customer_id) values($1,$2)',[legacy.workspace.id,customerId]);await adminPool.query("insert into billing_checkouts(workspace_id,plan_id,request_id,idempotency_version) values($1,'standard',$2,1)",[legacy.workspace.id,requestId]);
  assert.equal((await request('/api/billing/checkout',{planId:'standard'},legacy)).statusCode,200);assert.equal(calls.at(-1)!.options.idempotencyKey,`folio-checkout:${requestId}`);
+});
+test('an opt-in test clock binds new customers and accepts the same expanded clock without changing retry identities',async()=>{
+ mode('test');const ordinary=await signup();
+ assert.equal((await request('/api/billing/checkout',{planId:'standard'},ordinary)).statusCode,200);
+ const ordinaryCreate=calls.find(c=>c.operation==='customer-create'&&c.input.metadata.folio_workspace===ordinary.workspace.id)!;
+ assert.equal(Object.hasOwn(ordinaryCreate.input,'test_clock'),false);
+ const owner=await signup(),clock='clock_OwnedSandbox123';process.env.STRIPE_TEST_CLOCK_ID=clock;
+ try{
+  assert.equal((await request('/api/billing/checkout',{planId:'standard'},owner)).statusCode,200);
+  const created=calls.filter(c=>c.operation==='customer-create'&&c.input.metadata.folio_workspace===owner.workspace.id);
+  assert.equal(created.length,1);assert.equal(created[0]!.input.test_clock,clock);assert.equal(created[0]!.options.idempotencyKey,`folio-customer:test:${owner.workspace.id}`);
+  const checkout=(await adminPool.query('select * from billing_checkouts where workspace_id=$1',[owner.workspace.id])).rows;
+  const customerId=`cus_test_${owner.workspace.id}`,customer=customers.get(customerId);customers.set(customerId,{...customer,test_clock:{id:clock}});
+  const before=calls.length;assert.equal((await request('/api/billing/checkout',{planId:'standard'},owner)).statusCode,200);
+  assert.deepEqual(calls.slice(before).map(c=>c.operation),['account','price','customer-read','subscriptions','checkout-read']);
+  assert.deepEqual((await adminPool.query('select * from billing_checkouts where workspace_id=$1',[owner.workspace.id])).rows,checkout);
+  assert.equal((await request('/api/billing/portal',{},owner)).statusCode,200);
+  assert.equal(calls.filter(c=>c.operation==='customer-create'&&c.input.metadata.folio_workspace===owner.workspace.id).length,1);
+ }finally{mode('test');}
+});
+test('missing or mismatched clocks returned by customer creation are not persisted or used for Checkout',async()=>{
+ mode('test');process.env.STRIPE_TEST_CLOCK_ID='clock_OwnedSandbox123';
+ try{
+  for(const issue of ['created-clock-missing','created-clock-wrong']){
+   const owner=await signup(),before=calls.length;fault=issue;
+   const response=await request('/api/billing/checkout',{planId:'standard'},owner);assert.equal(response.statusCode,500,response.body);assert.match(response.json().error,/test clock/);
+   assert.deepEqual(calls.slice(before).map(c=>c.operation),['account','price','customer-create']);
+   assert.equal((await adminPool.query('select count(*)::int n from subscriptions where workspace_id=$1',[owner.workspace.id])).rows[0].n,0);
+   assert.equal((await adminPool.query('select count(*)::int n from billing_checkouts where workspace_id=$1',[owner.workspace.id])).rows[0].n,0);
+  }
+ }finally{fault='';mode('test');}
+});
+test('existing customers cannot be rebound to a missing or different clock by Checkout or portal',async()=>{
+ mode('test');const owner=await signup();assert.equal((await request('/api/billing/checkout',{planId:'standard'},owner)).statusCode,200);
+ const customerId=`cus_test_${owner.workspace.id}`,customer=customers.get(customerId);
+ const beforeSubscriptions=(await adminPool.query('select * from subscriptions where workspace_id=$1',[owner.workspace.id])).rows;
+ const beforeCheckouts=(await adminPool.query('select * from billing_checkouts where workspace_id=$1',[owner.workspace.id])).rows;
+ process.env.STRIPE_TEST_CLOCK_ID='clock_OwnedSandbox123';
+ try{
+  for(const test_clock of [undefined,null,'clock_other',{id:'clock_other'}]){
+   customers.set(customerId,{...customer,test_clock});
+   for(const [path,payload,operations] of [['/api/billing/checkout',{planId:'standard'},['account','price','customer-read']],['/api/billing/portal',{},['account','customer-read']]] as const){
+    const before=calls.length,response=await request(path,payload,owner);assert.equal(response.statusCode,500,response.body);assert.match(response.json().error,/test clock/);
+    assert.deepEqual(calls.slice(before).map(c=>c.operation),operations);
+   }
+   assert.deepEqual((await adminPool.query('select * from subscriptions where workspace_id=$1',[owner.workspace.id])).rows,beforeSubscriptions);
+   assert.deepEqual((await adminPool.query('select * from billing_checkouts where workspace_id=$1',[owner.workspace.id])).rows,beforeCheckouts);
+  }
+  // A matching clock cannot substitute for the existing mode or workspace checks.
+  customers.set(customerId,{...customer,test_clock:'clock_OwnedSandbox123',metadata:{folio_workspace:outsider.workspace.id}});
+  assert.equal((await request('/api/billing/portal',{},owner)).statusCode,409);
+  customers.set(customerId,{...customer,test_clock:'clock_OwnedSandbox123',livemode:true});
+  assert.equal((await request('/api/billing/checkout',{planId:'standard'},owner)).statusCode,500);
+ }finally{customers.set(customerId,customer);mode('test');}
+});
+test('live clocks and public clock selection fail before Stripe transport',async()=>{
+ mode('live');process.env.STRIPE_TEST_CLOCK_ID='clock_OwnedSandbox123';let before=calls.length;
+ assert.equal((await request('/api/billing/checkout',{planId:'standard'})).statusCode,503);
+ assert.equal((await request('/api/billing/portal')).statusCode,503);assert.equal(calls.length,before);
+ mode('test');before=calls.length;
+ for(const field of ['testClockId','test_clock']){
+  assert.equal((await request('/api/billing/checkout',{planId:'standard',[field]:'clock_untrusted'})).statusCode,400);
+  assert.equal((await request('/api/billing/portal',{[field]:'clock_untrusted'})).statusCode,400);
+ }
+ assert.equal(calls.length,before);
+});
+test('clock-bound reconciliation refuses mismatched customers without persisting entitlement or event bindings',async()=>{
+ mode('test');const owner=await signup();assert.equal((await request('/api/billing/checkout',{planId:'standard'},owner)).statusCode,200);
+ const customerId=`cus_test_${owner.workspace.id}`,customer=customers.get(customerId),clock='clock_OwnedSandbox123';
+ const pointer={id:`evt_${randomUUID()}`,type:'customer.subscription.updated',created:200,customerId,mode:'test' as const};events.push(`stripe:${pointer.id}`);await storeProviderEvent('stripe',pointer.id,pointer);
+ const beforeSubscription=(await adminPool.query('select * from subscriptions where workspace_id=$1',[owner.workspace.id])).rows;
+ const beforePlan=(await adminPool.query('select plan from workspaces where id=$1',[owner.workspace.id])).rows;
+ process.env.STRIPE_TEST_CLOCK_ID=clock;
+ try{
+  const before=calls.length;await assert.rejects(reconcileStripeCustomer(pointer,client('test')),/test clock/);
+  assert.deepEqual(calls.slice(before).map(c=>c.operation),['account','customer-read']);
+  assert.deepEqual((await adminPool.query('select * from subscriptions where workspace_id=$1',[owner.workspace.id])).rows,beforeSubscription);
+  assert.deepEqual((await adminPool.query('select plan from workspaces where id=$1',[owner.workspace.id])).rows,beforePlan);
+  assert.equal((await adminPool.query('select count(*)::int n from provider_event_workspaces where event_id=$1',[`stripe:${pointer.id}`])).rows[0].n,0);
+  customers.set(customerId,{...customer,test_clock:{id:clock}});fault='active';await reconcileStripeCustomer(pointer,client('test'));
+  assert.equal((await adminPool.query('select plan from workspaces where id=$1',[owner.workspace.id])).rows[0].plan.id,'standard');
+ }finally{fault='';customers.set(customerId,customer);mode('test');}
 });
 test('live account eligibility, exact price and customer mode fail before Checkout creation',async()=>{
  mode('live');const before=calls.filter(c=>c.operation==='checkout-create').length;

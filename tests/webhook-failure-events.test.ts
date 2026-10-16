@@ -19,6 +19,8 @@ import {failInitialSetup} from '../server/core/parser-setup.js';
 import {registerExports} from '../server/integrations/exports.js';
 import {renderExport} from '../server/integrations/export-format.js';
 import {registerIntegrations,enqueueFailureEvents,enqueueIntegrationEvents,processOneDelivery} from '../server/integrations/webhooks.js';
+import {reserveSheetWrite} from '../server/integrations/providers.js';
+import {deliveryAttemptAuditSchema} from '../server/integrations/delivery-attempt-audit.js';
 import {encryptSecret} from '../server/integrations/secrets.js';
 import type {PublicRequestOptions} from '../server/integrations/network.js';
 import {verifyWebhookDelivery} from '../examples/automations/verify.js';
@@ -71,6 +73,7 @@ async function detail(account:Account,documentId:string){const response=await re
 async function approved(account:Account){const source=await upload(account);await processOneCoreJob(source.jobId);const data=await detail(account,source.document.id),run=data.runs.find((value:any)=>value.id===data.document.latestRunId);const response=await request(account,'POST',`/api/runs/${run.id}/approve`,{});assert.equal(response.statusCode,200,response.body);return {...source,run,approval:response.json().approval};}
 const deliveries=async(account:Account)=>(await adminPool.query('select * from webhook_deliveries where workspace_id=$1 order by created_at,id',[account.actor.workspaceId])).rows;
 const history=async(account:Account,documentId:string)=>(await adminPool.query("select * from document_events where workspace_id=$1 and document_id=$2 and state='failed' order by sequence",[account.actor.workspaceId,documentId])).rows;
+const attemptHistory=async(account:Account,deliveryId:string)=>(await adminPool.query("select * from audit_events where workspace_id=$1 and entity_id=$2 and action in('delivery.attempt_claimed','delivery.attempt_finished','delivery.lease_expired') order by created_at,id",[account.actor.workspaceId,deliveryId])).rows;
 async function fail(account:Account){setExtractionProvider({configured:()=>true,async extract(){throw Object.assign(new Error('private provider error must not leave the app'),{permanent:true});}});const source=await upload(account);await processOneCoreJob(source.jobId);assert.equal((await detail(account,source.document.id)).document.status,'failed');return source;}
 
 test('creation validates distinct known choices, defaults approval-only, and enforces role, scope and parser ownership',async()=>{
@@ -197,7 +200,13 @@ test('failure retries and replay keep signed bytes and identity; Sheets rejects 
  const replay=await request(account,'POST',`/api/deliveries/${original.id}/replay`,{});assert.equal(replay.statusCode,200,replay.body);await processOneDelivery({workspaceId:account.actor.workspaceId,transport});
  assert.equal(captured.length,3);for(const item of captured){assert.equal(item.body,captured[0].body);assert.equal(item.headers['Idempotency-Key'],original.id);assert.equal(item.headers['X-Folio-Delivery'],original.id);}
  assert.equal((await adminPool.query("select id from audit_events where workspace_id=$1 and entity_id=$2 and action='delivery.replayed'",[account.actor.workspaceId,original.id])).rowCount,1);
+ const attempts=await attemptHistory(account,original.id);attempts.forEach(event=>deliveryAttemptAuditSchema.parse(event.metadata));
+ const claims=attempts.filter(event=>event.action==='delivery.attempt_claimed').map(event=>event.metadata),finishes=attempts.filter(event=>event.action==='delivery.attempt_finished').map(event=>event.metadata);
+ assert.deepEqual(claims.map(event=>[event.attempt,event.priorAttempts,event.acquiredFrom,event.priorLeaseExpired]),[[1,0,'queued',false],[2,1,'retry',false],[1,0,'queued',false]]);
+ assert.equal(new Set(claims.map(event=>event.attemptId)).size,3);assert.deepEqual(finishes.map(event=>[event.outcome,event.responseStatus,event.path]),[['retry',503,'webhook_request'],['delivered',204,'webhook_request'],['delivered',204,'webhook_request']]);
+ for(const claim of claims){const finish=finishes.find(event=>event.attemptId===claim.attemptId);assert.ok(finish);assert.ok(finish.elapsedMs>=claim.elapsedMs);}
  await adminPool.query("update webhook_deliveries set status='delivering',attempts=5,lease_until=now()-interval '1 second',lease_token=$2 where id=$1",[original.id,randomUUID()]);assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId,transport}),false);assert.equal((await deliveries(account))[0].status,'failed');assert.equal(captured.length,3);
+ assert.equal((await attemptHistory(account,original.id)).filter(event=>event.action==='delivery.lease_expired').length,1);assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId,transport}),false);assert.equal((await attemptHistory(account,original.id)).filter(event=>event.action==='delivery.lease_expired').length,1);
  const sheets=await connection(account,['document.approved'],{kind:'google_sheets'}),invalid=randomUUID();await adminPool.query("insert into webhook_deliveries(id,workspace_id,integration_id,event_key,payload) values($1,$2,$3,'controlled-invalid-sheet-event',$4)",[invalid,account.actor.workspaceId,sheets,JSON.stringify(original.payload)]);
  await processOneDelivery({workspaceId:account.actor.workspaceId,transport});assert.equal(captured.length,3);assert.equal(networkCalls,0);assert.match((await adminPool.query('select error from webhook_deliveries where id=$1',[invalid])).rows[0].error,/approval events only/);
  assert.equal(original.integration_id,integrationId);assert.equal(original.payload.document.id,source.document.id);
@@ -230,15 +239,20 @@ test('reclaimed failure-delivery leases fence late opposite outcomes without dup
   const stale=processOneDelivery({workspaceId:account.actor.workspaceId,transport});
   try{
    await bounded(started);const held=(await deliveries(account))[0];assert.equal(held.id,original.id);assert.equal(held.attempts,1);assert.equal(held.status,'delivering');assert.ok(held.lease_token);
+   const heldClaim=(await attemptHistory(account,original.id)).filter(event=>event.action==='delivery.attempt_claimed').at(-1)!.metadata;assert.notEqual(heldClaim.attemptId,held.lease_token);
+   const freshHistory=await attemptHistory(account,original.id);assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId,transport:async()=>{throw new Error('A fresh lease cannot send again.');}}),false);assert.deepEqual(await attemptHistory(account,original.id),freshHistory);
    // Only this disposable local fixture's lease is advanced; no wall-clock wait or live queue.
    await adminPool.query("update webhook_deliveries set lease_until=now()-interval '1 second' where id=$1 and lease_token=$2",[original.id,held.lease_token]);
    assert.equal(await bounded(processOneDelivery({workspaceId:account.actor.workspaceId,transport})),true);
    const current=(await deliveries(account))[0];assert.equal(current.attempts,2);assert.equal(current.response_status,variant.current);
    assert.equal(current.status,variant.current===204?'delivered':'retry');assert.equal(current.lease_token,null);assert.equal(current.lease_until,null);
+   const reclaimed=(await attemptHistory(account,original.id)).filter(event=>event.action==='delivery.attempt_claimed').at(-1)!.metadata;assert.equal(reclaimed.acquiredFrom,'expired_lease');assert.equal(reclaimed.priorLeaseExpired,true);assert.equal(reclaimed.priorAttempts,1);assert.notEqual(reclaimed.attemptId,heldClaim.attemptId);
    if(variant.current===204){assert.ok(current.delivered_at);assert.equal(current.error,null);}else{assert.equal(current.delivered_at,null);assert.match(current.error,/HTTP 503/);}
    release();assert.equal(await bounded(stale),true);
    // A stale success cannot erase the current retry; a stale failure cannot undo current success.
    assert.deepEqual((await deliveries(account))[0],current);
+   const staleFinish=(await attemptHistory(account,original.id)).find(event=>event.action==='delivery.attempt_finished'&&event.metadata.attemptId===heldClaim.attemptId)!.metadata;
+   assert.equal(staleFinish.outcome,'fence_lost');assert.equal(staleFinish.responseStatus,variant.stale);
    if(variant.current===503){
     await adminPool.query('update webhook_deliveries set next_attempt_at=now() where id=$1',[original.id]);
     assert.equal(await bounded(processOneDelivery({workspaceId:account.actor.workspaceId,transport})),true);
@@ -252,8 +266,81 @@ test('reclaimed failure-delivery leases fence late opposite outcomes without dup
  assert.equal(captured.length,5);for(const item of captured){assert.equal(item.body,captured[0].body);assert.equal(item.headers['Idempotency-Key'],original.id);assert.equal(item.headers['X-Folio-Delivery'],original.id);}
  assert.deepEqual(await detail(account,source.document.id),beforeDocument);assert.deepEqual(await history(account,source.document.id),beforeHistory);
  assert.deepEqual(await usage(),beforeUsage);assert.deepEqual(await notifications(),beforeNotifications);assert.equal(networkCalls,0);
+ const audited=await attemptHistory(account,original.id);audited.forEach(event=>deliveryAttemptAuditSchema.parse(event.metadata));assert.equal(audited.filter(event=>event.action==='delivery.attempt_claimed').length,5);assert.equal(audited.filter(event=>event.metadata.outcome==='fence_lost').length,2);
  // Lease fencing protects durable outcome metadata; an already-sent HTTP request cannot be unsent.
  // The five controlled calls prove stable receiver identity, not exactly-once third-party side effects.
+});
+
+test('attempt audits exclude caught error contents and preserve the existing admin-session workspace boundary',async()=>{
+ const account=await fixture('ai'),foreign=await fixture();await connection(account,['document.extraction_failed']);await fail(account);await enqueueFailureEvents({workspaceId:account.actor.workspaceId});const [delivery]=await deliveries(account);
+ const canary='SYNTHETIC_PRIVATE_PROVIDER_DIAGNOSTIC';
+ await processOneDelivery({workspaceId:account.actor.workspaceId,transport:async()=>{throw Object.assign(new Error(canary),{status:503,headers:{authorization:canary},response:{data:canary}});}});
+ const events=await attemptHistory(account,delivery.id);assert.equal(events.length,2);events.forEach(event=>deliveryAttemptAuditSchema.parse(event.metadata));assert.ok(!JSON.stringify(events).includes(canary));
+ const finish=events.find(event=>event.action==='delivery.attempt_finished')!.metadata;assert.equal(finish.errorKind,'operation_failed');assert.equal(finish.stage,'webhook_request');assert.equal(finish.responseStatus,null,'A thrown error status is not an observed returned response.');
+ const own=await request(account,'GET','/api/workspace/audit');assert.equal(own.statusCode,200);assert.ok(own.json().events.some((event:any)=>event.id===events[0].id));
+ const others=await request(foreign,'GET','/api/workspace/audit');assert.equal(others.statusCode,200);assert.ok(!others.json().events.some((event:any)=>event.entityId===delivery.id));
+ assert.equal((await withWorkspace(foreign.actor.workspaceId,c=>c.query('select id from audit_events where id=$1',[events[0].id]))).rowCount,0);
+ await adminPool.query("insert into memberships(workspace_id,user_id,role) values($1,$2,'viewer')",[account.actor.workspaceId,foreign.actor.userId]);
+ assert.equal((await request(foreign,'GET','/api/workspace/audit',undefined,{'x-workspace-id':account.actor.workspaceId})).statusCode,403);
+ await adminPool.query("update memberships set role='admin' where workspace_id=$1 and user_id=$2",[account.actor.workspaceId,foreign.actor.userId]);
+ const admin=await request(foreign,'GET','/api/workspace/audit',undefined,{'x-workspace-id':account.actor.workspaceId});assert.equal(admin.statusCode,200);assert.ok(admin.json().events.some((event:any)=>event.id===events[0].id));
+ const made=await request(account,'POST','/api/workspace/api-keys',{name:'Audit scope fixture',scopes:['results:read']});assert.equal(made.statusCode,200,made.body);
+ assert.equal((await app.inject({method:'GET',url:'/api/workspace/audit',headers:{authorization:`Bearer ${made.json().token}`}})).statusCode,403);
+});
+
+test('diagnostic INSERT failures preserve claims, retry outcomes and exhausted expiry without another outbound send',async()=>{
+ const account=await fixture('ai');await connection(account,['document.extraction_failed']);const source=await fail(account);await enqueueFailureEvents({workspaceId:account.actor.workspaceId});const [original]=await deliveries(account);
+ const before=await detail(account,source.document.id),usage=(await adminPool.query('select * from usage_ledger where workspace_id=$1 order by id',[account.actor.workspaceId])).rows;
+ const name=`owned_delivery_audit_failure_${randomUUID().replaceAll('-','')}`;let calls=0;
+ try{
+  await adminPool.query(`create function ${name}() returns trigger language plpgsql as $$ begin if NEW.workspace_id='${account.actor.workspaceId}'::uuid and NEW.action in('delivery.attempt_claimed','delivery.attempt_finished','delivery.lease_expired') then raise exception 'SYNTHETIC_PRIVATE_DIAGNOSTIC_INSERT_FAILURE'; end if; return NEW; end $$`);
+  await adminPool.query(`create trigger ${name} before insert on audit_events for each row execute function ${name}()`);
+  const transport=async()=>({status:++calls===1?503:204,bytes:Buffer.alloc(0)});
+  assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId,transport}),true);assert.equal((await deliveries(account))[0].status,'retry');assert.equal((await deliveries(account))[0].attempts,1);
+  await adminPool.query('update webhook_deliveries set next_attempt_at=now() where id=$1',[original.id]);assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId,transport}),true);
+  const delivered=(await deliveries(account))[0];assert.equal(delivered.status,'delivered');assert.equal(delivered.attempts,2);assert.equal(calls,2);assert.deepEqual(await attemptHistory(account,original.id),[]);
+  assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId,transport}),false);assert.deepEqual((await deliveries(account))[0],delivered);assert.equal(calls,2,'A successful delivery remains committed despite its rejected audit; no extra send follows.');
+  await adminPool.query("update webhook_deliveries set status='delivering',attempts=5,lease_until=now()-interval '1 second',lease_token=$2 where id=$1",[original.id,randomUUID()]);
+  assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId,transport}),false);assert.equal((await deliveries(account))[0].status,'failed');assert.equal(calls,2);assert.deepEqual(await attemptHistory(account,original.id),[]);
+ }finally{await adminPool.query(`drop trigger if exists ${name} on audit_events`);await adminPool.query(`drop function if exists ${name}()`);}
+ assert.deepEqual(await detail(account,source.document.id),before);assert.deepEqual((await adminPool.query('select * from usage_ledger where workspace_id=$1 order by id',[account.actor.workspaceId])).rows,usage);
+});
+
+test('a delivered Sheets reservation reports its shortcut without decrypting credentials or creating refresh or range proof',async()=>{
+ const account=await fixture(),integrationId=await connection(account,['document.approved'],{kind:'google_sheets'});
+ await adminPool.query('update integrations set config=$2,secret_ciphertext=$3 where id=$1',[integrationId,JSON.stringify({spreadsheetId:'owned_fixture_spreadsheet_12345',sheetName:'Owned QA',columns:[{source:'reference',label:'Reference'}]}),'SYNTHETIC_INVALID_CIPHERTEXT_MUST_NOT_BE_DECRYPTED']);
+ await approved(account);await enqueueIntegrationEvents({workspaceId:account.actor.workspaceId});const [delivery]=await deliveries(account),integration=(await adminPool.query('select * from integrations where id=$1',[integrationId])).rows[0];
+ const reserved=await reserveSheetWrite(integration,delivery);const seeded=await adminPool.query("update sheet_writes set status='delivered',delivered_at=now() where integration_id=$1 and event_key=$2",[integrationId,reserved.write.event_key]);assert.equal(seeded.rowCount,1);
+ const before=(await adminPool.query('select * from sheet_writes where integration_id=$1',[integrationId])).rows,cursor=(await adminPool.query('select * from sheet_cursors where integration_id=$1',[integrationId])).rows;
+ assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId}),true);const row=(await deliveries(account))[0];assert.equal(row.status,'delivered');assert.equal(row.attempts,1);
+ const finish=(await attemptHistory(account,delivery.id)).find(event=>event.action==='delivery.attempt_finished')!.metadata;assert.equal(finish.path,'sheets_already_delivered');assert.equal(finish.stage,'delivery_commit');assert.equal(finish.responseStatus,200);
+ assert.deepEqual((await adminPool.query('select * from sheet_writes where integration_id=$1',[integrationId])).rows,before);assert.deepEqual((await adminPool.query('select * from sheet_cursors where integration_id=$1',[integrationId])).rows,cursor);
+ assert.equal((await adminPool.query("select id from audit_events where workspace_id=$1 and action='google_sheets.delivered'",[account.actor.workspaceId])).rowCount,0);assert.equal(networkCalls,0);
+});
+
+test('exhausted delivery cleanup caps each tick, skips held leases and leaves protected or foreign rows untouched', {timeout:15_000}, async()=>{
+ const account=await fixture(),foreign=await fixture(),integration=await connection(account,['document.extraction_failed'],{enabled:false}),foreignIntegration=await connection(foreign,['document.extraction_failed'],{enabled:false});
+ const ids=Array.from({length:28},()=>randomUUID()),fresh=randomUUID(),outside=randomUUID(),payload=JSON.stringify({event:'document.extraction_failed',id:randomUUID(),document:{id:randomUUID(),name:'Synthetic exhausted-lease fixture'}});
+ await adminPool.query(`insert into webhook_deliveries(id,workspace_id,integration_id,event_key,payload,status,attempts,lease_token,lease_until)
+  select id,$2,$3,'bounded-terminal:'||id::text,$4::jsonb,'delivering',5,gen_random_uuid(),now()-interval '2 hours'+n*interval '1 second' from unnest($1::uuid[]) with ordinality as fixture(id,n)`,[ids,account.actor.workspaceId,integration,payload]);
+ for(const [id,workspace,connectionId,past] of [[fresh,account.actor.workspaceId,integration,false],[outside,foreign.actor.workspaceId,foreignIntegration,true]] as const)await adminPool.query(`insert into webhook_deliveries(id,workspace_id,integration_id,event_key,payload,status,attempts,lease_token,lease_until) values($1,$2,$3,'protected-terminal:'||$1::text,$4,'delivering',5,gen_random_uuid(),now()+($5*interval '1 hour'))`,[id,workspace,connectionId,payload,past?-1:1]);
+ const protectedBefore=(await adminPool.query('select * from webhook_deliveries where id=any($1::uuid[]) order by id',[[fresh,outside]])).rows;
+ const states=async()=>(await adminPool.query('select id,status from webhook_deliveries where id=any($1::uuid[])',[ids])).rows;
+ const expired=async()=>(await adminPool.query("select * from audit_events where workspace_id=$1 and action='delivery.lease_expired' order by entity_id",[account.actor.workspaceId])).rows;
+ const transport=async()=>{throw new Error('Exhausted cleanup cannot send any outbound request.');};
+ const lock=await adminPool.connect();let timer:ReturnType<typeof setTimeout>|undefined,pending:Promise<boolean>|undefined;
+ try{
+  await lock.query('BEGIN');await lock.query('select id from webhook_deliveries where id=$1 for update',[ids[0]]);
+  pending=processOneDelivery({workspaceId:account.actor.workspaceId,transport});
+  assert.equal(await Promise.race([pending,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Cleanup waited for a held lease instead of skipping it.')),5_000);})]),false);
+  const first=await states();assert.equal(first.filter(row=>row.status==='failed').length,25);assert.equal(first.find(row=>row.id===ids[0])?.status,'delivering');
+  assert.deepEqual(new Set(first.filter(row=>row.status==='failed').map(row=>row.id)),new Set(ids.slice(1,26)),'Ordered unlocked candidates are processed first.');
+  assert.equal((await expired()).length,25);
+ }finally{if(timer)clearTimeout(timer);await lock.query('ROLLBACK');lock.release();if(pending)await pending;}
+ assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId,transport}),false);assert.ok((await states()).every(row=>row.status==='failed'));assert.equal((await expired()).length,28);
+ assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId,transport}),false);assert.equal((await expired()).length,28,'A completed expiry is not journalled again.');
+ assert.deepEqual((await adminPool.query('select * from webhook_deliveries where id=any($1::uuid[]) order by id',[[fresh,outside]])).rows,protectedBefore);
+ (await expired()).forEach(event=>deliveryAttemptAuditSchema.parse(event.metadata));assert.equal(networkCalls,0);
 });
 
 test('paused failures catch up on resume, and document deletion or retention removes payloads and their reconciliation source',async()=>{

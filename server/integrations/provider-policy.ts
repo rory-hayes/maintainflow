@@ -34,8 +34,17 @@ export function requireTestStripeKey(key:string|undefined):string {return requir
 export function assertStripeMode(object:{livemode?:boolean},mode:StripeMode) {
  if(object.livemode!==(mode==='live'))throw new Error('Live/test Stripe object does not match the configured billing mode.');
 }
-export function stripeConfiguration(environment:Record<string,string|undefined>=process.env,origin=environment.APP_ORIGIN||'http://localhost'): {mode:StripeMode;key:string;prices:PriceMap;accountId?:string;portalConfigurationId?:string;webhookSecret:string} {
+/** A clock is an operator-selected sandbox boundary, never a customer rebind. */
+export function assertStripeCustomerTestClock(customer:{test_clock?:unknown},testClockId?:string) {
+ if(!testClockId)return;
+ const value=customer.test_clock;
+ const id=typeof value==='string'?value:value&&typeof value==='object'&&!Array.isArray(value)?(value as {id?:unknown}).id:undefined;
+ if(id!==testClockId)throw new Error('The Stripe customer does not match the configured test clock.');
+}
+export function stripeConfiguration(environment:Record<string,string|undefined>=process.env,origin=environment.APP_ORIGIN||'http://localhost'): {mode:StripeMode;key:string;prices:PriceMap;accountId?:string;portalConfigurationId?:string;testClockId?:string;webhookSecret:string} {
  const mode=stripeMode(environment),key=requireStripeKey(environment.STRIPE_SECRET_KEY,mode);
+ const testClockId=environment.STRIPE_TEST_CLOCK_ID||undefined;
+ if(testClockId&&(mode!=='test'||testClockId.length>200||!/^clock_[A-Za-z0-9]+$/.test(testClockId)))throw new Error('A Stripe test clock requires test mode and a valid bounded clock ID.');
  const prices:PriceMap={standard:environment.STRIPE_PRICE_STANDARD,team:environment.STRIPE_PRICE_TEAM};
  const ids=Object.values(prices).filter((value):value is string=>!!value);
  if(!ids.length||ids.some(id=>!/^price_[A-Za-z0-9_]+$/.test(id))||new Set(ids).size!==ids.length)throw new Error('Configure distinct Stripe price IDs for the supported plans.');
@@ -48,7 +57,7 @@ export function stripeConfiguration(environment:Record<string,string|undefined>=
   if(!prices.standard||!prices.team)throw new Error('Live Stripe billing requires both approved plan prices.');
   if(!/^bpc_[A-Za-z0-9]+$/.test(environment.STRIPE_PORTAL_CONFIGURATION_ID||''))throw new Error('Live Stripe billing requires STRIPE_PORTAL_CONFIGURATION_ID.');
  }
- return {mode,key,prices,accountId:environment.STRIPE_ACCOUNT_ID,portalConfigurationId:environment.STRIPE_PORTAL_CONFIGURATION_ID,webhookSecret:environment.STRIPE_WEBHOOK_SECRET};
+ return {mode,key,prices,accountId:environment.STRIPE_ACCOUNT_ID,portalConfigurationId:environment.STRIPE_PORTAL_CONFIGURATION_ID,...(testClockId?{testClockId}:{}),webhookSecret:environment.STRIPE_WEBHOOK_SECRET};
 }
 export function verifyStripePayload(raw:Buffer,signature:string,secret:string,mode:StripeMode='test') {
  const event=Stripe.webhooks.constructEvent(raw,signature,secret);

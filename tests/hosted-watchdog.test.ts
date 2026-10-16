@@ -122,6 +122,12 @@ test('existing delivery and retention predicates remain conditional',async()=>{
  const integration=randomUUID(),doc=randomUUID();
  await clear();await insert('integrations',{id:integration,enabled:false});await insert('webhook_deliveries',{integration_id:integration,status:'retry',attempts:0,next_attempt_at:past});assert.equal(await runnable(),false);
  await client.query(`UPDATE ${schema}.integrations SET enabled=true`);assert.equal(await runnable(),true);
+ await clear();await insert('integrations',{id:integration,enabled:false});
+ await client.query(`INSERT INTO ${schema}.webhook_deliveries(id,integration_id,status,attempts,lease_until) SELECT gen_random_uuid(),$1,'delivering',5,$2 FROM generate_series(1,28)`,[integration,past]);
+ assert.equal(await runnable(),true,'Exhausted expired leases wake cleanup even for a disabled integration.');
+ await client.query(`UPDATE ${schema}.webhook_deliveries SET status='failed' WHERE id IN (SELECT id FROM ${schema}.webhook_deliveries LIMIT 25)`);
+ assert.equal(await runnable(),true,'The leases remaining after one bounded sweep still wake a later invocation.');
+ await client.query(`UPDATE ${schema}.webhook_deliveries SET status='failed'`);assert.equal(await runnable(),false,'The watchdog becomes quiet after the remaining expired leases are cleaned.');
  await clear();await workspaceFixture();await insert('documents',{id:doc,workspace_id:workspace,created_at:longPast});assert.equal(await runnable(),true);
  await queue('jobs',{document_id:doc,waiting_for_schema:true});assert.equal(await runnable(),false,'retention cannot delete a waiting-schema document');
 });

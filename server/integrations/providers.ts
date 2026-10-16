@@ -18,7 +18,7 @@ import {publicRequest} from './network.js';
 import {mockBillingEnabled,mockBillingStatus,registerMockBilling,requireRealBilling} from './mock-billing.js';
 import {validateCheckoutPolicy,readCheckoutContract,reserveCheckoutContract,contractSessionKey,bindCheckoutContract,checkoutCompletionPointer,captureCheckoutCompletion,listCheckoutContracts,getCheckoutContract,renderCheckoutTermsRecord,type CheckoutPolicyInput,type CheckoutCompletionPointer} from './checkout-contracts.js';
 import {
- SHEETS_SCOPE,stripeMode,stripeConfiguration,assertStripeMode,stripePriceMatches,assertStripePortalConfiguration,verifyStripePayload,verifyResendPayload,
+ SHEETS_SCOPE,stripeMode,stripeConfiguration,assertStripeMode,assertStripeCustomerTestClock,stripePriceMatches,assertStripePortalConfiguration,verifyStripePayload,verifyResendPayload,
  publicProviderError,emailAddress,deliveredRecipients,verifiedReceivingDomain,managedReceivingProbe,verifiedManagedReceivingProbe,
  stripePlan,selectStripeSubscription,sheetConfigSchema,sheetRows,sheetRanges,
  writeSheetRange,receivedEmailBody,type PaidPlanId,type ApprovalPayload,type StripeMode,
@@ -41,11 +41,12 @@ async function verifyBillingAccount(client:Stripe,settings:BillingConfiguration,
  if(account.id!==settings.accountId)badRequest('Stripe credentials do not belong to the approved billing account.',503);
  if(acceptPayments&&(!account.charges_enabled||!account.payouts_enabled||!account.details_submitted))badRequest('The Stripe account is not ready to accept payments.',503);
 }
-async function verifyBillingCustomer(client:Stripe,customerId:string,workspaceId:string,mode:StripeMode){
+async function verifyBillingCustomer(client:Stripe,customerId:string,workspaceId:string,mode:StripeMode,testClockId?:string){
  const customer=await client.customers.retrieve(customerId);
  if(customer.deleted)badRequest('The Stripe billing customer is no longer available.',409);
  assertStripeMode(customer,mode);
  if(!sameWorkspaceUuid(customer.metadata.folio_workspace,workspaceId))badRequest('The Stripe customer does not match this workspace.',409);
+ assertStripeCustomerTestClock(customer,testClockId);
  return customer;
 }
 function verifySubscriptionModes(subscriptions:Stripe.Subscription[],mode:StripeMode,customerId?:string){
@@ -141,6 +142,7 @@ export async function reconcileStripeCustomer(pointer:StripePointer,controlledCl
  await transaction(adminPool,async c=>{
   const {rows:[local]}=await c.query('select * from subscriptions where customer_id=$1 and billing_mode=$2 for update',[pointer.customerId,mode]);
   if(!local)return; // Never trust workspace/plan metadata from an incoming event.
+  if(settings.testClockId)await verifyBillingCustomer(client,pointer.customerId,local.workspace_id,mode,settings.testClockId);
   await c.query('insert into provider_event_workspaces(event_id,workspace_id) values($1,$2) on conflict do nothing',[`stripe:${pointer.id}`,local.workspace_id]);
   const current=await client.subscriptions.list({customer:pointer.customerId,status:'all',limit:100});
   if(current.has_more)throw new Error('Subscription reconciliation exceeded the supported customer subscription limit.');
@@ -303,7 +305,7 @@ export async function reserveSheetWrite(integration:Integration,delivery:{id:str
 export async function sendGoogleSheets(integration:Integration,delivery:{id:string;payload:ApprovalPayload},options:{signal?:AbortSignal}={}) {
  options.signal?.throwIfAborted();
  const {write,integration:current}=await reserveSheetWrite(integration,delivery);
- if(write.status==='delivered')return {status:200};
+ if(write.status==='delivered')return {status:200,deliveryPath:'sheets_already_delivered' as const};
  const client=googleClient();
  const credentials=JSON.parse(decryptSecret(current.secret_ciphertext!)) as Credentials;
  client.setCredentials(credentials);
@@ -318,7 +320,7 @@ export async function sendGoogleSheets(integration:Integration,delivery:{id:stri
    await c.query("update sheet_writes set status='delivered',delivered_at=now() where integration_id=$1 and event_key=$2",[current.id,write.event_key]);
    await audit(c,current.workspace_id,null,'google_sheets.delivered',current.id,{eventId:write.event_key,range:write.data_range,refreshProof:googleSheetsDeliveredRefreshProof(accessStep,delivery.id,result.status)});
   });
-  return result;
+  return {...result,deliveryPath:'sheets_range_write' as const};
  }catch(error){throw Object.assign(new Error(publicProviderError('Google Sheets',error)),{status:(error as {status?:number}).status});}
 }
 
@@ -394,12 +396,13 @@ export async function registerProviders(app:FastifyInstance,dependencies:{stripe
    await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`billing:${actor.workspaceId}`]);
    let {rows:[subscription]}=await c.query('select * from subscriptions where workspace_id=$1 and billing_mode=$2 for update',[actor.workspaceId,mode]);
    if(!subscription?.customer_id){
-    const customer=await client.customers.create({metadata:{folio_workspace:actor.workspaceId}},{idempotencyKey:`folio-customer:${mode}:${actor.workspaceId}`});
+    const customer=await client.customers.create({metadata:{folio_workspace:actor.workspaceId},...(settings.testClockId?{test_clock:settings.testClockId}:{})},{idempotencyKey:`folio-customer:${mode}:${actor.workspaceId}`});
     assertStripeMode(customer,mode);
     if(customer.metadata.folio_workspace!==actor.workspaceId)throw new Error('Stripe customer creation did not preserve the workspace binding.');
+    assertStripeCustomerTestClock(customer,settings.testClockId);
     await c.query('insert into subscriptions(workspace_id,billing_mode,customer_id) values($1,$2,$3) on conflict(workspace_id,billing_mode) do update set customer_id=excluded.customer_id',[actor.workspaceId,mode,customer.id]);
     subscription={customer_id:customer.id,status:'inactive'};
-   }else await verifyBillingCustomer(client,subscription.customer_id,actor.workspaceId,mode);
+   }else await verifyBillingCustomer(client,subscription.customer_id,actor.workspaceId,mode,settings.testClockId);
    const active=await client.subscriptions.list({customer:subscription.customer_id,status:'all',limit:100});
    verifySubscriptionModes(active.data,mode,subscription.customer_id);
    if(active.has_more||active.data.some(s=>!['canceled','incomplete_expired'].includes(s.status)))badRequest('Use the billing portal to manage the existing subscription',409);
@@ -441,7 +444,7 @@ export async function registerProviders(app:FastifyInstance,dependencies:{stripe
   await verifyBillingAccount(client,settings);
   const local=await withWorkspace(actor.workspaceId,async c=>(await c.query('select customer_id from subscriptions where workspace_id=$1 and billing_mode=$2',[actor.workspaceId,mode])).rows[0]);
   if(!local?.customer_id)badRequest('No Stripe customer exists for this workspace in the selected billing mode.',409);
-  await verifyBillingCustomer(client,local.customer_id,actor.workspaceId,mode);
+  await verifyBillingCustomer(client,local.customer_id,actor.workspaceId,mode,settings.testClockId);
   if(settings.portalConfigurationId){
    const configuration=await client.billingPortal.configurations.retrieve(settings.portalConfigurationId);
    assertStripePortalConfiguration(configuration,settings.prices,mode);
