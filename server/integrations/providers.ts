@@ -13,6 +13,7 @@ import {requireWorkBudget,WorkBudgetExhausted,type WorkBudget} from '../core/wor
 import {addDocument} from '../core/intake.js';
 import {ParserFormatNotAllowedError,SourceIntakeRejectedError} from '../core/intake-policy.js';
 import {encryptSecret,decryptSecret} from './secrets.js';
+import {observeGoogleSheetsAccessStep,googleSheetsDeliveredRefreshProof} from './google-sheets-refresh-proof.js';
 import {publicRequest} from './network.js';
 import {mockBillingEnabled,mockBillingStatus,registerMockBilling,requireRealBilling} from './mock-billing.js';
 import {validateCheckoutPolicy,readCheckoutContract,reserveCheckoutContract,contractSessionKey,bindCheckoutContract,checkoutCompletionPointer,captureCheckoutCompletion,listCheckoutContracts,getCheckoutContract,renderCheckoutTermsRecord,type CheckoutPolicyInput,type CheckoutCompletionPointer} from './checkout-contracts.js';
@@ -308,14 +309,14 @@ export async function sendGoogleSheets(integration:Integration,delivery:{id:stri
  client.setCredentials(credentials);
  try{
   // Refresh explicitly and persist any replacement token before the range write.
-  await client.getAccessToken();
+  const accessStep=await observeGoogleSheetsAccessStep(client);
   options.signal?.throwIfAborted();
   const persisted=await withWorkspace(current.workspace_id,c=>c.query('update integrations set secret_ciphertext=$2 where id=$1 and enabled=true and secret_ciphertext=$3',[current.id,encryptSecret(JSON.stringify({...credentials,...client.credentials})),current.secret_ciphertext]));
   if(!persisted.rowCount)throw new Error('Sheets connection changed during delivery. Retry with the current connection.');
   const result=await writeSheetRange(request=>client.request({...request,signal:options.signal}),write);
   await withWorkspace(current.workspace_id,async c=>{
    await c.query("update sheet_writes set status='delivered',delivered_at=now() where integration_id=$1 and event_key=$2",[current.id,write.event_key]);
-   await audit(c,current.workspace_id,null,'google_sheets.delivered',current.id,{eventId:write.event_key,range:write.data_range});
+   await audit(c,current.workspace_id,null,'google_sheets.delivered',current.id,{eventId:write.event_key,range:write.data_range,refreshProof:googleSheetsDeliveredRefreshProof(accessStep,delivery.id,result.status)});
   });
   return result;
  }catch(error){throw Object.assign(new Error(publicProviderError('Google Sheets',error)),{status:(error as {status?:number}).status});}
