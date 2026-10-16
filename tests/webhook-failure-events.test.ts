@@ -203,6 +203,59 @@ test('failure retries and replay keep signed bytes and identity; Sheets rejects 
  assert.equal(original.integration_id,integrationId);assert.equal(original.payload.document.id,source.document.id);
 });
 
+test('reclaimed failure-delivery leases fence late opposite outcomes without duplicate events or usage', {timeout:20_000}, async()=>{
+ const account=await fixture('ai');await connection(account,['document.extraction_failed']);const source=await fail(account);
+ await enqueueFailureEvents({workspaceId:account.actor.workspaceId});const [original]=await deliveries(account);assert.ok(original);
+ const beforeDocument=await detail(account,source.document.id),beforeHistory=await history(account,source.document.id);
+ const usage=async()=>(await adminPool.query('select * from usage_ledger where workspace_id=$1 order by id',[account.actor.workspaceId])).rows;
+ const notifications=async()=>{const response=await request(account,'GET','/api/workspace/notifications');assert.equal(response.statusCode,200,response.body);return response.json();};
+ const beforeUsage=await usage(),beforeNotifications=await notifications();
+ assert.equal(beforeHistory.length,1);assert.equal(beforeUsage.length,1);assert.equal(beforeNotifications.notifications.length,1);
+ const captured:{body:string;headers:Record<string,string>}[]=[];
+ async function bounded<T>(work:Promise<T>):Promise<T>{
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  try{return await Promise.race([work,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Controlled delivery barrier timed out.')),5_000);})]);}
+  finally{if(timer)clearTimeout(timer);}
+ }
+ for(const [index,variant] of [{stale:204,current:503},{stale:503,current:204}].entries()){
+  if(index){const replay=await request(account,'POST',`/api/deliveries/${original.id}/replay`,{});assert.equal(replay.statusCode,200,replay.body);}
+  let release!:()=>void,entered!:()=>void,calls=0;
+  const gate=new Promise<void>(resolve=>{release=resolve;}),started=new Promise<void>(resolve=>{entered=resolve;});
+  const transport=async(_url:string,options:PublicRequestOptions={})=>{
+   assert.equal(_url,'https://receiver.example/owned');const value={body:options.body!,headers:options.headers!};captured.push(value);
+   assert.equal(verifyWebhookDelivery({body:Buffer.from(value.body),headers:value.headers},secret).deliveryId,original.id);
+   calls++;if(calls===1){entered();await gate;return {status:variant.stale,bytes:Buffer.alloc(0)};}
+   return {status:calls===2?variant.current:204,bytes:Buffer.alloc(0)};
+  };
+  const stale=processOneDelivery({workspaceId:account.actor.workspaceId,transport});
+  try{
+   await bounded(started);const held=(await deliveries(account))[0];assert.equal(held.id,original.id);assert.equal(held.attempts,1);assert.equal(held.status,'delivering');assert.ok(held.lease_token);
+   // Only this disposable local fixture's lease is advanced; no wall-clock wait or live queue.
+   await adminPool.query("update webhook_deliveries set lease_until=now()-interval '1 second' where id=$1 and lease_token=$2",[original.id,held.lease_token]);
+   assert.equal(await bounded(processOneDelivery({workspaceId:account.actor.workspaceId,transport})),true);
+   const current=(await deliveries(account))[0];assert.equal(current.attempts,2);assert.equal(current.response_status,variant.current);
+   assert.equal(current.status,variant.current===204?'delivered':'retry');assert.equal(current.lease_token,null);assert.equal(current.lease_until,null);
+   if(variant.current===204){assert.ok(current.delivered_at);assert.equal(current.error,null);}else{assert.equal(current.delivered_at,null);assert.match(current.error,/HTTP 503/);}
+   release();assert.equal(await bounded(stale),true);
+   // A stale success cannot erase the current retry; a stale failure cannot undo current success.
+   assert.deepEqual((await deliveries(account))[0],current);
+   if(variant.current===503){
+    await adminPool.query('update webhook_deliveries set next_attempt_at=now() where id=$1',[original.id]);
+    assert.equal(await bounded(processOneDelivery({workspaceId:account.actor.workspaceId,transport})),true);
+    const recovered=(await deliveries(account))[0];assert.equal(recovered.status,'delivered');assert.equal(recovered.attempts,3);assert.equal(recovered.response_status,204);assert.equal(recovered.error,null);
+   }
+   assert.equal(calls,variant.current===503?3:2);
+  }finally{release();await bounded(stale);}
+ }
+ await enqueueFailureEvents({workspaceId:account.actor.workspaceId});const final=await deliveries(account);assert.equal(final.length,1);
+ assert.equal(final[0].id,original.id);assert.equal(final[0].event_key,original.event_key);assert.deepEqual(final[0].payload,original.payload);assert.equal(final[0].attempts,2);
+ assert.equal(captured.length,5);for(const item of captured){assert.equal(item.body,captured[0].body);assert.equal(item.headers['Idempotency-Key'],original.id);assert.equal(item.headers['X-Folio-Delivery'],original.id);}
+ assert.deepEqual(await detail(account,source.document.id),beforeDocument);assert.deepEqual(await history(account,source.document.id),beforeHistory);
+ assert.deepEqual(await usage(),beforeUsage);assert.deepEqual(await notifications(),beforeNotifications);assert.equal(networkCalls,0);
+ // Lease fencing protects durable outcome metadata; an already-sent HTTP request cannot be unsent.
+ // The five controlled calls prove stable receiver identity, not exactly-once third-party side effects.
+});
+
 test('paused failures catch up on resume, and document deletion or retention removes payloads and their reconciliation source',async()=>{
  const account=await fixture('ai'),paused=await connection(account,['document.extraction_failed'],{enabled:false}),source=await fail(account);
  await enqueueFailureEvents({workspaceId:account.actor.workspaceId});assert.deepEqual(await deliveries(account),[]);
