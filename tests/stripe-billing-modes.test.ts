@@ -9,10 +9,11 @@ import {ZodError} from 'zod';
 import {registerCore} from '../server/core/index.js';
 import {adminPool,closeDatabase} from '../server/core/db.js';
 import {config} from '../server/core/config.js';
+import {validatePreviewConfiguration} from '../server/core/preview.js';
 import {registerProviders,reconcileStripeCustomer,storeProviderEvent} from '../server/integrations/providers.js';
 import {stripeMode,stripeConfiguration,requireStripeKey,verifyStripePayload,stripePlan,stripePriceMatches,assertStripePortalConfiguration,type StripeMode} from '../server/integrations/provider-policy.js';
 
-const keys=['STRIPE_MODE','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_PRICE_STANDARD','STRIPE_PRICE_TEAM','STRIPE_ACCOUNT_ID','STRIPE_PORTAL_CONFIGURATION_ID','STRIPE_TEST_CLOCK_ID','FOLIO_BILLING_MOCK','FOLIO_PREVIEW_MODE','RESEND_API_KEY','RESEND_INBOUND_ENABLED'] as const;
+const keys=['STRIPE_MODE','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_PRICE_STANDARD','STRIPE_PRICE_TEAM','STRIPE_ACCOUNT_ID','STRIPE_PORTAL_CONFIGURATION_ID','STRIPE_TEST_CLOCK_ID','FOLIO_BILLING_MOCK','FOLIO_PREVIEW_MODE','FOLIO_PREVIEW_STRIPE_TEST','FOLIO_PREVIEW_INVITE_CODE','APP_ORIGIN','RESEND_API_KEY','RESEND_INBOUND_ENABLED'] as const;
 const original=Object.fromEntries(keys.map(key=>[key,process.env[key]])),originalOrigin=config.origin;
 const signing='whsec_owned_billing_mode_fixture';
 const accounts:any[]=[],events:string[]=[],sessions=new Map<string,any>(),customers=new Map<string,any>();
@@ -20,7 +21,8 @@ const calls:{operation:string;mode:StripeMode;input:any;options?:any}[]=[];
 let app:FastifyInstance,actor:any,outsider:any,reader:any,fault='',loseResponse=false;
 function mode(value:StripeMode){
  Object.assign(process.env,{STRIPE_MODE:value,STRIPE_SECRET_KEY:`sk_${value}_controlled`,STRIPE_WEBHOOK_SECRET:signing,STRIPE_PRICE_STANDARD:`price_${value}_standard`,STRIPE_PRICE_TEAM:`price_${value}_team`,STRIPE_ACCOUNT_ID:'acct_approved',STRIPE_PORTAL_CONFIGURATION_ID:'bpc_approved',FOLIO_BILLING_MOCK:'false',FOLIO_PREVIEW_MODE:'false',RESEND_INBOUND_ENABLED:'false'});
- delete process.env.RESEND_API_KEY;delete process.env.STRIPE_TEST_CLOCK_ID;
+ delete process.env.RESEND_API_KEY;delete process.env.STRIPE_TEST_CLOCK_ID;delete process.env.FOLIO_PREVIEW_STRIPE_TEST;delete process.env.FOLIO_PREVIEW_INVITE_CODE;
+ if(original.APP_ORIGIN===undefined)delete process.env.APP_ORIGIN;else process.env.APP_ORIGIN=original.APP_ORIGIN;
 }
 function price(id:string,live:boolean){return {id,livemode:live,active:true,currency:'eur',unit_amount:id.endsWith('team')?4900:1900,recurring:{interval:'month',interval_count:1,usage_type:'licensed'},billing_scheme:'per_unit',transform_quantity:null} as Stripe.Price;}
 function subscription(customer:string,value:StripeMode,status='active'){return {id:`sub_${value}_${customer}`,customer,created:100,livemode:value==='live',status,items:{data:[{quantity:1,price:price(`price_${value}_standard`,value==='live')}]}} as Stripe.Subscription;}
@@ -40,7 +42,7 @@ function client(value:StripeMode):Stripe {
  } as unknown as Stripe;
 }
 const request=(url:string,payload:unknown={},account=actor,headers:Record<string,string>={})=>app.inject({method:'POST',url,payload:payload as any,headers:{cookie:account.cookie,origin:config.origin,...headers}});
-async function signup(){const response=await app.inject({method:'POST',url:'/api/auth/register',headers:{origin:config.origin},payload:{name:'Controlled billing fixture',email:`billing-${randomUUID()}@example.test`,password:'controlled billing fixture password',workspaceName:'Controlled billing fixture'}});assert.equal(response.statusCode,201,response.body);const value={...response.json(),cookie:response.cookies.map(c=>`${c.name}=${c.value}`).join('; ')};accounts.push(value);return value;}
+async function signup(inviteCode?:string){const response=await app.inject({method:'POST',url:'/api/auth/register',headers:{origin:config.origin},payload:{name:'Controlled billing fixture',email:`billing-${randomUUID()}@example.test`,password:'controlled billing fixture password',workspaceName:'Controlled billing fixture',...(inviteCode===undefined?{}:{inviteCode})}});assert.equal(response.statusCode,201,response.body);const value={...response.json(),cookie:response.cookies.map(c=>`${c.name}=${c.value}`).join('; ')};accounts.push(value);return value;}
 before(async()=>{
  config.origin='https://folio-billing.example.test';mode('test');
  app=Fastify({logger:false});await app.register(cookie);await app.register(multipart);
@@ -85,6 +87,40 @@ test('signed webhooks require mode and reject altered, stale, missing-mode and C
  const check=(body:any,expected:StripeMode=value)=>{const raw=JSON.stringify(body),signature=Stripe.webhooks.generateTestHeaderString({payload:raw,secret:signing});return verifyStripePayload(Buffer.from(raw),signature,signing,expected);};
  assert.equal(check(payload).livemode,value==='live');assert.throws(()=>check(payload,value==='test'?'live':'test'));assert.throws(()=>check({...payload,livemode:undefined}));assert.throws(()=>check({...payload,account:'acct_connected'}));
  const raw=JSON.stringify(payload),signature=Stripe.webhooks.generateTestHeaderString({payload:raw,secret:signing});assert.throws(()=>verifyStripePayload(Buffer.from(raw+' '),signature,signing,value));const stale=Stripe.webhooks.generateTestHeaderString({payload:raw,secret:signing,timestamp:1});assert.throws(()=>verifyStripePayload(Buffer.from(raw),stale,signing,value));}
+});
+test('opted-in private TEST preview keeps registration invite-gated and Checkout unentitled',async()=>{
+ mode('test');const invite='owned-private-stripe-test-preview-'.repeat(2);
+ Object.assign(process.env,{FOLIO_PREVIEW_MODE:'true',FOLIO_PREVIEW_STRIPE_TEST:'true',FOLIO_PREVIEW_INVITE_CODE:invite,APP_ORIGIN:config.origin});
+ try{
+  assert.doesNotThrow(()=>validatePreviewConfiguration());
+  const counts=async()=>(await adminPool.query('select (select count(*)::int from users) users,(select count(*)::int from workspaces) workspaces,(select count(*)::int from memberships) memberships')).rows[0];
+  const beforeCounts=await counts(),beforeCalls=calls.length;
+  for(const inviteCode of [undefined,invite+'wrong']){
+   const response=await app.inject({method:'POST',url:'/api/auth/register',headers:{origin:config.origin},payload:{name:'Denied private TEST preview fixture',workspaceName:'Denied private TEST preview workspace',email:`denied-preview-${randomUUID()}@example.test`,password:'controlled private preview password',...(inviteCode===undefined?{}:{inviteCode})}});
+   assert.equal(response.statusCode,403,response.body);assert.match(response.json().error,/invite code is required/);
+   assert.deepEqual(await counts(),beforeCounts);assert.equal(calls.length,beforeCalls);
+  }
+  const owner=await signup(invite);
+  assert.deepEqual(await counts(),{users:beforeCounts.users+1,workspaces:beforeCounts.workspaces+1,memberships:beforeCounts.memberships+1});
+  assert.equal(owner.workspace.role,'owner');assert.equal(owner.workspace.plan.id,'explore');assert.equal(calls.length,beforeCalls);
+  const planBefore=(await adminPool.query('select plan from workspaces where id=$1',[owner.workspace.id])).rows;
+  const usageResponse=await app.inject({method:'GET',url:'/api/workspace/usage',headers:{cookie:owner.cookie,origin:config.origin}});assert.equal(usageResponse.statusCode,200,usageResponse.body);const usageBefore=usageResponse.json();
+  fault='account';let start=calls.length;
+  let response=await request('/api/billing/checkout',{planId:'standard'},owner);
+  assert.equal(response.statusCode,503,response.body);assert.match(response.json().error,/approved billing account/);assert.deepEqual(calls.slice(start).map(call=>call.operation),['account']);
+  assert.deepEqual((await adminPool.query('select * from subscriptions where workspace_id=$1',[owner.workspace.id])).rows,[]);assert.deepEqual((await adminPool.query('select * from billing_checkouts where workspace_id=$1',[owner.workspace.id])).rows,[]);
+  fault='not-live-ready';start=calls.length;
+  response=await request('/api/billing/checkout',{planId:'standard'},owner);
+  assert.equal(response.statusCode,200,response.body);assert.equal(response.json().mode,'test');
+  const observed=calls.slice(start);assert.deepEqual(observed.map(call=>call.operation),['account','price','customer-create','subscriptions','checkout-create']);assert.ok(observed.every(call=>call.mode==='test'));
+  assert.equal(observed.find(call=>call.operation==='price')!.input,'price_test_standard');
+  const created=observed.find(call=>call.operation==='customer-create')!;assert.equal(created.input.metadata.folio_workspace,owner.workspace.id);assert.equal(created.options.idempotencyKey,`folio-customer:test:${owner.workspace.id}`);
+  const checkouts=(await adminPool.query('select billing_mode,request_id,session_id from billing_checkouts where workspace_id=$1',[owner.workspace.id])).rows;assert.equal(checkouts.length,1);assert.equal(checkouts[0].billing_mode,'test');assert.ok(checkouts[0].session_id);
+  assert.equal(observed.find(call=>call.operation==='checkout-create')!.options.idempotencyKey,`folio-checkout:test:${checkouts[0].request_id}`);
+  assert.deepEqual((await adminPool.query('select billing_mode,customer_id from subscriptions where workspace_id=$1',[owner.workspace.id])).rows,[{billing_mode:'test',customer_id:`cus_test_${owner.workspace.id}`}]);
+  assert.deepEqual((await adminPool.query('select plan from workspaces where id=$1',[owner.workspace.id])).rows,planBefore);
+  const usageAfter=await app.inject({method:'GET',url:'/api/workspace/usage',headers:{cookie:owner.cookie,origin:config.origin}});assert.equal(usageAfter.statusCode,200,usageAfter.body);assert.deepEqual(usageAfter.json(),usageBefore);
+ }finally{fault='';mode('test');}
 });
 test('test and live Checkouts have separate customers, reservations and durable retry keys',async()=>{
  mode('test');let response=await request('/api/billing/checkout',{planId:'standard'});assert.equal(response.statusCode,200,response.body);assert.equal(response.json().mode,'test');
