@@ -9,6 +9,12 @@ const navigation = [
   { label: 'Pricing', href: '/#pricing' },
 ];
 
+function StartLink({to,label,onClick}:{to:string;label:string;onClick?:()=>void}) {
+  return to.startsWith('#')
+    ? <a className="button primary marketing-cta" href={to} onClick={onClick}>{label}</a>
+    : <Link className="button primary marketing-cta" to={to} onClick={onClick}>{label}</Link>;
+}
+
 export function MarketingHeader({startTo='/sign-up',startLabel='Start extracting',signInTo='/sign-in'}:{startTo?:string;startLabel?:string;signInTo?:string}={}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -27,7 +33,7 @@ export function MarketingHeader({startTo='/sign-up',startLabel='Start extracting
         </nav>
         <div className="marketing-header-actions">
           <Link className="marketing-sign-in" to={signInTo}>Sign in</Link>
-          <Link className="button primary marketing-cta" to={startTo}>{startLabel}</Link>
+          <StartLink to={startTo} label={startLabel}/>
         </div>
         <button
           ref={menuButton}
@@ -56,7 +62,7 @@ export function MarketingHeader({startTo='/sign-up',startLabel='Start extracting
           {navigation.map((item) => <a key={item.label} href={item.href} onClick={closeMenu}>{item.label}</a>)}
           <Link to="/help" onClick={closeMenu}>Resources</Link>
           <Link to={signInTo} onClick={closeMenu}>Sign in</Link>
-          <Link className="button primary marketing-cta" to={startTo} onClick={closeMenu}>{startLabel}</Link>
+          <StartLink to={startTo} label={startLabel} onClick={closeMenu}/>
         </nav>
       ) : null}
     </header>

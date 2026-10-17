@@ -44,10 +44,22 @@ export default function Help() {
   return (
     <GuideLayout title="Get your first document moving." introduction="A practical guide to capturing documents, checking the details and exporting clean data.">
       <nav className="marketing-guide-shortcuts" aria-label="Help topics">
+        <a href="#bank-statements"><FileText size={21} /><span>Bank statements</span><ArrowRight size={16} /></a>
         <a href="#first-document"><FileText size={21} /><span>Your first document</span><ArrowRight size={16} /></a>
         <a href="#integrations"><Settings2 size={21} /><span>Integrations & setup</span><ArrowRight size={16} /></a>
         <Link to="/help/api"><Code2 size={21} /><span>API documentation</span><ArrowRight size={16} /></Link>
       </nav>
+      <section id="bank-statements">
+        <h2>Your first bank statement</h2>
+        <ol>
+          <li><strong>Open Bank statements.</strong> The transaction columns and extraction instructions are already set up. You do not need to create a parser or define fields.</li>
+          <li><strong>Choose your files.</strong> Upload up to 20 statements at a time, each up to 10 MB and 30 pages. Check the received and failed files separately; a failed file does not remove the others.</li>
+          <li><strong>Review beside the original.</strong> Check each account and currency separately. Correct missing or incorrect values, add omitted transactions or exclude incorrect rows, and resolve the flagged checks. Matching balances alone do not prove every row is correct.</li>
+          <li><strong>Approve and download.</strong> Explicitly approve the values you have checked. Download CSV or Excel for one approved statement, or select several approved statements in the list. Each download uses the saved approved revision.</li>
+        </ol>
+        <p>Bank statement extraction uses the configured AI provider. Scans and images must be readable, and extraction can miss or misread details. Start with a synthetic sample when exploring the private preview; review every transaction before relying on an export.</p>
+        <Link className="marketing-text-link" to="/bank-statement-converter">Explore bank statement conversion <ArrowRight size={17}/></Link>
+      </section>
       <section id="first-document">
         <h2>Your first document</h2>
         <ol>

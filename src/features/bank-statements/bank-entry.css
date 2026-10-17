@@ -1,0 +1,9 @@
+.bank-early-access {
+  padding-top: 30px;
+  padding-bottom: 40px;
+  scroll-margin-top: 24px;
+}
+.bank-early-access h2 { font-size: 28px; letter-spacing: -.025em; }
+.bank-early-access p { max-width: 660px; line-height: 1.75; }
+.bank-early-access .marketing-cta { display: inline-flex; gap: 12px; }
+.bank-early-access .link { overflow-wrap: anywhere; }
