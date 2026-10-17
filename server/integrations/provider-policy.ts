@@ -66,6 +66,14 @@ export function verifyStripePayload(raw:Buffer,signature:string,secret:string,mo
  if(event.account)throw new Error('Connected-account Stripe events are not supported.');
  return event;
 }
+export type StripeCustomerPointer={id:string;type:string;created:number;customerId:string;mode:StripeMode};
+/** Call only after signature/mode verification; event metadata never grants access. */
+export function stripeCustomerPointer(event:Stripe.Event):StripeCustomerPointer|null {
+ if(!['customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','customer.subscription.paused','customer.subscription.resumed','checkout.session.completed','checkout.session.async_payment_succeeded','invoice.paid','invoice.payment_failed','invoice.payment_action_required'].includes(event.type))return null;
+ const object=event.data.object as unknown as {customer?:string|{id:string}};
+ const customerId=typeof object.customer==='string'?object.customer:object.customer?.id;
+ return customerId?{id:event.id,type:event.type,created:event.created,customerId,mode:event.livemode?'live':'test'}:null;
+}
 export function stripePriceMatches(price:Stripe.Price,planId:PaidPlanId,prices:PriceMap,mode:StripeMode,requireActive=false):boolean {
  const plan=PLANS.find(p=>p.id===planId)!;
  return price.id===prices[planId]&&price.livemode===(mode==='live')&&(!requireActive||price.active)

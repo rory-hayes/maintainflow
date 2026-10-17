@@ -21,7 +21,7 @@ import {validateCheckoutPolicy,readCheckoutContract,reserveCheckoutContract,cont
 import {
  SHEETS_SCOPE,stripeMode,stripeConfiguration,assertStripeMode,assertStripeCustomerTestClock,stripePriceMatches,assertStripePortalConfiguration,verifyStripePayload,verifyResendPayload,
  publicProviderError,emailAddress,deliveredRecipients,verifiedReceivingDomain,managedReceivingProbe,verifiedManagedReceivingProbe,
- stripePlan,selectStripeSubscription,sheetConfigSchema,sheetRows,sheetRanges,
+ stripePlan,selectStripeSubscription,stripeCustomerPointer,sheetConfigSchema,sheetRows,sheetRanges,
  writeSheetRange,receivedEmailBody,type PaidPlanId,type ApprovalPayload,type StripeMode,
 } from './provider-policy.js';
 
@@ -117,11 +117,9 @@ export async function storeProviderEvent(provider:'stripe'|'resend',id:string,pa
  return {received:true,duplicate:result.rowCount===0};
 }
 function stripePointer(event:Stripe.Event):StripePointer|null {
- if(!['customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','checkout.session.completed','checkout.session.async_payment_succeeded','invoice.paid','invoice.payment_failed','invoice.payment_action_required'].includes(event.type))return null;
- const object=event.data.object as unknown as {customer?:string|{id:string}};
- const customerId=typeof object.customer==='string'?object.customer:object.customer?.id;
+ const pointer=stripeCustomerPointer(event);
  const checkout=checkoutCompletionPointer(event);
- return customerId?{id:event.id,type:event.type,created:event.created,customerId,mode:event.livemode?'live':'test',...(checkout?{checkout}:{})}:null;
+ return pointer?{...pointer,...(checkout?{checkout}:{})}:null;
 }
 
 /** Neither completion evidence nor entitlement reconciliation can starve the other. */
