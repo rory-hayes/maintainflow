@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type {PoolClient} from 'pg';
-import {deliveryAttemptAuditSchema,recordDeliveryAttemptAudit,deliveryAttemptElapsed,deliveryResponseStatus} from '../server/integrations/delivery-attempt-audit.js';
+import {deliveryAttemptAuditSchema,recordDeliveryAttemptAudit,deliveryAttemptElapsed,deliveryResponseStatus,reportGoogleSheetsDeliveryStage,type GoogleSheetsDeliveryStage} from '../server/integrations/delivery-attempt-audit.js';
 
 const identity={workspaceId:'534631dc-88ee-445d-8e28-ac9c378b006f',deliveryId:'55a0be98-11e4-453b-9293-e7706917bfab'};
 const common={version:1 as const,integrationId:'ffac6f3c-ece8-4a0e-8431-d8564863e9d0',attemptId:'30f1586b-637d-4ab0-bf2b-e4a0ac143931',attempt:1,elapsedMs:12};
@@ -18,6 +18,25 @@ test('status observations admit only actual bounded integer values and elapsed t
  for(const value of [undefined,null,'200',NaN,Infinity,99,600,200.5,{}])assert.equal(deliveryResponseStatus(value),null);
  assert.equal(deliveryResponseStatus(100),100);assert.equal(deliveryResponseStatus(599),599);
  assert.equal(deliveryAttemptElapsed(100,112.9),12);assert.equal(deliveryAttemptElapsed(100,99),0);assert.equal(deliveryAttemptElapsed(0,Number.MAX_SAFE_INTEGER),2_147_483_647);
+});
+
+test('Sheets stages extend rather than replace historical audit records and never imply an HTTP response',()=>{
+ for(const stage of ['sheets_delivery','sheets_reservation','sheets_setup','sheets_access_step','sheets_credential_persist','sheets_range_write','sheets_write_commit']){
+  const event={...finished,stage,path:'sheets_unobserved',outcome:'retry',errorKind:'operation_failed',responseStatus:null};
+  assert.equal(deliveryAttemptAuditSchema.safeParse(event).success,true);
+ }
+ for(const stage of ['refresh_succeeded','https://private.example/token','SYNTHETIC_ERROR_CANARY'])assert.equal(deliveryAttemptAuditSchema.safeParse({...finished,stage}).success,false);
+});
+
+test('Sheets stage observations ignore invalid values and synchronous or asynchronous observer failures',async()=>{
+ const seen:GoogleSheetsDeliveryStage[]=[];
+ const canary={get stage(){throw new Error('SYNTHETIC_PRIVATE_CANARY_MUST_NOT_BE_READ');},toString(){throw new Error('SYNTHETIC_PRIVATE_CANARY_MUST_NOT_BE_COERCED');}};
+ for(const value of [undefined,null,{},canary,1,'sheets_delivery','refresh_token','https://private.example/token'])reportGoogleSheetsDeliveryStage(stage=>{seen.push(stage);},value);
+ assert.equal(seen.length,0);
+ reportGoogleSheetsDeliveryStage(stage=>{seen.push(stage);},'sheets_access_step');assert.deepEqual(seen,['sheets_access_step']);
+ assert.doesNotThrow(()=>reportGoogleSheetsDeliveryStage(()=>{throw new Error('SYNTHETIC_OBSERVER_FAILURE');},'sheets_range_write'));
+ reportGoogleSheetsDeliveryStage(async()=>{throw new Error('SYNTHETIC_ASYNC_OBSERVER_FAILURE');},'sheets_write_commit');
+ await new Promise(resolve=>setImmediate(resolve));
 });
 
 test('valid audit serializes only its exact allowlist and uses the existing worker audit boundary',async()=>{

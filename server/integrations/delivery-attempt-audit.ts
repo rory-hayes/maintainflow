@@ -5,13 +5,21 @@ const elapsedMs=z.number().int().min(0).max(2_147_483_647);
 const attempt=z.number().int().min(1).max(5);
 const common={version:z.literal(1),integrationId:z.uuid()};
 const running={...common,attemptId:z.uuid(),attempt,elapsedMs};
+const sheetsStages=['sheets_reservation','sheets_setup','sheets_access_step','sheets_credential_persist','sheets_range_write','sheets_write_commit'] as const;
+export type GoogleSheetsDeliveryStage=typeof sheetsStages[number];
+export type GoogleSheetsDeliveryStageObserver=(stage:GoogleSheetsDeliveryStage)=>void|Promise<void>;
+/** Internal, best-effort last-entered operation only; no provider values are inspected. */
+export function reportGoogleSheetsDeliveryStage(observer:GoogleSheetsDeliveryStageObserver|undefined,stage:unknown){
+ if(typeof observer!=='function'||typeof stage!=='string'||!(sheetsStages as readonly string[]).includes(stage))return;
+ try{void Promise.resolve(observer(stage as GoogleSheetsDeliveryStage)).catch(()=>{});}catch{/* Diagnostics cannot change delivery. */}
+}
 const claimed=z.object({
  ...running,phase:z.literal('claimed'),priorAttempts:z.number().int().min(0).max(4),
  acquiredFrom:z.enum(['queued','retry','expired_lease']),priorLeaseExpired:z.boolean(),
 }).strict().refine(value=>value.attempt===value.priorAttempts+1&&value.priorLeaseExpired===(value.acquiredFrom==='expired_lease'));
 const finished=z.object({
  ...running,phase:z.literal('finished'),
- stage:z.enum(['integration_lookup','sheets_delivery','webhook_request','delivery_commit']),
+ stage:z.enum(['integration_lookup','sheets_delivery',...sheetsStages,'webhook_request','delivery_commit']),
  path:z.enum(['not_started','webhook_request','sheets_unobserved','sheets_already_delivered','sheets_range_write']),
  outcome:z.enum(['delivered','retry','failed','fence_lost']),
  errorKind:z.enum(['none','http_status','operation_failed','aborted','persistence_error']),

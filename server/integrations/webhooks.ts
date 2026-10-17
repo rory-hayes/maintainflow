@@ -159,7 +159,7 @@ export async function processOneDelivery(options: {transport?: typeof publicRequ
       // invalid outbox row was restored or inserted outside the normal enqueue.
       if(delivery.payload.event!=='document.approved')throw new Error('Google Sheets accepts document approval events only.');
       const {sendGoogleSheets}=await import('./providers.js');
-      const result=await sendGoogleSheets(integration,delivery,{signal:options.signal}) as {status:number;deliveryPath?:unknown};
+      const result=await sendGoogleSheets(integration,delivery,{signal:options.signal,observeStage:value=>{stage=value;}}) as {status:number;deliveryPath?:unknown};
       status=result.status;
       if(result.deliveryPath==='sheets_already_delivered'||result.deliveryPath==='sheets_range_write')path=result.deliveryPath;
     } else {
