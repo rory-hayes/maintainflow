@@ -5,10 +5,17 @@ import {z} from 'zod';
 const schema=JSON.parse(readFileSync(new URL('../../fixtures/automations/document-approved.schema.json',import.meta.url),'utf8'));
 const approvalSchema=z.fromJSONSchema(schema);
 const failureSchema=z.fromJSONSchema(JSON.parse(readFileSync(new URL('../../fixtures/automations/document-failed.schema.json',import.meta.url),'utf8')));
-type ReceiverInput={body:Buffer;headers:Record<string,string|undefined>};
+export type ReceiverInput={body:Buffer;headers:Record<string,string|undefined>};
 function verifySignedBody(input:ReceiverInput,secret:string,nowSeconds:number) {
  if(!secret||input.body.length>1024*1024)throw new Error('Missing receiver secret or payload limit exceeded');
- const headers=Object.fromEntries(Object.entries(input.headers).map(([key,value])=>[key.toLowerCase(),value]));
+ if(!Number.isSafeInteger(nowSeconds)||nowSeconds<0)throw new Error('Receiver clock is invalid');
+ const headers:Record<string,string|undefined>={};
+ const signedHeaders=new Set(['x-folio-timestamp','x-folio-signature','x-folio-delivery','idempotency-key']);
+ for(const [key,value] of Object.entries(input.headers)){
+  const name=key.toLowerCase();
+  if(signedHeaders.has(name)&&(Object.hasOwn(headers,name)||typeof value!=='string'))throw new Error('Delivery headers are ambiguous or invalid');
+  headers[name]=value;
+ }
  const timestamp=headers['x-folio-timestamp']||'',signature=headers['x-folio-signature']||'',deliveryId=headers['x-folio-delivery']||'';
  if(!/^\d{10,12}$/.test(timestamp)||Math.abs(nowSeconds-Number(timestamp))>300)throw new Error('Delivery timestamp is invalid or expired');
  if(!z.uuid().safeParse(deliveryId).success||headers['idempotency-key']!==deliveryId)throw new Error('Delivery identity is invalid');
@@ -23,6 +30,14 @@ export function verifyApprovalDelivery(input:ReceiverInput,secret:string,nowSeco
  // Caller must atomically persist (connectionId, deliveryId) and an outbox item before
  // acknowledging 2xx. This pure verifier deliberately does not pretend to deduplicate.
  return {deliveryId:verified.deliveryId,event};
+}
+
+/** Use one explicitly configured parser per invoice recipe, before durable acceptance. */
+export function verifyParserApprovalDelivery(input:ReceiverInput,secret:string,parserId:string,nowSeconds=Math.floor(Date.now()/1000)) {
+ const expectedParser=z.uuid().parse(parserId).toLowerCase();
+ const verified=verifyApprovalDelivery(input,secret,nowSeconds);
+ if(verified.event.document.parserId.toLowerCase()!==expectedParser)throw new Error('Delivery parser is outside this receiver scope');
+ return verified;
 }
 
 /** For receivers explicitly subscribed to approval and/or terminal failure events. */

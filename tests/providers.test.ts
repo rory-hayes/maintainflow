@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID,randomBytes} from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import Fastify,{type FastifyInstance} from 'fastify';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
@@ -10,6 +11,9 @@ import Stripe from 'stripe';
 import {Webhook} from 'svix';
 import {Resend,type GetReceivingEmailResponseSuccess,type GetDomainResponseSuccess} from 'resend';
 import {ZodError} from 'zod';
+import {OAuth2Client} from 'google-auth-library';
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {registerCore} from '../server/core/index.js';
 import {adminPool,appPool,withWorkspace,closeDatabase} from '../server/core/db.js';
 import {hashToken} from '../server/core/auth.js';
@@ -22,7 +26,7 @@ import {requireTestStripeKey,verifyStripePayload,verifyResendPayload,deliveredRe
 const suffix=randomUUID();
 const stripeSecret='whsec_controlled_fixture';
 const svixSecret=`whsec_${randomBytes(32).toString('base64')}`;
-const environmentKeys=['FOLIO_BILLING_MOCK','STRIPE_MODE','STRIPE_ACCOUNT_ID','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_PRICE_STANDARD','STRIPE_PRICE_TEAM','RESEND_API_KEY','RESEND_WEBHOOK_SECRET','RESEND_INBOUND_ENABLED','GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REDIRECT_URI'];
+const environmentKeys=['FOLIO_BILLING_MOCK','STRIPE_MODE','STRIPE_ACCOUNT_ID','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_PRICE_STANDARD','STRIPE_PRICE_TEAM','RESEND_API_KEY','RESEND_WEBHOOK_SECRET','RESEND_INBOUND_ENABLED','GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REDIRECT_URI','INTEGRATION_ENCRYPTION_KEY','INTEGRATION_ENCRYPTION_KEY_FILE'];
 const originalEnv=Object.fromEntries(environmentKeys.map(key=>[key,process.env[key]]));
 const fixtureEvents:string[]=[];
 let app:FastifyInstance,account:any,other:any,parser:any;
@@ -33,6 +37,7 @@ async function request(method:any,url:string,payload?:unknown,actor=account){ret
 async function signup(name:string){const response=await app.inject({method:'POST',url:'/api/auth/register',payload:{name,email:`${name}-${suffix}@example.test`,password:'controlled fixture password',workspaceName:`Provider ${name}`},headers:{origin:config.origin}});assert.equal(response.statusCode,201,response.body);const value=response.json();workspaceIds.push(value.workspace.id);userIds.push(value.user.id);return {...value,cookie:response.cookies.map(c=>`${c.name}=${c.value}`).join('; ')};}
 async function event(provider:'stripe'|'resend',id:string,payload:unknown){fixtureEvents.push(`${provider}:${id}`);return storeProviderEvent(provider,id,payload);}
 before(async()=>{
+ process.env.INTEGRATION_ENCRYPTION_KEY=randomBytes(32).toString('base64');delete process.env.INTEGRATION_ENCRYPTION_KEY_FILE;
  delete process.env.FOLIO_BILLING_MOCK; delete process.env.STRIPE_MODE; delete process.env.STRIPE_ACCOUNT_ID; // This suite verifies the real adapter with controlled transport fixtures.
  process.env.STRIPE_SECRET_KEY='sk_test_controlled_fixture';process.env.STRIPE_WEBHOOK_SECRET=stripeSecret;
  process.env.STRIPE_PRICE_STANDARD='price_fixture_standard';process.env.STRIPE_PRICE_TEAM='price_fixture_team';
@@ -175,6 +180,65 @@ test('Google OAuth states are hashed, tied to the user, expiring, single-use, an
  assert.equal((await request('POST',`/api/google/${integrationId}/disconnect`,{})).statusCode,200);
  assert.equal((await adminPool.query('select * from oauth_states where integration_id=$1',[integrationId])).rowCount,0);
  assert.equal((await request('GET',`/api/google/callback?state=${encodeURIComponent(finalState)}&error=access_denied`)).statusCode,400);
+});
+
+test('Google disconnect returns the committed state for unreadable credentials and failed provider revocation',async()=>{
+ const original=OAuth2Client.prototype.revokeToken;let revokeCalls=0;
+ try{
+  OAuth2Client.prototype.revokeToken=(async()=>{revokeCalls++;throw new Error('SYNTHETIC_PROVIDER_SECRET_FAILURE');}) as typeof original;
+  for(const ciphertext of ['unreadable-synthetic-ciphertext',encryptSecret(JSON.stringify({refresh_token:'SYNTHETIC_DISCONNECT_REFRESH'}))]){
+   const id=randomUUID();
+   await adminPool.query("insert into integrations(id,workspace_id,parser_id,name,kind,config,secret_ciphertext) values($1,$2,$3,'Disconnect failure fixture','google_sheets',$4,$5)",[id,account.workspace.id,parser.id,JSON.stringify(mapping),ciphertext]);
+   const started=await request('POST','/api/google/start',{integrationId:id});assert.equal(started.statusCode,200,started.body);
+   const response=await request('POST',`/api/google/${id}/disconnect`,{});
+   assert.equal(response.statusCode,200,response.body);assert.equal(response.json().disconnected,true);assert.equal(response.json().providerRevoked,false);
+   assert.doesNotMatch(response.body,/SYNTHETIC_|ciphertext|Unsupported state/);
+   const {rows:[stored]}=await adminPool.query('select enabled,secret_ciphertext from integrations where id=$1',[id]);
+   assert.deepEqual(stored,{enabled:false,secret_ciphertext:null});
+   assert.equal((await adminPool.query('select count(*)::int n from oauth_states where integration_id=$1',[id])).rows[0].n,0);
+   assert.equal((await adminPool.query("select count(*)::int n from audit_events where workspace_id=$1 and action='google_sheets.disconnected' and entity_id=$2",[account.workspace.id,id])).rows[0].n,1);
+  }
+  assert.equal(revokeCalls,1,'An unreadable credential must not issue a provider request.');
+ }finally{OAuth2Client.prototype.revokeToken=original;}
+});
+
+test('Google disconnect confirms provider success and prevents future reservations',async()=>{
+ const id=randomUUID(),original=OAuth2Client.prototype.revokeToken;let revokeCalls=0;
+ try{
+  OAuth2Client.prototype.revokeToken=(async token=>{assert.equal(token,'SYNTHETIC_DISCONNECT_SUCCESS_REFRESH');revokeCalls++;return {status:200,data:{}};}) as typeof original;
+  await adminPool.query("insert into integrations(id,workspace_id,parser_id,name,kind,config,secret_ciphertext) values($1,$2,$3,'Disconnect success fixture','google_sheets',$4,$5)",[id,account.workspace.id,parser.id,JSON.stringify(mapping),encryptSecret(JSON.stringify({refresh_token:'SYNTHETIC_DISCONNECT_SUCCESS_REFRESH'}))]);
+  const {rows:[integration]}=await adminPool.query('select * from integrations where id=$1',[id]);
+  const response=await request('POST',`/api/google/${id}/disconnect`,{});
+  assert.equal(response.statusCode,200,response.body);assert.deepEqual(response.json(),{disconnected:true,providerRevoked:true,reason:null});assert.equal(revokeCalls,1);
+  await assert.rejects(reserveSheetWrite(integration,{id:randomUUID(),payload:{...approval,id:randomUUID()}}),/disconnected/);
+  const repeated=await request('POST',`/api/google/${id}/disconnect`,{});assert.equal(repeated.statusCode,200);assert.equal(repeated.json().providerRevoked,false);assert.equal(revokeCalls,1);
+ }finally{OAuth2Client.prototype.revokeToken=original;}
+});
+
+test('Google credentials and fixed row reservations survive three literal process starts with synthetic transport',async()=>{
+ const id=randomUUID(),eventId=randomUUID(),nextEventId=randomUUID();
+ await adminPool.query("insert into integrations(id,workspace_id,parser_id,name,kind,config,secret_ciphertext) values($1,$2,$3,'Cold process fixture','google_sheets',$4,$5)",[id,account.workspace.id,parser.id,JSON.stringify(mapping),encryptSecret(JSON.stringify({refresh_token:'SYNTHETIC_INITIAL_REFRESH',expiry_date:Date.now()-60_000}))]);
+ async function cold(event:string,expectedRefreshToken:string){
+  // Pass only synthetic test configuration and the owned runtime database.
+  assert.ok(process.env.DATABASE_ADMIN_URL||process.env.PGHOST,'Cold-process acceptance requires an explicit owned test database.');
+  const environment:NodeJS.ProcessEnv={NODE_ENV:'test',TSX_DISABLE_CACHE:'1',DATABASE_POOL_MAX:'1',FOLIO_SYNTHETIC_GOOGLE_PROCESS:'true',GOOGLE_CLIENT_ID:'fixture.apps.googleusercontent.com',GOOGLE_CLIENT_SECRET:'controlled-fixture-secret',GOOGLE_REDIRECT_URI:`${config.origin}/api/google/callback`};
+  for(const key of ['PATH','TMPDIR','PGHOST','PGPORT','PGDATABASE','PGADMINUSER','PGUSER','PGPASSWORD','DATABASE_URL','DATABASE_ADMIN_URL','DATABASE_SCHEMA','DATABASE_CA_CERT','INTEGRATION_ENCRYPTION_KEY'])if(process.env[key]!==undefined)environment[key]=process.env[key];
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'folio-google-cold-'));
+  const child=spawn(process.execPath,['--import',import.meta.resolve('tsx'),fileURLToPath(new URL('./fixtures/google-sheets-process.ts',import.meta.url))],{cwd:directory,env:environment,stdio:['pipe','pipe','pipe']});
+  const stdout:Buffer[]=[],stderr:Buffer[]=[];child.stdout.on('data',b=>stdout.push(b));child.stderr.on('data',b=>stderr.push(b));
+  child.stdin.end(JSON.stringify({integrationId:id,workspaceId:account.workspace.id,expectedRefreshToken,delivery:{id:randomUUID(),payload:{...approval,id:event}}}));
+  const timer=setTimeout(()=>child.kill('SIGTERM'),20_000);
+  const code=await new Promise<number|null>((resolve,reject)=>{child.once('error',reject);child.once('close',resolve);}).finally(async()=>{clearTimeout(timer);await fs.rm(directory,{recursive:true,force:true});});
+  assert.equal(code,0,Buffer.concat(stderr).toString());return JSON.parse(Buffer.concat(stdout).toString());
+ }
+ const first=await cold(eventId,'SYNTHETIC_INITIAL_REFRESH');
+ assert.equal(first.result.deliveryPath,'sheets_range_write');assert.equal(first.accessCalls,1);assert.equal(first.requestCount,1);assert.equal(first.writes.length,1);
+ const replay=await cold(eventId,'SYNTHETIC_PERSISTED_REFRESH');
+ assert.notEqual(replay.pid,first.pid);assert.equal(replay.result.deliveryPath,'sheets_already_delivered');assert.equal(replay.accessCalls,0);assert.equal(replay.requestCount,0);assert.deepEqual(replay.writes,first.writes);
+ const next=await cold(nextEventId,'SYNTHETIC_PERSISTED_REFRESH');
+ assert.notEqual(next.pid,first.pid);assert.notEqual(next.pid,replay.pid);assert.equal(next.result.deliveryPath,'sheets_range_write');assert.equal(next.accessCalls,1);assert.equal(next.requestCount,1);assert.equal(next.writes.length,2);
+ assert.deepEqual(next.writes.find((write:any)=>write.event_key===eventId),first.writes[0]);
+ assert.deepEqual(next.writes.map((write:any)=>write.data_range).sort(),["'Supplier''s invoices'!A2:C3","'Supplier''s invoices'!A4:C5"]);
 });
 
 test('bounded inbound continuation resumes after a committed body without decoding it twice',async()=>{

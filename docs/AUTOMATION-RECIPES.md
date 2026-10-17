@@ -9,6 +9,7 @@ Files:
 - [`recipes.json`](../fixtures/automations/recipes.json): all four platform mappings and expected synthetic values.
 - [`examples/automations/verify.ts`](../examples/automations/verify.ts): server-side raw-body signature/schema verifier, with no listener, forwarding, or account changes.
 - [`tests/automations.test.ts`](../tests/automations.test.ts): local tests for all mappings, literal identifiers, signature compatibility, tampering, timestamp expiry, and stable replay identity. `tests/integrations.test.ts` also validates actual enqueued approval payloads against the supplied envelope schema.
+- [`tests/webhook-receiver.test.ts`](../tests/webhook-receiver.test.ts): listener-free sender/receiver contract drill with a synthetic transactional receipt/outbox fixture, including failed commit, lost response, concurrent duplicates and replay. It supplies no durable receiver service.
 
 ## Shared setup and event contract
 
@@ -58,7 +59,11 @@ Every request supplies `X-Folio-Delivery`, `Idempotency-Key`, `X-Folio-Timestamp
 
 The supplied `verifyApprovalDelivery({body, headers}, secret)` returns `{deliveryId,event}` after these checks. It is a tested building block for a trusted receiving endpoint or a compatible server-side workflow code step, not a deployed relay and not a durable deduplication service. If the chosen workflow cannot access the exact raw bytes, protected secret, cryptographic comparison, and transactional storage, put an owned verification receiver in front of it. Do not remove verification simply to make a test trigger fire.
 
+For a parser-specific invoice workflow, use `verifyParserApprovalDelivery({body, headers}, secret, parserId)` before saving a receipt or starting any action. It validates the configured parser UUID and rejects a validly signed approval from another parser. Both verifiers reject ambiguous duplicate signed headers and an invalid receiver clock. An HTTP adapter must preserve the raw bytes and reject duplicate security headers before its framework collapses them into one value.
+
 A receiving service should atomically save `(connectionId, deliveryId)` with a unique constraint and a pending downstream/outbox record before returning 2xx. A previously accepted ID returns 2xx without creating another action. Its worker should forward only validated events and retain its own retries/error status. The automation's final destination should additionally upsert by approval ID so replay or a lost response cannot add duplicate invoices. The verifier intentionally does not pretend to implement this persistence.
+
+Save the exact body hash with that receipt and reject a different body presented under an already saved delivery ID. Scope receipts to the configured connection, and retain pending work when the receiver's downstream credential fails. The signature covers `timestamp.body`; it does not authenticate the delivery/idempotency headers. An approval-ID upsert is therefore required even when delivery receipts exist. Verify the signature and parser scope again before acknowledging a duplicate request.
 
 Folio retries non-2xx/timeouts up to five attempts and keeps the same delivery identity. Manual replay retains that identity too. Folio's Delivered status proves HTTP acceptance by the configured receiver; it does not prove that an asynchronous Zap/scenario/flow's final destination action succeeded. Inspect that platform's execution history and the resulting record separately.
 
@@ -116,6 +121,18 @@ Use `/help/api` for the exact endpoints/scopes/error codes. The [Google Drive �
 
 ## Local and external evidence
 
-Run `node --import tsx --test --test-concurrency=1 tests/automations.test.ts` for the outbound contract checks. The integrated suite also compares real `enqueueApprovals()` output with the example schema. Those checks verify fixture shape, field paths, scalar types, HMAC compatibility and rejection behavior. They do not compile/import a Zap, Make blueprint or Power Automate package; the outbound `recipes.json` is a mapping manifest. The separate Google Drive intake guide describes the actual n8n import artifact, real-engine test and its controlled-provider limits.
+Run `node --import tsx --test --test-concurrency=1 tests/automations.test.ts tests/webhook-receiver.test.ts tests/source-intake-recipe.test.ts` for the listener-free contract checks. These tests import the sender's pure request construction and do not load application environment files or open a database. The integrated suite separately compares real `enqueueApprovals()` output with the example schema. The contract checks verify fixture shape, field paths, scalar types, HMAC compatibility and rejection behavior. The receiver transaction and downstream upsert in the drill are in-memory fixtures; their success does not establish durable storage, worker scheduling or real account execution. The source-recipe credential cases inject HTTP 401/403 at metadata, stable-source reread, upload and result-read guards, assert that later stages stop, and retain the same source key when the metadata guard is rerun with a successful synthetic response. They do not revoke any real credential or test a platform's native download/authentication node. The tests do not compile/import a Zap, Make blueprint or Power Automate package; the outbound `recipes.json` is a mapping manifest. The separate Google Drive intake guide describes the actual n8n import artifact, real-engine test and its controlled-provider limits.
 
 For each actual account, record trigger settings, verification/dedupe proof, a real approved-document delivery, destination identifiers and literal values, retry behavior, and execution history before marking its bridge externally verified. No platform-specific success has been claimed from the local fixtures.
+
+The following account checks remain required for any advertised bridge:
+
+| Bridge | Account-specific trigger and credential acceptance |
+| --- | --- |
+| Zapier | Verify the configured raw-hook or owned relay boundary; use an agreed credential failure at the downstream action, inspect failed execution history, restore the credential and prove one approval-keyed destination record. |
+| Make | Verify raw bytes/headers or the owned relay; test any configured extra authentication and a downstream credential failure, then successful recovery without duplicate records. |
+| n8n outbound | Verify the actual production webhook, protected verification credential and durable acceptance; test the configured authentication/downstream credential failure and retry with one destination record. |
+| Power Automate | Verify the owned HMAC receiver and permitted Entra identity; reject an unapproved/invalid relay credential, then prove recovery and one approval-keyed destination record. |
+| Google Drive → n8n intake | Prove real scheduled create/update triggers, downloaded bytes, expired/revoked source and MaintainFlow credentials, stable source-key recovery and current-result completion in the owned account. |
+
+Coordinate all remote credential changes and receiver faults with the account operator. A new workspace alone does not isolate global monitors or existing subscriptions. The real signed receiver drill must record fail → retry → success, explicit replay, exact payload and identities, audited replay and receipt/downstream state; the local fixtures do not close that gate.

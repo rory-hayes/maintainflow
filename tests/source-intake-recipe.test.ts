@@ -66,6 +66,26 @@ test('typed HTTP failures preserve actionable retry boundaries without reflectin
  assert.throws(()=>g.responseBody(response({message:'Document decoding is busy. Retry shortly.'},429),'Upload'),/same.*(?:source|file).*version/i);
 });
 
+test('credential rejection at each guarded Drive or MaintainFlow step stops later stages and recovery keeps the source key',()=>{
+ const operations=['Read Drive metadata','Recheck Drive metadata','Upload to MaintainFlow','Read MaintainFlow document'];
+ for(const status of [401,403])for(let failedStep=0;failedStep<operations.length;failedStep++){
+  const calls:string[]=[];
+  const reply=(step:number,success:any)=>{
+   calls.push(operations[step]);
+   return step===failedStep?response({message:'SYNTHETIC_SECRET_MUST_NOT_BE_REFLECTED'},status):success;
+  };
+  assert.throws(()=>{
+   const p=g.prepareSource(g.configure(source.trigger,source.config),reply(0,response(source.metadata)));
+   const bytes=g.verifyBytes(p,Buffer.byteLength(source.contentUtf8),source.metadata.md5Checksum,source.binaryMetadata);
+   const stable=g.verifyStableSource(bytes,reply(1,response(source.metadata)));
+   const pending=g.beginPolling(stable,reply(2,responses.upload),1000);
+   g.inspectDocument(g.nextPoll(pending,1100),reply(3,responses.ready));
+  },(error:any)=>error.message.includes(`HTTP ${status}`)&&!error.message.includes('SYNTHETIC_SECRET')&&(status===401?/stored credential/.test(error.message):/scopes, file permissions and parser workspace/.test(error.message)));
+  assert.deepEqual(calls,operations.slice(0,failedStep+1));
+  assert.equal(prepared().idempotencyKey,source.expectedIdempotencyKey,'Credential recovery must not invent a new source identity');
+ }
+});
+
 test('accepted upload is pending and a duplicate with no job must resolve the current document',()=>{
  const p=polling();assert.equal(p.done,false);assert.throws(()=>g.result(p),/not_complete/);
  const duplicate=g.beginPolling(downloaded(),responses.duplicate,1000);assert.equal(duplicate.uploadedJobId,null);assert.equal(duplicate.done,false);

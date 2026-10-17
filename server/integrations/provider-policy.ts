@@ -120,8 +120,19 @@ export function publicProviderError(provider:string,error:unknown) {
  return `${provider} operation failed. Check provider configuration and the documented release gates.`;
 }
 export function emailAddress(value:string) {
- const address=(value.match(/<([^<>]+)>/)?.[1]||value).trim().toLowerCase();
+ // Authorize one complete mailbox only. A partial angle-bracket match must not
+ // hide a second mailbox, trailing header text or injected control characters.
+ if(/[\u0000-\u001f\u007f]/.test(value))return null;
+ const complete=value.trim();
+ const mailbox=complete.includes('<')||complete.includes('>')?complete.match(/^(?:"(?:[^"\\]|\\.)*"|[^<>"@,;]*)\s*<([^<>]+)>$/)?.[1]:complete;
+ if(!mailbox)return null;
+ const address=mailbox.trim().toLowerCase();
  return /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(address)?address:null;
+}
+/** Retrieved message content must belong to the signed durable event pointer. */
+export function receivedEmailMatchesId(emailId:string,email:unknown):boolean {
+ const expected=z.string().uuid().safeParse(emailId),actual=z.object({id:z.string().uuid()}).safeParse(email);
+ return expected.success&&actual.success&&expected.data.toLowerCase()===actual.data.id.toLowerCase();
 }
 /**
  * Intersect provider-supplied received_for values; visible To/CC never authorizes routing.
