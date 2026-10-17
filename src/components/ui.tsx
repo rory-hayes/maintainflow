@@ -10,10 +10,10 @@ export function ErrorState({error,retry}:{error:unknown;retry?:()=>void}){return
 export function Empty({title,description,children}:{title:string;description:string;children?:ReactNode}){return <div className="empty"><FileText size={36} strokeWidth={1.5}/><h2>{title}</h2><p>{description}</p>{children}</div>;}
 export function Status({value}:{value:string}){return <span className={clsx('status',value)}><span/>{value.replaceAll('_',' ').replace(/^./,s=>s.toUpperCase())}</span>;}
 export function PageHeader({title,description,children}:{title:string;description?:string;children?:ReactNode}){return <div className="page-heading"><div><h1>{title}</h1>{description&&<p>{description}</p>}</div><div className="actions">{children}</div></div>;}
-export function Tabs({items,value,onChange,label='Sections'}:{items:string[];value:string;onChange:(v:string)=>void;label?:string}){
+export function Tabs({items,value,onChange,label='Sections',idPrefix}:{items:string[];value:string;onChange:(v:string)=>void;label?:string;idPrefix?:string}){
   const buttons=useRef<Array<HTMLButtonElement|null>>([]);
   const activeIndex=Math.max(0,items.indexOf(value));
-  return <div className="tabs" role="tablist" aria-label={label}>{items.map((item,index)=><button ref={element=>{buttons.current[index]=element;}} type="button" role="tab" aria-selected={index===activeIndex} tabIndex={index===activeIndex?0:-1} className={index===activeIndex?'active':''} onClick={()=>onChange(item)} onKeyDown={event=>{
+  return <div className="tabs" role="tablist" aria-label={label}>{items.map((item,index)=><button ref={element=>{buttons.current[index]=element;}} type="button" role="tab" id={idPrefix?`${idPrefix}-tab-${index}`:undefined} aria-controls={idPrefix?`${idPrefix}-panel-${index}`:undefined} aria-selected={index===activeIndex} tabIndex={index===activeIndex?0:-1} className={index===activeIndex?'active':''} onClick={()=>onChange(item)} onKeyDown={event=>{
     let next:number;
     if(event.key==='ArrowRight')next=(index+1)%items.length;
     else if(event.key==='ArrowLeft')next=(index-1+items.length)%items.length;
