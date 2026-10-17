@@ -40,7 +40,7 @@ This calculation reads only the provided policy file. It does not configure a de
 
 ## Failure and recovery behavior
 
-Enabled missing, malformed, oversized, duplicate-version, unsafe or digest/version-mismatched configuration returns the fixed503 `Checkout terms configuration is unavailable.` when a new terms reservation is needed. No raw JSON, policy text or parse error is echoed. It never returns a legacy policy/null fallback on those errors.
+Enabled missing, malformed, oversized, duplicate-version, unsafe or digest/version-mismatched configuration raises an internal503 error when a new terms reservation is needed. The normal application returns HTTP503 with its generic sanitized server-error message; it does not expose the internal exception text, raw JSON, policy text or parse error. It never returns a legacy policy/null fallback on those errors.
 
 The reader is lazy at the existing new-reservation point. It does not fail the application at startup or prevent historical record access. Existing reservations replay their pinned creation parameters/key even when current configuration changes, breaks or is explicitly disabled; no current policy overwrites historical evidence. The authenticated history list can report capture disabled/unavailable while retaining existing records.
 
