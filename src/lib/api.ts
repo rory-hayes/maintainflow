@@ -1,4 +1,4 @@
-import {keepPreviousData,useQuery,useQueryClient} from '@tanstack/react-query';
+import {environmentManager,keepPreviousData,useQuery,useQueryClient,type QueryClient,type UseQueryOptions} from '@tanstack/react-query';
 import {useRef,useState} from 'react';
 
 export class ApiError extends Error {constructor(message:string,public status:number){super(message);}}
@@ -14,7 +14,17 @@ export async function api<T=any>(path:string,options:RequestInit={}):Promise<T> 
 }
 export const post=<T=any>(path:string,body:unknown={})=>api<T>(path,{method:'POST',body:JSON.stringify(body)});
 export const patch=<T=any>(path:string,body:unknown)=>api<T>(path,{method:'PATCH',body:JSON.stringify(body)});
-export function useData<T=any>(path:string,poll:boolean|number=false,retainPrevious=false){return useQuery<T>({queryKey:[workspaceId(),path],queryFn:({signal})=>api<T>(path,{signal}),refetchInterval:typeof poll==='number'?poll:poll?1800:false,placeholderData:retainPrevious?keepPreviousData:undefined});}
+type DataQueryPolicy={stopOnNotFound?:boolean};
+export function dataQueryOptions<T=any>(client:QueryClient,path:string,poll:boolean|number=false,retainPrevious=false,policy:DataQueryPolicy={}):UseQueryOptions<T>{
+  const interval=typeof poll==='number'?poll:poll?1800:false;
+  const options:UseQueryOptions<T>={queryKey:[workspaceId(),path],queryFn:({signal})=>api<T>(path,{signal}),refetchInterval:interval,placeholderData:retainPrevious?keepPreviousData:undefined};
+  if(!policy.stopOnNotFound)return options;
+  // Preserve client/key-specific retry settings for every other error.
+  const retry=client.defaultQueryOptions(options).retry??(environmentManager.isServer()?0:3);
+  const notFound=(error:unknown)=>error instanceof ApiError&&error.status===404;
+  return {...options,refetchInterval:query=>notFound(query.state.error)?false:interval,retry:(failureCount,error)=>!notFound(error)&&(typeof retry==='function'?retry(failureCount,error):retry===true||(typeof retry==='number'&&failureCount<retry))};
+}
+export function useData<T=any>(path:string,poll:boolean|number=false,retainPrevious=false,policy:DataQueryPolicy={}){return useQuery<T>(dataQueryOptions<T>(useQueryClient(),path,poll,retainPrevious,policy));}
 export function useAction(){
   const client=useQueryClient();const running=useRef(false);const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [message,setMessage]=useState('');
   async function run<T>(action:()=>Promise<T>,success='Saved.'):Promise<T|undefined>{if(running.current)return undefined;running.current=true;setBusy(true);setError('');setMessage('');try{const result=await action();await client.invalidateQueries();setMessage(success);return result;}catch(e){setError(e instanceof Error?e.message:'Something went wrong.');return undefined;}finally{running.current=false;setBusy(false);}}
