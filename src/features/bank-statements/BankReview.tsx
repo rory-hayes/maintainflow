@@ -27,7 +27,7 @@ export default function BankReview(){
   const {id}=useParams();return <BankReviewScreen key={id} id={id!}/>;
 }
 function BankReviewScreen({id}:{id:string}){
-  const query=useData<Detail>(`/api/bank-statements/${id}`,2500),session=useSession().data,action=useAction();
+  const query=useData<Detail>(`/api/bank-statements/${id}`,2500,false,{stopOnNotFound:true}),session=useSession().data,action=useAction();
   const [selectedRun,setSelectedRun]=useState(''),[page,setPage]=useState(1),[evidence,setEvidence]=useState<Evidence|null>(null),[mobileTab,setMobileTab]=useState('Transactions');
   const [reviewState,setReviewState]=useState({dirty:false,busy:false}),[pendingRun,setPendingRun]=useState(''),[extractOpen,setExtractOpen]=useState(false),[extractLocale,setExtractLocale]=useState<BankLocale|''>(''),[useLatestExtraction,setUseLatestExtraction]=useState(false);
   const [sourceRequest,setSourceRequest]=useState(0),[mobile,setMobile]=useState(()=>typeof window!=='undefined'&&window.matchMedia('(max-width:1000px)').matches);
