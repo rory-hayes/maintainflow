@@ -105,7 +105,8 @@ The server reads `.env.local` and `.env` from the project directory. Keep server
 | `PGADMINUSER`, `PGUSER` | Local fallback `folio_admin`, `folio_app` |
 | `INTEGRATION_ENCRYPTION_KEY` | Production-required base64 32-byte AES-GCM key; local private file fallback in development |
 | `OPENAI_API_KEY` | Server-only OpenAI credential; current local setup was completed through the approved secure flow |
-| `FOLIO_BILLING_MOCK` | Literal `true` opts into local billing simulation; disabled when `NODE_ENV=production` |
+| `FOLIO_BILLING_MOCK` | Literal `true` opts into billing simulation; production requires a configured private preview |
+| `FOLIO_PREVIEW_STRIPE_TEST` | Default off. Explicit private Stripe TEST opt-in with strict server bindings and the existing invite gate; see [billing acceptance](docs/BILLING-LAUNCH-ACCEPTANCE.md). Canonical preview remains simulated. |
 | `LOG_LEVEL` | `warn` |
 
 Resend custom-domain and managed-inbox settings, Google OAuth configuration, and the separate deferred Stripe test adapter are documented in [PROVIDERS.md](docs/PROVIDERS.md). The user-requested billing mock changes real local plan limits without Stripe calls or payment; the UI identifies its simulated state. Missing receiving/OAuth prerequisites keep those connections blocked, with no fabricated usable inbox or spreadsheet-sync success. OpenAI uses the fixed `gpt-5.4-mini-2026-03-17` snapshot through explicit API/worker entrypoint initialization. Importing the application for tests does not enable it. [AI-EXTRACTION.md](docs/AI-EXTRACTION.md) records its provenance, cost and evidence contracts.

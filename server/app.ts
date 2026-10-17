@@ -14,7 +14,7 @@ import {setExtractionProvider} from './core/worker.js';
 import {registerExports} from './integrations/exports.js';
 import {registerIntegrations} from './integrations/webhooks.js';
 import {registerProviders} from './integrations/providers.js';
-import {previewEnabled,validatePreviewConfiguration} from './core/preview.js';
+import {previewEnabled,previewBillingMode,validatePreviewConfiguration} from './core/preview.js';
 import {storageDiagnostic} from './core/storage.js';
 import {requestRateLimitOptions} from './core/rate-limit.js';
 import {accountEmailStatus} from './integrations/account-email.js';
@@ -46,7 +46,7 @@ export async function buildApp(options: {rateLimitStore?: FastifyRateLimitStoreC
   });
   app.get('/api/health',async()=>({status:'ok',name:'Folio',environment:previewEnabled()?'preview':config.production?'production':'local',revision:process.env.VERCEL_GIT_COMMIT_SHA||null,limits:{maxBytes:config.maxBytes,maxPages:config.maxPages}}));
   registerOperationalHealth(app);
-  app.get('/api/config',async()=>({preview:previewEnabled(),inviteRequired:previewEnabled(),hosted:!!process.env.VERCEL,passwordRecovery:accountEmailStatus(),emailVerification:emailVerificationStatus(),publicService:installationConfiguration().publicDetails}));
+  app.get('/api/config',async()=>({preview:previewEnabled(),inviteRequired:previewEnabled(),previewBillingMode:previewBillingMode(),hosted:!!process.env.VERCEL,passwordRecovery:accountEmailStatus(),emailVerification:emailVerificationStatus(),publicService:installationConfiguration().publicDetails}));
   await registerCore(app,{signupPolicy:options.signupPolicy});await registerExports(app);await registerIntegrations(app);await registerProviders(app);
   const dist=path.resolve('dist'),hasStaticFiles=existsSync(dist);
   if(hasStaticFiles){
