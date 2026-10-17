@@ -38,7 +38,16 @@ function client(value:StripeMode):Stripe {
    create:async(input:any,options:any)=>{call('checkout-create',input,options);let result=sessions.get(options.idempotencyKey);if(!result){result={id:`cs_${randomUUID()}`,livemode:value==='live',status:'open',customer:input.customer,client_reference_id:input.client_reference_id,url:'https://checkout.stripe.com/c/pay/controlled'};sessions.set(options.idempotencyKey,result);}if(loseResponse){loseResponse=false;throw new Error('Controlled lost Checkout response');}return fault==='session-mode'?{...result,livemode:value!=='live'}:result;},
    retrieve:async(id:string)=>{call('checkout-read',id);return [...sessions.values()].find(s=>s.id===id);},expire:async(id:string)=>{call('checkout-expire',id);const s=[...sessions.values()].find(s=>s.id===id);s.status='expired';return s;},
   }},
-  billingPortal:{configurations:{retrieve:async()=>{call('portal-config',null);const result=portalConfiguration(value);if(fault==='portal-price')result.features.subscription_update.products![0]!.prices=['price_unapproved'];return result;}},sessions:{create:async(input:any)=>{call('portal-create',input);return {url:'https://billing.stripe.com/p/session/controlled',livemode:value==='live',customer:input.customer};}}},
+  billingPortal:{configurations:{retrieve:async(id:string,params?:Stripe.BillingPortal.ConfigurationRetrieveParams)=>{
+   call('portal-config',id,params);const result=portalConfiguration(value),update=result.features.subscription_update;
+   // Stripe omits these includable products unless the retrieval requests their expansion.
+   const expanded=params?.expand?.length===1&&params.expand[0]==='features.subscription_update.products';
+   if(!expanded||fault==='portal-products-missing')delete update.products;
+   else if(fault==='portal-products-null')update.products=null;
+   else if(fault==='portal-price')update.products![0]!.prices=['price_unapproved'];
+   if(fault==='portal-quantity')update.default_allowed_updates.push('quantity');
+   return result;
+  }},sessions:{create:async(input:any)=>{call('portal-create',input);return {url:'https://billing.stripe.com/p/session/controlled',livemode:value==='live',customer:input.customer};}}},
  } as unknown as Stripe;
 }
 const request=(url:string,payload:unknown={},account=actor,headers:Record<string,string>={})=>app.inject({method:'POST',url,payload:payload as any,headers:{cookie:account.cookie,origin:config.origin,...headers}});
@@ -273,6 +282,41 @@ test('live account eligibility, exact price and customer mode fail before Checko
  for(const issue of ['account','disabled','price-mode','customer-mode']){fault=issue;assert.notEqual((await request('/api/billing/checkout',{planId:'team'})).statusCode,200);}
  fault='';assert.equal(calls.filter(c=>c.operation==='checkout-create').length,before);
  process.env.STRIPE_SECRET_KEY='sk_test_fixture';const transportBefore=calls.length;assert.equal((await request('/api/billing/checkout',{planId:'standard'})).statusCode,503);assert.equal(calls.length,transportBefore);mode('live');
+});
+test('configured test and live portals expand products before creating the matching customer session',async()=>{
+ try{
+  for(const selected of ['test','live'] as const){
+   mode(selected);const owner=await signup();
+   assert.equal((await request('/api/billing/checkout',{planId:'standard'},owner)).statusCode,200);
+   const before=calls.length,response=await request('/api/billing/portal',{},owner);
+   assert.equal(response.statusCode,200,response.body);assert.equal(response.json().mode,selected);
+   assert.equal(response.json().url,'https://billing.stripe.com/p/session/controlled');
+   const observed=calls.slice(before);
+   assert.deepEqual(observed.map(call=>call.operation),['account','customer-read','portal-config','price','price','portal-create']);
+   assert.ok(observed.every(call=>call.mode===selected));
+   const retrieval=observed.find(call=>call.operation==='portal-config')!;
+   assert.equal(retrieval.input,'bpc_approved');assert.deepEqual(retrieval.options,{expand:['features.subscription_update.products']});
+   assert.deepEqual(observed.filter(call=>call.operation==='price').map(call=>call.input),[`price_${selected}_standard`,`price_${selected}_team`]);
+   assert.deepEqual(observed.at(-1)!.input,{customer:`cus_${selected}_${owner.workspace.id}`,return_url:`${config.origin}/app/usage`,configuration:'bpc_approved'});
+  }
+ }finally{fault='';mode('test');}
+});
+test('test and live portals refuse missing products, foreign prices and quantity updates before session creation',async()=>{
+ try{
+  for(const selected of ['test','live'] as const){
+   mode(selected);const owner=await signup();
+   assert.equal((await request('/api/billing/checkout',{planId:'standard'},owner)).statusCode,200);
+   for(const issue of ['portal-products-missing','portal-products-null','portal-price','portal-quantity']){
+    fault=issue;const before=calls.length,response=await request('/api/billing/portal',{},owner);
+    assert.equal(response.statusCode,500,response.body);assert.match(response.json().error,/approved MaintainFlow plan prices without quantity changes/);
+    const observed=calls.slice(before);
+    assert.deepEqual(observed.map(call=>call.operation),['account','customer-read','portal-config']);
+    assert.equal(observed.some(call=>call.operation==='portal-create'),false);
+    assert.deepEqual(observed.at(-1)!.options,{expand:['features.subscription_update.products']});
+   }
+   fault='';
+  }
+ }finally{fault='';mode('test');}
 });
 test('live portal uses the mode customer and validated approved configuration',async()=>{
  mode('live');const result=await request('/api/billing/portal');assert.equal(result.statusCode,200,result.body);assert.equal(result.json().mode,'live');const last=calls.at(-1)!;assert.equal(last.operation,'portal-create');assert.equal(last.input.configuration,'bpc_approved');assert.match(last.input.customer,/^cus_live_/);
