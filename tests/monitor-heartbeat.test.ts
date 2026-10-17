@@ -132,8 +132,28 @@ test('workflow uses trusted default-branch code and never downloads source artif
   const workflow = await fs.readFile(new URL('../.github/workflows/monitor-heartbeat.yml', import.meta.url), 'utf8');
   assert.match(workflow, /workflow_run:\s+workflows: \[Operational monitoring\]\s+types: \[completed\]\s+branches: \[main\]/);
   assert.match(workflow, /ref: \$\{\{ github.sha \}\}/); assert.match(workflow, /persist-credentials: false/);
-  assert.doesNotMatch(workflow, /ref:.*workflow_run|download-artifact|pull_request_target|workflow_dispatch/);
+  assert.doesNotMatch(workflow, /ref:.*workflow_run|download-artifact|pull_request_target|^\s{2}workflow_dispatch:/m);
   assert.deepEqual([...workflow.matchAll(/secrets\.([A-Z_]+)/g)].map(match => match[1]), ['FOLIO_MONITOR_HEARTBEAT_URL']);
   assert.match(workflow, /permissions:\s+contents: read/); assert.doesNotMatch(workflow, /: write/);
   for (const key of Object.keys(fixture()).filter(key => key.startsWith('SOURCE_'))) assert.match(workflow, new RegExp(`${key}: \\$\\{\\{ github.event.workflow_run\\.`));
+});
+
+test('only successful authenticated external ticks can keep the receiver alive in opt-in mode', async () => {
+  const external = {...fixture(), SOURCE_EVENT: 'workflow_dispatch', FOLIO_MONITOR_EXTERNAL_TRIGGER_ENABLED: 'true',
+    FOLIO_MONITOR_TRIGGER_ACTOR_ID: '123', SOURCE_ACTOR_ID: '123', SOURCE_TITLE: 'Folio monitor: external-run 2026-09-27T15:27:00.000Z',
+    SOURCE_CREATED_AT: '2026-09-27T15:27:15Z', SOURCE_UPDATED_AT: '2026-09-27T15:28:00Z'};
+  const f = transport();
+  assert.deepEqual(await sendHeartbeat(external, f.fetcher, {now}), {status: 'sent', reason: 'completed_external_trigger_accepted', requests: 1});
+  for (const patch of [{FOLIO_MONITOR_EXTERNAL_TRIGGER_ENABLED: 'false'}, {FOLIO_MONITOR_TRIGGER_ACTOR_ID: ''},
+    {SOURCE_ACTOR_ID: '999'}, {SOURCE_TITLE: 'Folio monitor: run'}, {SOURCE_TITLE: 'Folio monitor: delivery-drill'},
+    {SOURCE_TITLE: external.SOURCE_TITLE.replace('15:27', '15:26')}, {SOURCE_TITLE: external.SOURCE_TITLE.replace('27T', '99T')},
+    {SOURCE_CREATED_AT: '2026-09-27T15:26:59Z'}, {SOURCE_CREATED_AT: '2026-09-27T15:29:01Z', SOURCE_UPDATED_AT: '2026-09-27T15:29:30Z'},
+    {SOURCE_ATTEMPT: '2'}, {SOURCE_CONCLUSION: 'failure'}]) {
+    const rejected = transport(); assert.equal((await sendHeartbeat({...external, ...patch}, rejected.fetcher, {now})).status, 'rejected');
+    assert.equal(rejected.calls.length, 0);
+  }
+  // A fresh completion cannot refresh an old intended tick even if creation was two minutes later.
+  const oldTick = {...external, SOURCE_TITLE: 'Folio monitor: external-run 2026-09-27T15:07:00.000Z',
+    SOURCE_CREATED_AT: '2026-09-27T15:09:00Z', SOURCE_UPDATED_AT: '2026-09-27T15:29:00Z'};
+  assert.equal((await sendHeartbeat(oldTick, transport().fetcher, {now})).status, 'rejected');
 });

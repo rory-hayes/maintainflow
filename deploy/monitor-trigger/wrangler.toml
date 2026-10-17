@@ -1,0 +1,18 @@
+name = "maintainflow-monitor-trigger"
+main = "worker.ts"
+compatibility_date = "2026-10-17"
+workers_dev = false
+preview_urls = false
+
+[vars]
+FOLIO_MONITOR_EXTERNAL_TRIGGER_ENABLED = "false"
+# Root supplies the actual approved credential owner's numeric GitHub actor ID.
+FOLIO_MONITOR_TRIGGER_ACTOR_ID = ""
+
+[triggers]
+# Disabled preparation. Root adds ["2-59/5 * * * *"] only after reviewed setup.
+crons = []
+
+[observability]
+enabled = true
+head_sampling_rate = 1

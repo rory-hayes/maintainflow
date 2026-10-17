@@ -12,7 +12,7 @@ const options:SelectionOptions={token:'synthetic_owned_github_token',runId:30,ru
 const fixtureHead='ab34186f3619dff95b0cbd623352114e6b3a3dab';
 const run=(id:number,mode='run',attempt=1)=>({id,run_number:id,run_attempt:attempt,display_title:`Folio monitor: ${mode}`,head_sha:fixtureHead,head_branch:'main',event:'workflow_dispatch',status:id===30?'in_progress':'completed',conclusion:id===30?null:'failure',repository:{full_name:repo},head_repository:{full_name:repo}});
 const artifact=(id:number,attempt=1,phase='delivered',extra:Record<string,unknown>={})=>({id,name:`folio-monitor-state-v1-${attempt}-${phase}`,expired:false,size_in_bytes:512,...extra});
-function transport(runs:ReturnType<typeof run>[],artifacts:ReturnType<typeof artifact>[],extra:{totalRuns?:number;totalArtifacts?:number;previousConclusion?:string;jobs?:Record<number,unknown>;artifactsByRun?:Record<number,ReturnType<typeof artifact>[]>;sourceOverrides?:Record<string,string>;checkRuns?:Record<number,unknown>;annotations?:Record<number,unknown>}={}){
+function transport(runs:ReturnType<typeof run>[],artifacts:ReturnType<typeof artifact>[],extra:{totalRuns?:number;runPages?:Record<number,{total_count:number;workflow_runs:ReturnType<typeof run>[]}>;totalArtifacts?:number;previousConclusion?:string;jobs?:Record<number,unknown>;artifactsByRun?:Record<number,ReturnType<typeof artifact>[]>;sourceOverrides?:Record<string,string>;checkRuns?:Record<number,unknown>;annotations?:Record<number,unknown>}={}){
   const calls:string[]=[];
   const fetcher:typeof fetch=async(input,init)=>{
     const url=String(input);calls.push(url);assert.equal(init?.method,'GET');assert.equal(init?.redirect,'error');assert.ok(init?.signal);const headers=new Headers(init?.headers);assert.equal(headers.get('authorization'),`Bearer ${options.token}`);assert.equal(headers.get('x-github-api-version'),'2022-11-28');
@@ -20,7 +20,9 @@ function transport(runs:ReturnType<typeof run>[],artifacts:ReturnType<typeof art
     const jobs=/\/runs\/(\d+)\/attempts\/1\/jobs\?per_page=100$/.exec(url);
     const source=new RegExp(`^https://api.github.com/repos/${repo}/contents/(\\.github/workflows/operations-monitor\\.yml|scripts/monitor-artifact-state\\.ts)\\?ref=[0-9a-f]{40}$`).exec(url);
     const check=new RegExp(`^https://api.github.com/repos/${repo}/check-runs/([1-9][0-9]*)(/annotations\\?per_page=100)?$`).exec(url);
-    assert.ok(url===`${root}/workflows/operations-monitor.yml/runs?branch=main&per_page=30`||new RegExp(`^${root}/runs/[0-9]+/artifacts\\?per_page=100$`).test(url)||attempt||jobs||source||check);
+    const page=new RegExp(`^${root}/workflows/operations-monitor\\.yml/runs\\?branch=main&per_page=30&page=([1-9][0-9]*)$`).exec(url);
+    assert.ok(url===`${root}/workflows/operations-monitor.yml/runs?branch=main&per_page=30`||page||new RegExp(`^${root}/runs/[0-9]+/artifacts\\?per_page=100$`).test(url)||attempt||jobs||source||check);
+    if(page){const value=extra.runPages?.[Number(page[1])];assert.ok(value,'unexpected history page');return Response.json(value);}
     if(check)return Response.json(check[2]?extra.annotations?.[Number(check[1])]??[]:extra.checkRuns?.[Number(check[1])]??{});
     if(source){const sourcePath=source[1],bytes=extra.sourceOverrides?.[sourcePath]??await fs.readFile(new URL(`../${sourcePath}`,import.meta.url),'utf8');return Response.json({type:'file',path:sourcePath,encoding:'base64',content:Buffer.from(bytes).toString('base64')});}
     if(attempt)return Response.json({...runs.find(r=>r.id===Number(attempt[1]))!,run_attempt:Number(attempt[2]),status:'completed',conclusion:extra.previousConclusion??'failure'});
@@ -56,6 +58,15 @@ test('selects latest stateful main run by run number and ignores newer probes or
   const {fetcher,calls}=transport([run(28,'probe'),run(30),run(26),run(29,'delivery-drill'),run(27)], [artifact(101)]);
   assert.deepEqual(await selectMonitorArtifact(options,fetcher),{artifactId:101,runId:27,name:'folio-monitor-state-v1-1-delivered'});
   assert.ok(calls[1].includes('/runs/27/'));assert.equal(calls.length,2);
+});
+
+test('an empty external tick title still requires exact pre-state failure proof before recovery',async()=>{
+  const fixture=transport([run(30),run(29,'external-run'),{...run(28),conclusion:'success'}],[],{
+    jobs:{29:selectorFailedJob(29)},artifactsByRun:{28:[artifact(101)]},
+  });
+  assert.equal((await selectMonitorArtifact(options,fixture.fetcher))?.runId,28);
+  const unproven=transport([run(30),run(29,'external-run'),run(28)],[]);
+  await assert.rejects(selectMonitorArtifact(options,unproven.fetcher),/latest_monitor_checkpoint_missing/);
 });
 
 test('highest attempt wins before delivered then prepared then resumed phase order',async()=>{
@@ -107,6 +118,89 @@ test('the observed eighteen-failure cascade remains within the bounded history a
   const fixture=transport([run(30),...failed.map(id=>run(id)),{...run(11),conclusion:'success'}],[],{jobs,artifactsByRun:{11:[artifact(101)]}});
   assert.equal((await selectMonitorArtifact({...options,onSkippedRun:id=>skipped.push(id)},fixture.fetcher))?.runId,11);
   assert.deepEqual(skipped,failed);assert.equal(fixture.calls.length,40);assert.equal(fixture.calls.filter(url=>url.includes('/contents/')).length,2);
+});
+
+test('more than thirty proven harmless failures resume the latest checkpoint across complete history pages',async()=>{
+  const current={...run(80),status:'in_progress',conclusion:null};
+  const failed=Array.from({length:35},(_,index)=>79-index),jobs=Object.fromEntries(failed.map(id=>[id,selectorFailedJob(id)]));
+  for(const phase of ['delivered','prepared']){
+    const checkpoint={...run(44),conclusion:phase==='delivered'?'success':'failure'};
+    const all=[current,...failed.map(id=>run(id)),checkpoint,{...run(43),conclusion:'success'}],skipped:number[]=[];
+    const fixture=transport(all.slice(0,30),[],{totalRuns:all.length,runPages:{2:{total_count:all.length,workflow_runs:all.slice(30)}},jobs,
+      artifactsByRun:{44:[artifact(101,1,phase)],43:[artifact(102)]}});
+    assert.deepEqual(await selectMonitorArtifact({...options,runId:80,runNumber:80,onSkippedRun:id=>skipped.push(id)},fixture.fetcher),
+      {artifactId:101,runId:44,name:`folio-monitor-state-v1-1-${phase}`});
+    assert.deepEqual(skipped,failed);assert.equal(fixture.calls.filter(url=>url.includes('/contents/')).length,2);
+    const secondPage=fixture.calls.findIndex(url=>url.endsWith('&page=2'));
+    assert.ok(secondPage>fixture.calls.findIndex(url=>url.includes('/runs/51/attempts/1/jobs')));
+    assert.ok(secondPage<fixture.calls.findIndex(url=>url.includes('/runs/50/artifacts')));
+    assert.ok(!fixture.calls.some(url=>url.includes('/runs/43/')));
+  }
+});
+
+test('pagination never crosses an unproven stateful failure or a missing authoritative checkpoint',async()=>{
+  const current={...run(80),status:'in_progress',conclusion:null},failed=Array.from({length:29},(_,index)=>79-index);
+  const jobs=Object.fromEntries(failed.map(id=>[id,selectorFailedJob(id)])),first=[current,...failed.map(id=>run(id))];
+  for(const firstPageFailure of [true,false]){
+    const fixture=transport(first,[],{totalRuns:32,runPages:{2:{total_count:32,workflow_runs:[{...run(50),conclusion:'success'},run(49)]}},
+      jobs:{...jobs,...(firstPageFailure?{51:{total_count:0,jobs:[]}}:{})},artifactsByRun:{49:[artifact(102)]}});
+    await assert.rejects(selectMonitorArtifact({...options,runId:80,runNumber:80,initialize:true},fixture.fetcher),/latest_monitor_checkpoint_missing/);
+    assert.equal(fixture.calls.some(url=>url.endsWith('&page=2')),!firstPageFailure);
+    assert.ok(!fixture.calls.some(url=>url.includes('/runs/49/')));
+  }
+});
+
+test('changed totals, incomplete pages, cross-page duplicate identities and newer run order fail closed',async()=>{
+  const current={...run(80),status:'in_progress',conclusion:null},failed=Array.from({length:29},(_,index)=>79-index);
+  const first=[current,...failed.map(id=>run(id))],older=Array.from({length:6},(_,index)=>run(50-index));
+  const jobs=Object.fromEntries(failed.map(id=>[id,selectorFailedJob(id)]));
+  const cases=[
+    {total_count:37,workflow_runs:older},
+    {total_count:35,workflow_runs:older},
+    {total_count:36,workflow_runs:older.slice(0,5)},
+    {total_count:36,workflow_runs:[]},
+    {total_count:36,workflow_runs:[{...older[0],id:51},...older.slice(1)]},
+    {total_count:36,workflow_runs:[{...older[0],run_number:51},...older.slice(1)]},
+    {total_count:36,workflow_runs:[{...older[0],id:90,run_number:90},...older.slice(1)]},
+  ];
+  for(const page of cases){
+    const fixture=transport(first,[],{totalRuns:36,runPages:{2:page},jobs,artifactsByRun:{50:[artifact(101)]}});
+    await assert.rejects(selectMonitorArtifact({...options,runId:80,runNumber:80},fixture.fetcher),/artifact_(history_incomplete|runs_ambiguous|runs_invalid)/);
+    assert.ok(fixture.calls.at(-1)?.endsWith('&page=2'));assert.ok(!fixture.calls.some(url=>url.includes('/runs/50/')));
+  }
+});
+
+test('the ten-page three-hundred-run cap refuses hidden state instead of initializing or requesting page eleven',async()=>{
+  const all=Array.from({length:301},(_,index)=>index===0?{...run(400,'initialize'),status:'in_progress',conclusion:null}:run(400-index,'probe'));
+  all[300]=run(100);
+  const runPages=Object.fromEntries(Array.from({length:10},(_,index)=>[index+2,{total_count:all.length,workflow_runs:all.slice((index+1)*30,(index+2)*30)}]));
+  const fixture=transport(all.slice(0,30),[],{totalRuns:all.length,runPages});
+  await assert.rejects(selectMonitorArtifact({...options,runId:400,runNumber:400,initialize:true},fixture.fetcher),/artifact_history_incomplete/);
+  assert.equal(fixture.calls.length,10);assert.ok(fixture.calls.at(-1)?.endsWith('&page=10'));
+  assert.ok(!fixture.calls.some(url=>url.endsWith('&page=11')||url.includes('/artifacts')));
+});
+
+test('pagination shares the original deadline and late pages cannot continue checkpoint selection',async()=>{
+  const current={...run(80),status:'in_progress',conclusion:null},failed=Array.from({length:29},(_,index)=>79-index);
+  const jobs=Object.fromEntries(failed.map(id=>[id,selectorFailedJob(id)]));
+  const fixture=transport([current,...failed.map(id=>run(id))],[],{totalRuns:31,jobs,artifactsByRun:{50:[artifact(101)]}});
+  let release!:(response:Response)=>void,pages=0;const held=new Promise<Response>(resolve=>{release=resolve;});
+  const fetcher:typeof fetch=async(input,init)=>{if(String(input).endsWith('&page=2')){pages++;return held;}return fixture.fetcher(input,init);};
+  await assert.rejects(selectMonitorArtifact({...options,runId:80,runNumber:80,timeoutMs:500},fetcher),/artifact_api_timeout/);
+  assert.equal(pages,1);release(Response.json({total_count:31,workflow_runs:[{...run(50),conclusion:'success'}]}));
+  await new Promise(resolve=>setImmediate(resolve));assert.ok(!fixture.calls.some(url=>url.includes('/runs/50/')));
+});
+
+test('natural and external monitor triggers share one authoritative checkpoint pipeline in either direction',async()=>{
+  const title='Folio monitor: external-run 2026-10-17T14:22:00.000Z';
+  for(const externalCurrent of [true,false]){
+    const current={...run(30),event:externalCurrent?'workflow_dispatch':'schedule',display_title:externalCurrent?title:'Folio monitor: run'};
+    const prior={...run(29),event:externalCurrent?'schedule':'workflow_dispatch',display_title:externalCurrent?'Folio monitor: run':title,conclusion:'success'};
+    const fixture=transport([current,prior],[artifact(101)]);
+    assert.deepEqual(await selectMonitorArtifact(options,fixture.fetcher),{artifactId:101,runId:29,name:'folio-monitor-state-v1-1-delivered'});
+  }
+  const superseded=transport([{...run(31),display_title:title},run(30)],[artifact(101)]);
+  await assert.rejects(selectMonitorArtifact(options,superseded.fetcher),/monitor_run_superseded/);
 });
 
 test('a valid latest checkpoint does not inspect irrelevant older unrecognized modes',async()=>{

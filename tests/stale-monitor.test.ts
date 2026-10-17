@@ -13,14 +13,21 @@ const run = (id = 10, minutes = 5, extra: Record<string, unknown> = {}) => ({
 });
 const history = (runs: ReturnType<typeof run>[], total = runs.length) => ({total_count: total, workflow_runs: runs});
 const evaluate = (runs: ReturnType<typeof run>[], total = runs.length) => evaluateSchedule(metadata, history(runs, total), now);
-function fixture(runs: ReturnType<typeof run>[], workflowMetadata: unknown = metadata) {
+const externalActorId = 24680;
+const externalRun = (id = 10, tickMinutes = 3, extra: Record<string, unknown> = {}) => {
+  const tick = new Date(now.getTime() - tickMinutes * 60_000).toISOString();
+  return run(id, tickMinutes - 0.5, {display_title: `Folio monitor: external-run ${tick}`,
+    event: 'workflow_dispatch', actor: {id: externalActorId}, ...extra});
+};
+const evaluateExternal = (runs: ReturnType<typeof run>[], total = runs.length) => evaluateSchedule(metadata, history(runs, total), now, 20, {externalActorId});
+function fixture(runs: ReturnType<typeof run>[], workflowMetadata: unknown = metadata, event = 'schedule') {
   const calls: string[] = [];
   const transport: typeof fetch = async (input, init) => {
     const url = String(input); calls.push(url);
     assert.equal(init?.method, 'GET'); assert.equal(init?.redirect, 'error'); assert.ok(init?.signal);
     const headers = new Headers(init?.headers); assert.equal(headers.get('authorization'), `Bearer ${token}`);
     assert.equal(headers.get('x-github-api-version'), '2022-11-28');
-    assert.ok(url === base || url === `${base}/runs?branch=main&event=schedule&per_page=30`);
+    assert.ok(url === base || url === `${base}/runs?branch=main&event=${event}&per_page=30`);
     return Response.json(url === base ? workflowMetadata : history(runs));
   };
   return {calls, transport};
@@ -29,6 +36,7 @@ function fixture(runs: ReturnType<typeof run>[], workflowMetadata: unknown = met
 test('healthy requires a completed stateful scheduled main run, and reports only fixed metadata', async () => {
   const f = fixture([run()]); const result = await checkStaleMonitor({token, now}, f.transport);
   assert.equal(result.status, 'healthy'); assert.equal(result.reason, 'scheduled_monitor_fresh');
+  assert.equal(result.source, 'github-schedule');
   assert.equal(result.lastSuccessfulScheduledRun?.id, 10); assert.equal(f.calls.length, 2);
   assert.equal(JSON.stringify(result).includes(token), false);
 });
@@ -38,6 +46,7 @@ test('age uses scheduled creation, not rerun completion or recent metadata updat
   for (const extra of [{}, {run_attempt: 2}, {updated_at: now.toISOString()}]) {
     assert.equal(evaluate([run(10, 20.001, extra)]).reason, 'scheduled_monitor_stale');
   }
+  assert.equal(evaluate([run(10, 25, {triggerAt: now.toISOString()})]).reason, 'scheduled_monitor_stale');
 });
 
 test('latest scheduled failure cannot be concealed by an older fresh success or a new queued run', () => {
@@ -147,4 +156,120 @@ test('explicit CLI check exits unsuccessfully for missing token, malformed thres
   }
   const f = fixture([]); const result = await main(['--check'], {GH_TOKEN: token}, f.transport);
   assert.equal(result.exitCode, 1); assert.equal(result.report.reason, 'no_scheduled_success'); assert.equal(f.calls.length, 2);
+});
+
+test('external mode queries only fixed dispatch history and records the trusted intended tick', async () => {
+  const f = fixture([externalRun()], metadata, 'workflow_dispatch');
+  const result = await checkStaleMonitor({token, now, externalActorId}, f.transport);
+  assert.equal(result.status, 'healthy'); assert.equal(result.reason, 'external_monitor_fresh');
+  assert.equal(result.source, 'external-trigger'); assert.equal(f.calls.length, 2);
+  assert.equal(result.lastSuccessfulScheduledRun?.triggerAt, '2026-09-26T16:57:00.000Z');
+  assert.equal(JSON.stringify(result).includes(token), false);
+});
+
+test('external mode excludes ordinary manual modes before classification without refreshing freshness', () => {
+  const manual = ['run', 'probe', 'delivery-drill', 'initialize', 'disabled', 'other'];
+  const unrelated = manual.map((mode, i) => run(20 + i, 1, {event: 'workflow_dispatch', display_title: `Folio monitor: ${mode}`,
+    conclusion: 'failure', actor: {id: 999}, head_sha: 'unrelated metadata is not external evidence'}));
+  const fresh = evaluateExternal([...unrelated, externalRun()]);
+  assert.equal(fresh.status, 'healthy'); assert.equal(fresh.latestScheduledRun?.id, 10);
+  assert.equal(evaluateExternal([...unrelated, externalRun(10, 23)]).reason, 'external_monitor_stale');
+  assert.equal(evaluateExternal(unrelated).reason, 'no_external_success');
+  assert.throws(() => evaluate([externalRun()]), /observer_run_invalid/);
+});
+
+test('untrusted actors claiming an external title fail closed even when trusted success is present', async () => {
+  for (const actor of [undefined, null, {}, {id: externalActorId + 1}, {id: String(externalActorId)}]) {
+    assert.throws(() => evaluateExternal([externalRun(11, 3, {actor}), externalRun(10, 8)]), /observer_external_actor_untrusted/);
+    const f = fixture([externalRun(11, 3, {actor}), externalRun(10, 8)], metadata, 'workflow_dispatch');
+    const result = await checkStaleMonitor({token, now, externalActorId}, f.transport);
+    assert.equal(result.status, 'unavailable'); assert.equal(result.reason, 'observer_external_actor_untrusted');
+    assert.equal(result.source, 'external-trigger');
+  }
+});
+
+test('external runs require the fixed workflow, dispatch event, main and both repository identities', () => {
+  for (const patch of [{workflow_id: 124}, {event: 'schedule'}, {head_branch: 'other'},
+    {repository: {full_name: 'foreign/repo'}}, {head_repository: {full_name: 'foreign/repo'}}, {head_sha: 'bad'},
+    {created_at: 'yesterday'}, {updated_at: '2026-09-26T16:00:00Z'}, {status: 'completed', conclusion: null}]) {
+    assert.throws(() => evaluateExternal([externalRun(10, 3, patch)]), /observer_run_invalid/);
+  }
+});
+
+test('external titles require a canonical five-minute tick and creation within its two-minute window', () => {
+  for (const title of ['Folio monitor: external-run', 'Folio monitor: external-run-other',
+    'Folio monitor: external-run 2026-09-26T16:57:00Z', 'Folio monitor: external-run 2026-09-26T16:56:00.000Z',
+    'Folio monitor: external-run 2026-09-26T16:57:01.000Z', 'Folio monitor: external-run 2026-09-26T16:57:00.001Z',
+    'Folio monitor: external-run 2026-09-26T17:02:00.000Z', 'Folio monitor: external-run 2026-02-30T16:57:00.000Z']) {
+    assert.throws(() => evaluateExternal([externalRun(10, 3, {display_title: title})]), /observer_external_tick_invalid/);
+  }
+  for (const created_at of ['2026-09-26T16:56:59.999Z', '2026-09-26T16:59:00.001Z']) {
+    assert.throws(() => evaluateExternal([externalRun(10, 3, {created_at})]), /observer_external_tick_invalid/);
+  }
+  for (const created_at of ['2026-09-26T16:57:00.000Z', '2026-09-26T16:59:00.000Z']) {
+    assert.equal(evaluateExternal([externalRun(10, 3, {created_at})]).status, 'healthy');
+  }
+});
+
+test('external freshness uses the intended tick and old reruns cannot refresh it', () => {
+  const clock = new Date('2026-09-26T17:17:00.000Z');
+  assert.equal(evaluateSchedule(metadata, history([externalRun()]), clock, 20, {externalActorId}).status, 'healthy');
+  assert.equal(evaluateSchedule(metadata, history([externalRun()]), new Date(clock.getTime() + 1), 20, {externalActorId}).reason, 'external_monitor_stale');
+  for (const extra of [{}, {run_attempt: 2}, {updated_at: now.toISOString()}]) {
+    assert.equal(evaluateExternal([externalRun(10, 23, extra)]).reason, 'external_monitor_stale');
+  }
+});
+
+test('latest external failure cannot be hidden by a manual success or queued external run and later success recovers', () => {
+  const manual = run(20, 1, {event: 'workflow_dispatch'});
+  for (const conclusion of ['failure', 'cancelled', 'timed_out', 'action_required', 'neutral', 'skipped', 'stale', 'startup_failure']) {
+    const failed = externalRun(11, 8, {conclusion});
+    assert.equal(evaluateExternal([manual, failed, externalRun(10, 13)]).reason, 'latest_external_run_failed');
+    assert.equal(evaluateExternal([manual, externalRun(12, 3, {status: 'queued', conclusion: null}), failed, externalRun(10, 13)]).reason, 'latest_external_run_failed');
+    assert.equal(evaluateExternal([failed, externalRun(12, 3)]).status, 'healthy');
+  }
+});
+
+test('external empty and bounded dispatch histories cannot be made healthy by unrelated runs', () => {
+  assert.equal(evaluateExternal([]).reason, 'no_external_success');
+  const unrelated = Array.from({length: 30}, (_, i) => run(40 - i, i, {event: 'workflow_dispatch'}));
+  assert.equal(evaluateExternal(unrelated, 100).reason, 'no_success_in_bounded_history');
+  unrelated[29] = externalRun(10, 3);
+  assert.equal(evaluateExternal(unrelated, 100).status, 'healthy');
+  assert.throws(() => evaluateExternal(unrelated.slice(0, 2), 100), /observer_history_invalid/);
+  const pending = externalRun(10, 3, {status: 'in_progress', conclusion: null});
+  assert.equal(evaluateExternal([pending]).reason, 'no_external_success');
+});
+
+test('external duplicate identities or contradictory ordering fail closed', () => {
+  for (const runs of [[externalRun(), externalRun()], [externalRun(), externalRun(11, 3, {run_number: 10})],
+    [externalRun(11, 8), externalRun(10, 3)]]) {
+    assert.throws(() => evaluateExternal(runs), /observer_history_ambiguous/);
+  }
+});
+
+test('external mode requires a safe numeric actor setting before any request and disabled workflow remains unhealthy', async () => {
+  let calls = 0; const transport: typeof fetch = async () => { calls++; throw new Error('must not contact network'); };
+  for (const externalActorId of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    const result = await checkStaleMonitor({token, now, externalActorId}, transport);
+    assert.equal(result.reason, 'observer_external_actor_invalid'); assert.equal(result.source, 'external-trigger');
+  }
+  for (const actor of [undefined, '', '0', '-1', '01', ' 24680', '24680 ', '2.468e4', '9007199254740992']) {
+    const result = await main(['--check-external'], {GH_TOKEN: token, ...(actor === undefined ? {} : {FOLIO_MONITOR_TRIGGER_ACTOR_ID: actor})}, transport);
+    assert.equal(result.exitCode, 1); assert.equal(result.report.reason, 'observer_external_actor_invalid');
+  }
+  assert.equal(calls, 0);
+  const f = fixture([], {...metadata, state: 'disabled_manually'}, 'workflow_dispatch');
+  const result = await checkStaleMonitor({token, now, externalActorId}, f.transport);
+  assert.equal(result.reason, 'workflow_disabled'); assert.equal(f.calls.length, 1);
+});
+
+test('CLI external check selects dispatch mode while --check ignores the external actor environment', async () => {
+  const externalFixture = fixture([], metadata, 'workflow_dispatch');
+  const externalResult = await main(['--check-external'], {GH_TOKEN: token, FOLIO_MONITOR_TRIGGER_ACTOR_ID: String(externalActorId)}, externalFixture.transport);
+  assert.equal(externalResult.exitCode, 1); assert.equal(externalResult.report.reason, 'no_external_success');
+  const scheduledFixture = fixture([]);
+  const env = {GH_TOKEN: token, get FOLIO_MONITOR_TRIGGER_ACTOR_ID(): string { throw new Error('schedule mode must not read actor'); }};
+  const scheduledResult = await main(['--check'], env, scheduledFixture.transport);
+  assert.equal(scheduledResult.report.reason, 'no_scheduled_success');
 });

@@ -49,7 +49,11 @@ The local flag does not read or change the GitHub repository variable. A locally
 
 Use the existing GitHub workflow's dispatch form and `main` reference. Do not run local `--run` as a substitute: it lacks the workflow's remote checkpoint ordering. The drill reads/writes no incident artifacts, but sends real test email and needs the approved recipient. On an uncertain drill retry, reuse **both** the UUID and timestamp within the permitted window; notices at least 23 hours old require reconciliation. Do not change recipient/sender/origin during uncertain delivery.
 
-Initialize promptly after the probe and drill. The selector inspects at most 30 recent runs; hidden older state cannot authorize a fresh start. Missing, expired or ambiguous authoritative artifacts, incomplete prior runs and an older pending notice require reconciliation. Never delete history, fall back to an older checkpoint or invent a new notice identity to bypass these failures.
+Initialize promptly after the probe and drill. The selector inspects at most ten complete pages / 300 recent runs under a shared 20-second deadline; hidden older state cannot authorize a fresh start. Missing, expired or ambiguous authoritative artifacts, incomplete prior runs and an older pending notice require reconciliation. Never delete history, fall back to an older checkpoint or invent a new notice identity to bypass these failures.
+
+## Optional supported external trigger
+
+The prepared [external trigger](MONITOR-EXTERNAL-TRIGGER.md) offers a signed actor-bound timer mode that reuses the same state/outbox. Its default is inactive. Root must select an owned supported timer, configure secrets and complete actual cadence/receiver acceptance; this source does not create another mandatory provider. Existing Supabase permission concerns must be resolved before using its bridge; the Worker is a reviewable alternative. Preserve the active natural schedule and accepted delivery drill.
 
 ## External stale-run check remains necessary
 
