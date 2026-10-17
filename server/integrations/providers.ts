@@ -14,6 +14,7 @@ import {addDocument} from '../core/intake.js';
 import {ParserFormatNotAllowedError,SourceIntakeRejectedError} from '../core/intake-policy.js';
 import {encryptSecret,decryptSecret} from './secrets.js';
 import {observeGoogleSheetsAccessStep,googleSheetsDeliveredRefreshProof} from './google-sheets-refresh-proof.js';
+import {reportGoogleSheetsDeliveryStage,type GoogleSheetsDeliveryStageObserver} from './delivery-attempt-audit.js';
 import {publicRequest} from './network.js';
 import {mockBillingEnabled,mockBillingStatus,registerMockBilling,requireRealBilling} from './mock-billing.js';
 import {validateCheckoutPolicy,readCheckoutContract,reserveCheckoutContract,contractSessionKey,bindCheckoutContract,checkoutCompletionPointer,captureCheckoutCompletion,listCheckoutContracts,getCheckoutContract,renderCheckoutTermsRecord,type CheckoutPolicyInput,type CheckoutCompletionPointer} from './checkout-contracts.js';
@@ -302,20 +303,26 @@ export async function reserveSheetWrite(integration:Integration,delivery:{id:str
   return {write,integration:stored as Integration};
  });
 }
-export async function sendGoogleSheets(integration:Integration,delivery:{id:string;payload:ApprovalPayload},options:{signal?:AbortSignal}={}) {
+export async function sendGoogleSheets(integration:Integration,delivery:{id:string;payload:ApprovalPayload},options:{signal?:AbortSignal;observeStage?:GoogleSheetsDeliveryStageObserver}={}) {
  options.signal?.throwIfAborted();
+ reportGoogleSheetsDeliveryStage(options.observeStage,'sheets_reservation');
  const {write,integration:current}=await reserveSheetWrite(integration,delivery);
  if(write.status==='delivered')return {status:200,deliveryPath:'sheets_already_delivered' as const};
+ reportGoogleSheetsDeliveryStage(options.observeStage,'sheets_setup');
  const client=googleClient();
  const credentials=JSON.parse(decryptSecret(current.secret_ciphertext!)) as Credentials;
  client.setCredentials(credentials);
  try{
   // Refresh explicitly and persist any replacement token before the range write.
+  reportGoogleSheetsDeliveryStage(options.observeStage,'sheets_access_step');
   const accessStep=await observeGoogleSheetsAccessStep(client);
   options.signal?.throwIfAborted();
+  reportGoogleSheetsDeliveryStage(options.observeStage,'sheets_credential_persist');
   const persisted=await withWorkspace(current.workspace_id,c=>c.query('update integrations set secret_ciphertext=$2 where id=$1 and enabled=true and secret_ciphertext=$3',[current.id,encryptSecret(JSON.stringify({...credentials,...client.credentials})),current.secret_ciphertext]));
   if(!persisted.rowCount)throw new Error('Sheets connection changed during delivery. Retry with the current connection.');
+  reportGoogleSheetsDeliveryStage(options.observeStage,'sheets_range_write');
   const result=await writeSheetRange(request=>client.request({...request,signal:options.signal}),write);
+  reportGoogleSheetsDeliveryStage(options.observeStage,'sheets_write_commit');
   await withWorkspace(current.workspace_id,async c=>{
    await c.query("update sheet_writes set status='delivered',delivered_at=now() where integration_id=$1 and event_key=$2",[current.id,write.event_key]);
    await audit(c,current.workspace_id,null,'google_sheets.delivered',current.id,{eventId:write.event_key,range:write.data_range,refreshProof:googleSheetsDeliveredRefreshProof(accessStep,delivery.id,result.status)});

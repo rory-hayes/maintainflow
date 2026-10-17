@@ -8,6 +8,7 @@ import Fastify,{type FastifyInstance} from 'fastify';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import {z,ZodError} from 'zod';
+import {OAuth2Client} from 'google-auth-library';
 import {registerCore} from '../server/core/index.js';
 import {adminPool,appPool,withWorkspace,transaction,closeDatabase,databaseSchema} from '../server/core/db.js';
 import {config} from '../server/core/config.js';
@@ -19,8 +20,8 @@ import {failInitialSetup} from '../server/core/parser-setup.js';
 import {registerExports} from '../server/integrations/exports.js';
 import {renderExport} from '../server/integrations/export-format.js';
 import {registerIntegrations,enqueueFailureEvents,enqueueIntegrationEvents,processOneDelivery} from '../server/integrations/webhooks.js';
-import {reserveSheetWrite} from '../server/integrations/providers.js';
-import {deliveryAttemptAuditSchema} from '../server/integrations/delivery-attempt-audit.js';
+import {reserveSheetWrite,sendGoogleSheets} from '../server/integrations/providers.js';
+import {deliveryAttemptAuditSchema,type GoogleSheetsDeliveryStage} from '../server/integrations/delivery-attempt-audit.js';
 import {encryptSecret} from '../server/integrations/secrets.js';
 import type {PublicRequestOptions} from '../server/integrations/network.js';
 import {verifyWebhookDelivery} from '../examples/automations/verify.js';
@@ -75,6 +76,22 @@ const deliveries=async(account:Account)=>(await adminPool.query('select * from w
 const history=async(account:Account,documentId:string)=>(await adminPool.query("select * from document_events where workspace_id=$1 and document_id=$2 and state='failed' order by sequence",[account.actor.workspaceId,documentId])).rows;
 const attemptHistory=async(account:Account,deliveryId:string)=>(await adminPool.query("select * from audit_events where workspace_id=$1 and entity_id=$2 and action in('delivery.attempt_claimed','delivery.attempt_finished','delivery.lease_expired') order by created_at,id",[account.actor.workspaceId,deliveryId])).rows;
 async function fail(account:Account){setExtractionProvider({configured:()=>true,async extract(){throw Object.assign(new Error('private provider error must not leave the app'),{permanent:true});}});const source=await upload(account);await processOneCoreJob(source.jobId);assert.equal((await detail(account,source.document.id)).document.status,'failed');return source;}
+async function sheetsFixture(){
+ const account=await fixture(),integrationId=await connection(account,['document.approved'],{kind:'google_sheets'});
+ await adminPool.query('update integrations set config=$2,secret_ciphertext=$3 where id=$1',[integrationId,JSON.stringify({spreadsheetId:'owned_fixture_spreadsheet_12345',sheetName:'Owned QA',columns:[{source:'reference',label:'Reference'}]}),encryptSecret(JSON.stringify({access_token:'SYNTHETIC_ACCESS_CANARY',refresh_token:'SYNTHETIC_REFRESH_CANARY'}))]);
+ const source=await approved(account);await enqueueIntegrationEvents({workspaceId:account.actor.workspaceId});
+ return {account,source,integration:(await adminPool.query('select * from integrations where id=$1',[integrationId])).rows[0],delivery:(await deliveries(account))[0]};
+}
+/** Private synthetic DB only; neither the OAuth nor range method reaches a network transport. */
+async function controlledSheets(run:(control:{failAt:'access'|'range'|null;accessCalls:number;rangeCalls:number;requests:unknown[]})=>Promise<void>){
+ const keys=['GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REDIRECT_URI'] as const,previous=keys.map(key=>process.env[key]);
+ const getAccessToken=OAuth2Client.prototype.getAccessToken,request=OAuth2Client.prototype.request;
+ const control={failAt:null as 'access'|'range'|null,accessCalls:0,rangeCalls:0,requests:[] as unknown[]};
+ Object.assign(process.env,{GOOGLE_CLIENT_ID:'synthetic-client',GOOGLE_CLIENT_SECRET:'SYNTHETIC_CLIENT_CANARY',GOOGLE_REDIRECT_URI:'http://127.0.0.1/owned-google-callback'});
+ OAuth2Client.prototype.getAccessToken=(async()=>{control.accessCalls++;if(control.failAt==='access')throw Object.assign(new Error('SYNTHETIC_ACCESS_FAILURE_CANARY'),{status:418});return {token:'SYNTHETIC_RETURNED_TOKEN_CANARY'};}) as typeof getAccessToken;
+ OAuth2Client.prototype.request=(async input=>{control.rangeCalls++;control.requests.push(input);if(control.failAt==='range')throw Object.assign(new Error('SYNTHETIC_RANGE_FAILURE_CANARY'),{status:418});return {status:200};}) as typeof request;
+ try{await run(control);}finally{OAuth2Client.prototype.getAccessToken=getAccessToken;OAuth2Client.prototype.request=request;keys.forEach((key,index)=>{if(previous[index]===undefined)delete process.env[key];else process.env[key]=previous[index];});}
+}
 
 test('creation validates distinct known choices, defaults approval-only, and enforces role, scope and parser ownership',async()=>{
  const account=await fixture(),foreign=await fixture();
@@ -312,10 +329,61 @@ test('a delivered Sheets reservation reports its shortcut without decrypting cre
  await approved(account);await enqueueIntegrationEvents({workspaceId:account.actor.workspaceId});const [delivery]=await deliveries(account),integration=(await adminPool.query('select * from integrations where id=$1',[integrationId])).rows[0];
  const reserved=await reserveSheetWrite(integration,delivery);const seeded=await adminPool.query("update sheet_writes set status='delivered',delivered_at=now() where integration_id=$1 and event_key=$2",[integrationId,reserved.write.event_key]);assert.equal(seeded.rowCount,1);
  const before=(await adminPool.query('select * from sheet_writes where integration_id=$1',[integrationId])).rows,cursor=(await adminPool.query('select * from sheet_cursors where integration_id=$1',[integrationId])).rows;
+ const stages:GoogleSheetsDeliveryStage[]=[];assert.equal((await sendGoogleSheets(integration,delivery,{observeStage:stage=>{stages.push(stage);}})).deliveryPath,'sheets_already_delivered');assert.deepEqual(stages,['sheets_reservation']);
  assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId}),true);const row=(await deliveries(account))[0];assert.equal(row.status,'delivered');assert.equal(row.attempts,1);
  const finish=(await attemptHistory(account,delivery.id)).find(event=>event.action==='delivery.attempt_finished')!.metadata;assert.equal(finish.path,'sheets_already_delivered');assert.equal(finish.stage,'delivery_commit');assert.equal(finish.responseStatus,200);
  assert.deepEqual((await adminPool.query('select * from sheet_writes where integration_id=$1',[integrationId])).rows,before);assert.deepEqual((await adminPool.query('select * from sheet_cursors where integration_id=$1',[integrationId])).rows,cursor);
  assert.equal((await adminPool.query("select id from audit_events where workspace_id=$1 and action='google_sheets.delivered'",[account.actor.workspaceId])).rowCount,0);assert.equal(networkCalls,0);
+});
+
+for(const [failure,expectedStage] of [['access','sheets_access_step'],['persist','sheets_credential_persist'],['range','sheets_range_write'],['commit','sheets_write_commit']] as const)test(`Sheets ${failure} failure records its entered stage while retry preserves reservation, data and usage`,async()=>{
+ const {account,source,integration,delivery}=await sheetsFixture(),before=await detail(account,source.document.id);
+ const usage=async()=>(await adminPool.query('select * from usage_ledger where workspace_id=$1 order by id',[account.actor.workspaceId])).rows;
+ const notifications=async()=>(await request(account,'GET','/api/workspace/notifications')).json();
+ const usageBefore=await usage(),notificationsBefore=await notifications();
+ const trigger=`owned_sheet_stage_${randomUUID().replaceAll('-','')}`,table=failure==='persist'?'integrations':'sheet_writes';let installed=false;
+ const writes=async()=>(await adminPool.query('select * from sheet_writes where integration_id=$1',[integration.id])).rows;
+ const cursor=async()=>(await adminPool.query('select * from sheet_cursors where integration_id=$1',[integration.id])).rows;
+ await controlledSheets(async control=>{
+  try{
+   if(failure==='persist'||failure==='commit'){
+    await adminPool.query(`create function ${trigger}() returns trigger language plpgsql as $$ begin if NEW.workspace_id='${account.actor.workspaceId}'::uuid then raise exception 'SYNTHETIC_DATABASE_FAILURE_CANARY'; end if; return NEW; end $$`);
+    await adminPool.query(`create trigger ${trigger} before update on ${table} for each row execute function ${trigger}()`);installed=true;
+   }else control.failAt=failure;
+   assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId}),true);
+   const first=(await deliveries(account))[0],events=await attemptHistory(account,delivery.id),finished=events.find(event=>event.action==='delivery.attempt_finished')!.metadata;
+   assert.equal(first.id,delivery.id);assert.equal(first.status,'retry');assert.equal(first.attempts,1);assert.equal(first.lease_token,null);assert.equal(first.lease_until,null);
+   assert.equal(finished.stage,expectedStage);assert.equal(finished.path,'sheets_unobserved');assert.equal(finished.outcome,'retry');assert.equal(finished.errorKind,'operation_failed');assert.equal(finished.responseStatus,null,'Thrown error properties are not returned HTTP evidence.');
+   const claimed=events.find(event=>event.action==='delivery.attempt_claimed')!.metadata;assert.equal(finished.attemptId,claimed.attemptId);assert.equal(finished.attempt,1);
+   assert.equal(JSON.stringify(events.map(event=>event.metadata)).includes('CANARY'),false);events.forEach(event=>deliveryAttemptAuditSchema.parse(event.metadata));
+   const [reserved]=await writes(),cursorBefore=await cursor();assert.equal(reserved.status,'reserved');assert.equal((await writes()).length,1);
+   assert.equal(control.rangeCalls,failure==='range'||failure==='commit'?1:0);assert.equal((await adminPool.query("select id from audit_events where workspace_id=$1 and action='google_sheets.delivered'",[account.actor.workspaceId])).rowCount,0);
+   if(installed){await adminPool.query(`drop trigger ${trigger} on ${table}`);await adminPool.query(`drop function ${trigger}()`);installed=false;}
+   control.failAt=null;await adminPool.query('update webhook_deliveries set next_attempt_at=now() where id=$1',[delivery.id]);
+   assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId}),true);
+   const final=(await deliveries(account))[0],[written]=await writes(),finalEvents=await attemptHistory(account,delivery.id),finishes=finalEvents.filter(event=>event.action==='delivery.attempt_finished').map(event=>event.metadata);
+   assert.equal(final.id,delivery.id);assert.equal(final.status,'delivered');assert.equal(final.attempts,2);assert.equal(final.response_status,200);
+   const {status:_oldStatus,delivered_at:_oldAt,...oldReservation}=reserved,{status:_newStatus,delivered_at:_newAt,...newReservation}=written;assert.deepEqual(newReservation,oldReservation);assert.equal(written.status,'delivered');assert.deepEqual(await cursor(),cursorBefore);
+   assert.equal(finishes.length,2);assert.equal(finishes[1].stage,'delivery_commit');assert.equal(finishes[1].path,'sheets_range_write');assert.equal(finishes[1].outcome,'delivered');assert.equal(finishes[1].responseStatus,200);assert.equal(finishes[1].errorKind,'none');assert.notEqual(finishes[1].attemptId,finishes[0].attemptId);
+   if(failure==='range'||failure==='commit')assert.deepEqual(control.requests[1],control.requests[0],'A retry repeats its reserved exact range, never appends. A prior remote write cannot be unsent.');
+   assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId}),false);assert.equal((await attemptHistory(account,delivery.id)).length,4);
+   assert.deepEqual(await detail(account,source.document.id),before);assert.deepEqual(await usage(),usageBefore);assert.deepEqual(await notifications(),notificationsBefore);assert.equal(networkCalls,0);
+  }finally{if(installed){await adminPool.query(`drop trigger ${trigger} on ${table}`);await adminPool.query(`drop function ${trigger}()`);}}
+ });
+});
+
+test('throwing Sheets stage observers do not prevent a range write or its final worker delivery',async()=>{
+ const {account,source,integration,delivery}=await sheetsFixture(),before=await detail(account,source.document.id);
+ const usage=(await adminPool.query('select * from usage_ledger where workspace_id=$1 order by id',[account.actor.workspaceId])).rows,stages:GoogleSheetsDeliveryStage[]=[];
+ await controlledSheets(async control=>{
+  const result=await sendGoogleSheets(integration,delivery,{observeStage:stage=>{stages.push(stage);throw new Error('SYNTHETIC_OBSERVER_FAILURE_CANARY');}});
+  assert.deepEqual(stages,['sheets_reservation','sheets_setup','sheets_access_step','sheets_credential_persist','sheets_range_write','sheets_write_commit']);assert.equal(result.deliveryPath,'sheets_range_write');assert.equal(result.status,200);assert.equal(control.accessCalls,1);assert.equal(control.rangeCalls,1);
+  const written=(await adminPool.query('select * from sheet_writes where integration_id=$1',[integration.id])).rows;assert.equal(written.length,1);assert.equal(written[0].status,'delivered');
+  assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId}),true);assert.equal((await deliveries(account))[0].status,'delivered');assert.equal((await deliveries(account))[0].attempts,1);
+  const finished=(await attemptHistory(account,delivery.id)).find(event=>event.action==='delivery.attempt_finished')!.metadata;assert.equal(finished.stage,'delivery_commit');assert.equal(finished.path,'sheets_already_delivered');assert.equal(control.accessCalls,1);assert.equal(control.rangeCalls,1);
+  assert.equal(await processOneDelivery({workspaceId:account.actor.workspaceId}),false);assert.equal((await adminPool.query("select id from audit_events where workspace_id=$1 and action='google_sheets.delivered'",[account.actor.workspaceId])).rowCount,1);
+ });
+ assert.deepEqual(await detail(account,source.document.id),before);assert.deepEqual((await adminPool.query('select * from usage_ledger where workspace_id=$1 order by id',[account.actor.workspaceId])).rows,usage);assert.equal(networkCalls,0);
 });
 
 test('exhausted delivery cleanup caps each tick, skips held leases and leaves protected or foreign rows untouched', {timeout:15_000}, async()=>{
