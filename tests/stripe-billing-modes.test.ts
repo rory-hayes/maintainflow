@@ -1,6 +1,8 @@
 import test,{before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
+import http from 'node:http';
+import https from 'node:https';
 import Fastify,{type FastifyInstance} from 'fastify';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
@@ -147,6 +149,51 @@ test('lost Checkout response replays the persisted nonce once, and legacy test n
  const legacy=await signup(),customerId=`cus_test_${legacy.workspace.id}`,requestId=randomUUID();customers.set(customerId,{id:customerId,livemode:false,metadata:{folio_workspace:legacy.workspace.id}});
  await adminPool.query('insert into subscriptions(workspace_id,customer_id) values($1,$2)',[legacy.workspace.id,customerId]);await adminPool.query("insert into billing_checkouts(workspace_id,plan_id,request_id,idempotency_version) values($1,'standard',$2,1)",[legacy.workspace.id,requestId]);
  assert.equal((await request('/api/billing/checkout',{planId:'standard'},legacy)).statusCode,200);assert.equal(calls.at(-1)!.options.idempotencyKey,`folio-checkout:${requestId}`);
+});
+test('controlled unresolved Checkout age boundary preserves the nonce at 23 hours and refuses older retries',async t=>{
+ // Fresh disposable fixtures and a controlled application clock; no real Stripe transport or elapsed-time claim.
+ for(const extraMillisecond of [0,1])await t.test(extraMillisecond?'23 hours plus 1 ms refuses retry':'exactly 23 hours recovers the same attempt',async t=>{
+  let networkCalls=0;
+  const deny=()=>{networkCalls++;throw new Error('External transport is forbidden in the controlled Checkout age fixture');};
+  t.mock.method(globalThis,'fetch',deny);t.mock.method(http,'request',deny);t.mock.method(https,'request',deny);
+  mode('test');fault='';const owner=await signup();
+  const state=async()=>({
+   checkout:(await adminPool.query('select to_jsonb(t) row from billing_checkouts t where workspace_id=$1 order by billing_mode',[owner.workspace.id])).rows.map(r=>r.row),
+   subscription:(await adminPool.query('select to_jsonb(t) row from subscriptions t where workspace_id=$1 order by billing_mode',[owner.workspace.id])).rows.map(r=>r.row),
+   plan:(await adminPool.query('select plan from workspaces where id=$1',[owner.workspace.id])).rows,
+   usage:(await adminPool.query('select to_jsonb(t) row from usage_ledger t where workspace_id=$1 order by id',[owner.workspace.id])).rows.map(r=>r.row),
+   audit:(await adminPool.query('select to_jsonb(t) row from audit_events t where workspace_id=$1 order by id',[owner.workspace.id])).rows.map(r=>r.row),
+  });
+  try{
+   loseResponse=true;const lost=await request('/api/billing/checkout',{planId:'standard'},owner);
+   assert.equal(lost.statusCode,500,lost.body);assert.equal(loseResponse,false);
+   const initialCreates=calls.filter(c=>c.operation==='checkout-create'&&c.input.client_reference_id===owner.workspace.id);
+   assert.equal(initialCreates.length,1);const initial=initialCreates[0]!,providerSession=sessions.get(initial.options.idempotencyKey);assert.ok(providerSession);
+   const before=await state();assert.equal(before.checkout.length,1);const pending=before.checkout[0];
+   assert.equal(pending.plan_id,'standard');assert.equal(pending.billing_mode,'test');assert.equal(pending.session_id,null);
+   assert.equal(initial.options.idempotencyKey,`folio-checkout:test:${pending.request_id}`);
+   const providerBefore=structuredClone(providerSession),sessionCount=sessions.size,callStart=calls.length;
+   t.mock.method(Date,'now',()=>new Date(pending.created_at).getTime()+23*60*60*1000+extraMillisecond);
+   const result=await request('/api/billing/checkout',{planId:'standard'},owner),after=await state(),observed=calls.slice(callStart);
+   if(extraMillisecond){
+    assert.equal(result.statusCode,409,result.body);
+    assert.equal(result.json().error,'An unresolved Checkout reservation requires operator reconciliation before another Checkout can be created.');
+    assert.deepEqual(observed.map(c=>c.operation),['account','price','customer-read','subscriptions']);
+    assert.deepEqual(after,before,'Refusal must preserve the full pending reservation, audits, subscription, plan and usage');
+   }else{
+    assert.equal(result.statusCode,200,result.body);assert.equal(result.json().mode,'test');assert.equal(result.json().url,providerSession.url);
+    assert.deepEqual(observed.map(c=>c.operation),['account','price','customer-read','subscriptions','checkout-create']);
+    const replay=observed.at(-1)!;assert.deepEqual(replay.input,initial.input);assert.deepEqual(replay.options,initial.options);
+    assert.deepEqual(after.checkout,[{...pending,session_id:providerSession.id}],'Recovery may only bind the existing Session; nonce and creation time stay exact');
+    assert.deepEqual(after.subscription,before.subscription);assert.deepEqual(after.plan,before.plan);assert.deepEqual(after.usage,before.usage);
+    assert.deepEqual(after.audit.filter(row=>before.audit.some(old=>old.id===row.id)),before.audit);
+    const added=after.audit.filter(row=>!before.audit.some(old=>old.id===row.id));assert.equal(added.length,1);
+    assert.equal(added[0].action,'billing.checkout_created');assert.equal(added[0].user_id,owner.user.id);assert.equal(added[0].entity_id,null);
+    assert.deepEqual(added[0].metadata,{planId:'standard',mode:'test'});
+   }
+   assert.equal(sessions.size,sessionCount);assert.deepEqual(sessions.get(initial.options.idempotencyKey),providerBefore);assert.equal(networkCalls,0);
+  }finally{t.mock.restoreAll();loseResponse=false;}
+ });
 });
 test('an opt-in test clock binds new customers and accepts the same expanded clock without changing retry identities',async()=>{
  mode('test');const ordinary=await signup();
