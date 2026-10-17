@@ -122,6 +122,9 @@ test('failed removal retains its cleanup handle; only an authorised retry can re
  assert.equal((await adminPool.query('select attempts from file_deletions where id=$1',[row.id])).rows[0].attempts,10);
  failures.delete(storageKey);
  assert.equal((await request('POST',`/api/workspace/storage-deletions/${row.id}/retry`)).statusCode,200);
+ const reset=(await adminPool.query('select *,available_at<=clock_timestamp() due from file_deletions where id=$1',[row.id])).rows[0];
+ assert.equal(reset.status,'pending');assert.equal(reset.attempts,0);assert.equal(reset.last_error,null);assert.equal(reset.due,true);
+ assert.deepEqual(await fs.readFile(path.join(config.storageDir,storageKey)),documentBytes(document),'Retry acceptance alone must leave the original bytes present.');
  assert.equal(await processOneFileDeletion(),true);
  assert.equal((await adminPool.query('select id from file_deletions where id=$1',[row.id])).rowCount,0);
  await assert.rejects(fs.access(path.join(config.storageDir,storageKey)),(error:any)=>error.code==='ENOENT');
