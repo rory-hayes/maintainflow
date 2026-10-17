@@ -26,8 +26,8 @@ function evidenced(raw:Record<string,unknown>,source:BankSource,field:typeof ban
  // Providers can copy an ordinary table header into this signed-layout field.
  // Accept only the complete same header, including its order, in every alias;
  // no cropped quote or extra instruction may be discarded as header metadata.
- const columns=field==='transaction_layout'?separateColumnsHeader(value):null;
- if(columns)return entries.every(item=>source.sourcePages.includes(item.page)&&separateColumnsHeader(item.text)===columns)?columns:null;
+ const columns=field==='transaction_layout'?separateColumnsHeader(value,true):null;
+ if(columns)return entries.every(item=>source.sourcePages.includes(item.page)&&separateColumnsHeader(item.text,true)===columns)?columns:null;
  if(!entries.some(item=>collapse(item.text).includes(collapse(value))))return null;
  const signature=(input:string):string|null=>{
   if(field==='date_format')return dateOrder(input);
@@ -74,9 +74,14 @@ function nonFormatMetadata(raw:Record<string,unknown>,source:BankSource,field:'d
  return entries.length>0&&entries.length<=20&&entries.every(item=>item&&Number.isInteger(item.page)&&item.page>=1&&item.page<=30&&source.sourcePages.includes(item.page)&&typeof item.text==='string'&&item.text.length<=2000&&['matched-text','matched-region','model-visual'].includes(item.source??'')&&collapse(item.text)===collapse(value));
 }
 const provided=(raw:Record<string,unknown>,field:typeof bankFormatFields[number])=>Boolean(scalar(raw[field])?.trim());
-function separateColumnsHeader(value:string|null):string|null {
+function separateColumnsHeader(value:string|null,allowSpaced=false):string|null {
  if(!value)return null;
- const columns=value.split('|').map(column=>collapse(column).toLowerCase());
+ // Preserve horizontal boundaries before collapsing individual labels. Single
+ // spaces or vertical whitespace cannot establish a separate-column layout.
+ // Spaced headers are opt-in only for complete own-field metadata quotations;
+ // the distinct native TXT balance-rule recovery keeps its existing contract.
+ const parts=value.includes('|')?value.split('|'):allowSpaced&&!/[^\S \t]/u.test(value)?value.trim().split(/\t+| {2,}/):[];
+ const columns=parts.map(column=>collapse(column).toLowerCase());
  const labels=['date','description','reference','debit','credit','balance','currency'];
  return columns.includes('debit')&&columns.includes('credit')&&new Set(columns).size===columns.length&&columns.every(column=>labels.includes(column))?columns.join('|'):null;
 }
