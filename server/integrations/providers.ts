@@ -454,7 +454,7 @@ export async function registerProviders(app:FastifyInstance,dependencies:{stripe
   if(!local?.customer_id)badRequest('No Stripe customer exists for this workspace in the selected billing mode.',409);
   await verifyBillingCustomer(client,local.customer_id,actor.workspaceId,mode,settings.testClockId);
   if(settings.portalConfigurationId){
-   const configuration=await client.billingPortal.configurations.retrieve(settings.portalConfigurationId);
+   const configuration=await client.billingPortal.configurations.retrieve(settings.portalConfigurationId,{expand:['features.subscription_update.products']});
    assertStripePortalConfiguration(configuration,settings.prices,mode);
    for(const plan of ['standard','team'] as const){const id=settings.prices[plan];if(id&&!stripePriceMatches(await client.prices.retrieve(id),plan,settings.prices,mode,true))badRequest('Configured Stripe price does not match the MaintainFlow monthly plan.',503);}
   }
