@@ -1,0 +1,314 @@
+{
+  "version": 1,
+  "rates": {
+    "basis": "official_public_rate",
+    "source": "https://developers.openai.com/api/docs/pricing (standard; fetched 2026-10-17); model snapshot https://developers.openai.com/api/docs/models/gpt-5.4-mini",
+    "verifiedOn": "2026-10-17",
+    "model": "gpt-5.4-mini-2026-03-17",
+    "inputUsdPerMillion": 0.75,
+    "cachedInputUsdPerMillion": 0.075,
+    "outputUsdPerMillion": 4.5
+  },
+  "financial": {
+    "basis": "assumed",
+    "source": "All financial values are planning assumptions, not settlement evidence. EEA standard fee schedule https://stripe.com/ie/pricing and Billing PAYG https://stripe.com/ie/billing/pricing verified 2026-10-17, but actual card mix/contract/fees unknown. FX 0.92 is deliberately assumed, not a current exchange quote. All operating unit costs and invoice multiplier are unmeasured.",
+    "values": {
+      "eurPerUsd": 0.92,
+      "providerInvoiceMultiplier": 1,
+      "paymentFraction": 0.015,
+      "paymentFixedEur": 0.25,
+      "billingFraction": 0.007,
+      "refundAndDisputeReserveFraction": 0.01,
+      "salesTaxFraction": 0,
+      "storageEurPerGiBMonth": 0.03,
+      "egressEurPerGiB": 0.1,
+      "emailEurPerMessage": 0.001,
+      "supportEurPerHour": 30
+    }
+  },
+  "portfolio": {
+    "basis": "assumed",
+    "source": "Illustrative 25 paying workspaces and one active free workspace subsidized by each paid workspace. Fixed EUR allocations are placeholder totals, not provider quotes/invoices; use only incremental costs beyond included allowances to avoid double counting.",
+    "values": {
+      "payingWorkspaces": 25,
+      "freeWorkspacesPerPayingWorkspace": 1,
+      "fixedMonthlyEur": {
+        "hosting": 25,
+        "database": 30,
+        "backup": 10,
+        "monitor": 5,
+        "email": 0,
+        "domainAndOther": 1
+      }
+    }
+  },
+  "decision": {
+    "basis": "assumed",
+    "source": "70% contribution target is an unadopted planning sensitivity; owner must adopt offer, reserve and monthly budget. Support time is costed. No CAC, income tax or founder profit is inferred.",
+    "values": {
+      "targetContributionFraction": 0.7
+    }
+  },
+  "scenarios": [
+    {
+      "id": "illustrative_half_allowance",
+      "label": "Illustrative 50% allowance; unmeasured",
+      "basis": "assumed",
+      "source": "Planning sensitivity only. No customer distribution, bill, free ratio or support observation establishes these values.",
+      "paid": {
+        "allowanceUtilization": 0.5,
+        "aiShare": 1,
+        "pagesPerJob": 2,
+        "uncreditedAiJobsPerCreditedAiJob": 0,
+        "attemptsPerExtraction": 1.1,
+        "extractionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 1200
+        },
+        "suggestionUtilization": 1,
+        "fieldSuggestionShare": 0.5,
+        "attemptsPerSuggestion": 1.1,
+        "fieldSuggestionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 2000
+        },
+        "splitSuggestionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 1000
+        },
+        "storedCopies": 2,
+        "retentionMonths": 3,
+        "emailsPerWorkspace": 2,
+        "emailsPerJob": 0.1,
+        "supportMinutes": 2,
+        "sourceMiBPerOriginal": 0.5,
+        "downloadsPerOriginal": 2,
+        "newOriginalsPerCreditedJob": 1,
+        "newOriginalsPerUncreditedAiJob": 1,
+        "extractionOperatingEurPerAttempt": 0.001,
+        "suggestionOperatingEurPerAttempt": 0.001
+      },
+      "free": {
+        "allowanceUtilization": 0.3,
+        "aiShare": 1,
+        "pagesPerJob": 2,
+        "uncreditedAiJobsPerCreditedAiJob": 0,
+        "attemptsPerExtraction": 1.1,
+        "extractionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 1200
+        },
+        "suggestionUtilization": 0.5,
+        "fieldSuggestionShare": 0.5,
+        "attemptsPerSuggestion": 1.1,
+        "fieldSuggestionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 2000
+        },
+        "splitSuggestionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 1000
+        },
+        "storedCopies": 2,
+        "retentionMonths": 3,
+        "emailsPerWorkspace": 2,
+        "emailsPerJob": 0.1,
+        "supportMinutes": 0.5,
+        "sourceMiBPerOriginal": 0.5,
+        "downloadsPerOriginal": 2,
+        "newOriginalsPerCreditedJob": 1,
+        "newOriginalsPerUncreditedAiJob": 1,
+        "extractionOperatingEurPerAttempt": 0.001,
+        "suggestionOperatingEurPerAttempt": 0.001
+      },
+      "peakRequestsPerMinute": 30,
+      "peakInputTokensPerMinute": 180000,
+      "peakOutputTokensPerMinute": 60000
+    },
+    {
+      "id": "full_allowance_same_mix",
+      "label": "Full allowance with the same assumed token/retry mix",
+      "basis": "assumed",
+      "source": "Allowance sensitivity. All three AI lanes included; no measured full-use cohort.",
+      "paid": {
+        "allowanceUtilization": 1,
+        "aiShare": 1,
+        "pagesPerJob": 2,
+        "uncreditedAiJobsPerCreditedAiJob": 0,
+        "attemptsPerExtraction": 1.1,
+        "extractionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 1200
+        },
+        "suggestionUtilization": 1,
+        "fieldSuggestionShare": 0.5,
+        "attemptsPerSuggestion": 1.1,
+        "fieldSuggestionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 2000
+        },
+        "splitSuggestionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 1000
+        },
+        "storedCopies": 2,
+        "retentionMonths": 3,
+        "emailsPerWorkspace": 2,
+        "emailsPerJob": 0.1,
+        "supportMinutes": 2,
+        "sourceMiBPerOriginal": 0.5,
+        "downloadsPerOriginal": 2,
+        "newOriginalsPerCreditedJob": 1,
+        "newOriginalsPerUncreditedAiJob": 1,
+        "extractionOperatingEurPerAttempt": 0.001,
+        "suggestionOperatingEurPerAttempt": 0.001
+      },
+      "free": {
+        "allowanceUtilization": 1,
+        "aiShare": 1,
+        "pagesPerJob": 2,
+        "uncreditedAiJobsPerCreditedAiJob": 0,
+        "attemptsPerExtraction": 1.1,
+        "extractionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 1200
+        },
+        "suggestionUtilization": 1,
+        "fieldSuggestionShare": 0.5,
+        "attemptsPerSuggestion": 1.1,
+        "fieldSuggestionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 2000
+        },
+        "splitSuggestionTokens": {
+          "input": 6000,
+          "cachedInput": 0,
+          "output": 1000
+        },
+        "storedCopies": 2,
+        "retentionMonths": 3,
+        "emailsPerWorkspace": 2,
+        "emailsPerJob": 0.1,
+        "supportMinutes": 0.5,
+        "sourceMiBPerOriginal": 0.5,
+        "downloadsPerOriginal": 2,
+        "newOriginalsPerCreditedJob": 1,
+        "newOriginalsPerUncreditedAiJob": 1,
+        "extractionOperatingEurPerAttempt": 0.001,
+        "suggestionOperatingEurPerAttempt": 0.001
+      },
+      "peakRequestsPerMinute": 60,
+      "peakInputTokensPerMinute": 360000,
+      "peakOutputTokensPerMinute": 120000
+    },
+    {
+      "id": "retry_output_storage_fx_stress",
+      "label": "Three attempts, capped output, 50k input, single-page jobs, 12-month storage, adverse FX/card costs",
+      "basis": "assumed",
+      "source": "Stress scenario, not a worst-case spending ceiling: 50k input is assumed, output uses installed requested caps; cleanup lag, unbounded new accounts and unobserved charges can exceed it. Financial stress assumes 10% provider uplift, international cards with 2% conversion (3.15%+2%) and 3% refund/dispute reserve; none is established actual account usage.",
+      "paid": {
+        "allowanceUtilization": 1,
+        "aiShare": 1,
+        "pagesPerJob": 1,
+        "uncreditedAiJobsPerCreditedAiJob": 0,
+        "attemptsPerExtraction": 3,
+        "extractionTokens": {
+          "input": 50000,
+          "cachedInput": 0,
+          "output": 16000
+        },
+        "suggestionUtilization": 1,
+        "fieldSuggestionShare": 0.5,
+        "attemptsPerSuggestion": 3,
+        "fieldSuggestionTokens": {
+          "input": 50000,
+          "cachedInput": 0,
+          "output": 16000
+        },
+        "splitSuggestionTokens": {
+          "input": 50000,
+          "cachedInput": 0,
+          "output": 4096
+        },
+        "storedCopies": 2,
+        "retentionMonths": 12,
+        "emailsPerWorkspace": 2,
+        "emailsPerJob": 0.1,
+        "supportMinutes": 15,
+        "sourceMiBPerOriginal": 10,
+        "downloadsPerOriginal": 5,
+        "newOriginalsPerCreditedJob": 1,
+        "newOriginalsPerUncreditedAiJob": 1,
+        "extractionOperatingEurPerAttempt": 0.001,
+        "suggestionOperatingEurPerAttempt": 0.005
+      },
+      "free": {
+        "allowanceUtilization": 1,
+        "aiShare": 1,
+        "pagesPerJob": 1,
+        "uncreditedAiJobsPerCreditedAiJob": 0,
+        "attemptsPerExtraction": 3,
+        "extractionTokens": {
+          "input": 50000,
+          "cachedInput": 0,
+          "output": 16000
+        },
+        "suggestionUtilization": 1,
+        "fieldSuggestionShare": 0.5,
+        "attemptsPerSuggestion": 3,
+        "fieldSuggestionTokens": {
+          "input": 50000,
+          "cachedInput": 0,
+          "output": 16000
+        },
+        "splitSuggestionTokens": {
+          "input": 50000,
+          "cachedInput": 0,
+          "output": 4096
+        },
+        "storedCopies": 2,
+        "retentionMonths": 12,
+        "emailsPerWorkspace": 2,
+        "emailsPerJob": 0.1,
+        "supportMinutes": 5,
+        "sourceMiBPerOriginal": 10,
+        "downloadsPerOriginal": 5,
+        "newOriginalsPerCreditedJob": 1,
+        "newOriginalsPerUncreditedAiJob": 1,
+        "extractionOperatingEurPerAttempt": 0.001,
+        "suggestionOperatingEurPerAttempt": 0.005
+      },
+      "peakRequestsPerMinute": 90,
+      "peakInputTokensPerMinute": 4500000,
+      "peakOutputTokensPerMinute": 1440000,
+      "financialOverrides": {
+        "eurPerUsd": 1.05,
+        "providerInvoiceMultiplier": 1.1,
+        "paymentFraction": 0.0515,
+        "refundAndDisputeReserveFraction": 0.03
+      }
+    }
+  ],
+  "capacity": null,
+  "evidence": {
+    "providerProject": null,
+    "utcBillingWindow": null,
+    "reconciledAllAttemptBill": null,
+    "netReceiptsAndFx": null,
+    "measuredWorkload": null,
+    "operatingCosts": null,
+    "adoptedOfferReserveBudget": null,
+    "sustainedHostedCapacity": null
+  }
+}
