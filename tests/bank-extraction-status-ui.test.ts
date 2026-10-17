@@ -90,8 +90,9 @@ const hooks=registerHooks({load(url,context,next){return cssUrls.has(url)?{forma
 const BankReview=await import('../src/features/bank-statements/BankReview').then(module=>module.default).finally(()=>hooks.deregister());
 const values:BankValues={version:1,accounts:[{id:'synthetic-account',origin:'extracted',excluded:false,exclusion_reason:null,bank_name:'Synthetic bank',account_identifier:'SYN-001',currency:'EUR',statement_start:null,statement_end:null,opening_balance:'100.00',closing_balance:'90.00',total_debits:'10.00',total_credits:'0.00',balance_convention:'credit_increases',transactions:[{id:'synthetic-transaction',origin:'extracted',excluded:false,exclusion_reason:null,date:'2026-09-01',description:'Preserved earlier transaction',reference:'SYN-TX-001',debit:'10.00',credit:null,balance:'90.00',currency:'EUR'}]}]};
 const run:BankRun={id:'synthetic-run',createdAt:'2026-09-01T00:00:00Z',effectiveValues:values,effectiveRevision:'synthetic-revision',bankReviewToken:'synthetic-token',bankContext:{version:1,locale:'en-IE',accounts:{},transactions:{}},bankIssues:[],rawValues:{},evidence:{},corrections:[],approvals:[{id:'synthetic-approval',createdAt:'2026-09-01T00:01:00Z',values}]};
-function renderReview(jobs:BankExtractionJob[],withRun=true,documentStatus='failed'){
-  const storage=Object.getOwnPropertyDescriptor(globalThis,'sessionStorage'),fetch=globalThis.fetch;let requests=0;
+function renderReview(jobs:BankExtractionJob[],withRun=true,documentStatus='failed',mobile?:boolean){
+  const storage=Object.getOwnPropertyDescriptor(globalThis,'sessionStorage'),browser=Object.getOwnPropertyDescriptor(globalThis,'window'),fetch=globalThis.fetch;let requests=0;
+  if(mobile!==undefined)Object.defineProperty(globalThis,'window',{configurable:true,value:{matchMedia:()=>({matches:mobile})}});
   Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:{getItem:()=> 'synthetic-workspace'}});
   globalThis.fetch=(async()=>{requests++;throw new Error('Network forbidden in synthetic review fixture');}) as typeof fetch;
   const client=new QueryClient({defaultOptions:{queries:{retry:false,staleTime:Infinity,gcTime:Infinity}}});
@@ -100,7 +101,7 @@ function renderReview(jobs:BankExtractionJob[],withRun=true,documentStatus='fail
   try{
     const html=renderToStaticMarkup(createElement(QueryClientProvider,{client},createElement(MemoryRouter,{initialEntries:['/app/bank-statements/synthetic-document']},createElement(SessionProvider,null,createElement(Routes,null,createElement(Route,{path:'/app/bank-statements/:id',element:createElement(BankReview)}))))));
     assert.equal(requests,0);return html;
-  }finally{client.clear();globalThis.fetch=fetch;if(storage)Object.defineProperty(globalThis,'sessionStorage',storage);else Reflect.deleteProperty(globalThis,'sessionStorage');}
+  }finally{client.clear();globalThis.fetch=fetch;if(storage)Object.defineProperty(globalThis,'sessionStorage',storage);else Reflect.deleteProperty(globalThis,'sessionStorage');if(mobile!==undefined){if(browser)Object.defineProperty(globalThis,'window',browser);else Reflect.deleteProperty(globalThis,'window');}}
 }
 
 test('the real review screen exposes latest job progress above preserved prior transactions',()=>{
@@ -119,4 +120,37 @@ test('initial extraction failures remain actionable without displaying raw docum
   const html=renderReview([job('failed',3)],false);
   assert.match(html,/latest extraction could not finish/);assert.match(html,/Contact MaintainFlow support to check this failure/);assert.match(html,/No transactions to review yet/);
   assert.doesNotMatch(html,/selected earlier extraction|PRIVATE|private\.example|do-not-show/);
+});
+
+// These are rendered ARIA contracts, not a substitute for live keyboard/focus QA.
+function elementAttributes(html:string){
+  return [...html.matchAll(/<(?:button|div|section)\b[^>]*>/g)].map(([tag])=>Object.fromEntries([...tag.matchAll(/([\w:-]+)="([^"]*)"/g)].map(([,key,value])=>[key,value])));
+}
+function assertTabPanels(html:string,count:number){
+  const elements=elementAttributes(html),tabs=elements.filter(item=>item.role==='tab'&&item['aria-controls']),panels=elements.filter(item=>item.role==='tabpanel');
+  assert.equal(tabs.length,count);assert.equal(panels.length,count);
+  const ids=elements.map(item=>item.id).filter(Boolean);assert.equal(new Set(ids).size,ids.length,'Every rendered ID is unique');
+  for(const tab of tabs){
+    assert.ok(tab.id);const targets=panels.filter(panel=>panel.id===tab['aria-controls']);assert.equal(targets.length,1,'Each controlled panel exists exactly once');
+    const panel=targets[0];assert.equal(panel['aria-labelledby'],tab.id);assert.equal(Object.hasOwn(panel,'hidden'),tab['aria-selected']!=='true');
+    assert.equal(tab.tabindex,tab['aria-selected']==='true'?'0':'-1');assert.equal(panel.tabindex,tab['aria-selected']==='true'?'0':'-1');
+  }
+  assert.equal(elements.filter(item=>item['aria-label']==='Original document').length,1,'One original preview remains mounted');
+  assert.equal((html.match(/Preserved earlier transaction/g)||[]).length,1,'Transactions are not duplicated for responsive layout');
+  return elements;
+}
+
+test('desktop bank review associates its inner panels while preserving the independent original region',()=>{
+  const elements=assertTabPanels(renderReview([job('completed',1)],true,'exported',false),2);
+  for(const className of ['bank-original-panel','bank-transactions-panel']){
+    const panel=elements.find(item=>item.class===className);assert.ok(panel);
+    assert.equal(panel.role,undefined);assert.equal(panel['aria-labelledby'],undefined);assert.equal(panel.tabindex,undefined);assert.equal(Object.hasOwn(panel,'hidden'),false);
+  }
+});
+
+test('mobile bank review connects both tablists to unique panels and hides inactive content',()=>{
+  const elements=assertTabPanels(renderReview([job('completed',1)],true,'exported',true),4);
+  const original=elements.find(item=>item.class==='bank-original-panel'),transactions=elements.find(item=>item.class==='bank-transactions-panel');
+  assert.ok(original&&transactions);assert.equal(original.role,'tabpanel');assert.equal(transactions.role,'tabpanel');
+  assert.equal(Object.hasOwn(original,'hidden'),true);assert.equal(Object.hasOwn(transactions,'hidden'),false);
 });
