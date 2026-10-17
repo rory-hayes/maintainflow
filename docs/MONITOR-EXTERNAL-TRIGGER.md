@@ -32,6 +32,8 @@ The workflow gates the actor before secret use. Its source-authenticated selecto
 
 Dispatch **can be duplicated; it is not exactly once**: recent matching metadata avoids ordinary resends, but concurrent GET→POST invocations can create duplicate runs. The shared workflow concurrency group serializes them. An authenticated prior observation whose `checkedAt` already reaches the tick wins, so duplicates cannot multiply failing polls or incident/recovery transitions. A native observation after that tick also counts.
 
+Debounce remains **three consecutive unhealthy observations**, not three distinct five-minute intervals. If the external run executes first and a native run follows, both actual probes count; if native executes first at or after that external tick, the later external observation is suppressed. Dependency-failure and expired-lease counters use this same observation cadence. Native sampling is unchanged. Overlap can therefore reach the threshold sooner, without allocating another incident ID or another incident/recovery outbox pair for the same outage. Do not infer one observation per interval or a guaranteed fifteen-minute failure threshold from the cron expression; record source order and actual observations in cadence evidence.
+
 Checkpoint selection can read ten pages / 300 runs under the existing shared 20-second deadline, only after proving intervening stateful failures harmless. This does not promise 25 hours of recovery: extra runs and API latency shorten coverage. Limits, expired/ambiguous/raced history and notices aged at least 23 hours require exact operator/provider reconciliation. Preserve evidence; never delete runs, reset initialization or select an arbitrary older artifact to get green.
 
 ## Exact coordinator actions

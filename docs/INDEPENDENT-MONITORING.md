@@ -7,6 +7,7 @@ The runner calls only `GET /api/health`, `GET /api/ready` and `GET /api/internal
 ## Behaviour
 
 - The workflow requests a run every five minutes, best effort. Three consecutive unhealthy observations open one incident; a healthy observation closes it with a recovery notice. GitHub delay makes elapsed detection time longer than the nominal cadence.
+- This debounce counts observations, not distinct five-minute intervals. With both timers, external first then native can record two actual unhealthy probes in one interval; native first at or after the external tick suppresses that later external observation because its durable observation already reaches the tick. Dependency-failure and expired-lease counters use this same observation cadence. Native sampling is unchanged, so overlap can shorten the time to the third observation. There is no guaranteed fifteen-minute failure threshold. Either ordering retains one incident identity and one incident/recovery outbox pair for that outage.
 - Due work older than five minutes or an increase from the last observed terminal failure count opens an incident immediately. A decrease establishes the next count baseline, so later failures are not hidden below a historical maximum. Three consecutive observations of expired leases also open an incident. Existing failures on initialization establish a baseline rather than generating historical alerts.
 - A gap exceeding 20 minutes between observations is a separate monitoring-gap incident. It is detected only when execution resumes; the workflow cannot report its own permanent stoppage.
 - Email content contains only fixed check names, the app origin and timestamps. No diagnostic payload, account identifier, document content, credential or raw provider error appears in logs or notices.
@@ -33,7 +34,7 @@ If a provider accepts an email but its response or final checkpoint is lost, the
 
 New notices use MaintainFlow sender, subject and body text and persist `messageVersion: 2`. An unversioned pending notice retains the original Folio payload on restore/retry. State-envelope version, encryption binding, idempotency keys and exact workflow run-name matching remain unchanged. This compatibility support does not assert that monitoring or email delivery has been activated.
 
-The optional [external trigger](MONITOR-EXTERNAL-TRIGGER.md) preserves this pipeline. Duplicate ticks retain the durable observation instead of multiplying failure polls. Its provider/key setup and hosted acceptance remain separate.
+The optional [external trigger](MONITOR-EXTERNAL-TRIGGER.md) preserves this pipeline. Repeated external ticks retain the durable observation instead of multiplying failure polls; later native observations still count as described above. Its provider/key setup and hosted acceptance remain separate.
 
 ## Configuration and activation
 

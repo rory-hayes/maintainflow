@@ -61,6 +61,45 @@ test('duplicate external ticks resume one durable observation without multiplyin
   assert.throws(()=>advance(state,healthy(7),{externalTick:'2026-09-20T00:12:00.000Z'}),/invalid_external_tick/);
 });
 
+for(const externalFirst of [true,false])test(`overlapping schedulers preserve observation debounce and one outbox identity: ${externalFirst?'external then native':'native then external'}`,()=>{
+  let state=initialState(origin),identities=0;
+  const sampling={id:()=>{identities++;return incidentId;}};
+  const pair=(minute:number,ready:boolean)=>{
+    const tick=healthy(minute).at;
+    for(const [index,external]of [externalFirst,!externalFirst].entries()){
+      const snapshot={...healthy(minute),ready,at:new Date(Date.parse(tick)+(index+1)*10_000).toISOString()};
+      snapshot.queues!.extraction.expiredLeases=ready?0:1;
+      const previous=structuredClone(state);
+      state=advance(state,snapshot,{...sampling,...(external?{externalTick:tick}:{})});
+      // A native observation after this tick suppresses the later external one.
+      if(external&&!externalFirst)assert.deepEqual(state,previous);
+    }
+    assert.equal(state.checkedAt,new Date(Date.parse(tick)+(externalFirst?20_000:10_000)).toISOString());
+  };
+  pair(2,false);
+  assert.equal(state.consecutiveFailures,externalFirst?2:1);
+  assert.equal(state.expiredPolls.extraction,externalFirst?2:1);
+  assert.equal(state.pending.length,0);assert.equal(identities,0);
+  pair(7,false);
+  assert.equal(state.consecutiveFailures,externalFirst?3:2);
+  assert.equal(state.expiredPolls.extraction,externalFirst?3:2);
+  assert.equal(state.pending.length,externalFirst?1:0);
+  pair(12,false);
+  const openedAt=new Date(Date.parse(healthy(externalFirst?7:12).at)+10_000).toISOString();
+  assert.equal(identities,1);assert.equal(state.incident?.id,incidentId);
+  assert.equal(state.incident?.openedAt,openedAt);
+  assert.equal(state.pending.length,1);
+  const incident=structuredClone(state.pending[0]);
+  assert.deepEqual(incident,{id:incidentId,kind:'incident',at:openedAt,openedAt,reasons:['readiness_unavailable','queue_lease:extraction'],test:false,messageVersion:2});
+  pair(17,false);
+  assert.equal(identities,1);assert.deepEqual(state.pending,[incident]);assert.equal(state.incident?.openedAt,openedAt);
+  pair(22,true);pair(27,true);
+  assert.equal(identities,1);assert.equal(state.incident,null);assert.equal(state.consecutiveFailures,0);
+  assert.equal(state.expiredPolls.extraction,0);
+  assert.deepEqual(state.pending,[incident,{...incident,kind:'recovery',at:new Date(Date.parse(healthy(22).at)+10_000).toISOString()}]);
+  assert.deepEqual(state.pending.map(notice=>`${notice.id}/${notice.kind}`),[`${incidentId}/incident`,`${incidentId}/recovery`]);
+});
+
 test('public artifact payload is encrypted and bound to the key and exact configured origin',()=>{
   const key=randomBytes(32).toString('base64'),state=advance(initialState(origin),healthy(0),options),ciphertext=seal(state,key);
   assert.deepEqual(unseal(ciphertext,key,origin),state);assert.equal(ciphertext.includes(Buffer.from('failedCounts')),false);
