@@ -28,7 +28,7 @@ function portalConfiguration(value:StripeMode){return {id:'bpc_approved',active:
 function client(value:StripeMode):Stripe {
  const call=(operation:string,input:any,options?:any)=>calls.push({operation,mode:value,input,options});
  return {
-  accounts:{retrieve:async()=>{call('account',null);return {id:fault==='account'?'acct_wrong':'acct_approved',charges_enabled:fault!=='disabled',payouts_enabled:true,details_submitted:true};}},
+  accounts:{retrieve:async()=>{call('account',null);return {id:fault==='account'?'acct_wrong':'acct_approved',charges_enabled:!['disabled','charges-disabled','not-live-ready'].includes(fault),payouts_enabled:!['payouts-disabled','not-live-ready'].includes(fault),details_submitted:!['details-missing','not-live-ready'].includes(fault)};}},
   prices:{retrieve:async(id:string)=>{call('price',id);return price(id,fault==='price-mode'?value!=='live':value==='live');}},
   customers:{create:async(input:any,options:any)=>{call('customer-create',input,options);const id=`cus_${value}_${input.metadata.folio_workspace}`;const customer={id,livemode:value==='live',metadata:input.metadata,...(input.test_clock?{test_clock:fault==='created-clock-missing'?null:fault==='created-clock-wrong'?'clock_other':input.test_clock}:{})};customers.set(id,customer);return customer;},retrieve:async(id:string)=>{call('customer-read',id);const result=customers.get(id);return fault==='customer-mode'?{...result,livemode:value!=='live'}:result;}},
   subscriptions:{list:async(input:any)=>{call('subscriptions',input);return {data:fault==='active'?[subscription(input.customer,value)]:[],has_more:false};}},
@@ -184,6 +184,53 @@ test('clock-bound reconciliation refuses mismatched customers without persisting
   customers.set(customerId,{...customer,test_clock:{id:clock}});fault='active';await reconcileStripeCustomer(pointer,client('test'));
   assert.equal((await adminPool.query('select plan from workspaces where id=$1',[owner.workspace.id])).rows[0].plan.id,'standard');
  }finally{fault='';customers.set(customerId,customer);mode('test');}
+});
+test('matching test account can create sandbox Checkout before live activation without granting paid entitlements',async()=>{
+ mode('test');const owner=await signup();
+ const planBefore=(await adminPool.query('select plan from workspaces where id=$1',[owner.workspace.id])).rows;
+ const usageBefore=(await adminPool.query('select * from usage_ledger where workspace_id=$1',[owner.workspace.id])).rows;
+ const before=calls.length;fault='not-live-ready';
+ try{
+  const response=await request('/api/billing/checkout',{planId:'standard'},owner);
+  assert.equal(response.statusCode,200,response.body);assert.equal(response.json().mode,'test');
+  const observed=calls.slice(before);assert.deepEqual(observed.map(call=>call.operation),['account','price','customer-create','subscriptions','checkout-create']);assert.ok(observed.every(call=>call.mode==='test'));
+  assert.equal(observed.find(call=>call.operation==='customer-create')!.options.idempotencyKey,`folio-customer:test:${owner.workspace.id}`);
+  const stored=(await adminPool.query('select billing_mode,customer_id from subscriptions where workspace_id=$1',[owner.workspace.id])).rows;
+  assert.deepEqual(stored,[{billing_mode:'test',customer_id:`cus_test_${owner.workspace.id}`}]);
+  const checkout=(await adminPool.query('select billing_mode,request_id,session_id from billing_checkouts where workspace_id=$1',[owner.workspace.id])).rows;assert.equal(checkout.length,1);assert.equal(checkout[0].billing_mode,'test');assert.ok(checkout[0].session_id);
+  assert.equal(observed.find(call=>call.operation==='checkout-create')!.options.idempotencyKey,`folio-checkout:test:${checkout[0].request_id}`);
+  assert.deepEqual((await adminPool.query('select plan from workspaces where id=$1',[owner.workspace.id])).rows,planBefore);
+  assert.deepEqual((await adminPool.query('select * from usage_ledger where workspace_id=$1',[owner.workspace.id])).rows,usageBefore);
+ }finally{fault='';mode('test');}
+});
+test('live Checkout rejects each missing activation flag and all flags missing before customer or reservation creation',async()=>{
+ mode('live');const owner=await signup();
+ const planBefore=(await adminPool.query('select plan from workspaces where id=$1',[owner.workspace.id])).rows;
+ try{
+  for(const issue of ['charges-disabled','payouts-disabled','details-missing','not-live-ready']){
+   const before=calls.length;fault=issue;const response=await request('/api/billing/checkout',{planId:'standard'},owner);
+   assert.equal(response.statusCode,503,response.body);assert.match(response.json().error,/not ready to accept payments/);
+   assert.deepEqual(calls.slice(before).map(call=>call.operation),['account']);
+  }
+  assert.deepEqual((await adminPool.query('select * from subscriptions where workspace_id=$1',[owner.workspace.id])).rows,[]);
+  assert.deepEqual((await adminPool.query('select * from billing_checkouts where workspace_id=$1',[owner.workspace.id])).rows,[]);
+  assert.deepEqual((await adminPool.query('select * from audit_events where workspace_id=$1',[owner.workspace.id])).rows,[]);
+  assert.deepEqual((await adminPool.query('select plan from workspaces where id=$1',[owner.workspace.id])).rows,planBefore);
+ }finally{fault='';mode('test');}
+});
+test('test and live Checkout both reject the wrong account before customer or reservation creation',async()=>{
+ try{
+  for(const selected of ['test','live'] as const){
+   mode(selected);const owner=await signup(),before=calls.length;fault='account';
+   const response=await request('/api/billing/checkout',{planId:'standard'},owner);
+   assert.equal(response.statusCode,503,response.body);assert.match(response.json().error,/approved billing account/);
+   assert.deepEqual(calls.slice(before).map(call=>call.operation),['account']);
+   assert.deepEqual((await adminPool.query('select * from subscriptions where workspace_id=$1',[owner.workspace.id])).rows,[]);
+   assert.deepEqual((await adminPool.query('select * from billing_checkouts where workspace_id=$1',[owner.workspace.id])).rows,[]);
+   assert.deepEqual((await adminPool.query('select * from audit_events where workspace_id=$1',[owner.workspace.id])).rows,[]);
+   fault='';
+  }
+ }finally{fault='';mode('test');}
 });
 test('live account eligibility, exact price and customer mode fail before Checkout creation',async()=>{
  mode('live');const before=calls.filter(c=>c.operation==='checkout-create').length;

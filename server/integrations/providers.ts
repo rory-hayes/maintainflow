@@ -40,7 +40,8 @@ async function verifyBillingAccount(client:Stripe,settings:BillingConfiguration,
  if(settings.mode!=='live'&&!settings.accountId)return;
  const account=await client.accounts.retrieve(null);
  if(account.id!==settings.accountId)badRequest('Stripe credentials do not belong to the approved billing account.',503);
- if(acceptPayments&&(!account.charges_enabled||!account.payouts_enabled||!account.details_submitted))badRequest('The Stripe account is not ready to accept payments.',503);
+ // Live activation flags do not gate sandbox Checkout; account identity still does.
+ if(acceptPayments&&settings.mode==='live'&&(!account.charges_enabled||!account.payouts_enabled||!account.details_submitted))badRequest('The Stripe account is not ready to accept payments.',503);
 }
 async function verifyBillingCustomer(client:Stripe,customerId:string,workspaceId:string,mode:StripeMode,testClockId?:string){
  const customer=await client.customers.retrieve(customerId);
