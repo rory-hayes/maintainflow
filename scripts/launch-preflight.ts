@@ -68,6 +68,13 @@ const sha256=(bytes:Uint8Array)=>createHash('sha256').update(bytes).digest('hex'
 const sameSet=(actual:string[],expected:string[])=>actual.length===expected.length&&new Set(actual).size===actual.length&&expected.every(id=>actual.includes(id));
 const fresh=(value:unknown,now:Date,minutes:number)=>typeof value==='string'&&Number.isFinite(Date.parse(value))&&Date.parse(value)<=now.getTime()+30_000&&now.getTime()-Date.parse(value)<=minutes*60_000;
 const validHost=(value:unknown)=>typeof value==='string'&&/^maintainflow-[a-z0-9]+-rorys-projects-accf0d71\.vercel\.app$/.test(value);
+function nextWafVersion(baseline:unknown,live:unknown,staged:unknown):number|null{
+  if(typeof baseline!=='number'||typeof live!=='number'||typeof staged!=='number'||
+    !Number.isSafeInteger(baseline)||!Number.isSafeInteger(live)||!Number.isSafeInteger(staged)||
+    baseline<0||live<0||staged<0||baseline>=Number.MAX_SAFE_INTEGER)return null;
+  const next=baseline+1;
+  return live===next&&staged===next?next:null;
+}
 const requiredChecks=['Test and build','Analyze (actions)','Analyze (javascript-typescript)','Analyze (python)','CodeQL','Vercel','Vercel Preview Comments'];
 const requiredSteps=['Create restricted application database role','Apply database migrations','Run tests with controlled provider fixtures','Typecheck and package the hosted application','Verify the isolated function runtime and document decoders','Restore and activate an independently encrypted synthetic backup','Capture and restore a managed database with controlled private object storage'];
 export type PreflightContext={now:Date;expectedCommit:string;expectedTree:string;repository:{commit:string;tree:string;branch:string;clean:boolean};read:(filename:string)=>Promise<Uint8Array>};
@@ -141,6 +148,8 @@ export async function checkLaunchPreflight(input:unknown,context:PreflightContex
   const route=(name:string)=>requests.filter(value=>object(value).path===name);
   const data=(name:string)=>object(object(route(name)[0]).data);
   check('private_canonical_guards',canonical.pass===true&&canonical.revision===commit&&requests.length===4&&['/api/health','/api/ready','/api/config','/api/auth/signup-terms'].every(name=>route(name).length===1)&&requests.every(value=>object(value).status===200&&object(value).pass===true&&object(value).cacheControl==='private, no-store')&&data('/api/health').revision===commit&&data('/api/health').environment==='preview'&&data('/api/health').status==='ok'&&data('/api/ready').status==='ready'&&isDeepStrictEqual(data('/api/ready').checks,{restore:'ok',database:'ok',storage:'ok'})&&isDeepStrictEqual(data('/api/config'),{preview:true,inviteRequired:true,previewBillingMode:'mock'})&&isDeepStrictEqual(data('/api/auth/signup-terms'),{enabled:false,policy:null}),'Before activation preserve exact revision, readiness, private invitations, simulated billing and dormant terms metadata. Separate actual signup-POST denial is required.');
+  const nextVersion=nextWafVersion(nested(before,'active','version'),nested(live,'active','version'),nested(draft,'draft','version'));
+  check('waf_version_numbers',nextVersion!==null,'Original baseline, live and staged WAF versions must be nonnegative safe integer numbers, with an exact safe baseline-plus-one live/staged version; no coercion is allowed.');
   let wafMatches=false;
   try{
     const expected=structuredClone(before),active=object(expected.active),current=object(live.active),rules=array(active.rules);
@@ -148,8 +157,10 @@ export async function checkLaunchPreflight(input:unknown,context:PreflightContex
     const rule=object(target[0]),conditions=array(object(array(rule.conditionGroup)[0]).conditions),condition=object(conditions[0]),oldHosts=array(condition.value);
     const newRule=array(current.rules).find(value=>object(value).id===rule.id);
     const baselineSafe=before.draft===null&&live.draft===null&&active.firewallEnabled===true&&target.length===1&&rule.active===true&&nested(rule,'action','mitigate','action')==='deny'&&array(rule.conditionGroup).length===1&&conditions.length===1&&condition.type==='host'&&condition.op==='ninc'&&oldHosts.length===3&&oldHosts[0]==='maintainflow.io'&&oldHosts[1]==='www.maintainflow.io'&&validHost(oldHosts[2])&&oldHosts[2]!==host&&nested(newRule,'active')===true;
-    condition.value=['maintainflow.io','www.maintainflow.io',host];active.version=Number(active.version)+1;active.updatedAt=current.updatedAt;
-    wafMatches=baselineSafe&&Number.isSafeInteger(active.version)&&isDeepStrictEqual(expected,live)&&review.liveWafVersion===current.version&&review.noDraft===true&&review.fullNonTargetProtectionAndHistoryEqual===true;
+    if(nextVersion!==null){
+      condition.value=['maintainflow.io','www.maintainflow.io',host];active.version=nextVersion;active.updatedAt=current.updatedAt;
+      wafMatches=baselineSafe&&isDeepStrictEqual(expected,live)&&review.liveWafVersion===current.version&&review.noDraft===true&&review.fullNonTargetProtectionAndHistoryEqual===true;
+    }
   }catch{wafMatches=false;}
   check('complete_waf_preservation',wafMatches,'Compare the complete baseline/live WAF and history: no draft, active deny rule, canonical hosts and exactly one old-to-current immutable-host replacement. Only version/update time may otherwise change.');
   const draftProjection=structuredClone(object(draft.draft)),liveProjection=structuredClone(object(live.active));

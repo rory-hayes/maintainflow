@@ -34,6 +34,14 @@ function fixture(){
   return {manifest,context,files,pin,replace,ci,deployment,before,live,draft,canonical,stage,review};
 }
 const blocked=async(f:ReturnType<typeof fixture>,id:string)=>{const report=await checkLaunchPreflight(f.manifest,f.context);assert.equal(report.decision,'BLOCKED');assert.equal(report.checks.find(check=>check.id===id)?.status,'blocked',JSON.stringify(report));return report;};
+function rebindWafReceipts(f:ReturnType<typeof fixture>){
+  f.draft.active=structuredClone(f.before.active);
+  f.replace('wafBefore',f.before);f.replace('wafLive',f.live);f.replace('wafDraft',f.draft);
+  Object.assign(f.stage,{activeVersion:f.before.active.version,draftVersion:f.live.active.version,baselineSHA256:f.manifest.release.wafBefore!.sha256,draftSHA256:f.manifest.release.wafDraft!.sha256});
+  f.replace('stageReview',f.stage);Object.assign(f.review,{liveWafVersion:f.live.active.version});
+  for(const [key,name] of [['wafBefore','firewall-before.json'],['wafLive','firewall-live.json'],['wafDraft','firewall-draft.json'],['stageReview','STAGE-REVIEW.json']] as const)f.review.inputs[name].sha256=f.manifest.release[key]!.sha256;
+  f.replace('review',f.review);
+}
 
 test('complete synthetic launch evidence only prepares coordinator review and never authorizes or performs activation',async()=>{
   const f=fixture(),report=await checkLaunchPreflight(f.manifest,f.context);
@@ -98,6 +106,30 @@ test('stale release guards, early public signup/billing and stale review digest 
 });
 test('complete WAF comparison rejects unrelated drift, wildcard/retired hosts, disabled protections, draft and history changes',async()=>{
   for(const mutate of [(f:ReturnType<typeof fixture>)=>{f.live.active.crs.xss.active=false;},(f:ReturnType<typeof fixture>)=>{f.live.active.rules[0].conditionGroup[0].conditions[0].value.push('*.vercel.app');},(f:ReturnType<typeof fixture>)=>{f.live.active.rules[0].conditionGroup[0].conditions[0].value[2]=oldHost;},(f:ReturnType<typeof fixture>)=>{f.live.active.firewallEnabled=false;},(f:ReturnType<typeof fixture>)=>{(f.live as unknown as {draft:unknown}).draft={pending:true};},(f:ReturnType<typeof fixture>)=>{(f.live.versions as unknown[]).push({version:1});}]){const f=fixture();mutate(f);f.replace('wafLive',f.live);await blocked(f,'complete_waf_preservation');}
+});
+test('malformed baseline WAF versions cannot pass through coercion even when all release receipt hashes are rebound',async()=>{
+  for(const [baseline,next] of [[null,1],['',1],['32',33],['0',1],[-1,0]] as const){
+    const f=fixture();Object.assign(f.before.active,{version:baseline});f.live.active.version=next;f.draft.draft.version=next;rebindWafReceipts(f);
+    const report=await checkLaunchPreflight(f.manifest,f.context);
+    assert.equal(report.checks.find(check=>check.id==='independent_release_review')?.status,'pass');
+    assert.equal(report.checks.find(check=>check.id==='reviewed_stage_then_publish')?.status,'pass');
+    assert.equal(report.checks.find(check=>check.id==='complete_staged_waf')?.status,'pass');
+    assert.equal(report.checks.find(check=>check.id==='complete_waf_preservation')?.status,'blocked',`baseline ${JSON.stringify(baseline)} unexpectedly passed`);
+    assert.equal(report.decision,'BLOCKED');assert.equal(report.productionReady,false);assert.equal(report.activationAuthorized,false);assert.equal(report.activationPerformed,false);
+  }
+});
+test('original baseline, live and staged WAF versions must be safe integer numbers with an exact safe increment',async()=>{
+  for(const field of ['baseline','live','draft'] as const){
+    for(const value of [null,'','32','33',false,-1,0.5,Number.MAX_SAFE_INTEGER+1]){
+      const f=fixture();Object.assign(field==='baseline'?f.before.active:field==='live'?f.live.active:f.draft.draft,{version:value});rebindWafReceipts(f);
+      const report=await checkLaunchPreflight(f.manifest,f.context);
+      assert.equal(report.checks.find(check=>check.id==='independent_release_review')?.status,'pass');
+      assert.equal(report.checks.find(check=>check.id==='waf_version_numbers')?.status,'blocked',`${field} ${JSON.stringify(value)} unexpectedly passed`);
+      assert.equal(report.decision,'BLOCKED');
+    }
+  }
+  const overflow=fixture();overflow.before.active.version=Number.MAX_SAFE_INTEGER;overflow.live.active.version=Number.MAX_SAFE_INTEGER+1;overflow.draft.draft.version=Number.MAX_SAFE_INTEGER+1;rebindWafReceipts(overflow);await blocked(overflow,'waf_version_numbers');
+  for(const baseline of [0,1,Number.MAX_SAFE_INTEGER-1]){const f=fixture();f.before.active.version=baseline;f.live.active.version=baseline+1;f.draft.draft.version=baseline+1;rebindWafReceipts(f);const report=await checkLaunchPreflight(f.manifest,f.context);assert.equal(report.decision,'READY_FOR_COORDINATOR_REVIEW',JSON.stringify(report.checks.filter(item=>item.status==='blocked')));assert.equal(report.activationAuthorized,false);assert.equal(report.productionReady,false);}
 });
 test('staged projection, independent hash binding and stage-before-publish order are mandatory',async()=>{
   const drift=fixture();drift.draft.draft.firewallEnabled=false;drift.replace('wafDraft',drift.draft);await blocked(drift,'complete_staged_waf');
