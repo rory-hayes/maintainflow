@@ -33,6 +33,14 @@ test('known temporary terminal failure explains a delayed charged retry and resp
   const viewer=renderStatus(temporary,true,false);assert.match(viewer,/Ask a workspace editor/);assert.doesNotMatch(viewer,/using Extract again/);
 });
 
+test('exhausted worker lease keeps manual retry guidance without promising another automatic attempt',()=>{
+  const error='Worker lease expired; automatic retry limit reached. Reprocess the document to try again.';
+  const exhausted={...job('failed',3),error};
+  const editor=renderStatus(exhausted);assert.match(editor,/latest extraction could not finish/);assert.match(editor,/3 of 3 attempts used/);assert.match(editor,/Wait a little before using Extract again/);assert.match(editor,/uses pages from your allowance/);
+  const viewer=renderStatus(exhausted,true,false);assert.match(viewer,/Ask a workspace editor/);assert.doesNotMatch(viewer,/using Extract again/);
+  for(const html of [editor,viewer]){assert.doesNotMatch(html,/retry automatically|retry scheduled/);assert.ok(!html.includes(error));}
+});
+
 test('configuration, provider access and quota failures direct customers to MaintainFlow support',()=>{
   const errors=[
     'Bank statement extraction is unavailable because the AI provider is not configured. Ask your administrator to enable it, then retry the statement.',

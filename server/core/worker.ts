@@ -63,7 +63,7 @@ async function recoverExpiredCoreJobs(onlyJobId?:string){
  const candidates=(await adminPool.query("select id,workspace_id,document_id from jobs where state='processing' and lease_until<now() and ($1::uuid is null or id=$1) order by lease_until,id limit 20",[onlyJobId??null])).rows;
  for(const candidate of candidates)await transaction(adminPool,async c=>{
   await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[candidate.workspace_id]);
-  const {rows:[job]}=await c.query("update jobs set state=case when attempts>=max_attempts then 'failed' else 'queued' end,lease_owner=null,lease_until=null,error='Worker lease expired; retry scheduled',updated_at=now() where id=$1 and state='processing' and lease_until<now() returning *",[candidate.id]);
+  const {rows:[job]}=await c.query("update jobs set state=case when attempts>=max_attempts then 'failed' else 'queued' end,lease_owner=null,lease_until=null,error=case when attempts>=max_attempts then 'Worker lease expired; automatic retry limit reached. Reprocess the document to try again.' else 'Worker lease expired; retry scheduled' end,updated_at=now() where id=$1 and state='processing' and lease_until<now() returning *",[candidate.id]);
   // Preserve reviewed displays, but let the existing status journal record a
   // recovered processing job's queued state before its next actual claim.
   if(job?.state==='queued')await c.query("update documents set status='queued',error=$3,updated_at=now() where id=$1 and workspace_id=$2 and status='processing'",[job.document_id,job.workspace_id,'Worker lease expired; retry scheduled']);
