@@ -263,7 +263,7 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
 
 /** Called by the root worker. Leases, bounded attempts and persistent errors survive restarts. */
 /** Optional dependencies and event ID are internal controlled-worker test seams. */
-export async function tickProviders(budget:WorkBudget={},dependencies:{resend?:ResendDependencies;eventId?:string}={}){
+export async function tickProviders(budget:WorkBudget={},dependencies:{stripe?:Stripe;resend?:ResendDependencies;eventId?:string}={}){
  if(budget.signal?.aborted||(budget.deadlineAt!==undefined&&Date.now()+140_000>=budget.deadlineAt))return false;
  await adminPool.query("update provider_events set status='failed',error='Provider processing lease expired after the final attempt.',lease_until=null,lease_token=null where status='processing' and lease_until<now() and attempts>=5");
  const token=randomUUID();
@@ -276,7 +276,7 @@ export async function tickProviders(budget:WorkBudget={},dependencies:{resend?:R
  const heartbeat=setInterval(()=>{void adminPool.query("update provider_events set lease_until=now()+interval '5 minutes' where id=$1 and lease_token=$2 and status='processing'",[event.id,token]).catch(()=>{});},30_000);
  heartbeat.unref();
  try{
-  if(event.provider==='stripe')await processStripeEvent(event.payload);
+  if(event.provider==='stripe')await processStripeEvent(event.payload,dependencies.stripe);
   else if(event.provider==='resend')await processResendEvent(event.id,event.payload,dependencies.resend,budget);
   else throw new Error('Unsupported provider event.');
   await adminPool.query("update provider_events set status='completed',error=null,lease_until=null,lease_token=null where id=$1 and lease_token=$2",[event.id,token]);
