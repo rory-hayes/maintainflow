@@ -6,32 +6,15 @@ import type {CheckoutTermsList,CheckoutTermsRecord,CheckoutTermsSummary} from '.
 import {PLANS} from '../../shared/plans.js';
 import {monthlyAiSuggestionLimit} from '../../shared/ai-suggestion-allowances.js';
 import {adminPool,badRequest,notFound,transaction,withWorkspace} from '../core/db.js';
+import {checkoutPolicySchema as policySchema,checkoutAgreementMessage as agreementMessage,type CheckoutPolicyInput,type CheckoutPolicy as Policy} from './checkout-policy.js';
+export {validateCheckoutPolicy,type CheckoutPolicyInput} from './checkout-policy.js';
 
 const boundedText=(max:number)=>z.string().min(1).max(max).refine(value=>!/[\u0000-\u0008\u000b-\u001f\u007f]/.test(value));
 const shortText=(max:number)=>boundedText(max).refine(value=>!/[\r\n\t]/.test(value));
 const identifier=(prefix:string)=>z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9_-]{1,200}$`));
-const httpsUrl=z.string().max(2048).url().refine(value=>{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password&&!u.hash;});
-const policyInput=z.object({version:shortText(80),language:z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/).max(35),title:shortText(160),text:boundedText(16000),url:httpsUrl,agreementText:shortText(1000)}).strict();
-/** No production catalogue is supplied. Only the internal dependency seam can enable capture. */
-export type CheckoutPolicyInput=z.input<typeof policyInput>;
-type Policy=CheckoutPolicyInput&{sha256:string};
-const policySchema=policyInput.extend({sha256:z.string().regex(/^[a-f0-9]{64}$/)});
 const hash=(value:string)=>createHash('sha256').update(value,'utf8').digest('hex');
 const stable=(value:unknown):string=>JSON.stringify(value,(_key,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
 const notice='This Checkout terms record preserves the presented terms and recorded acceptance evidence. It does not confirm payment, entitlement, delivery of contractual information, or legal completeness.';
-const markdownText=(text:string)=>text.replace(/[\\`*_{}\[\]()#+.!|>-]/g,'\\$&');
-function agreementMessage(policy:CheckoutPolicyInput){
- const url=new URL(policy.url).href.replace(/[()]/g,char=>char==='('?'%28':'%29');
- const message=`${markdownText(policy.agreementText)} [${markdownText(policy.title)}](${url})`;
- if(message.length>1200||url.length>2048)badRequest('Checkout terms configuration is unavailable.',503);
- return message;
-}
-export function validateCheckoutPolicy(input:unknown):Policy{
- const parsed=policyInput.safeParse(input);
- if(!parsed.success||Buffer.byteLength(parsed.data.text,'utf8')>60000)badRequest('Checkout terms configuration is unavailable.',503);
- agreementMessage(parsed.data); // Stripe limits the final custom message to 1200 characters.
- return {...parsed.data,sha256:hash(parsed.data.text)};
-}
 type ContractRow={id:string;workspace_id:string;initiated_by:string|null;billing_mode:'test'|'live';customer_id:string;plan_id:'standard'|'team';policy:Policy;offer:CheckoutTermsRecord['offer'];create_params:Stripe.Checkout.SessionCreateParams;params_sha256:string;session_id:string|null;created_at:Date;created_cursor?:string;completion_state?:'accepted'|'not_recorded'|null;provider_event_created_at?:Date;observed_at?:Date};
 const offerSchema=z.object({planName:shortText(80),currency:z.literal('eur'),amountMinor:z.number().int().positive(),interval:z.literal('month'),pagesPerCalendarMonth:z.number().int().positive(),aiSuggestionsPerCalendarMonth:z.number().int().positive()}).strict();
 function checked(row:ContractRow){

@@ -335,8 +335,8 @@ export async function sendGoogleSheets(integration:Integration,delivery:{id:stri
 /** Optional client is an internal controlled-transport seam; configuration/authorization still run. */
 export async function registerProviders(app:FastifyInstance,dependencies:{stripeClient?:(settings:BillingConfiguration)=>Stripe;checkoutPolicy?:()=>CheckoutPolicyInput|null}={}){
  const billingClient=(settings:BillingConfiguration)=>dependencies.stripeClient?.(settings)??stripeClient(settings);
- // No production policy provider is installed. A future approved catalogue can
- // supply this internal seam; absent configuration never invents acceptance.
+ // buildApp supplies the optional operator-selected catalogue lazily. Existing
+ // pinned reservations never depend on the current policy configuration.
  const checkoutPolicy=()=>{const policy=dependencies.checkoutPolicy?.();return policy===null||policy===undefined?null:validateCheckoutPolicy(policy);};
  const captureEnabled=()=>{try{return Boolean(checkoutPolicy());}catch{return false;}};
  app.get('/api/billing/contracts',async(request,reply)=>{
