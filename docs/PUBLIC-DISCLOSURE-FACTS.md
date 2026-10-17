@@ -10,6 +10,8 @@ The selected monthly offer is free/50 pages, Standard €19/300 and Team €49/1
 
 ## Current public configuration
 
+Refreshed by an unauthenticated canonical `GET /api/config` on **17 October 2026 at 14:27:18 UTC**: Rory Hayes and roryh1@gmail.com remain configured; full privacy, terms and subprocessor URLs, retention notice and data-location notice remain absent. Preview, invitations and mock billing remain. This HTTP read verifies the public configuration only; it does not verify inbox handling, provider contracts, actual workspace periods or policy adoption. The older snapshot below is retained as dated evidence.
+
 Read from the canonical site's public `/api/config` on 26 September 2026. The site reports private preview, required invitations, available password recovery and required signup verification. Public-service configuration is **partial**.
 
 | Field | Observed status | Remaining work |
@@ -38,6 +40,8 @@ No configuration values were changed. The exact settings and validation rules ar
 ## Facts still needed before publication
 
 Record the intended operator/contact ownership; actual hosting and processing locations; final provider inventory and contractual arrangements; selected retention and backup periods; support/privacy-request handling; approved service/payment/cancellation conditions; and any policy review required for the intended market. Customer-controller/processor responsibilities and legal bases must come from the operator's actual service arrangements, not guesses made from code.
+
+The [17 October policy review](LAUNCH-POLICY-DRAFTS.md) also identifies the actual Vercel plan/DPA/data-sharing check and applicable consumer online-withdrawal implementation/territory assessment. These are factual/legal completion within L22; they do not invent a chosen plan or business-only market. The [local operator rehearsal](RETENTION-CLOSURE-OPERATIONS.md) gives exact document/access/storage steps and remaining account/backup limits.
 
 ## Acceptance
 

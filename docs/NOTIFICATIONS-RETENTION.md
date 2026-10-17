@@ -20,11 +20,13 @@ The owner/admin setting **Show in-app processing notifications** applies to the 
 
 ## Retention contract
 
-Document age is measured from receipt (`documents.created_at`) against the workspace's configured 1–3,650 days. The worker calls `enforceRetention()` every 120 completed loop cycles; this is an operational cadence, not a guaranteed wall-clock deletion deadline. Each sweep considers the oldest 100 eligible documents. Queued or processing jobs defer expiry. Eligibility is checked again after acquiring the document lock, so a concurrent reprocess cannot silently lose its original.
+Document age is measured from receipt (`documents.created_at`) against the workspace's configured 1–3,650 days. The long-running worker calls `enforceRetention()` every 120 completed loop cycles; hosted maintenance instead makes budgeted calls with a one-document limit. Neither is a guaranteed wall-clock deletion deadline. A default sweep considers the oldest 100 eligible documents. Queued or processing extraction, field-suggestion or split-suggestion work defers expiry. Eligibility is checked again after acquiring the document lock, so a concurrent reprocess cannot silently lose its original.
 
 The deletion transaction removes the document's runs, corrections, approvals, job-derived notifications/read receipts, local export snapshots containing it, queued delivery payloads, and Sheets write reservations. It durably records the original file in `file_deletions`. Immediate unlink is attempted; a filesystem failure remains tracked for bounded worker retries and an admin retry action. Minimal usage events and intake idempotency tombstones survive with null document links; audit action/resource identities remain. These records do not retain the deleted extraction values or original bytes.
 
 Downloads already on users' devices, email-provider copies, delivered webhook payloads at a destination, external spreadsheet rows and deployment backups require their own retention policies. Local deletion cannot revoke them.
+
+Automatic removal failures remain pending with exponential backoff capped at one hour; the tenth failed attempt becomes `failed` for administrator follow-up. The worker rechecks due/pending state under the deletion row lock, so another worker's stale candidate cannot consume a new attempt during backoff or after terminal failure. Explicit removal/manual retry retains its existing immediate semantics. See [the executable operator rehearsal](RETENTION-CLOSURE-OPERATIONS.md) for the concurrency regression and supported document/access workflow. This 17 October change is local preparation until integrated and released; the older evidence below remains dated to its original scope.
 
 ## Exact local evidence
 
