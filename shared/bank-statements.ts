@@ -11,7 +11,8 @@ export interface BankTransaction extends RawBankTransaction,BankIdentity {}
 export interface BankAccount extends Omit<RawBankAccount,'transactions'|'balance_convention'|'date_format'|'number_format'|'transaction_layout'|'movement_convention'>,BankIdentity {balance_convention:BankBalanceConvention;transactions:BankTransaction[];}
 export interface BankValues {version:1;accounts:BankAccount[];}
 export interface BankAccountFormats {version:1;dateStatus:'missing'|'supported'|'unresolved';dateOrder:'dmy'|'mdy'|'ymd'|null;numberStatus:'missing'|'supported'|'unresolved';decimalSeparator:'.'|','|null;groupSeparator:'.'|','|' '|null;movement:'columns'|'positive_credit'|'positive_debit'|'unresolved';}
-export interface BankSource {rawPath:string;sourcePages:number[];evidence:Record<string,Evidence[]>;formats?:BankAccountFormats;}
+export interface BankNativeColumns {version:1;mimeType:'text/plain';page:1;header:string;}
+export interface BankSource {nativeColumns?:BankNativeColumns;rawPath:string;sourcePages:number[];evidence:Record<string,Evidence[]>;formats?:BankAccountFormats;}
 /** Server-owned extraction context. Never accept a replacement context from corrections. */
 export interface BankContext {version:1;locale:string;accounts:Record<string,BankSource>;transactions:Record<string,BankSource&{accountId:string}>;}
 export interface BankIssue {code:string;message:string;severity:'error'|'warning';accountId?:string;transactionId?:string;field?:string;relatedDocumentIds?:string[];}

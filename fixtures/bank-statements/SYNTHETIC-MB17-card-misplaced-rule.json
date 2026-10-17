@@ -1,0 +1,305 @@
+{
+  "synthetic": true,
+  "description": "Labelled synthetic MB17-B actual provider field-placement regression. Selected sanitized raw/evidence only; source author truth is independent of the failed normalized output.",
+  "captured_detail_sha256": "fb6524135107b9499a02beb273ff102fd2fe293e131b5cdc5d7ac48b019785d2",
+  "source_sha256": "1c59f1c7db3bf33a99719ee3a0a83564bc0aae07d15c001525d2603341a50c0a",
+  "source_text": "SYNTHETIC QA - FICTIONAL STATEMENT - NOT A REAL BANK ACCOUNT\nMixed batch case MB17-B. Page 1 of 1.\nBank: Synthetic Cedar Card Bank\nAccount type: Credit card account\nAccount identifier: QA-MB17-USD-CARD-7395\nCurrency: USD\nStatement period: 2026-10-08 to 2026-10-14\nDates use YYYY-MM-DD.\nAmounts use a decimal dot.\nPositive balance is the amount owed.\nDebits increase and credits decrease the amount owed.\nOpening balance: 500.00\n\nDate | Description | Reference | Debit | Credit | Balance\n2026-10-09 | Fictional card purchase | QA-MB17-B-001 | 20.00 | | 520.00\n2026-10-13 | Synthetic card payment | QA-MB17-B-002 | | 50.00 | 470.00\n\nBalance column shows the running amount owed after each transaction.\nTotal debits: 20.00\nTotal credits: 50.00\nClosing balance: 470.00\nEnd of SYNTHETIC QA statement MB17-B. No additional accounts or pages.\n",
+  "raw": {
+    "accounts": [
+      {
+        "currency": "USD",
+        "bank_name": "Synthetic Cedar Card Bank",
+        "date_format": "Dates use YYYY-MM-DD.",
+        "total_debits": "20.00",
+        "transactions": [
+          {
+            "date": "2026-10-09",
+            "debit": "20.00",
+            "credit": null,
+            "balance": "520.00",
+            "currency": null,
+            "reference": "QA-MB17-B-001",
+            "description": "Fictional card purchase"
+          },
+          {
+            "date": "2026-10-13",
+            "debit": null,
+            "credit": "50.00",
+            "balance": "470.00",
+            "currency": null,
+            "reference": "QA-MB17-B-002",
+            "description": "Synthetic card payment"
+          }
+        ],
+        "number_format": "Amounts use a decimal dot.",
+        "statement_end": "2026-10-14",
+        "total_credits": "50.00",
+        "closing_balance": "470.00",
+        "opening_balance": "500.00",
+        "statement_start": "2026-10-08",
+        "account_identifier": "QA-MB17-USD-CARD-7395",
+        "balance_convention": "Positive balance is the amount owed.",
+        "transaction_layout": null,
+        "movement_convention": "Debits increase and credits decrease the amount owed."
+      }
+    ]
+  },
+  "evidence": {
+    "accounts[0].currency": [
+      {
+        "page": 1,
+        "text": "Currency: USD",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].bank_name": [
+      {
+        "page": 1,
+        "text": "Bank: Synthetic Cedar Card Bank",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].date_format": [
+      {
+        "page": 1,
+        "text": "Dates use YYYY-MM-DD.",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].total_debits": [
+      {
+        "page": 1,
+        "text": "Total debits: 20.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].number_format": [
+      {
+        "page": 1,
+        "text": "Amounts use a decimal dot.",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].statement_end": [
+      {
+        "page": 1,
+        "text": "Statement period: 2026-10-08 to 2026-10-14",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].total_credits": [
+      {
+        "page": 1,
+        "text": "Total credits: 50.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].closing_balance": [
+      {
+        "page": 1,
+        "text": "Closing balance: 470.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].opening_balance": [
+      {
+        "page": 1,
+        "text": "Opening balance: 500.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].statement_start": [
+      {
+        "page": 1,
+        "text": "Statement period: 2026-10-08 to 2026-10-14",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].account_identifier": [
+      {
+        "page": 1,
+        "text": "Account identifier: QA-MB17-USD-CARD-7395",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].balance_convention": [
+      {
+        "page": 1,
+        "text": "Positive balance is the amount owed.",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].movement_convention": [
+      {
+        "page": 1,
+        "text": "Debits increase and credits decrease the amount owed.",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].transactions[0].date": [
+      {
+        "page": 1,
+        "text": "2026-10-09 | Fictional card purchase | QA-MB17-B-001 | 20.00 | | 520.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].transactions[1].date": [
+      {
+        "page": 1,
+        "text": "2026-10-13 | Synthetic card payment | QA-MB17-B-002 | | 50.00 | 470.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].transactions[0].debit": [
+      {
+        "page": 1,
+        "text": "2026-10-09 | Fictional card purchase | QA-MB17-B-001 | 20.00 | | 520.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].transactions[1].credit": [
+      {
+        "page": 1,
+        "text": "2026-10-13 | Synthetic card payment | QA-MB17-B-002 | | 50.00 | 470.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].transactions[0].balance": [
+      {
+        "page": 1,
+        "text": "2026-10-09 | Fictional card purchase | QA-MB17-B-001 | 20.00 | | 520.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].transactions[1].balance": [
+      {
+        "page": 1,
+        "text": "2026-10-13 | Synthetic card payment | QA-MB17-B-002 | | 50.00 | 470.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].transactions[0].reference": [
+      {
+        "page": 1,
+        "text": "2026-10-09 | Fictional card purchase | QA-MB17-B-001 | 20.00 | | 520.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].transactions[1].reference": [
+      {
+        "page": 1,
+        "text": "2026-10-13 | Synthetic card payment | QA-MB17-B-002 | | 50.00 | 470.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].transactions[0].description": [
+      {
+        "page": 1,
+        "text": "2026-10-09 | Fictional card purchase | QA-MB17-B-001 | 20.00 | | 520.00",
+        "source": "matched-text"
+      }
+    ],
+    "accounts[0].transactions[1].description": [
+      {
+        "page": 1,
+        "text": "2026-10-13 | Synthetic card payment | QA-MB17-B-002 | | 50.00 | 470.00",
+        "source": "matched-text"
+      }
+    ]
+  },
+  "ids": [
+    "3dfbe6ed-2184-4902-ab11-e75d893d7282",
+    "b820a6f1-f5a6-4bdd-b26b-402f8ada9cb7",
+    "ddfe4ff1-cfaa-46da-acff-997f9f3ecc18"
+  ],
+  "captured_formats": {
+    "version": 1,
+    "movement": "unresolved",
+    "dateOrder": "ymd",
+    "dateStatus": "supported",
+    "numberStatus": "supported",
+    "groupSeparator": null,
+    "decimalSeparator": "."
+  },
+  "captured_values": {
+    "version": 1,
+    "accounts": [
+      {
+        "id": "3dfbe6ed-2184-4902-ab11-e75d893d7282",
+        "origin": "extracted",
+        "currency": "USD",
+        "excluded": false,
+        "bank_name": "Synthetic Cedar Card Bank",
+        "total_debits": "20.00",
+        "transactions": [
+          {
+            "id": "b820a6f1-f5a6-4bdd-b26b-402f8ada9cb7",
+            "date": "2026-10-09",
+            "debit": null,
+            "credit": null,
+            "origin": "extracted",
+            "balance": "520.00",
+            "currency": "USD",
+            "excluded": false,
+            "reference": "QA-MB17-B-001",
+            "description": "Fictional card purchase",
+            "exclusion_reason": null
+          },
+          {
+            "id": "ddfe4ff1-cfaa-46da-acff-997f9f3ecc18",
+            "date": "2026-10-13",
+            "debit": null,
+            "credit": null,
+            "origin": "extracted",
+            "balance": "470.00",
+            "currency": "USD",
+            "excluded": false,
+            "reference": "QA-MB17-B-002",
+            "description": "Synthetic card payment",
+            "exclusion_reason": null
+          }
+        ],
+        "statement_end": "2026-10-14",
+        "total_credits": "50.00",
+        "closing_balance": "470.00",
+        "opening_balance": "500.00",
+        "statement_start": "2026-10-08",
+        "exclusion_reason": null,
+        "account_identifier": "QA-MB17-USD-CARD-7395",
+        "balance_convention": "unknown"
+      }
+    ]
+  },
+  "expected_business": {
+    "bank_name": "Synthetic Cedar Card Bank",
+    "account_identifier": "QA-MB17-USD-CARD-7395",
+    "currency": "USD",
+    "statement_start": "2026-10-08",
+    "statement_end": "2026-10-14",
+    "opening_balance": "500.00",
+    "closing_balance": "470.00",
+    "total_debits": "20.00",
+    "total_credits": "50.00",
+    "balance_convention": "debit_increases",
+    "transactions": [
+      {
+        "date": "2026-10-09",
+        "description": "Fictional card purchase",
+        "reference": "QA-MB17-B-001",
+        "debit": "20.00",
+        "credit": null,
+        "balance": "520.00",
+        "currency": "USD"
+      },
+      {
+        "date": "2026-10-13",
+        "description": "Synthetic card payment",
+        "reference": "QA-MB17-B-002",
+        "debit": null,
+        "credit": "50.00",
+        "balance": "470.00",
+        "currency": "USD"
+      }
+    ]
+  }
+}
