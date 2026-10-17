@@ -13,7 +13,7 @@ import {createSupabaseBackupSource} from './backup/supabase.js';
 import type {BackupConfig,BackupManifest,BackupPayloadFile} from './backup/types.js';
 
 const migrationsDirectory=fileURLToPath(new URL('../migrations/',import.meta.url));
-const usage='Use keygen, create --quiesced, inspect, restore, or activate --allow-outbound with explicit private files. See docs/BACKUP-RESTORE.md.';
+const usage='Use keygen, create --quiesced, inspect, restore, verify, or activate --allow-outbound with explicit private files. See docs/BACKUP-RESTORE.md.';
 const options={'config':{type:'string'},'identity-file':{type:'string'},'recipient-file':{type:'string'},'input':{type:'string'},'output':{type:'string'},'quiesced':{type:'boolean'},'allow-outbound':{type:'boolean'}} as const;
 type Values=Partial<Record<keyof typeof options,string|boolean>>;
 function selected(values:Values,key:keyof typeof options){const value=values[key];backupAssert(typeof value==='string'&&path.isAbsolute(value)&&!value.includes('\0'),'BACKUP_ARGUMENTS',usage);return value;}
@@ -107,7 +107,12 @@ async function verifyTargetFiles(config:BackupConfig,manifest:BackupManifest){
  const actual=(await scanStorage(config.storageDir,true)).sort((a,b)=>a.key.localeCompare(b.key));
  backupAssert(JSON.stringify(actual)===JSON.stringify(expected),'BACKUP_STORAGE','The restored originals differ from the authenticated backup.');
 }
-async function restoreOrActivate(values:Values,activate:boolean){
+async function matchingPending(filename:string,expected:Pending){
+ let actual:unknown;try{actual=JSON.parse((await readPrivateFile(filename)).toString('utf8'));}catch{throw new BackupError('BACKUP_ACTIVATION','The selected destination has no readable pending restore marker.');}
+ backupAssert(JSON.stringify(actual)===JSON.stringify(expected),'BACKUP_ACTIVATION','The pending restore does not match this configuration and authenticated backup.');
+}
+async function restoreOrActivate(values:Values,operation:'restore'|'verify'|'activate'){
+ const activate=operation==='activate';
  only(values,activate?['config','input','identity-file','allow-outbound']:['config','input','identity-file']);
  if(activate)backupAssert(values['allow-outbound']===true,'BACKUP_ACTIVATION','Activation permits queued work and configured integrations when services next start. Pass --allow-outbound to confirm.');
  const configFile=selected(values,'config'),input=selected(values,'input'),identityFile=selected(values,'identity-file'),config=await readConfig(configFile),directory=await scratch();
@@ -117,14 +122,21 @@ async function restoreOrActivate(values:Values,activate:boolean){
   const {manifest,ciphertextSha256}=await openArchive(input,await textKey(identityFile),directory);
   backupAssert(!config.sourceStorage&&!config.databaseProfile,'BACKUP_TARGET','Managed-source configuration is capture-only. Select a fresh dedicated filesystem restore destination.');
   const marker=pending(config,manifest,ciphertextSha256),markerFile=path.join(config.storageDir,pendingName),receiptFile=path.join(config.storageDir,receiptName);
+  if(operation==='verify'){
+   await matchingPending(markerFile,marker);
+   backupAssert(await absent(receiptFile),'BACKUP_ACTIVATION','An activation receipt already exists. Inspect the interrupted activation before verifying an inactive restore.');
+   await verifyTargetFiles(config,manifest);await verifyRestoredDatabase(config,manifest.database,path.join(directory,'tables'),migrationsDirectory,manifest.objects);await verifyTargetFiles(config,manifest);
+   await matchingPending(markerFile,marker);
+   backupAssert(await absent(receiptFile),'BACKUP_ACTIVATION','Activation began during inactive verification. Keep services stopped and inspect the destination.');
+   return {status:'restored_verified_inactive',...summary(manifest),ciphertextSha256,servicesStarted:false,pendingRetained:true};
+  }
   if(activate){
    const recorded=await matchingReceipt(receiptFile,marker);
    if(await absent(markerFile)){
     backupAssert(recorded,'BACKUP_ACTIVATION','The selected destination has no pending restore or matching activation receipt.');
     return {status:'restore_already_activated',...summary(manifest),servicesStarted:false};
    }
-   let actual:unknown;try{actual=JSON.parse((await readPrivateFile(markerFile)).toString('utf8'));}catch{throw new BackupError('BACKUP_ACTIVATION','The selected destination has no readable pending restore marker.');}
-   backupAssert(JSON.stringify(actual)===JSON.stringify(marker),'BACKUP_ACTIVATION','The pending restore does not match this configuration and authenticated backup.');
+   await matchingPending(markerFile,marker);
    await verifyTargetFiles(config,manifest);await verifyRestoredDatabase(config,manifest.database,path.join(directory,'tables'),migrationsDirectory,manifest.objects);await verifyTargetFiles(config,manifest);
    if(!recorded)await writePrivate(receiptFile,JSON.stringify({...marker,activatedAt:new Date().toISOString()})+'\n');
    await fs.unlink(markerFile);
@@ -149,7 +161,7 @@ async function restoreOrActivate(values:Values,activate:boolean){
 export async function runBackup(argv:string[]){
  let parsed:{values:Values;positionals:string[]};try{parsed=parseArgs({args:argv,options,allowPositionals:true,strict:true});}catch{throw new BackupError('BACKUP_ARGUMENTS',usage);}
  const [command,...extra]=parsed.positionals;backupAssert(extra.length===0,'BACKUP_ARGUMENTS',usage);
- switch(command){case 'keygen':return keygen(parsed.values);case 'create':return create(parsed.values);case 'inspect':return inspect(parsed.values);case 'restore':return restoreOrActivate(parsed.values,false);case 'activate':return restoreOrActivate(parsed.values,true);default:throw new BackupError('BACKUP_ARGUMENTS',usage);}
+ switch(command){case 'keygen':return keygen(parsed.values);case 'create':return create(parsed.values);case 'inspect':return inspect(parsed.values);case 'restore':case 'verify':case 'activate':return restoreOrActivate(parsed.values,command);default:throw new BackupError('BACKUP_ARGUMENTS',usage);}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  try{console.log(JSON.stringify(await runBackup(process.argv.slice(2))));}
