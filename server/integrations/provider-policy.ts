@@ -66,6 +66,14 @@ export function verifyStripePayload(raw:Buffer,signature:string,secret:string,mo
  if(event.account)throw new Error('Connected-account Stripe events are not supported.');
  return event;
 }
+export type StripeCustomerPointer={id:string;type:string;created:number;customerId:string;mode:StripeMode};
+/** Call only after signature/mode verification; event metadata never grants access. */
+export function stripeCustomerPointer(event:Stripe.Event):StripeCustomerPointer|null {
+ if(!['customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','customer.subscription.paused','customer.subscription.resumed','checkout.session.completed','checkout.session.async_payment_succeeded','invoice.paid','invoice.payment_failed','invoice.payment_action_required'].includes(event.type))return null;
+ const object=event.data.object as unknown as {customer?:string|{id:string}};
+ const customerId=typeof object.customer==='string'?object.customer:object.customer?.id;
+ return customerId?{id:event.id,type:event.type,created:event.created,customerId,mode:event.livemode?'live':'test'}:null;
+}
 export function stripePriceMatches(price:Stripe.Price,planId:PaidPlanId,prices:PriceMap,mode:StripeMode,requireActive=false):boolean {
  const plan=PLANS.find(p=>p.id===planId)!;
  return price.id===prices[planId]&&price.livemode===(mode==='live')&&(!requireActive||price.active)
@@ -112,8 +120,19 @@ export function publicProviderError(provider:string,error:unknown) {
  return `${provider} operation failed. Check provider configuration and the documented release gates.`;
 }
 export function emailAddress(value:string) {
- const address=(value.match(/<([^<>]+)>/)?.[1]||value).trim().toLowerCase();
+ // Authorize one complete mailbox only. A partial angle-bracket match must not
+ // hide a second mailbox, trailing header text or injected control characters.
+ if(/[\u0000-\u001f\u007f]/.test(value))return null;
+ const complete=value.trim();
+ const mailbox=complete.includes('<')||complete.includes('>')?complete.match(/^(?:"(?:[^"\\]|\\.)*"|[^<>"@,;]*)\s*<([^<>]+)>$/)?.[1]:complete;
+ if(!mailbox)return null;
+ const address=mailbox.trim().toLowerCase();
  return /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(address)?address:null;
+}
+/** Retrieved message content must belong to the signed durable event pointer. */
+export function receivedEmailMatchesId(emailId:string,email:unknown):boolean {
+ const expected=z.string().uuid().safeParse(emailId),actual=z.object({id:z.string().uuid()}).safeParse(email);
+ return expected.success&&actual.success&&expected.data.toLowerCase()===actual.data.id.toLowerCase();
 }
 /**
  * Intersect provider-supplied received_for values; visible To/CC never authorizes routing.

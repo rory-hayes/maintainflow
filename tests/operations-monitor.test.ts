@@ -44,6 +44,62 @@ test('missed monitoring interval is identified separately from application outag
   assert.throws(()=>advance(gap,healthy(21)),/non_monotonic/);assert.equal(advance(gap,healthy(26)).pending[1].kind,'recovery');
 });
 
+test('duplicate external ticks resume one durable observation without multiplying failure polls or notices',()=>{
+  const tick='2026-09-20T00:02:00.000Z',first={...healthy(2),ready:false};
+  const state=advance(initialState(origin),first,{...options,externalTick:tick});
+  const resumed=unseal(seal(state,Buffer.alloc(32,7).toString('base64')),Buffer.alloc(32,7).toString('base64'),origin);
+  const duplicate=advance(resumed,{...healthy(3),ready:false},{...options,externalTick:tick});
+  assert.deepEqual(duplicate,resumed);assert.equal(duplicate.consecutiveFailures,1);assert.equal(duplicate.pending.length,0);
+  const second=advance(duplicate,{...healthy(7),ready:false},{...options,externalTick:'2026-09-20T00:07:00.000Z'});
+  const third=advance(second,{...healthy(12),ready:false},{...options,externalTick:'2026-09-20T00:12:00.000Z'});
+  assert.equal(third.pending.length,1);assert.deepEqual(third.incident?.reasons,['readiness_unavailable']);
+  assert.deepEqual(advance(third,{...healthy(13),ready:false},{...options,externalTick:'2026-09-20T00:12:00.000Z'}),third);
+  const recovery=advance(third,healthy(17),{...options,externalTick:'2026-09-20T00:17:00.000Z'});
+  assert.deepEqual(recovery.pending.map(n=>n.kind),['incident','recovery']);
+  assert.deepEqual(advance(recovery,healthy(18),{...options,externalTick:'2026-09-20T00:17:00.000Z'}),recovery);
+  assert.throws(()=>advance(state,healthy(7),{externalTick:'invalid'}),/invalid_external_tick/);
+  assert.throws(()=>advance(state,healthy(7),{externalTick:'2026-09-20T00:12:00.000Z'}),/invalid_external_tick/);
+});
+
+for(const externalFirst of [true,false])test(`overlapping schedulers preserve observation debounce and one outbox identity: ${externalFirst?'external then native':'native then external'}`,()=>{
+  let state=initialState(origin),identities=0;
+  const sampling={id:()=>{identities++;return incidentId;}};
+  const pair=(minute:number,ready:boolean)=>{
+    const tick=healthy(minute).at;
+    for(const [index,external]of [externalFirst,!externalFirst].entries()){
+      const snapshot={...healthy(minute),ready,at:new Date(Date.parse(tick)+(index+1)*10_000).toISOString()};
+      snapshot.queues!.extraction.expiredLeases=ready?0:1;
+      const previous=structuredClone(state);
+      state=advance(state,snapshot,{...sampling,...(external?{externalTick:tick}:{})});
+      // A native observation after this tick suppresses the later external one.
+      if(external&&!externalFirst)assert.deepEqual(state,previous);
+    }
+    assert.equal(state.checkedAt,new Date(Date.parse(tick)+(externalFirst?20_000:10_000)).toISOString());
+  };
+  pair(2,false);
+  assert.equal(state.consecutiveFailures,externalFirst?2:1);
+  assert.equal(state.expiredPolls.extraction,externalFirst?2:1);
+  assert.equal(state.pending.length,0);assert.equal(identities,0);
+  pair(7,false);
+  assert.equal(state.consecutiveFailures,externalFirst?3:2);
+  assert.equal(state.expiredPolls.extraction,externalFirst?3:2);
+  assert.equal(state.pending.length,externalFirst?1:0);
+  pair(12,false);
+  const openedAt=new Date(Date.parse(healthy(externalFirst?7:12).at)+10_000).toISOString();
+  assert.equal(identities,1);assert.equal(state.incident?.id,incidentId);
+  assert.equal(state.incident?.openedAt,openedAt);
+  assert.equal(state.pending.length,1);
+  const incident=structuredClone(state.pending[0]);
+  assert.deepEqual(incident,{id:incidentId,kind:'incident',at:openedAt,openedAt,reasons:['readiness_unavailable','queue_lease:extraction'],test:false,messageVersion:2});
+  pair(17,false);
+  assert.equal(identities,1);assert.deepEqual(state.pending,[incident]);assert.equal(state.incident?.openedAt,openedAt);
+  pair(22,true);pair(27,true);
+  assert.equal(identities,1);assert.equal(state.incident,null);assert.equal(state.consecutiveFailures,0);
+  assert.equal(state.expiredPolls.extraction,0);
+  assert.deepEqual(state.pending,[incident,{...incident,kind:'recovery',at:new Date(Date.parse(healthy(22).at)+10_000).toISOString()}]);
+  assert.deepEqual(state.pending.map(notice=>`${notice.id}/${notice.kind}`),[`${incidentId}/incident`,`${incidentId}/recovery`]);
+});
+
 test('public artifact payload is encrypted and bound to the key and exact configured origin',()=>{
   const key=randomBytes(32).toString('base64'),state=advance(initialState(origin),healthy(0),options),ciphertext=seal(state,key);
   assert.deepEqual(unseal(ciphertext,key,origin),state);assert.equal(ciphertext.includes(Buffer.from('failedCounts')),false);
@@ -132,6 +188,53 @@ test('an uncertain delivery keeps the exact pending notice and retry key; expire
   const state=initialState(origin),notice=drillNotices(origin,incidentId,healthy(0).at)[0];state.pending.push(notice);const configuration={origin,to:'operator@example.test',from:'monitor@example.test',apiKey:'re_owned_fixture_only'};let saved=0;
   await assert.rejects(deliverPending(state,configuration,async()=>{saved++;},async()=>{throw new Error('uncertain transport');},()=>Date.parse(healthy(1).at)));assert.deepEqual(state.pending,[notice]);assert.equal(saved,0);
   await assert.rejects(deliverPending(state,configuration,async()=>{},async()=>{throw new Error('must not send');},()=>Date.parse(healthy(0).at)+24*60*60*1000),/old_pending/);
+});
+
+for(const interruption of ['lost acknowledgment','crash before checkpoint'] as const)test(`encrypted checkpoint recovers real incident and recovery after ${interruption} without duplicate acceptance`,async()=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'folio-monitor-accepted-')),filename=path.join(directory,'state.enc'),key=randomBytes(32).toString('base64');
+  const configuration={origin,to:'operator@example.test',from:'monitor@example.test',apiKey:'re_owned_fixture_only'};
+  const requests:{key:string;body:string}[]=[],accepted=new Map<string,string>();
+  const transport:typeof fetch=async(input,init)=>{
+    assert.equal(String(input),'https://api.resend.com/emails');assert.equal(init?.method,'POST');
+    const request={key:new Headers(init?.headers).get('idempotency-key')!,body:String(init?.body)};requests.push(request);
+    // The fake provider retains acceptance independently of the monitor process.
+    if(accepted.has(request.key))assert.equal(request.body,accepted.get(request.key));
+    else{accepted.set(request.key,request.body);if(interruption==='lost acknowledgment')throw new Error('accepted_but_acknowledgment_lost');}
+    return Response.json({id:incidentId});
+  };
+  const checkpoint=async(state:Parameters<typeof seal>[0])=>{await fs.writeFile(filename,seal(state,key));};
+  const restore=async()=>{await validateCheckpoint(filename,key,origin);return unseal(await fs.readFile(filename),key,origin);};
+  try{
+    let state=initialState(origin);
+    for(let i=0;i<3;i++)state=advance(state,{...healthy(i*5),ready:false},options);
+    assert.deepEqual(state.incident,{id:incidentId,openedAt:healthy(10).at,reasons:['readiness_unavailable'],notified:false});
+    for(const kind of ['incident','recovery'] as const){
+      if(kind==='recovery'){state=advance(state,healthy(15),options);assert.equal(state.incident,null);}
+      const notice=structuredClone(state.pending[0]);assert.equal(notice.kind,kind);assert.equal(notice.test,false);assert.equal(notice.messageVersion,2);
+      assert.equal(notice.openedAt,healthy(10).at);assert.deepEqual(notice.reasons,['readiness_unavailable']);
+      await checkpoint(state);const before=await fs.readFile(filename);
+      await assert.rejects(deliverPending(state,configuration,async()=>{throw new Error('accepted_but_checkpoint_not_written');},transport,()=>Date.parse(healthy(kind==='incident'?11:16).at)),interruption==='lost acknowledgment'?/acknowledgment_lost/:/checkpoint_not_written/);
+      assert.deepEqual(await fs.readFile(filename),before);
+      assert.equal(state.pending.length,interruption==='lost acknowledgment'?1:0);
+      state=await restore();assert.deepEqual(state.pending,[notice]);
+      if(kind==='incident')assert.equal(state.incident?.notified,false);
+      assert.equal(await deliverPending(state,configuration,checkpoint,transport,()=>Date.parse(healthy(kind==='incident'?12:17).at)),1);
+      state=await restore();assert.deepEqual(state.pending,[]);
+      if(kind==='incident')assert.equal(state.incident?.notified,true);else assert.equal(state.incident,null);
+      const attempts=requests.filter(request=>request.key===`folio-monitor/${incidentId}/${kind}`);
+      assert.equal(attempts.length,2);assert.deepEqual(attempts[0],attempts[1]);
+      const payload=JSON.parse(attempts[0].body);
+      assert.equal(payload.subject,`[MaintainFlow monitor] ${kind==='incident'?'Action required':'Recovered'}`);
+      assert.deepEqual(payload.to,[configuration.to]);assert.match(payload.text,/^MaintainFlow operational monitoring notification\./);assert.doesNotMatch(payload.text,/synthetic|\[TEST\]/);
+      assert.equal(accepted.size,kind==='incident'?1:2);
+    }
+    assert.deepEqual([...accepted.keys()],[`folio-monitor/${incidentId}/incident`,`folio-monitor/${incidentId}/recovery`]);
+    const routes:string[]=[],snapshot=await probe(origin,'owned-monitor-secret',async(input,init)=>{const url=String(input);routes.push(url);assert.equal(init?.method,undefined);return Response.json(url.endsWith('/health')?{name:'Folio',status:'ok'}:url.endsWith('/ready')?{status:'ready',checks:{database:'ok',storage:'ok',restore:'ok'}}:diagnostic());},()=>healthy(20).at);
+    assert.deepEqual(snapshot,healthy(20));assert.deepEqual(routes,[origin+'/api/health',origin+'/api/ready',origin+'/api/internal/diagnostics']);
+    state=advance(state,snapshot,options);assert.equal(state.incident,null);assert.deepEqual(state.pending,[]);await checkpoint(state);
+    assert.equal(await deliverPending(await restore(),configuration,checkpoint,transport,()=>Date.parse(healthy(21).at)),0);
+    assert.equal(requests.length,4);assert.equal(accepted.size,2);
+  }finally{await fs.rm(directory,{recursive:true,force:true});}
 });
 
 test('a repeated drill has byte-identical bodies under each fixed idempotency key',()=>{

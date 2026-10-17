@@ -127,7 +127,20 @@ Set the normal `DATABASE_URL` and `DATABASE_ADMIN_URL` to the corresponding rest
 
 The filesystem runtime guard rejects API and worker startup while `.folio-restore-pending.json` exists in the selected originals directory. Keep the restored database, files and runtime configuration together; pointing a process at another storage directory is not a verification procedure. Do not delete the marker by hand to bypass activation.
 
+Compare the complete destination again while leaving that startup fence intact:
+
+```sh
+node --import tsx scripts/backup.ts verify \
+  --config /srv/folio/private/target.json \
+  --input /srv/folio/backups/folio-2026-09-20.age \
+  --identity-file /srv/folio/offline/restore.agekey
+```
+
+`verify` authenticates the archive, requires its exact configuration-bound pending marker, checks the recovered key and originals before and after full database byte/security/sequence/reference comparison, and rechecks the marker before reporting `restored_verified_inactive`. It reports the ciphertext digest, retains the marker and creates no activation receipt. It accepts no `--allow-outbound` flag and starts no services. Repeated verification is allowed while the destination is pending; an already activated destination or any existing activation receipt is refused. Keep destination writers and other operator commands stopped throughout verification. This is a point-in-time comparison, not a lock against another operator changing the destination afterward.
+
 Before activation, decide whether restored queued jobs, mail, webhooks, Sheets writes and configured integrations may resume. Clearing provider environment variables alone is not an outbound fence: restored database records can contain destinations and encrypted credentials. An isolated acceptance environment must block outbound transports or replace them with controlled transports. The activation flag permits later service execution; the CLI itself does not start services or send queued work.
+
+Also settle post-snapshot deletion and access-revocation reconciliation before activation. Exact historical restoration can recreate deleted documents, old password/session state, revoked API or integration credentials, and removed memberships. Keep the current authorized deletion/revocation journal separately recoverable. Exact verification and activation expect the authenticated historical bytes; apply the authorized reconciliation only after that exact transition, inside the isolated fence and before starting services or permitting user/provider access. If the current decisions cannot be established, keep the destination inactive. Do not weaken byte verification or expose historical access while deciding what to revoke.
 
 When the destination is ready for that explicit transition:
 
@@ -150,7 +163,7 @@ If activation was interrupted after writing the receipt, retrying the same comma
 | Missing/corrupt required source original, changed source inventory/key, open clients or conflicting locks | Keep the source safe, resolve the reported prerequisite, and retry capture to a new artifact path. Do not edit hashes merely to make backup pass. |
 | Wrong age identity, malformed/truncated artifact, invalid paths, missing declared payload or failed authentication | The rejected input remains unchanged. Authentication fails before destination setup. Use a verified artifact and matching identity. |
 | Failure after destination setup begins | The owned destination deliberately retains its pending marker and may retain copied files/key. Keep it inactive. Diagnose the database outcome before cleaning only that exact owned destination or selecting a new fresh target. Restore does not overwrite an existing attempt. |
-| `BACKUP_COMMIT_UNCERTAIN` | A lost COMMIT reply does not establish rollback. Preserve the pending destination. When activation is intended, the same `activate --allow-outbound` command verifies the database/files before proceeding. If verification fails, keep it inactive and investigate; do not blindly rerun restore over it. |
+| `BACKUP_COMMIT_UNCERTAIN` | A lost COMMIT reply does not establish rollback. Preserve the pending destination. Use `verify` to compare the database/files without activating. If verification fails, keep it inactive and investigate; do not blindly rerun restore over it. |
 | Interrupted activation with matching receipt and pending marker | Retry the identical activation command. A mismatched or unreadable marker/receipt is refused rather than overwritten. |
 | Existing artifact, key file or populated restore target | Choose a genuinely new target or inspect the existing outcome. There is no force/overwrite option. |
 
@@ -201,6 +214,8 @@ The source database connection must still be distinct from the runtime roles, ha
 Managed-source mode allows unrelated platform connections, schemas and other owners' default ACLs. It still refuses other connections under the configured backup and Folio runtime identities, prepared transactions, custom defaults belonging to the application schema owner, unknown application tables/types/sequences, missing migrations, or unsupported application security. Only the current checked-in migration catalogue is accepted; no historical hard-coded table count substitutes for it.
 
 Stop all Folio API, worker, cron, cleanup and object writers before capture. Drain all processing/sending/finalizing work and wait through outstanding signed-upload and write-lease expiry windows. These conditions are checked from the current queues/reservations in addition to the operator's `--quiesced` assertion. Application tables stay SHARE-locked in a repeatable-read transaction. This does **not** lock Supabase Storage or create a distributed database/object snapshot. Repeated inventory and byte hashing detect observed changes; they are not a substitute for stopping writers and allowing previously issued storage capabilities to expire.
+
+Current signed-upload retention is 130 minutes (`SIGNED_UPLOAD_RETENTION_SECONDS`); use the actual maximum `direct_uploads.cleanup_after` and `split_suggestions.staging_expires_at`, plus active write/intake leases, to choose the pause window. A fixed short pause does not establish quiescence. Do not shorten timestamps or delete reservations to make capture pass. A recurring schedule must accommodate these capabilities or use a separately implemented and verified consistent snapshot method.
 
 The storage transport accepts only the exact HTTPS `*.supabase.co` project origin and the fixed `folio-originals` bucket. It verifies a private bucket with a size limit no greater than 10 MiB, lists bounded UUID paths with pagination, downloads authenticated originals, and rechecks inventory, policy and every captured object's bytes before publication. Redirects are refused, each whole request including its body has a 45-second deadline, and arbitrary provider response bodies are excluded from errors. Only GET and the provider's read-only list POST are sent; no bucket/object/policy mutation or signed URL is requested. Authentication follows Supabase's [private bucket access model](https://supabase.com/docs/guides/storage/buckets/fundamentals).
 

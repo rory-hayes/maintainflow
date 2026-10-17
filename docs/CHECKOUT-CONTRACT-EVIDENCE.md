@@ -1,6 +1,6 @@
 # Checkout terms records
 
-This increment provides dormant evidence capture, not published terms, legal approval, payment verification, or delivery of contractual information. The original PR57 Checkout increment added no production policy catalogue, environment switch, signup acceptance change, email or new billing system. Mock billing is unchanged. Real policy content and customer eligibility remain unresolved; synthetic policies appear only in controlled tests.
+Checkout evidence capture is disabled by default. The original PR57 increment added no production policy catalogue, environment switch, signup acceptance change, email or new billing system. An explicit [operator-supplied catalogue configuration](CHECKOUT-POLICY-CONFIGURATION.md) now wires the existing capture mechanism through the normal application. It bundles no policy, adopts no text, and proves no publication, legal approval, payment or delivery of contractual information. Mock billing is unchanged. Actual policy content and customer eligibility remain separate inputs; synthetic policies appear only in controlled tests.
 
 ## Stored evidence
 
@@ -12,7 +12,7 @@ Core snapshots cannot be updated. A previously unknown Stripe Session ID can be 
 
 ## Stripe boundary
 
-New enabled attempts use Stripe's required terms checkbox and version-specific agreement text. The fully composed Markdown message is escaped and checked against Stripe's 1,200-character limit before reservation. Capture is available through the internal `registerProviders` policy dependency, used by synthetic fixtures. The normal application supplies no such dependency. An invalid supplied policy blocks a new terms-enabled Checkout; missing production policy does not silently assert acceptance for existing legacy billing.
+New enabled attempts use Stripe's required terms checkbox and version-specific agreement text. The fully composed Markdown message is escaped and checked against Stripe's 1,200-character limit before reservation. The normal application supplies the internal `registerProviders` dependency as a lazy reader of explicit server-only catalogue configuration. Absent configuration stays disabled; enabled incomplete or mismatched configuration blocks new Sessions without falling back to legacy parameters. Existing pinned reservations and historical reads do not reselect current policy, so recovery remains possible if the current catalogue becomes unavailable. No real policy is configured by this source change.
 
 Only a correctly signed, configured-mode Checkout completion event can enqueue the bounded completion pointer. That pointer is durable before any Session retrieval. Its identifiers must match the pre-existing local request, workspace, customer, mode and content hash. The existing provider worker retrieves that Session with expanded line items and checks the pinned offer, quantity, consent configuration, agreement wording, URLs and metadata before recording the consent result. Arbitrary event metadata cannot create a terms snapshot. A completion arriving before the Session creation response can bind the durable request; duplicate or out-of-order completion events retain the first record.
 

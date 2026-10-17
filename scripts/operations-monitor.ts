@@ -3,6 +3,7 @@ import fs,{constants} from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createCipheriv,createDecipheriv,randomBytes,randomUUID} from 'node:crypto';
+import {parseExternalTick} from './monitor-trigger-contract.ts';
 
 export const lanes=['extraction','field_suggestions','split_suggestions','deliveries','provider_events','account_email','invitation_email','object_deletion'] as const;
 type Lane=typeof lanes[number];
@@ -18,8 +19,15 @@ const maximumBytes=128*1024;
 const reasonPattern=/^(health_unavailable|readiness_unavailable|diagnostics_unavailable|monitor_gap|queue_(age|lease|failed):(?:extraction|field_suggestions|split_suggestions|deliveries|provider_events|account_email|invitation_email|object_deletion))$/;
 
 export function initialState(origin:string):MonitorState{return {version:1,origin,checkedAt:null,consecutiveFailures:0,expiredPolls:{},failedCounts:{},incident:null,pending:[]};}
-export function advance(previous:MonitorState,snapshot:Snapshot,options:{test?:boolean;id?:()=>string}={}):MonitorState{
+export function advance(previous:MonitorState,snapshot:Snapshot,options:{test?:boolean;id?:()=>string;externalTick?:string}={}):MonitorState{
   const state=structuredClone(previous),reasons:string[]=[];
+  if(options.externalTick!==undefined){
+    const tick=parseExternalTick(options.externalTick);
+    requireValue(tick!==null&&iso(snapshot.at)&&tick<=Date.parse(snapshot.at),'invalid_external_tick');
+    // Replayed/concurrent dispatches can share a tick. The durable prior
+    // observation, including a native schedule after that tick, wins.
+    if(state.checkedAt!==null&&Date.parse(state.checkedAt)>=tick)return state;
+  }
   requireValue(iso(snapshot.at)&&(!state.checkedAt||Date.parse(snapshot.at)>Date.parse(state.checkedAt)),'non_monotonic_probe');
   if(!snapshot.health)reasons.push('health_unavailable');
   if(!snapshot.ready)reasons.push('readiness_unavailable');
@@ -152,7 +160,7 @@ export async function main(args=process.argv.slice(2),env=process.env){
   let delivered=0;
   if(mode==='--deliver'||mode==='--run')delivered=await deliverPending(state,configuration,checkpoint);
   if(mode==='--deliver'){await checkpoint(state);console.log(JSON.stringify({monitor:'delivery_completed',providerAccepted:delivered,stateEncrypted:true}));return;}
-  const snapshot=await probe(origin,secret);state=advance(state,snapshot);await checkpoint(state);
+  const snapshot=await probe(origin,secret);state=advance(state,snapshot,env.FOLIO_MONITOR_TRIGGER_AT?{externalTick:env.FOLIO_MONITOR_TRIGGER_AT}:{});await checkpoint(state);
   if(mode==='--run')delivered+=await deliverPending(state,configuration,checkpoint);
   console.log(JSON.stringify({at:snapshot.at,monitor:'completed',healthy:snapshot.health&&snapshot.ready&&snapshot.diagnostics,incidentOpen:Boolean(state.incident),providerAccepted:delivered,stateEncrypted:true}));
 }

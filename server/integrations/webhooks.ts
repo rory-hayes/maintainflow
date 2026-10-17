@@ -1,5 +1,5 @@
 import type {FastifyInstance} from 'fastify';
-import {createHmac,randomBytes,randomUUID} from 'node:crypto';
+import {randomBytes,randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {requireActor} from '../core/auth.js';
 import {adminPool,transaction,withWorkspace,audit,notFound,camel,badRequest} from '../core/db.js';
@@ -7,6 +7,8 @@ import {encryptSecret,decryptSecret} from './secrets.js';
 import {validateDestination,publicRequest} from './network.js';
 import {webhookEvents} from '../../shared/webhook-events.js';
 import {recordDeliveryAttemptAudit,deliveryAttemptElapsed,deliveryResponseStatus,type DeliveryAttemptStage,type DeliveryAttemptPath,type DeliveryAttemptErrorKind} from './delivery-attempt-audit.js';
+import {createWebhookRequest} from './webhook-request.js';
+export {signDelivery} from './webhook-request.js';
 
 const eventsInput=z.array(z.enum(webhookEvents)).min(1).max(webhookEvents.length)
   .refine(events=>new Set(events).size===events.length,'Choose each webhook event only once.');
@@ -16,10 +18,6 @@ function batchLimit(options:EnqueueOptions){
   const limit=options.limit??200;
   if(!Number.isInteger(limit)||limit<1||limit>500)throw new Error('Delivery enqueue batch must be between 1 and 500.');
   return limit;
-}
-
-export function signDelivery(secret:string,timestamp:string,body:string) {
-  return createHmac('sha256',secret).update(`${timestamp}.${body}`).digest('hex');
 }
 
 export async function registerIntegrations(app:FastifyInstance,services:{validateDestination?:typeof validateDestination}={}) {
@@ -164,8 +162,8 @@ export async function processOneDelivery(options: {transport?: typeof publicRequ
       if(result.deliveryPath==='sheets_already_delivered'||result.deliveryPath==='sheets_range_write')path=result.deliveryPath;
     } else {
       stage='webhook_request';path='webhook_request';
-      const body=JSON.stringify(delivery.payload), timestamp=String(Math.floor(Date.now()/1000));
-      const response=await (options.transport||publicRequest)(integration.config.url,{body,signal:options.signal,headers:{'Content-Type':'application/json','User-Agent':'Folio-Webhooks/1.0','X-Folio-Delivery':delivery.id,'X-Folio-Timestamp':timestamp,'X-Folio-Signature':`v1=${signDelivery(decryptSecret(integration.secret_ciphertext),timestamp,body)}`,'Idempotency-Key':delivery.id}});
+      const request=createWebhookRequest(delivery,decryptSecret(integration.secret_ciphertext));
+      const response=await (options.transport||publicRequest)(integration.config.url,{...request,signal:options.signal});
       status=response.status;
     }
     observedStatus=deliveryResponseStatus(status);

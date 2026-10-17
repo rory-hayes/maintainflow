@@ -45,7 +45,7 @@ async function issue(a:Account){
  return {row,token,link,payload};
 }
 async function cooldown(a:Account){await adminPool.query("UPDATE account_recovery_limits SET cooldown_until=clock_timestamp()-interval '1 second' WHERE address_key=$1",[privateIdentifier('folio:account-recovery:address:v1',a.email)]);}
-async function makeSession(a:Account){const token=newToken();await adminPool.query("INSERT INTO sessions(user_id,workspace_id,token_hash,expires_at) VALUES($1,$2,$3,clock_timestamp()+interval '1 hour')",[a.id,a.workspaceId,hashToken(token)]);return token;}
+async function makeSession(a:Account,workspaceId=a.workspaceId){const token=newToken();await adminPool.query("INSERT INTO sessions(user_id,workspace_id,token_hash,expires_at) VALUES($1,$2,$3,clock_timestamp()+interval '1 hour')",[a.id,workspaceId,hashToken(token)]);return token;}
 async function outbox(id:string){return (await adminPool.query('SELECT * FROM account_email_outbox WHERE id=$1',[id])).rows[0];}
 async function ownedSnapshot(a:Account){return (await adminPool.query(`SELECT (SELECT count(*) FROM memberships WHERE user_id=$1)::int memberships,
  (SELECT row_to_json(w) FROM workspaces w WHERE id=$2) workspace,(SELECT count(*) FROM documents WHERE workspace_id=$2)::int documents,
@@ -219,6 +219,33 @@ test('completion is atomic, signs out browser sessions, preserves API keys and w
  assert.equal((await outbox(issued.row.id)).payload_ciphertext,null);
  const audit=(await adminPool.query("SELECT * FROM account_security_events WHERE user_id=$1 AND action='password_reset_completed'",[a.id])).rows[0];assert.equal(audit.sessions_revoked,2);assert.equal(audit.tokens_invalidated,1);assert.equal(JSON.stringify(audit).includes(a.email),false);
  assert.equal((await adminPool.query("SELECT count(*)::int n FROM account_email_outbox WHERE user_id=$1 AND kind='password_changed' AND state='pending'",[a.id])).rows[0].n,1);
+});
+
+test('reset rejects every old browser session across selected workspaces while another principal keeps access',async()=>{
+ const account=await fixture('cross-workspace-reset'),neighbor=await fixture('cross-workspace-control');
+ // Existing memberships are fixture setup, independent of invitation onboarding.
+ await adminPool.query("INSERT INTO memberships(workspace_id,user_id,role) VALUES($1,$2,'editor')",[neighbor.workspaceId,account.id]);
+ const ownSession=await makeSession(account),selectedSession=await makeSession(account,neighbor.workspaceId),neighborSession=await makeSession(neighbor);
+ const get=(url:string,token:string,workspaceId?:string)=>app.inject({url,headers:{cookie:`folio_session=${token}`,...(workspaceId?{'x-workspace-id':workspaceId}:{})}});
+ const readRoutes=['/api/auth/me','/api/documents','/api/workspace/settings','/api/exports'];
+ for(const session of [ownSession,selectedSession,neighborSession])for(const route of readRoutes)assert.equal((await get(route,session)).statusCode,200,route);
+ assert.equal((await get('/api/auth/me',selectedSession)).json().workspace.id,neighbor.workspaceId);
+ const accountBefore=await ownedSnapshot(account),neighborBefore=await ownedSnapshot(neighbor),issued=await issue(account),password='New cross-workspace reset password';
+ const result=await complete(issued.token,password);assert.equal(result.statusCode,200,result.body);assert.equal(result.headers['set-cookie'],undefined);
+ for(const session of [ownSession,selectedSession]){
+  for(const route of readRoutes)assert.equal((await get(route,session)).statusCode,401,route);
+  assert.equal((await get('/api/auth/me',session,neighbor.workspaceId)).statusCode,401,'A workspace header must not restore a revoked session');
+  const change=await app.inject({method:'POST',url:'/api/auth/password',headers:{origin:config.origin,cookie:`folio_session=${session}`},payload:{currentPassword:password,newPassword:'Must remain unauthorized'}});
+  assert.equal(change.statusCode,401);assert.equal(change.headers['set-cookie'],undefined);
+ }
+ for(const route of readRoutes)assert.equal((await get(route,neighborSession)).statusCode,200,route);
+ assert.deepEqual(await ownedSnapshot(account),accountBefore);assert.deepEqual(await ownedSnapshot(neighbor),neighborBefore);
+ assert.equal((await adminPool.query('SELECT 1 FROM sessions WHERE user_id=$1',[account.id])).rowCount,0);
+ const login=(value:string)=>app.inject({method:'POST',url:'/api/auth/login',remoteAddress:address(),headers:{origin:config.origin},payload:{email:account.email,password:value}});
+ const oldLogin=await login(account.password);assert.equal(oldLogin.statusCode,401);assert.equal(oldLogin.headers['set-cookie'],undefined);
+ const newLogin=await login(password);assert.equal(newLogin.statusCode,200,newLogin.body);assert.ok(newLogin.cookies.some(cookie=>cookie.name==='folio_session'));
+ // Logging in again cannot reactivate either captured old cookie.
+ for(const session of [ownSession,selectedSession])assert.equal((await get('/api/auth/me',session)).statusCode,401);
 });
 
 test('wrong, expired, used and credential-bound stale tokens share one safe error; password creation policy stays specific',async()=>{

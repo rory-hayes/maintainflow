@@ -92,7 +92,7 @@ Before public activation, record the actual database/object backup method, stabl
 For every recovery drill:
 
 1. Select a completed backup and isolated empty destination; prevent all outgoing provider traffic.
-2. Restore the database, originals and matching integration encryption key. Preserve pending-restore protection until verification succeeds.
+2. Restore the database, originals and matching integration encryption key. Run the backup CLI's `verify` command for exact comparison while retaining pending-restore protection; it does not activate or start the instance.
 3. Verify account/tenant isolation, exact original and approved export bytes, historical results, retained bundle sources, tombstones, queued jobs and deletion/outbox state.
 4. Activate only the isolated restored instance with the documented explicit command. Process controlled queued work once and verify no duplicate charges or deliveries.
 5. Record elapsed recovery time, source/artifact identity, missing objects, cleanup and any failure. A successful local drill is not proof of hosted disaster recovery.

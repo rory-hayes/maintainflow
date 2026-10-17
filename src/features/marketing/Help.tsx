@@ -315,12 +315,12 @@ export function Privacy() {
       </section>
       <section>
         <h2>Provider processing</h2>
-        <p>{ai.configured === true ? 'AI is configured in this installation.' : ai.configured === false ? 'AI is not currently configured in this installation.' : 'Current AI configuration could not yet be confirmed.'} When a parser uses AI mode, document content, field definitions and extraction instructions are sent to the configured AI provider for processing. Connected email, spreadsheet, webhook and billing providers receive the data necessary for the configured action. Their own terms and data practices also apply.</p>
+        <p>{ai.configured === true ? 'AI is configured in this installation.' : ai.configured === false ? 'AI is not currently configured in this installation.' : 'Current AI configuration could not yet be confirmed.'} Bank statement extraction, parser AI mode, AI field suggestions and AI split suggestions send relevant document text, files or images, field definitions and instructions to the configured AI provider. Bank statement extraction uses AI for native text statements too. Connected email, spreadsheet, webhook and billing providers receive the data necessary for the configured action. Their own terms and data practices also apply.</p>
         <p>The application does not add a separate cross-workspace training process using customer corrections. This does not make a claim about a third-party provider's data retention or training policy.</p>
       </section>
       <section>
         <h2>Retention and deletion</h2>
-        <p>Workspace administrators can choose a document-retention period in Settings. Deletion removes document records and queues removal of private files; an interrupted deletion is retried. Downloaded exports and copies already delivered to another service are outside those controls.</p>
+        <p>Workspace administrators can choose a document-retention period in Settings. Active processing can defer expiry. Deletion removes document records and queues removal of private files. Failed file removals have bounded retries and remain tracked for administrator follow-up. A removed document record does not by itself confirm physical file removal. Minimal usage, audit and replay-protection records can remain. Downloaded exports, backups and copies already delivered to another service have separate retention arrangements.</p>
         <p>Retained original PDF, TIFF and ZIP bundles can contain pages or files excluded from an import, or files from a deleted child, while another child still needs that original. Use the batch deletion controls to remove the retained batch.</p>
         <p>{details?.retentionNotice||'The operator has not yet published a retention notice covering backups, audit records and provider copies. Confirm those periods before submitting sensitive production data.'}</p>
       </section>

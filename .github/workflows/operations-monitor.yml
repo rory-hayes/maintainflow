@@ -1,6 +1,6 @@
 name: Operational monitoring
 run-name: >-
-  Folio monitor: ${{ (vars.FOLIO_MONITOR_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && contains(fromJSON('["probe","initialize","delivery-drill"]'), inputs.mode))) && (inputs.mode || 'run') || 'disabled' }}
+  Folio monitor: ${{ ((vars.FOLIO_MONITOR_ENABLED == 'true' && (inputs.mode != 'external-run' || (vars.FOLIO_MONITOR_EXTERNAL_TRIGGER_ENABLED == 'true' && vars.FOLIO_MONITOR_TRIGGER_ACTOR_ID != '' && format('{0}', github.actor_id) == vars.FOLIO_MONITOR_TRIGGER_ACTOR_ID))) || (github.event_name == 'workflow_dispatch' && contains(fromJSON('["probe","initialize","delivery-drill"]'), inputs.mode))) && (inputs.mode == 'external-run' && format('external-run {0}', inputs.trigger_at) || inputs.mode || 'run') || 'disabled' }}
 
 on:
   schedule:
@@ -8,10 +8,18 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Probe only, normal monitoring, initial state, or approved test alerts
+        description: Probe, monitoring, initialization, approved test alerts, or authenticated external timer
         type: choice
-        options: [probe, run, initialize, delivery-drill]
+        options: [probe, run, initialize, delivery-drill, external-run]
         default: probe
+      trigger_at:
+        description: External timer UTC tick only; supplied by the reviewed trigger
+        type: string
+        default: ''
+      tick_signature:
+        description: Provider HMAC for the fixed external tick; ordinary manual runs omit this
+        type: string
+        default: ''
       drill_id:
         description: Unique UUID for an approved email drill; reuse only to reconcile a retry
         type: string
@@ -35,7 +43,11 @@ jobs:
     # No pull-request execution, and no dispatch of another ref with production secrets.
     if: >-
       github.ref == 'refs/heads/main' &&
-      (vars.FOLIO_MONITOR_ENABLED == 'true' ||
+      ((vars.FOLIO_MONITOR_ENABLED == 'true' &&
+      (inputs.mode != 'external-run' ||
+      (vars.FOLIO_MONITOR_EXTERNAL_TRIGGER_ENABLED == 'true' &&
+      vars.FOLIO_MONITOR_TRIGGER_ACTOR_ID != '' &&
+      format('{0}', github.actor_id) == vars.FOLIO_MONITOR_TRIGGER_ACTOR_ID))) ||
       (github.event_name == 'workflow_dispatch' && contains(fromJSON('["probe","initialize","delivery-drill"]'), inputs.mode)))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -60,10 +72,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MONITOR_MODE: ${{ inputs.mode || 'run' }}
+          FOLIO_MONITOR_ENABLED: ${{ vars.FOLIO_MONITOR_ENABLED }}
+          FOLIO_MONITOR_EXTERNAL_TRIGGER_ENABLED: ${{ vars.FOLIO_MONITOR_EXTERNAL_TRIGGER_ENABLED }}
+          FOLIO_MONITOR_TRIGGER_ACTOR_ID: ${{ vars.FOLIO_MONITOR_TRIGGER_ACTOR_ID }}
+          FOLIO_MONITOR_TRIGGER_AT: ${{ inputs.trigger_at }}
+          FOLIO_MONITOR_TRIGGER_KEY: ${{ secrets.FOLIO_MONITOR_TRIGGER_KEY }}
         run: |
           case "$MONITOR_MODE" in
             initialize) node scripts/monitor-artifact-state.ts --initialize ;;
             run) node scripts/monitor-artifact-state.ts ;;
+            external-run) node scripts/monitor-artifact-state.ts ;;
             *) exit 1 ;;
           esac
       - name: Download exactly the selected encrypted artifact
@@ -99,6 +117,7 @@ jobs:
         env:
           MONITOR_MODE: ${{ inputs.mode || 'run' }}
           SELECTED_ARTIFACT_ID: ${{ steps.state.outputs.artifact_id }}
+          FOLIO_MONITOR_TRIGGER_AT: ${{ inputs.mode == 'external-run' && inputs.trigger_at || '' }}
         run: |
           if [ "$MONITOR_MODE" = initialize ] && [ -z "$SELECTED_ARTIFACT_ID" ]; then
             FOLIO_MONITOR_INITIALIZE=true node scripts/operations-monitor.ts --prepare

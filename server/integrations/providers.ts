@@ -14,14 +14,15 @@ import {addDocument} from '../core/intake.js';
 import {ParserFormatNotAllowedError,SourceIntakeRejectedError} from '../core/intake-policy.js';
 import {encryptSecret,decryptSecret} from './secrets.js';
 import {observeGoogleSheetsAccessStep,googleSheetsDeliveredRefreshProof} from './google-sheets-refresh-proof.js';
+import {googleSheetsRevocation} from './google-sheets-disconnect.js';
 import {reportGoogleSheetsDeliveryStage,type GoogleSheetsDeliveryStageObserver} from './delivery-attempt-audit.js';
 import {publicRequest} from './network.js';
 import {mockBillingEnabled,mockBillingStatus,registerMockBilling,requireRealBilling} from './mock-billing.js';
 import {validateCheckoutPolicy,readCheckoutContract,reserveCheckoutContract,contractSessionKey,bindCheckoutContract,checkoutCompletionPointer,captureCheckoutCompletion,listCheckoutContracts,getCheckoutContract,renderCheckoutTermsRecord,type CheckoutPolicyInput,type CheckoutCompletionPointer} from './checkout-contracts.js';
 import {
  SHEETS_SCOPE,stripeMode,stripeConfiguration,assertStripeMode,assertStripeCustomerTestClock,stripePriceMatches,assertStripePortalConfiguration,verifyStripePayload,verifyResendPayload,
- publicProviderError,emailAddress,deliveredRecipients,verifiedReceivingDomain,managedReceivingProbe,verifiedManagedReceivingProbe,
- stripePlan,selectStripeSubscription,sheetConfigSchema,sheetRows,sheetRanges,
+ publicProviderError,emailAddress,deliveredRecipients,receivedEmailMatchesId,verifiedReceivingDomain,managedReceivingProbe,verifiedManagedReceivingProbe,
+ stripePlan,selectStripeSubscription,stripeCustomerPointer,sheetConfigSchema,sheetRows,sheetRanges,
  writeSheetRange,receivedEmailBody,type PaidPlanId,type ApprovalPayload,type StripeMode,
 } from './provider-policy.js';
 
@@ -117,11 +118,9 @@ export async function storeProviderEvent(provider:'stripe'|'resend',id:string,pa
  return {received:true,duplicate:result.rowCount===0};
 }
 function stripePointer(event:Stripe.Event):StripePointer|null {
- if(!['customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','checkout.session.completed','checkout.session.async_payment_succeeded','invoice.paid','invoice.payment_failed','invoice.payment_action_required'].includes(event.type))return null;
- const object=event.data.object as unknown as {customer?:string|{id:string}};
- const customerId=typeof object.customer==='string'?object.customer:object.customer?.id;
+ const pointer=stripeCustomerPointer(event);
  const checkout=checkoutCompletionPointer(event);
- return customerId?{id:event.id,type:event.type,created:event.created,customerId,mode:event.livemode?'live':'test',...(checkout?{checkout}:{})}:null;
+ return pointer?{...pointer,...(checkout?{checkout}:{})}:null;
 }
 
 /** Neither completion evidence nor entitlement reconciliation can starve the other. */
@@ -183,6 +182,7 @@ export async function processResendEvent(eventId:string,pointer:ResendPointer,de
  requireWorkBudget(budget,20_000);
  const {data:email,error}=await client.emails.receiving.get(pointer.emailId,{html_format:'cid'});
  if(error||!email)throw new Error('Resend could not retrieve the received email content.');
+ if(!receivedEmailMatchesId(pointer.emailId,email))throw new Error('The retrieved email did not match the signed message identity.');
  const recipients=deliveredRecipients(pointer.recipients,email);
  if(!recipients.length)throw new Error('The signed and retrieved delivery envelopes did not match.');
  const {rows:routes}=await adminPool.query('select r.*,p.archived from email_routes r join parsers p on p.id=r.parser_id and p.workspace_id=r.workspace_id where r.address=any($1) and r.enabled=true and p.archived=false',[recipients]);
@@ -335,8 +335,8 @@ export async function sendGoogleSheets(integration:Integration,delivery:{id:stri
 /** Optional client is an internal controlled-transport seam; configuration/authorization still run. */
 export async function registerProviders(app:FastifyInstance,dependencies:{stripeClient?:(settings:BillingConfiguration)=>Stripe;checkoutPolicy?:()=>CheckoutPolicyInput|null}={}){
  const billingClient=(settings:BillingConfiguration)=>dependencies.stripeClient?.(settings)??stripeClient(settings);
- // No production policy provider is installed. A future approved catalogue can
- // supply this internal seam; absent configuration never invents acceptance.
+ // buildApp supplies the optional operator-selected catalogue lazily. Existing
+ // pinned reservations never depend on the current policy configuration.
  const checkoutPolicy=()=>{const policy=dependencies.checkoutPolicy?.();return policy===null||policy===undefined?null:validateCheckoutPolicy(policy);};
  const captureEnabled=()=>{try{return Boolean(checkoutPolicy());}catch{return false;}};
  app.get('/api/billing/contracts',async(request,reply)=>{
@@ -534,8 +534,6 @@ async function registerGoogleRoutes(app:FastifyInstance){
  app.post('/api/google/:id/disconnect',async request=>{
   const actor=await sessionAdmin(request),id=uuid.parse((request.params as {id:string}).id);
   const row=await withWorkspace(actor.workspaceId,async c=>{const result=await c.query("select * from integrations where id=$1 and kind='google_sheets' for update",[id]);if(!result.rows[0])notFound();await c.query('update integrations set enabled=false,secret_ciphertext=null where id=$1',[id]);await c.query('delete from oauth_states where integration_id=$1',[id]);await audit(c,actor.workspaceId,actor.userId,'google_sheets.disconnected',id);return result.rows[0];});
-  let providerRevoked=false;
-  if(row.secret_ciphertext){const token=JSON.parse(decryptSecret(row.secret_ciphertext)) as Credentials;const revoke=token.refresh_token||token.access_token;if(revoke){try{await googleClient().revokeToken(revoke);providerRevoked=true;}catch{ /* Local disconnection remains effective; user can revoke in Google account settings. */ }}}
-  return {disconnected:true,providerRevoked,reason:providerRevoked?null:'Local delivery is disabled. Revoke access for this app in your Google account if provider revocation could not complete.'};
+  return googleSheetsRevocation(row.secret_ciphertext,{decrypt:decryptSecret,revoke:token=>googleClient().revokeToken(token)});
  });
 }

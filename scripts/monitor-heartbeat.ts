@@ -1,6 +1,7 @@
 /** Optional, completed-schedule heartbeat. No .env, application state, or customer data. */
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {actorId, freshExternalTick} from './monitor-trigger-contract.ts';
 
 const repository = 'rory-hayes/maintainflow';
 const maxAgeMs = 20 * 60_000;
@@ -15,11 +16,14 @@ export function validateCompletedSchedule(env: NodeJS.ProcessEnv, now: Date): vo
   requireValue(env.GITHUB_EVENT_NAME === 'workflow_run' && env.GITHUB_REPOSITORY === repository
     && env.GITHUB_REF === 'refs/heads/main' && env.GITHUB_RUN_ATTEMPT === '1', 'heartbeat_trigger_invalid');
   requireValue(env.FOLIO_MONITOR_ENABLED === 'true', 'heartbeat_monitor_disabled');
-  requireValue(env.SOURCE_EVENT === 'schedule' && env.SOURCE_REPOSITORY === repository
+  const external = env.SOURCE_EVENT === 'workflow_dispatch' && env.FOLIO_MONITOR_EXTERNAL_TRIGGER_ENABLED === 'true'
+    && actorId(env.FOLIO_MONITOR_TRIGGER_ACTOR_ID) !== null
+    && actorId(env.SOURCE_ACTOR_ID) === actorId(env.FOLIO_MONITOR_TRIGGER_ACTOR_ID);
+  requireValue((env.SOURCE_EVENT === 'schedule' && env.SOURCE_TITLE === 'Folio monitor: run' || external)
+    && env.SOURCE_REPOSITORY === repository
     && env.SOURCE_HEAD_REPOSITORY === repository && env.SOURCE_BRANCH === 'main'
     && env.SOURCE_WORKFLOW === 'Operational monitoring'
-    && env.SOURCE_PATH === '.github/workflows/operations-monitor.yml'
-    && env.SOURCE_TITLE === 'Folio monitor: run', 'heartbeat_source_invalid');
+    && env.SOURCE_PATH === '.github/workflows/operations-monitor.yml', 'heartbeat_source_invalid');
   requireValue(env.SOURCE_STATUS === 'completed' && env.SOURCE_CONCLUSION === 'success'
     && env.SOURCE_ATTEMPT === '1', 'heartbeat_completion_invalid');
   requireValue(/^[1-9][0-9]{0,15}$/.test(env.SOURCE_RUN_ID ?? '')
@@ -30,6 +34,7 @@ export function validateCompletedSchedule(env: NodeJS.ProcessEnv, now: Date): vo
   const created = parse(env.SOURCE_CREATED_AT), updated = parse(env.SOURCE_UPDATED_AT), current = now.getTime();
   requireValue(Number.isFinite(current) && Number.isFinite(created) && Number.isFinite(updated)
     && created <= updated && updated <= current && current - created <= maxAgeMs, 'heartbeat_source_stale');
+  if (external) requireValue(freshExternalTick(env.SOURCE_TITLE ?? '', created, current, maxAgeMs) !== null, 'heartbeat_source_stale');
 }
 
 export async function sendHeartbeat(env: NodeJS.ProcessEnv, transport: typeof fetch = fetch,
@@ -66,7 +71,7 @@ export async function sendHeartbeat(env: NodeJS.ProcessEnv, transport: typeof fe
       } finally { await reader.cancel().catch(() => {}); }
       // Healthchecks also uses HTTP200 for "OK (not found)" and "OK (rate limited)".
       requireValue(Buffer.concat(chunks).toString('utf8') === 'OK', 'heartbeat_not_accepted');
-      return {status: 'sent' as const, reason: 'completed_schedule_accepted', requests};
+      return {status: 'sent' as const, reason: env.SOURCE_EVENT === 'schedule' ? 'completed_schedule_accepted' : 'completed_external_trigger_accepted', requests};
     })();
     return await Promise.race([work, new Promise<never>((_, reject) => {
       timer = setTimeout(() => { controller.abort(); reject(new HeartbeatError('heartbeat_timeout')); }, timeoutMs);

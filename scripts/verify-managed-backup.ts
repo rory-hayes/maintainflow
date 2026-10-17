@@ -16,6 +16,7 @@ import {openArchive} from './backup/archive.js';
 import {sha256} from './backup/files.js';
 import type {BackupConfig} from './backup/types.js';
 import {canonicalSignupPolicy} from '../shared/signup-terms.js';
+import {assertStorageRestoreReady} from '../server/core/restore-state.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),exec=promisify(execFile),args=process.argv.slice(2);
 assert.deepEqual(args,['--execute'],'Pass --execute to create and clean an owned socket-only PostgreSQL17 fixture. No hosted credentials are read.');
@@ -99,6 +100,15 @@ try{
  const unpack=path.join(run,'unpack');await fs.mkdir(unpack,{mode:0o700});const authenticated=await openArchive(artifact,(await fs.readFile(identity,'utf8')).trim(),unpack),manifest=authenticated.manifest;
  assert.equal(manifest.capture,'quiesced-supabase');assert.equal(manifest.database.migrations.length,(await readMigrations(migrations)).length);assert.equal(manifest.objects.filter(o=>o.present).length,3);assert.equal(manifest.objects.filter(o=>!o.present).length,1);assert.equal(manifest.omittedObjects.length,1);assert.ok(manifest.database.watchdogSha256);receipt.applicationTables=manifest.database.tables.length;receipt.migrations=manifest.database.migrations.length;receipt.ciphertextSha256=authenticated.ciphertextSha256;checkpoint('AuthenticatedInventoryBindsRequiredOptionalAbsentAndOmittedObjects');
  const restored=await runBackup(['restore','--config',path.join(run,'target.json'),'--input',artifact,'--identity-file',identity]);assert.equal(restored.status,'restored_inactive');checkpoint('ExactBinaryDataAndOwnersAclRlsConstraintsWatchdogRestoredInTransaction');
+ const pendingFile=path.join(target.storageDir,'.folio-restore-pending.json'),activationFile=path.join(target.storageDir,'.folio-restore-receipt.json'),pendingBytes=await fs.readFile(pendingFile);
+ const verifyInactive=()=>runBackup(['verify','--config',path.join(run,'target.json'),'--input',artifact,'--identity-file',identity]);
+ for(let n=0;n<2;n++){const verified=await verifyInactive();assert.equal(verified.status,'restored_verified_inactive');assert.equal('servicesStarted' in verified&&verified.servicesStarted,false);assert.equal('pendingRetained' in verified&&verified.pendingRetained,true);assert.equal('ciphertextSha256' in verified&&verified.ciphertextSha256,authenticated.ciphertextSha256);assert.deepEqual(await fs.readFile(pendingFile),pendingBytes);assert.equal(await fs.stat(activationFile).then(()=>true,()=>false),false);await assert.rejects(assertStorageRestoreReady(target.storageDir,'filesystem'),(error:any)=>error.code==='FOLIO_RESTORE_PENDING');}
+ checkpoint('InactiveVerificationRechecksExactDataTwiceAndPreservesStartupFenceWithoutReceipt');
+ const workspaceNames=await sql('target',async c=>(await c.query('SELECT id,name FROM folio.workspaces ORDER BY id')).rows);
+ await sql('target',c=>c.query("UPDATE folio.workspaces SET name=name||' altered'"));
+ await assert.rejects(verifyInactive(),/Restored table bytes differ/);assert.deepEqual(await fs.readFile(pendingFile),pendingBytes);assert.equal(await fs.stat(activationFile).then(()=>true,()=>false),false);
+ await sql('target',async c=>{for(const row of workspaceNames)await c.query('UPDATE folio.workspaces SET name=$1 WHERE id=$2',[row.name,row.id]);});await verifyInactive();
+ checkpoint('InactiveVerificationRejectsSameRowCountDataMutationAndPreservesPendingDestination');
  assert.deepEqual(await termsSnapshot('target'),originalTerms);
  await sql('target',async c=>{
   await assert.rejects(c.query("UPDATE folio.checkout_contracts SET policy=policy||'{\"text\":\"changed\"}'"),/immutable/);
@@ -108,6 +118,7 @@ try{
  checkpoint('CheckoutTermsBytesBindingsReceiptsAndImmutabilitySurviveEncryptedRestore');
  checkpoint('SignupPolicyBytesDigestsAcceptanceTimesAndImmutabilitySurviveEncryptedRestore');
  const activated=await runBackup(['activate','--config',path.join(run,'target.json'),'--input',artifact,'--identity-file',identity,'--allow-outbound']);assert.equal(activated.status,'restore_activated');checkpoint('ActivationRechecksFullDatabaseAndObjectsWithoutStartingServices');
+ await assert.rejects(verifyInactive(),(error:any)=>error.code==='BACKUP_ACTIVATION');checkpoint('InactiveVerificationCannotAcknowledgeAnAlreadyActivatedRestore');
  await sql('target',async c=>{assert.equal((await c.query('SELECT count(*)::int n FROM folio.documents')).rows[0].n,2);assert.deepEqual((await c.query('SELECT last_value::text,is_called FROM folio.document_events_sequence_seq')).rows[0],{last_value:'99',is_called:false});const r=(await c.query("SELECT has_function_privilege('backup_admin','folio.worker_has_runnable_work()','EXECUTE') admin,has_function_privilege('backup_app','folio.worker_has_runnable_work()','EXECUTE') app")).rows[0];assert.deepEqual(r,{admin:false,app:false});assert.equal((await c.query("SELECT count(*)::int n FROM pg_namespace WHERE nspname IN ('cron','vault','platform')")).rows[0].n,0);});
  const tenant=connection('target','backup_app');await tenant.connect();try{assert.equal((await tenant.query('SELECT count(*)::int n FROM folio.documents')).rows[0].n,0);for(const table of ['checkout_contracts','checkout_contract_receipts'])assert.equal((await tenant.query(`SELECT count(*)::int n FROM folio.${table}`)).rows[0].n,0);const workspace=[...objects.keys()][0].split('/')[0];await tenant.query("SELECT set_config('app.workspace_id',$1,false)",[workspace]);assert.equal((await tenant.query('SELECT count(*)::int n FROM folio.documents')).rows[0].n,1);for(const table of ['checkout_contracts','checkout_contract_receipts']){const rows=(await tenant.query(`SELECT workspace_id FROM folio.${table}`)).rows;assert.deepEqual(rows,[{workspace_id:workspace}]);assert.equal((await tenant.query(`DELETE FROM folio.${table}`)).rowCount,0);}await assert.rejects(tenant.query('SELECT * FROM folio.schema_migrations'),(error:any)=>error.code==='42501');}finally{await tenant.end();}checkpoint('RestoredTenantIsolationJournalDenialSequenceAndNoSchedulerActivation');
  const baseSnapshot=await openSourceDatabase({...source,sourceStorage:undefined},migrations);await baseSnapshot.close();

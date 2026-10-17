@@ -89,3 +89,56 @@ test('expired processing recovery journals one queued state under blocked capaci
 test('expired job recovery preserves nonprocessing reviewed displays until the next actual claim',{timeout:60_000},async()=>{
  for(const display of ['needs_review','processed','exported'] as const)await blockedRecovery(display);
 });
+
+test('exhausted lease records a terminal reason and only explicit reprocessing adds a new charged attempt',{timeout:30_000},async()=>{
+ const f=await createBankFixture(app),source=await f.queue(),terminalHint='Worker lease expired; automatic retry limit reached. Reprocess the document to try again.';
+ let providerCalls=0;setExtractionProvider({configured:()=>true,async extract(){providerCalls++;return result();}});
+ await adminPool.query("update jobs set state='processing',attempts=max_attempts,lease_owner='synthetic-exhausted-worker',lease_until=now()-interval '1 second' where id=$1",[source.jobId]);
+ await adminPool.query("update documents set status='processing' where id=$1",[source.document.id]);
+ const beforeUsage=await usage(f.actor.workspaceId),beforeEvents=await events(f.actor.workspaceId,source.document.id);
+ assert.equal(beforeUsage.length,1);assert.equal(beforeUsage[0].event,'upload');
+ assert.equal(await processOneCoreJob(source.jobId),false);
+ const failed=await job(source.jobId),failedDoc=await document(source.document.id),failedEvents=await events(f.actor.workspaceId,source.document.id);
+ assert.equal(failed.state,'failed');assert.equal(failed.attempts,failed.max_attempts);assert.equal(failed.error,terminalHint);assert.equal(failed.lease_owner,null);assert.equal(failed.lease_until,null);
+ assert.equal(failedDoc.status,'failed');assert.equal(failedDoc.error,terminalHint);assert.equal(failedDoc.latest_run_id,null);assert.equal(providerCalls,0);
+ assert.deepEqual(failedEvents.slice(0,beforeEvents.length),beforeEvents);assert.equal(failedEvents.length,beforeEvents.length+1);assert.equal(failedEvents.at(-1)!.state,'failed');assert.equal(failedEvents.at(-1)!.operation_id,source.jobId);
+ assert.deepEqual(await usage(f.actor.workspaceId),beforeUsage);assert.equal((await oldHistory(source.document.id,source.jobId)).runs.length,0);
+ assert.equal(await processOneCoreJob(source.jobId),false);assert.deepEqual(await job(source.jobId),failed);assert.deepEqual(await document(source.document.id),failedDoc);assert.deepEqual(await events(f.actor.workspaceId,source.document.id),failedEvents);assert.deepEqual(await usage(f.actor.workspaceId),beforeUsage);
+ const manual=await f.request('POST',`/api/documents/${source.document.id}/reprocess`,{});assert.equal(manual.statusCode,200,manual.body);const newJobId=manual.json().job.id;assert.notEqual(newJobId,source.jobId);
+ const charged=await usage(f.actor.workspaceId);assert.equal(charged.length,2);assert.deepEqual(charged.filter(row=>row.event==='upload'),beforeUsage);const [charge]=charged.filter(row=>row.event==='reprocess');assert.equal(charge.document_id,source.document.id);assert.equal(charge.pages,beforeUsage[0].pages);
+ assert.equal(await processOneCoreJob(newJobId),true);assert.equal(providerCalls,1);assert.equal((await job(newJobId)).state,'completed');assert.deepEqual(await job(source.jobId),failed);assert.deepEqual(await usage(f.actor.workspaceId),charged);
+ const completed=await f.detail(source.document.id);assert.equal(completed.document.status,'needs_review');assert.equal(completed.runs.length,1);assert.equal(completed.runs[0].jobId,newJobId);
+ const finalEvents=await events(f.actor.workspaceId,source.document.id);assert.deepEqual(finalEvents.slice(0,failedEvents.length),failedEvents);assert.equal(finalEvents.filter(event=>event.state==='failed'&&event.operation_id===source.jobId).length,1);
+ assert.equal(await processOneCoreJob(source.jobId),false);assert.equal(await processOneCoreJob(newJobId),false);assert.equal(providerCalls,1);assert.deepEqual(await events(f.actor.workspaceId,source.document.id),finalEvents);assert.deepEqual(await usage(f.actor.workspaceId),charged);
+});
+
+test('exhausted retry preserves prior corrected approval and exact CSV snapshots without another page charge',{timeout:30_000},async()=>{
+ const {f,source,approval,retryJobId}=await reviewedFixture(),terminalHint='Worker lease expired; automatic retry limit reached. Reprocess the document to try again.';
+ const exportInput={documentIds:[source.document.id],format:'csv',workflow:'bank_statement',revisions:[{documentId:source.document.id,approvalId:approval.id}]};
+ const created=await f.request('POST','/api/exports',exportInput);assert.equal(created.statusCode,200,created.body);const first=created.json();
+ const downloaded=await f.request('GET',first.downloadUrl);assert.equal(downloaded.statusCode,200,downloaded.body);const originalCsv=Buffer.from(downloaded.rawPayload);
+ assert.match(originalCsv.toString('utf8'),/Synthetic saved correction before retry/);assert.ok(originalCsv.toString('utf8').includes(approval.id));
+ const snapshots=()=>rows('select * from export_snapshots where workspace_id=$1 order by id',[f.actor.workspaceId]);
+ const beforeSnapshots=await snapshots();assert.equal(beforeSnapshots.length,1);assert.equal(beforeSnapshots[0].id,first.id);assert.deepEqual(beforeSnapshots[0].bytes,originalCsv);assert.deepEqual(beforeSnapshots[0].records[0].values,approval.values);
+ const immutableDocument=(value:any)=>Object.fromEntries(Object.entries(value).filter(([key])=>!['status','error','updated_at'].includes(key)));
+ const wholeUsage=async()=>{const response=await f.request('GET','/api/workspace/usage');assert.equal(response.statusCode,200,response.body);return response.json();};
+ const original=await f.request('GET',`/api/documents/${source.document.id}/original`);assert.equal(original.statusCode,200,original.body);const originalBytes=Buffer.from(original.rawPayload);
+ await adminPool.query("update jobs set state='processing',attempts=max_attempts,lease_owner='synthetic-reviewed-exhausted-worker',lease_until=now()-interval '1 second' where id=$1",[retryJobId]);
+ await adminPool.query("update documents set status='processing' where id=$1",[source.document.id]);
+ const beforeDoc=await document(source.document.id),beforeHistory=await oldHistory(source.document.id,retryJobId),beforeEvents=await events(f.actor.workspaceId,source.document.id),beforeLedger=await usage(f.actor.workspaceId),beforeUsage=await wholeUsage();
+ assert.equal(beforeHistory.runs.length,1);assert.equal(beforeHistory.corrections.length,1);assert.equal(beforeHistory.approvals.length,1);assert.equal(beforeHistory.jobs.length,1);assert.equal(beforeSnapshots[0].records[0].correctionId,beforeHistory.corrections[0].id);assert.equal(beforeUsage.usage.failed,0);
+ let providerCalls=0;setExtractionProvider({configured:()=>true,async extract(){providerCalls++;return result();}});
+ assert.equal(await processOneCoreJob(retryJobId),false);
+ const failed=await job(retryJobId),failedDoc=await document(source.document.id),failedEvents=await events(f.actor.workspaceId,source.document.id),expectedUsage=structuredClone(beforeUsage);expectedUsage.usage.failed=1;
+ assert.equal(failed.state,'failed');assert.equal(failed.attempts,failed.max_attempts);assert.equal(failed.error,terminalHint);assert.equal(failed.lease_owner,null);assert.equal(failed.lease_until,null);assert.equal(providerCalls,0);
+ assert.equal(failedDoc.status,'failed');assert.equal(failedDoc.error,terminalHint);assert.deepEqual(immutableDocument(failedDoc),immutableDocument(beforeDoc));assert.deepEqual(await oldHistory(source.document.id,retryJobId),beforeHistory);assert.deepEqual(await snapshots(),beforeSnapshots);assert.deepEqual(await usage(f.actor.workspaceId),beforeLedger);assert.deepEqual(await wholeUsage(),expectedUsage);
+ assert.deepEqual(failedEvents.slice(0,beforeEvents.length),beforeEvents);assert.equal(failedEvents.length,beforeEvents.length+1);assert.equal(failedEvents.at(-1)!.state,'failed');assert.equal(failedEvents.at(-1)!.operation_id,retryJobId);
+ assert.equal(await processOneCoreJob(retryJobId),false);assert.deepEqual(await job(retryJobId),failed);assert.deepEqual(await document(source.document.id),failedDoc);assert.deepEqual(await events(f.actor.workspaceId,source.document.id),failedEvents);assert.deepEqual(await wholeUsage(),expectedUsage);
+ const repeated=await f.request('POST','/api/exports',exportInput);assert.equal(repeated.statusCode,200,repeated.body);const second=repeated.json();assert.notEqual(second.id,first.id);
+ for(const url of [first.downloadUrl,second.downloadUrl]){const response=await f.request('GET',url);assert.equal(response.statusCode,200,response.body);assert.deepEqual(response.rawPayload,originalCsv);}
+ const afterSnapshots=await snapshots();assert.equal(afterSnapshots.length,2);assert.deepEqual(afterSnapshots.filter(snapshot=>snapshot.id===first.id),beforeSnapshots);const newSnapshot=afterSnapshots.find(snapshot=>snapshot.id===second.id);assert.ok(newSnapshot);assert.deepEqual(newSnapshot.records,beforeSnapshots[0].records);assert.deepEqual(newSnapshot.bytes,originalCsv);
+ const finalDoc=await document(source.document.id);assert.equal(finalDoc.status,'failed');assert.equal(finalDoc.error,terminalHint);assert.deepEqual(immutableDocument(finalDoc),immutableDocument(beforeDoc));assert.deepEqual(await oldHistory(source.document.id,retryJobId),beforeHistory);assert.deepEqual(await job(retryJobId),failed);assert.deepEqual(await usage(f.actor.workspaceId),beforeLedger);assert.deepEqual(await wholeUsage(),expectedUsage);assert.equal(providerCalls,0);
+ const finalOriginal=await f.request('GET',`/api/documents/${source.document.id}/original`);assert.equal(finalOriginal.statusCode,200,finalOriginal.body);assert.deepEqual(finalOriginal.rawPayload,originalBytes);
+ const finalEvents=await events(f.actor.workspaceId,source.document.id);assert.deepEqual(finalEvents.slice(0,failedEvents.length),failedEvents);assert.deepEqual(finalEvents.slice(failedEvents.length).map(event=>[event.phase,event.state,event.operation_id]),[['export','exporting',second.id],['export','exported',second.id]]);
+ assert.equal(await processOneCoreJob(retryJobId),false);assert.deepEqual(await events(f.actor.workspaceId,source.document.id),finalEvents);assert.deepEqual(await snapshots(),afterSnapshots);assert.deepEqual(await wholeUsage(),expectedUsage);assert.equal(providerCalls,0);
+});

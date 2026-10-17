@@ -37,6 +37,7 @@ const temporaryFailures=new Set([
   'Extraction interrupted by worker shutdown; retry scheduled',
   'Extraction provider exceeded the 90-second timeout',
   'Worker lease expired; retry scheduled',
+  'Worker lease expired; automatic retry limit reached. Reprocess the document to try again.',
 ]);
 function failureGuidance(error:string|null|undefined,canEdit:boolean){
   if(error==='The OpenAI project has no available API quota. Check project billing and limits.')return 'Statement processing is unavailable right now. Contact MaintainFlow support before starting another extraction.';

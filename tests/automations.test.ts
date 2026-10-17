@@ -3,13 +3,10 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
-import {signDelivery} from '../server/integrations/webhooks.js';
-import {closeDatabase} from '../server/core/db.js';
-import {after} from 'node:test';
+import {signDelivery} from '../server/integrations/webhook-request.js';
 import {verifyApprovalDelivery,verifyWebhookDelivery} from '../examples/automations/verify.js';
 const read=(file:string)=>JSON.parse(readFileSync(new URL(`../fixtures/automations/${file}`,import.meta.url),'utf8'));
 const fixture=read('document-approved.json'),schema=z.fromJSONSchema(read('document-approved.schema.json'));
-after(closeDatabase);
 test('four automation recipes map actual approved-event fields without identifier coercion',()=>{
  schema.parse(fixture);assert.equal(schema.safeParse({...fixture,revision:'1'}).success,false);assert.equal(schema.safeParse({...fixture,event:'document.received'}).success,false);
  const recipes=read('recipes.json').recipes;assert.deepEqual(recipes.map((r:any)=>r.platform),['Zapier','Make','n8n','Power Automate']);

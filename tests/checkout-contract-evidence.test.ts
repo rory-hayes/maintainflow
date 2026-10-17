@@ -15,6 +15,7 @@ import {adminPool,appPool,databaseSchema,closeDatabase,transaction,withWorkspace
 import {config} from '../server/core/config.js';
 import {registerProviders,reconcileStripeCustomer,processStripeEvent} from '../server/integrations/providers.js';
 import {validateCheckoutPolicy,reserveCheckoutContract,type CheckoutPolicyInput} from '../server/integrations/checkout-contracts.js';
+import {configuredCheckoutPolicy,checkoutPolicyConfigurationDigest} from '../server/integrations/checkout-policy.js';
 
 type Account={user:{id:string};workspace:{id:string};cookie:string};
 const keys=['STRIPE_MODE','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','STRIPE_PRICE_STANDARD','STRIPE_PRICE_TEAM','STRIPE_ACCOUNT_ID','STRIPE_PORTAL_CONFIGURATION_ID','FOLIO_BILLING_MOCK','FOLIO_PREVIEW_MODE','RESEND_API_KEY','RESEND_INBOUND_ENABLED','FOLIO_REQUIRE_EMAIL_VERIFICATION'] as const;
@@ -40,7 +41,7 @@ const client={
   return structuredClone(session);
  },retrieve:async(id:string)=>structuredClone([...sessions.values()].find(s=>s.id===id)),expire:async(id:string)=>{const session=[...sessions.values()].find(s=>s.id===id);session.status='expired';return structuredClone(session);}}},
 } as unknown as Stripe;
-async function build(withPolicy=true){const instance=Fastify({logger:false});await instance.register(cookie);await instance.register(multipart);instance.setErrorHandler((error:any,_req,reply)=>reply.code(error instanceof ZodError?400:error.statusCode||500).send({message:error.message}));await registerCore(instance);await registerProviders(instance,{stripeClient:()=>client,...(withPolicy?{checkoutPolicy:()=>policy}:{})});await instance.ready();apps.push(instance);return instance;}
+async function build(withPolicy=true,environment?:Record<string,string|undefined>){const instance=Fastify({logger:false});await instance.register(cookie);await instance.register(multipart);instance.setErrorHandler((error:any,_req,reply)=>reply.code(error instanceof ZodError?400:error.statusCode||500).send({message:error.message}));await registerCore(instance);await registerProviders(instance,{stripeClient:()=>client,...(withPolicy?{checkoutPolicy:environment?()=>configuredCheckoutPolicy(environment):()=>policy}:{})});await instance.ready();apps.push(instance);return instance;}
 async function signup(instance=app):Promise<Account>{const response=await instance.inject({method:'POST',url:'/api/auth/register',headers:{origin:config.origin},payload:{name:'Owned terms fixture',workspaceName:'Owned terms workspace',email:`terms-${randomUUID()}@example.test`,password:'Owned terms fixture password'}});assert.equal(response.statusCode,201,response.body);const account={...response.json(),cookie:response.cookies.map(c=>`${c.name}=${c.value}`).join('; ')};accounts.push(account);return account;}
 const request=(account:Account,method:'GET'|'POST',url:string,payload?:unknown,instance=app)=>instance.inject({method,url,headers:{cookie:account.cookie,origin:config.origin},...(payload===undefined?{}:{payload:payload as any})});
 async function create(account:Account,planId='standard'){const response=await request(account,'POST','/api/billing/checkout',{planId});assert.equal(response.statusCode,200,response.body);return [...sessions.values()].findLast(s=>s.client_reference_id===account.workspace.id)!;}
@@ -68,7 +69,7 @@ after(async()=>{
  finally{mock.restoreAll();for(const key of keys){if(original[key]===undefined)delete process.env[key];else process.env[key]=original[key];}config.origin=originalOrigin;await closeDatabase();}
 });
 
-test('production has no policy catalogue; normal Checkout and mock behavior remain legacy',async()=>{
+test('absent policy callback retains legacy Checkout and mock behavior',async()=>{
  const dormant=await build(false),owner=await signup(dormant);policy=fixture;
  const response=await request(owner,'POST','/api/billing/checkout',{planId:'standard'},dormant);assert.equal(response.statusCode,200,response.body);
  assert.deepEqual(Object.keys(calls.at(-1)!.params).sort(),['cancel_url','client_reference_id','customer','line_items','mode','success_url']);assert.equal((await rows(owner)).length,0);
@@ -79,6 +80,20 @@ test('policy bounds and unsafe configuration fail closed without creating a Chec
  const owner=await signup(),before=calls.length;
  for(const patch of [{text:''},{text:'x'.repeat(16001)},{text:'bad\u0000text'},{url:'javascript:alert(1)'},{url:'https://user:password@example.test/terms'},{language:'bad language'},{version:'version\nforged'},{unknown:'field'},{agreementText:'x'.repeat(1000),url:`https://terms.example.test/${'a'.repeat(500)}`}]){policy={...fixture,...patch} as CheckoutPolicyInput;assert.equal((await request(owner,'POST','/api/billing/checkout',{planId:'standard'})).statusCode,503);}
  assert.equal(calls.length,before);assert.equal((await rows(owner)).length,0);assert.equal((await adminPool.query('SELECT count(*)::int n FROM billing_checkouts WHERE workspace_id=$1',[owner.workspace.id])).rows[0].n,0);
+});
+test('explicit environment catalogue captures pinned terms; broken current selection blocks new attempts while pinned retries and history survive',async()=>{
+ const environment={FOLIO_CHECKOUT_POLICY_ENABLED:'true',FOLIO_CHECKOUT_POLICY_CATALOGUE_JSON:JSON.stringify({policies:[fixture]}),FOLIO_CHECKOUT_POLICY_VERSION:fixture.version,FOLIO_CHECKOUT_POLICY_SHA256:checkoutPolicyConfigurationDigest(fixture)};
+ const configured=await build(true,environment),owner=await signup(configured);
+ loseResponse=true;assert.equal((await request(owner,'POST','/api/billing/checkout',{planId:'standard'},configured)).statusCode,500);
+ const [reserved]=await rows(owner);assert.equal(reserved.policy.version,fixture.version);assert.equal(reserved.policy.text,fixture.text);assert.equal(reserved.session_id,null);
+ environment.FOLIO_CHECKOUT_POLICY_SHA256='0'.repeat(64);
+ assert.equal((await request(owner,'POST','/api/billing/checkout',{planId:'standard'},configured)).statusCode,200,'Pinned retry never reselects current configuration');
+ const relevant=calls.filter(call=>call.params.client_reference_id===owner.workspace.id);assert.equal(relevant.length,2);assert.deepEqual(relevant[0],relevant[1]);assert.equal(relevant[0].params.consent_collection.terms_of_service,'required');
+ const history=await request(owner,'GET','/api/billing/contracts',undefined,configured);assert.equal(history.statusCode,200);assert.equal(history.json().records.length,1);
+ const fresh=await signup(configured),before=calls.length;
+ const rejected=await request(fresh,'POST','/api/billing/checkout',{planId:'standard'},configured);assert.equal(rejected.statusCode,503);assert.equal(calls.length,before);assert.equal((await rows(fresh)).length,0);
+ assert.equal((await adminPool.query('SELECT count(*)::int n FROM billing_checkouts WHERE workspace_id=$1',[fresh.workspace.id])).rows[0].n,0);
+ assert.equal((await adminPool.query('SELECT count(*)::int n FROM subscriptions WHERE workspace_id=$1',[fresh.workspace.id])).rows[0].n,0);
 });
 test('operator text cannot change the Markdown link target through title or URL punctuation',async()=>{
  const owner=await signup();policy={...fixture,title:'Terms [link](other)',url:'https://terms.example.test/version(1)',agreementText:'Read *synthetic* terms.'};await create(owner);const message=calls.at(-1)!.params.custom_text.terms_of_service_acceptance.message;assert.ok(message.includes('Terms \\[link\\]\\(other\\)'));assert.ok(message.endsWith('(https://terms.example.test/version%281%29)'));assert.ok(message.length<=1200);

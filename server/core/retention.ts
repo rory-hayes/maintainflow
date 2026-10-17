@@ -75,11 +75,19 @@ export async function deleteStoredFile(
   workspaceId: string,
   storageKey: string,
   unlink?: (filename: string) => Promise<void>,
+  options: { onlyIfDue?: boolean } = {},
 ): Promise<'complete' | 'pending' | 'failed'> {
   let removed=false;
   const status=await withWorkspace(workspaceId, async c => {
     const { rows: [entry] } = await c.query('select * from file_deletions where storage_key=$1 for update', [storageKey]);
     if (!entry) return 'complete';
+    // Another worker may have failed this candidate after our unlocked queue
+    // read. Recheck its schedule only after owning the row; explicit removal
+    // calls may still retry immediately, including a manually reset failure.
+    if(options.onlyIfDue){
+      const due=(await c.query("select status='pending' and available_at<=clock_timestamp() due from file_deletions where id=$1",[entry.id])).rows[0]?.due;
+      if(!due)return entry.status==='failed'?'failed':'pending';
+    }
     try {
       validateStorageKey(entry.storage_key, workspaceId);
       if (unlink) await unlink(path.join(config.storageDir, entry.storage_key));
@@ -114,7 +122,7 @@ export async function deleteStoredFile(
 export async function processOneFileDeletion() {
   const { rows: [entry] } = await adminPool.query("select workspace_id,storage_key from file_deletions where status='pending' and available_at<=now() order by created_at limit 1");
   if (!entry) return false;
-  await deleteStoredFile(entry.workspace_id, entry.storage_key);
+  await deleteStoredFile(entry.workspace_id, entry.storage_key, undefined, { onlyIfDue: true });
   return true;
 }
 

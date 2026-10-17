@@ -1,8 +1,9 @@
 /** Select an authoritative encrypted checkpoint. This module never downloads state or sends alerts. */
 import fs from 'node:fs/promises';
+import {constants} from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {createHash} from 'node:crypto';
+import {createHash,createHmac,timingSafeEqual} from 'node:crypto';
 
 const repository='rory-hayes/maintainflow';
 const workflow='operations-monitor.yml';
@@ -53,7 +54,8 @@ function runsResponse(value:unknown):{runs:Run[];total:number}{
 function isStateful(run:Run):boolean{
   // The workflow derives "disabled" from the same predicate that skips its only job.
   if(['Folio monitor: probe','Folio monitor: delivery-drill','Folio monitor: disabled'].includes(run.display_title))return false;
-  requireValue(['Folio monitor: run','Folio monitor: initialize'].includes(run.display_title)&&['schedule','workflow_dispatch'].includes(run.event),'artifact_run_unrecognized');
+  requireValue((['Folio monitor: run','Folio monitor: initialize'].includes(run.display_title)&&['schedule','workflow_dispatch'].includes(run.event))
+    || (run.display_title==='Folio monitor: external-run'||run.display_title.startsWith('Folio monitor: external-run '))&&run.event==='workflow_dispatch','artifact_run_unrecognized');
   return true;
 }
 
@@ -153,6 +155,10 @@ const originalSelectorDigest='36d48bfae9039bc891147c7d06ec659a15ac69a3b2574525d6
 // These released PR79 bytes were independently checked before this recovery change.
 const releasedSelectorDigest='ecaacf7b935d187b4957c33823b142a205e427b8838bd74a2879b863df563daa';
 const releasedWorkflowDigest='b04ebabb35917e47b0ecb7756a838596ca27747a98d4b15fabfb20e31dbb6047';
+// PR99 main bytes before the opt-in external trigger. Keep recovery of its
+// proven pre-state failures available after changing this workflow/selector.
+const preExternalSelectorDigest='99055b9c9535bd229e108cfcb5cf0f74f8623bec946986961fed417dc11965bd';
+const preExternalWorkflowDigest='3a1da6395411103a5a6ef6680a41fb22275dd565c6dc0dd7ab9f5d282853342a';
 async function verifySelectorOnlySource(run:Run,token:string,transport:typeof fetch,signal:AbortSignal):Promise<void>{
   const paths=['.github/workflows/operations-monitor.yml','scripts/monitor-artifact-state.ts'] as const;
   const local=[await fs.readFile(new URL('../.github/workflows/operations-monitor.yml',import.meta.url)),await fs.readFile(new URL(import.meta.url))];
@@ -162,7 +168,7 @@ async function verifySelectorOnlySource(run:Run,token:string,transport:typeof fe
     const encoded=value.content.replace(/\n/g,'');
     requireValue(encoded.length>0&&/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded),'artifact_selector_source_untrusted');
     const source=Buffer.from(encoded,'base64'),actual=digest(source);
-    requireValue(source.byteLength<=responseLimit&&(actual===digest(local[index]!)||index===0&&actual===releasedWorkflowDigest||index===1&&(actual===originalSelectorDigest||actual===releasedSelectorDigest)),'artifact_selector_source_untrusted');
+    requireValue(source.byteLength<=responseLimit&&(actual===digest(local[index]!)||index===0&&(actual===releasedWorkflowDigest||actual===preExternalWorkflowDigest)||index===1&&(actual===originalSelectorDigest||actual===releasedSelectorDigest||actual===preExternalSelectorDigest)),'artifact_selector_source_untrusted');
   }
 }
 
@@ -174,55 +180,97 @@ export async function selectMonitorArtifact(options:SelectionOptions,transport:t
   const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
   const work=(async()=>{
     const {runs,total}=runsResponse(await json(`${api}/workflows/${workflow}/runs?branch=main&per_page=${runLimit}`,options.token,transport,controller.signal));
+    requireValue(runs.length===Math.min(runLimit,total),'artifact_history_incomplete');
     const current=runs.find(run=>run.id===options.runId);
     requireValue(current&&current.run_number===options.runNumber&&current.run_attempt===options.runAttempt&&isStateful(current),'artifact_current_run_invalid');
     requireValue(!runs.some(run=>run.run_number>options.runNumber&&isStateful(run)),'monitor_run_superseded');
     const previous=runs.filter(run=>run.run_number<options.runNumber).sort((a,b)=>b.run_number-a.run_number);
-    let selected=options.runAttempt>1?current:previous.find(isStateful);
-    if(!selected){
-      requireValue(total===runs.length,'artifact_history_incomplete');
-      requireValue(options.initialize===true,'monitor_state_missing_requires_reconciliation');
-      return null;
-    }
-    const maximumAttempt=selected.id===options.runId?options.runAttempt-1:selected.run_attempt;
-    if(selected.id===options.runId){
+    let selected=options.runAttempt>1?current:undefined;
+    const maximumAttempt=options.runAttempt-1;
+    if(selected){
       const priorAttempt=runsResponse({total_count:1,workflow_runs:[await json(`${api}/runs/${selected.id}/attempts/${maximumAttempt}`,options.token,transport,controller.signal)]}).runs[0]!;
       requireValue(priorAttempt.id===selected.id&&priorAttempt.run_number===selected.run_number&&priorAttempt.run_attempt===maximumAttempt&&isStateful(priorAttempt),'artifact_attempt_invalid');
       selected=priorAttempt;
     }
-    const candidates=selected.id===options.runId?[selected]:previous,verifiedSources=new Set<string>();
-    for(const candidate of candidates){
-      if(!isStateful(candidate))continue;
-      requireValue(candidate.status==='completed'&&candidate.conclusion!==null,'prior_monitor_run_incomplete');
-      const artifacts=await json(`${api}/runs/${candidate.id}/artifacts?per_page=${artifactLimit}`,options.token,transport,controller.signal);
-      try{return artifactResponse(artifacts,candidate,candidate.id===options.runId?maximumAttempt:candidate.run_attempt);}
-      catch(error){
-        if(!(error instanceof ArtifactStateError)||error.code!=='latest_monitor_checkpoint_missing'||candidate.id===options.runId||candidate.run_attempt!==1||candidate.conclusion!=='failure')throw error;
-        requireValue(object(artifacts)&&artifacts.total_count===0&&Array.isArray(artifacts.artifacts)&&artifacts.artifacts.length===0,'latest_monitor_checkpoint_missing');
-        const jobs=await json(`${api}/runs/${candidate.id}/attempts/1/jobs?per_page=100`,options.token,transport,controller.signal);
-        const selectorFailed=failedBeforeState(jobs,candidate),checkId=selectorFailed?null:neverAcquiredCheckId(jobs,candidate);
-        requireValue(selectorFailed||checkId!==null,'latest_monitor_checkpoint_missing');
-        if(!verifiedSources.has(candidate.head_sha)){
-          await verifySelectorOnlySource(candidate,options.token,transport,controller.signal);
-          verifiedSources.add(candidate.head_sha);
+    let candidates=selected?[selected]:previous,page=1,oldest=Math.min(...runs.map(run=>run.run_number)),sawStateful=false;
+    const verifiedSources=new Set<string>(),seenIds=new Set(runs.map(run=>run.id)),seenNumbers=new Set(runs.map(run=>run.run_number));
+    for(;;){
+      for(const candidate of candidates){
+        if(!isStateful(candidate))continue;
+        sawStateful=true;
+        requireValue(candidate.status==='completed'&&candidate.conclusion!==null,'prior_monitor_run_incomplete');
+        const artifacts=await json(`${api}/runs/${candidate.id}/artifacts?per_page=${artifactLimit}`,options.token,transport,controller.signal);
+        try{return artifactResponse(artifacts,candidate,candidate.id===options.runId?maximumAttempt:candidate.run_attempt);}
+        catch(error){
+          if(!(error instanceof ArtifactStateError)||error.code!=='latest_monitor_checkpoint_missing'||candidate.id===options.runId||candidate.run_attempt!==1||candidate.conclusion!=='failure')throw error;
+          requireValue(object(artifacts)&&artifacts.total_count===0&&Array.isArray(artifacts.artifacts)&&artifacts.artifacts.length===0,'latest_monitor_checkpoint_missing');
+          const jobs=await json(`${api}/runs/${candidate.id}/attempts/1/jobs?per_page=100`,options.token,transport,controller.signal);
+          const selectorFailed=failedBeforeState(jobs,candidate),checkId=selectorFailed?null:neverAcquiredCheckId(jobs,candidate);
+          requireValue(selectorFailed||checkId!==null,'latest_monitor_checkpoint_missing');
+          if(!verifiedSources.has(candidate.head_sha)){
+            await verifySelectorOnlySource(candidate,options.token,transport,controller.signal);
+            verifiedSources.add(candidate.head_sha);
+          }
+          if(!selectorFailed)requireValue(await proveNeverAcquired(checkId!,candidate,options.token,transport,controller.signal),'latest_monitor_checkpoint_missing');
+          options.onSkippedRun?.(candidate.id,selectorFailed?'selector_failed_before_state':'hosted_runner_not_acquired');
         }
-        if(!selectorFailed)requireValue(await proveNeverAcquired(checkId!,candidate,options.token,transport,controller.signal),'latest_monitor_checkpoint_missing');
-        options.onSkippedRun?.(candidate.id,selectorFailed?'selector_failed_before_state':'hosted_runner_not_acquired');
       }
+      if(seenIds.size===total){
+        // Only a completely enumerated first-ever history may initialize. A chain
+        // of harmless failures cannot authorize resetting an unknown checkpoint.
+        if(sawStateful)throw new ArtifactStateError('latest_monitor_checkpoint_missing');
+        requireValue(options.initialize===true,'monitor_state_missing_requires_reconciliation');
+        return null;
+      }
+      // Fetch older metadata only after every intervening stateful run was
+      // proven unable to touch state. Ten pages / 300 runs share the same deadline.
+      requireValue(page<10,'artifact_history_incomplete');
+      page++;
+      const next=runsResponse(await json(`${api}/workflows/${workflow}/runs?branch=main&per_page=${runLimit}&page=${page}`,options.token,transport,controller.signal));
+      requireValue(next.total===total&&next.runs.length===Math.min(runLimit,total-(page-1)*runLimit),'artifact_history_incomplete');
+      requireValue(next.runs.every(run=>!seenIds.has(run.id)&&!seenNumbers.has(run.run_number)&&run.run_number<oldest),'artifact_runs_ambiguous');
+      for(const run of next.runs){seenIds.add(run.id);seenNumbers.add(run.run_number);}
+      oldest=Math.min(...next.runs.map(run=>run.run_number));
+      candidates=next.runs.sort((a,b)=>b.run_number-a.run_number);
     }
-    // Selector-only failures do not authorize first-ever initialization or hide a
-    // checkpoint beyond the bounded history window.
-    requireValue(total===runs.length,'artifact_history_incomplete');
-    throw new ArtifactStateError('latest_monitor_checkpoint_missing');
   })();
   try{return await Promise.race([work,new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new ArtifactStateError('artifact_api_timeout'));},milliseconds);})]);}
   catch(error){if(error instanceof ArtifactStateError)throw error;throw new ArtifactStateError('artifact_api_unavailable');}
   finally{clearTimeout(timer);controller.abort();}
 }
 
+// Keep this pre-state guard inside the source-authenticated selector. An extra
+// executable before selection would invalidate the historical failure proof.
+export function validateExternalTrigger(env:NodeJS.ProcessEnv,now=Date.now(),signature=env.FOLIO_MONITOR_TICK_SIGNATURE??''):void{
+  const actor=env.FOLIO_MONITOR_TRIGGER_ACTOR_ID??'',tick=env.FOLIO_MONITOR_TRIGGER_AT??'';
+  const at=Date.parse(tick);
+  requireValue(env.GITHUB_EVENT_NAME==='workflow_dispatch'&&env.FOLIO_MONITOR_ENABLED==='true'
+    &&env.FOLIO_MONITOR_EXTERNAL_TRIGGER_ENABLED==='true'&&/^[1-9][0-9]{0,15}$/.test(actor)
+    &&Number.isSafeInteger(Number(actor))&&env.GITHUB_ACTOR_ID===actor
+    &&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/.test(tick)&&Number.isFinite(at)
+    &&new Date(at).toISOString()===tick&&new Date(at).getUTCMinutes()%5===2
+    &&Number.isFinite(now)&&at<=now&&now-at<=20*60_000,'external_trigger_invalid');
+  const key=env.FOLIO_MONITOR_TRIGGER_KEY??'';
+  requireValue(/^[0-9a-f]{64}$/.test(key)&&/^[0-9a-f]{64}$/.test(signature),'external_trigger_signature_invalid');
+  const expected=createHmac('sha256',Buffer.from(key,'hex')).update('maintainflow-monitor-tick:v1:'+tick).digest();
+  requireValue(timingSafeEqual(expected,Buffer.from(signature,'hex')),'external_trigger_signature_invalid');
+}
 export async function main(args=process.argv.slice(2),env=process.env){
   requireValue(args.length===0||args.length===1&&args[0]==='--initialize','artifact_arguments_invalid');
   requireValue(env.GITHUB_REPOSITORY===repository&&env.GITHUB_REF==='refs/heads/main','artifact_environment_invalid');
+  if(env.MONITOR_MODE==='external-run'){
+    // Ordinary workflow inputs are printed in step environment setup. Read the
+    // short-lived assertion from the provider event file without echoing it.
+    requireValue(typeof env.GITHUB_EVENT_PATH==='string'&&path.isAbsolute(env.GITHUB_EVENT_PATH),'external_trigger_event_invalid');
+    const eventFile=await fs.open(env.GITHUB_EVENT_PATH,constants.O_RDONLY|constants.O_NOFOLLOW);
+    try{
+      const stat=await eventFile.stat();requireValue(stat.isFile()&&stat.size<=128*1024,'external_trigger_event_invalid');
+      const event=JSON.parse(await eventFile.readFile('utf8')) as unknown;
+      requireValue(object(event)&&object(event.inputs)&&event.inputs.mode==='external-run'
+        &&event.inputs.trigger_at===env.FOLIO_MONITOR_TRIGGER_AT&&typeof event.inputs.tick_signature==='string','external_trigger_event_invalid');
+      validateExternalTrigger(env,Date.now(),event.inputs.tick_signature);
+    }finally{await eventFile.close();}
+  }
   requireValue(typeof env.GITHUB_OUTPUT==='string'&&path.isAbsolute(env.GITHUB_OUTPUT),'artifact_output_missing');
   const parse=(value:string|undefined)=>value&&/^[1-9][0-9]*$/.test(value)?Number(value):NaN;
   const result=await selectMonitorArtifact({token:env.GH_TOKEN??'',runId:parse(env.GITHUB_RUN_ID),runAttempt:parse(env.GITHUB_RUN_ATTEMPT),runNumber:parse(env.GITHUB_RUN_NUMBER),initialize:args[0]==='--initialize',onSkippedRun:(runId,reason)=>console.error(JSON.stringify({monitorState:'checkpoint_not_created',runId,code:reason}))});
