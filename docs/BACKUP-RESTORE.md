@@ -140,6 +140,8 @@ node --import tsx scripts/backup.ts verify \
 
 Before activation, decide whether restored queued jobs, mail, webhooks, Sheets writes and configured integrations may resume. Clearing provider environment variables alone is not an outbound fence: restored database records can contain destinations and encrypted credentials. An isolated acceptance environment must block outbound transports or replace them with controlled transports. The activation flag permits later service execution; the CLI itself does not start services or send queued work.
 
+Also settle post-snapshot deletion and access-revocation reconciliation before activation. Exact historical restoration can recreate deleted documents, old password/session state, revoked API or integration credentials, and removed memberships. Keep the current authorized deletion/revocation journal separately recoverable. Exact verification and activation expect the authenticated historical bytes; apply the authorized reconciliation only after that exact transition, inside the isolated fence and before starting services or permitting user/provider access. If the current decisions cannot be established, keep the destination inactive. Do not weaken byte verification or expose historical access while deciding what to revoke.
+
 When the destination is ready for that explicit transition:
 
 ```sh
