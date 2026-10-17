@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {Socket} from 'node:net';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
 import type {Role} from '../shared/types.js';
 import {hashToken,requireActor} from '../server/core/auth.js';
 import {adminPool,appPool,closeDatabase} from '../server/core/db.js';
@@ -64,7 +65,10 @@ async function fixture(context:TestContext){
  context.mock.method(appPool,'connect',async()=>forbidden('tenant database connection'));
  context.mock.method(globalThis,'fetch',async()=>forbidden('provider fetch'));
  context.mock.method(Socket.prototype,'connect',(()=>forbidden('network connection')) as typeof Socket.prototype.connect);
- const app=Fastify({logger:false});await app.register(cookie);
+ const app=Fastify({logger:false});
+ // Keep even the in-process positive control bounded without a database store.
+ await app.register(rateLimit,{max:100,timeWindow:'1 minute'});
+ await app.register(cookie);
  await registerDocuments(app);await registerWorkspace(app);await registerExports(app);
  await registerIntegrations(app,{validateDestination:async()=>forbidden('destination validation')});
  await registerProviders(app);
