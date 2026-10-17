@@ -1,0 +1,13 @@
+# Explicit activation candidate. Root must first review actual site/secret bindings.
+# The handler itself always exports its UTC schedule; never remove that export.
+[build]
+base = "deploy/monitor-trigger/netlify"
+publish = "public"
+command = ""
+
+[build.environment]
+NODE_VERSION = "24.13.0"
+
+[functions]
+directory = "functions"
+node_bundler = "esbuild"

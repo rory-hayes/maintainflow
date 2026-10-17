@@ -1,0 +1,1 @@
+This directory intentionally contains no function. The default deployment has no cron or public function. Root selects the separate activation configuration only after reviewing the exact owned timer site, secret names and enable gates.

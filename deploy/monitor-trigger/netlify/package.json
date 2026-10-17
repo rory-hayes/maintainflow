@@ -1,0 +1,6 @@
+{
+  "name": "maintainflow-monitor-netlify-timer",
+  "private": true,
+  "type": "module",
+  "engines": {"node": "24.x"}
+}

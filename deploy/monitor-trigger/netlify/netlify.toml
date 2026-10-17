@@ -1,0 +1,12 @@
+# Inert default: no scheduled function or public function is deployed.
+[build]
+base = "deploy/monitor-trigger/netlify"
+publish = "public"
+command = ""
+
+[build.environment]
+NODE_VERSION = "24.13.0"
+
+[functions]
+directory = "functions-disabled"
+node_bundler = "esbuild"
