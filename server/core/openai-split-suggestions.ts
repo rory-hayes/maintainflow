@@ -1,3 +1,4 @@
+import {startAIUsage,observeOpenAIResponse,withAIUsageId,readOpenAIErrorBody} from './openai-usage.js';
 import type {SplitSuggestionInput,SplitSuggestionProvider,SplitSuggestionResult} from '../../shared/split-suggestions.js';
 import {splitSuggestionLimits,splitSuggestionRanges} from '../../shared/split-suggestions.js';
 import {SplitSuggestionProviderError} from './split-suggestion-errors.js';
@@ -123,17 +124,22 @@ export function createOpenAISplitSuggestionProvider(options:ProviderOptions={}):
   if(input.signal?.aborted)throw cancelled();
   const body=buildRequest(input),pageCount=input.pages.length,controller=new AbortController(),signal=input.signal?AbortSignal.any([input.signal,controller.signal]):controller.signal;
   const configuredTimeout=options.timeoutMs??openAISplitSuggestions.timeoutMs,timeoutMs=Number.isFinite(configuredTimeout)?Math.min(openAISplitSuggestions.timeoutMs,Math.max(1,configuredTimeout)):openAISplitSuggestions.timeoutMs;
+  let usageId:string|undefined;
+  try{usageId=await startAIUsage(input.usageObserver,signal);}catch(error){if(signal.aborted)throw cancelled();throw error;}
   const timer=setTimeout(()=>controller.abort(),timeoutMs);let response:Response|undefined;
   try{
    try{response=await abortable(request(openAISplitSuggestions.endpoint,{method:'POST',redirect:'error',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify(body),signal}),signal,discardResponse);}catch{throw signal.aborted?cancelled():connectivity();}
+   let payload:JsonObject|undefined,bodyError:unknown;
+   try{payload=response.ok?await responseBody(response,signal):await readOpenAIErrorBody(response,signal,openAISplitSuggestions.maxResponseBytes);}catch(error){bodyError=error;}
+   finally{await observeOpenAIResponse(input.usageObserver,response,payload,openAISplitSuggestions);}
    if([401,403].includes(response.status)){discardResponse(response);throw failed('OpenAI rejected server credentials or model access. Check the configured project.');}
    if(response.status>=500||response.status===408){discardResponse(response);throw unavailable();}
    if(!response.ok&&response.status!==429){discardResponse(response);throw failed('OpenAI rejected the split suggestion request. Check the document and server configuration.');}
-   let payload:JsonObject;try{payload=await responseBody(response,signal);}catch(error){if(response.status===429&&!signal.aborted)throw unavailable();throw error;}
-   if(response.status===429){if(object(payload.error)&&payload.error.code==='insufficient_quota')throw failed('The OpenAI project has no available API quota. Check project billing and limits.');throw unavailable();}
+   if(response.status===429){if(object(payload?.error)&&payload.error.code==='insufficient_quota')throw failed('The OpenAI project has no available API quota. Check project billing and limits.');throw unavailable();}
+   if(bodyError)throw bodyError;if(!payload)throw invalid();
    const startPages=completedStarts(payload,pageCount);
-   return {startPages,model:openAISplitSuggestions.model,promptVersion:openAISplitSuggestions.promptVersion,...usageDetails(payload)};
-  }catch(error){if(signal.aborted)throw cancelled();if(error instanceof SplitSuggestionProviderError)throw error;throw connectivity();}
+   return {startPages,model:openAISplitSuggestions.model,promptVersion:openAISplitSuggestions.promptVersion,...withAIUsageId(usageDetails(payload),usageId)};
+  }catch(error){if(response&&!response.ok&&error instanceof SplitSuggestionProviderError)throw error;if(signal.aborted)throw cancelled();if(error instanceof SplitSuggestionProviderError)throw error;throw connectivity();}
   finally{clearTimeout(timer);if(signal.aborted&&response)discardResponse(response);}
  }};
 }

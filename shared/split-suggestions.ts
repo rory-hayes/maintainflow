@@ -1,9 +1,10 @@
+import type {AIUsageObserver} from './ai-usage.js';
 import type {PageText,VisualDocument} from './types';
 import type {PdfPageRange,PdfSplitSpec} from './pdf-split';
 
 export const splitSuggestionLimits=Object.freeze({perDay:10,pendingPerWorkspace:3,maxAttempts:3,maxGroups:20,maxPages:30,maxBytes:10*1024*1024,sourceRetentionHours:24});
 export type SplitSuggestionMime='application/pdf'|'image/tiff';
-export interface SplitSuggestionInput {bytes:Buffer;mimeType:SplitSuggestionMime;pages:PageText[];locale:string;signal?:AbortSignal;visualDocument?:VisualDocument;}
+export interface SplitSuggestionInput {bytes:Buffer;mimeType:SplitSuggestionMime;pages:PageText[];locale:string;signal?:AbortSignal;visualDocument?:VisualDocument;usageObserver?:AIUsageObserver;}
 export interface SplitSuggestionResult {startPages:number[];model:string;promptVersion:string;tokenUsage:Record<string,unknown>;costUsd:number;}
 export interface SplitSuggestionProvider {configured():boolean;suggest(input:SplitSuggestionInput):Promise<SplitSuggestionResult>;}
 export type SplitSuggestionState='uploading'|'queued'|'processing'|'ready'|'failed'|'cancelled';

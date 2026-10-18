@@ -1,3 +1,4 @@
+import {startAIUsage,observeOpenAIResponse,withAIUsageId,readOpenAIErrorBody} from './openai-usage.js';
 import {normalizationPolicy} from '../../shared/source-formats.js';
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
@@ -201,24 +202,29 @@ export function createOpenAIProvider(options: ProviderOptions = {}): ExtractionP
       const { visual, bankPdfLayout, body } = buildRequest(input);
       const controller = new AbortController();
       const signal = input.signal ? AbortSignal.any([controller.signal, input.signal]) : controller.signal;
+      let usageId:string|undefined;
+      try{usageId=await startAIUsage(input.usageObserver,signal);}catch(error){if(signal.aborted)throw failed('OpenAI extraction was canceled or exceeded its time limit. Retry when ready.',false);throw error;}
       const timer = setTimeout(() => controller.abort(), Math.min(openAIExtraction.timeoutMs, Math.max(1, options.timeoutMs ?? openAIExtraction.timeoutMs)));
       try {
-        let response: Response, payload: Record<string, unknown>;
+        let response: Response|undefined, payload: Record<string, unknown>|undefined,bodyError:unknown;
         try {
           response = await request(openAIExtraction.endpoint, { method: 'POST', redirect: 'error', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
-          payload = await responseBody(response);
+          try{payload = response.ok?await responseBody(response):await readOpenAIErrorBody(response,signal,openAIExtraction.maxResponseBytes);}catch(error){bodyError=error;}
+          finally{await observeOpenAIResponse(input.usageObserver,response,payload,{...openAIExtraction,pricingBasis:'OpenAI standard USD token rates, 2026-09-07'});}
         } catch (error) {
           if (signal.aborted) throw failed('OpenAI extraction was canceled or exceeded its time limit. Retry when ready.', false);
           if (error instanceof Error && Object.hasOwn(error, 'permanent')) throw error;
           throw failed('OpenAI could not be reached. Check server connectivity and retry.', false);
         }
+        if (!response) throw invalid();
         if (!response.ok) {
-          const code = object(payload.error) ? payload.error.code : undefined;
+          const code = object(payload?.error) ? payload.error.code : undefined;
           if (response.status === 401 || response.status === 403) throw failed('OpenAI rejected the server credentials or model access. Check the configured project.');
           if (response.status === 429 && code === 'insufficient_quota') throw failed('The OpenAI project has no available API quota. Check project billing and limits.');
           if (response.status === 429 || response.status >= 500) throw failed('OpenAI is temporarily unavailable or rate limited. The worker will retry.', false);
           throw failed('OpenAI rejected the extraction request. Check the document and parser limits.');
         }
+        if(bodyError)throw bodyError;if(!payload)throw invalid();
         if (payload.status === 'failed') {
           const code = object(payload.error) ? payload.error.code : undefined;
           if (code === 'server_error' || code === 'rate_limit_exceeded') throw failed('OpenAI reported a temporary extraction failure. The worker will retry.', false);
@@ -250,7 +256,7 @@ export function createOpenAIProvider(options: ProviderOptions = {}): ExtractionP
         const normalizedValues = Object.fromEntries(input.schema.fields.map(field => [field.key, normalizeValue(normalizationInput[field.key], field, input.locale, input.timezone,input.normalizationPolicy??normalizationPolicy)]));
         const evidence = sourceEvidence(output, input, visual);
         if (payload.model !== openAIExtraction.model) throw failed('OpenAI returned a different model version than the pinned extraction model.');
-        const usage=usageDetails(payload);
+        const usage=withAIUsageId(usageDetails(payload),usageId);
         return { rawValues: output.rawValues, normalizedValues, evidence: evidence.evidence, issues: [...validateValues(normalizedValues, input.schema,{locale:input.locale,timezone:input.timezone,version:input.normalizationPolicy??normalizationPolicy}), ...evidence.issues], engine: 'openai', model: payload.model, promptVersion: bankPdfLayout?openAIExtraction.bankLayoutPromptVersion:openAIExtraction.promptVersion, ...usage, ...(bankPdfLayout?{tokenUsage:{...usage.tokenUsage,bankPdfLayout}}:{}) };
       } finally { clearTimeout(timer); }
     },

@@ -1,8 +1,9 @@
+import type {AIUsageObserver} from './ai-usage.js';
 import type {PageText,ParserSchema,VisualDocument} from './types';
 
 export const schemaSuggestionLimits=Object.freeze({perDay:10,pendingPerWorkspace:3,maxAttempts:3,maxFields:60,maxDepth:4});
 export type SchemaSuggestionState='queued'|'processing'|'ready'|'failed';
-export interface SchemaSuggestionInput {bytes:Buffer;mimeType:string;pages:PageText[];locale:string;signal?:AbortSignal;visualDocument?:VisualDocument;}
+export interface SchemaSuggestionInput {bytes:Buffer;mimeType:string;pages:PageText[];locale:string;signal?:AbortSignal;visualDocument?:VisualDocument;usageObserver?:AIUsageObserver;}
 export interface SchemaSuggestionResult {schema:ParserSchema;model:string;promptVersion:string;tokenUsage:Record<string,unknown>;costUsd:number;}
 export interface SchemaSuggestionProvider {configured():boolean;suggest(input:SchemaSuggestionInput):Promise<SchemaSuggestionResult>;}
 export interface SchemaSuggestion {

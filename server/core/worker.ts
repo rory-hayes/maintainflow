@@ -1,3 +1,4 @@
+import {createAIUsageObserver} from './ai-usage.js';
 import {isDeepStrictEqual} from 'node:util';
 import {bankStatementWorkflow,bankStatementSchema,legacyBankStatementSchema} from '../../shared/bank-statement-preset.js';
 import {bankPdfLayoutVersion,serializeBankPdfLayout,type BankPdfLayoutInput,type BankPdfLayoutProvenance} from '../../shared/bank-pdf-layout.js';
@@ -102,6 +103,7 @@ if(!job)return false;
 const report=(phase:Parameters<typeof reportAttempt>[2])=>reportAttempt(job.id,job.attempts,phase);
 report({stage:'claimed'});
 let extractionFinished=false;
+const usageObserver=createAIUsageObserver({workspaceId:job.workspace_id,kind:'extraction',operationId:job.id,attempt:job.attempts});
 try{
 const attempt=await extractWithDeadline(async signal=>{
  const data=await withWorkspace(job.workspace_id,async c=>{const doc=(await c.query('select * from documents where id=$1',[job.document_id])).rows[0];const schema=(await c.query('select schema from schema_versions where id=$1',[job.schema_version_id])).rows[0]?.schema;return {doc,schema};});
@@ -154,7 +156,7 @@ const attempt=await extractWithDeadline(async signal=>{
   const bytes=sourceBytes??await readStoredObject(data.doc.storage_key);signal.throwIfAborted();
   const input={bytes,mimeType:data.doc.mime_type,pages:data.doc.source_text,schema:data.schema,instructions:job.config.instructions,locale:job.config.locale,timezone:job.config.timezone,normalizationPolicy:valuePolicy,signal,...(bankPdfLayout?{bankPdfLayout}:{})};
   const visualDocument=await prepareVisualDocument(input,{signal,expectedSha256:data.doc.sha256});signal.throwIfAborted();
-  result=await activeProvider.extract({...input,...(visualDocument?{visualDocument}:{})});
+  result=await activeProvider.extract({...input,usageObserver,...(visualDocument?{visualDocument}:{})});
   if(visualDocument)result={...result,tokenUsage:{...(result.tokenUsage&&typeof result.tokenUsage==='object'&&!Array.isArray(result.tokenUsage)?result.tokenUsage:{}),sourceRendering:visualRenderingMetadata(visualDocument)}};
   if(bankPdfLayoutInput)result={...result,tokenUsage:{...(result.tokenUsage&&typeof result.tokenUsage==='object'&&!Array.isArray(result.tokenUsage)?result.tokenUsage:{}),bankPdfLayoutInput}};
  }else{
@@ -182,7 +184,7 @@ report({stage:'finished',outcome:saved?'completed':'fence_lost'});
   const persisted=await withWorkspace(job.workspace_id,async c=>{await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[job.workspace_id]);const changed=await c.query("update jobs set state=$3,error=$4,available_at=now()+($5 * interval '1 second'),lease_owner=null,lease_until=null,updated_at=now() where id=$1 and lease_owner=$2 and state='processing' returning id",[job.id,owner,permanent?'failed':'queued',message,Math.min(60,2**job.attempts)]);if(changed.rowCount)await c.query('update documents set status=$2,error=$3,updated_at=now() where id=$1',[job.document_id,permanent?'failed':'queued',message]);return Boolean(changed.rowCount);});
   report({stage:'finished',outcome:persisted?outcome:'fence_lost'});
  }catch(persistenceError){report({stage:'finished',outcome:'persistence_error'});throw persistenceError;}
-}
+}finally{await usageObserver.finish();}
 return true;
 }
 export async function enforceRetention(onlyWorkspaceId?:string,options:{signal?:AbortSignal;limit?:number}={}){

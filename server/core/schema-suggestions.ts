@@ -1,3 +1,4 @@
+import {createAIUsageObserver} from './ai-usage.js';
 import {randomUUID,createHash} from 'node:crypto';
 import type {FastifyInstance,FastifyRequest} from 'fastify';
 import type {PoolClient} from 'pg';
@@ -142,6 +143,7 @@ export async function processOneSchemaSuggestion(onlyId?:string,options:{signal?
   return {...selected,attempts:selected.attempts+1};
  });
  if(!job)return false;
+ const usageObserver=createAIUsageObserver({workspaceId:job.workspace_id,kind:'schema_suggestion',operationId:job.id,attempt:job.attempts});
  try{
   // The lease covers the entire attempt, including slow private storage. A read
   // that ignores cancellation must never start a late provider call after timeout.
@@ -161,7 +163,7 @@ export async function processOneSchemaSuggestion(onlyId?:string,options:{signal?
    if(createHash('sha256').update(bytes).digest('hex')!==job.document_sha256)throw new SchemaSuggestionProviderError('The sample document could not be verified. Upload it again before suggesting fields.');
    const input={bytes,mimeType:data.mime_type,pages:data.source_text,locale:job.config.locale,signal};
    const visualDocument=await prepareVisualDocument(input,{signal,expectedSha256:job.document_sha256});signal.throwIfAborted();
-   const value=await active.suggest({...input,...(visualDocument?{visualDocument}:{})});
+   const value=await active.suggest({...input,usageObserver,...(visualDocument?{visualDocument}:{})});
    signal.throwIfAborted();const checked=validatedResult(value);return visualDocument?{...checked,tokenUsage:{...checked.tokenUsage,sourceRendering:visualRenderingMetadata(visualDocument)}}:checked;
   },options);
   if(!result)return true;
@@ -180,7 +182,7 @@ export async function processOneSchemaSuggestion(onlyId?:string,options:{signal?
    const changed=await c.query("update schema_suggestions set state=$3,lease_owner=null,lease_until=null,error=$4,available_at=now()+($5*interval '1 second'),updated_at=now() where id=$1 and lease_owner=$2 and state='processing' returning *",[job.id,owner,permanent?'failed':'queued',message,Math.min(60,2**job.attempts)]);
    if(changed.rowCount&&permanent){await audit(c,job.workspace_id,null,'schema.suggestion_failed',job.id,{parserId:job.parser_id,reason:trusted?'provider_failed':'processing_failed'});await failCurrentSetup(c,parser,changed.rows[0]);}
   });
- }
+ }finally{await usageObserver.finish();}
  return true;
 }
 

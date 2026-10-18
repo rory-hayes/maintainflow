@@ -1,4 +1,5 @@
 import type {FastifyInstance} from 'fastify';
+import type {PoolClient} from 'pg';
 import {z} from 'zod';
 import {withWorkspace,adminPool,transaction,camel,badRequest,notFound,audit} from './db.js';
 import {requireActor,requireSession,admins,newToken,hashToken} from './auth.js';
@@ -12,8 +13,85 @@ const apiKeyExpiry=z.iso.datetime({offset:true}).max(40).refine(value=>{
  const date=new Date(value),year=date.getUTCFullYear();
  return Number.isFinite(date.getTime())&&year>=1&&year<=9999;
 },'Expiry must be a valid ISO date and time with a timezone').transform(value=>new Date(value).toISOString());
+
+// Attempt estimates and legacy successful results have different coverage. Keep
+// the existing successful-cost fields below stable for API consumers.
+const aiCostKinds=['extraction','schema_suggestion','split_suggestion'] as const;
+const aiCostMetrics=['recordedAttempts','pricedObservationAttempts','successfulFallbackAttempts','unknownObservationAttempts','unpricedObservationAttempts','unknownCostAttempts','legacySuccessfulResults','legacyEstimatedResults','legacyUnknownCostResults','knownEstimatedCostUsd','legacyEstimatedCostUsd'] as const;
+type AiCostSummary=Record<typeof aiCostMetrics[number],number>;
+async function workspaceAiCostCoverage(c:PoolClient,workspaceId:string){
+ const {rows}=await c.query(`
+  with boundary as (select date_trunc('month',now(),'UTC') month_start),
+  attempts as (
+   select a.* from ai_usage_attempts a,boundary b
+   where a.workspace_id=$1 and a.created_at>=b.month_start and a.created_at<=now()
+  ), results as (
+   select 'extraction'::text kind,r.job_id operation_id,r.token_usage->>'aiUsageAttemptId' marker,r.created_at result_at,
+    case when r.token_usage->'estimatedCost'='true'::jsonb and r.cost_usd>=0 and r.cost_usd<'Infinity'::numeric then r.cost_usd end estimate
+   from extraction_runs r where r.workspace_id=$1 and r.engine='openai' and (
+    r.created_at between (select month_start from boundary) and now()
+    or exists(select 1 from attempts a where a.kind='extraction' and a.operation_id=r.job_id and a.id::text=r.token_usage->>'aiUsageAttemptId'))
+   union all
+   select 'schema_suggestion',s.id,s.token_usage->>'aiUsageAttemptId',s.completed_at,
+    case when s.token_usage->'estimatedCost'='true'::jsonb and s.cost_usd>=0 and s.cost_usd<'Infinity'::numeric then s.cost_usd end
+   from schema_suggestions s where s.workspace_id=$1 and s.state='ready' and (
+    s.completed_at between (select month_start from boundary) and now()
+    or exists(select 1 from attempts a where a.kind='schema_suggestion' and a.operation_id=s.id and a.id::text=s.token_usage->>'aiUsageAttemptId'))
+   union all
+   select 'split_suggestion',s.id,s.token_usage->>'aiUsageAttemptId',s.completed_at,
+    case when s.token_usage->'estimatedCost'='true'::jsonb and s.cost_usd>=0 and s.cost_usd<'Infinity'::numeric then s.cost_usd end
+   from split_suggestions s where s.workspace_id=$1 and s.state='ready' and (
+    s.completed_at between (select month_start from boundary) and now()
+    or exists(select 1 from attempts a where a.kind='split_suggestion' and a.operation_id=s.id and a.id::text=s.token_usage->>'aiUsageAttemptId'))
+  ), observed as (
+   select a.kind,count(*)::integer recorded_attempts,
+    count(*) filter(where a.usage_state='reported_priced')::integer priced_observation_attempts,
+    count(*) filter(where a.usage_state<>'reported_priced' and r.estimate is not null)::integer successful_fallback_attempts,
+    count(*) filter(where a.usage_state='unknown')::integer unknown_observation_attempts,
+    count(*) filter(where a.usage_state='reported_unpriced')::integer unpriced_observation_attempts,
+    count(*) filter(where a.usage_state<>'reported_priced' and r.estimate is null)::integer unknown_cost_attempts,
+    coalesce(sum(case when a.usage_state='reported_priced' then a.cost_usd else r.estimate end),0) estimated_cost_usd
+   from attempts a left join results r on r.kind=a.kind and r.operation_id=a.operation_id and r.marker=a.id::text
+   group by a.kind
+  ), legacy as (
+   select r.kind,count(*)::integer legacy_successful_results,
+    count(r.estimate)::integer legacy_estimated_results,
+    count(*) filter(where r.estimate is null)::integer legacy_unknown_cost_results,
+    coalesce(sum(r.estimate),0) legacy_estimated_cost_usd
+   from results r,boundary b where r.result_at>=b.month_start and r.result_at<=now()
+    -- A job can be removed while its immutable run survives. Its exact
+    -- tenant/kind marker still prevents legacy duplication, but the stricter
+    -- observed join above never promotes it to fallback without an operation.
+    and not exists(select 1 from ai_usage_attempts a where a.workspace_id=$1 and a.kind=r.kind and a.id::text=r.marker
+     and (a.operation_id=r.operation_id or (r.kind='extraction' and r.operation_id is null)))
+   group by r.kind
+  )
+  select k.kind,coalesce(o.recorded_attempts,0) recorded_attempts,
+   coalesce(o.priced_observation_attempts,0) priced_observation_attempts,
+   coalesce(o.successful_fallback_attempts,0) successful_fallback_attempts,
+   coalesce(o.unknown_observation_attempts,0) unknown_observation_attempts,
+   coalesce(o.unpriced_observation_attempts,0) unpriced_observation_attempts,
+   coalesce(o.unknown_cost_attempts,0) unknown_cost_attempts,
+   coalesce(l.legacy_successful_results,0) legacy_successful_results,
+   coalesce(l.legacy_estimated_results,0) legacy_estimated_results,
+   coalesce(l.legacy_unknown_cost_results,0) legacy_unknown_cost_results,
+   coalesce(o.estimated_cost_usd,0)+coalesce(l.legacy_estimated_cost_usd,0) known_estimated_cost_usd,
+   coalesce(l.legacy_estimated_cost_usd,0) legacy_estimated_cost_usd
+  from (values('extraction'),('schema_suggestion'),('split_suggestion')) k(kind)
+   left join observed o on o.kind=k.kind left join legacy l on l.kind=k.kind`,[workspaceId]);
+ const byKind=aiCostKinds.map(kind=>{
+  const row=rows.find(row=>row.kind===kind)!;
+  const values=camel(row);
+  return {kind,...Object.fromEntries(aiCostMetrics.map(key=>[key,Number(values[key])])) as AiCostSummary};
+ });
+ const totals=Object.fromEntries(aiCostMetrics.map(key=>{
+  const sum=byKind.reduce((total,row)=>total+row[key],0);
+  return [key,key.endsWith('Usd')?Number(sum.toFixed(9)):sum];
+ })) as AiCostSummary;
+ return {period:'utc_month_to_date' as const,completeness:'partial' as const,...totals,byKind};
+}
 export async function registerWorkspace(app:FastifyInstance){
-app.get('/api/workspace/usage',async req=>{const a=await requireActor(req,{scope:'documents:read'});return withWorkspace(a.workspaceId,async c=>{const workspace=(await c.query('select * from workspaces where id=$1',[a.workspaceId])).rows[0];const usage=(await c.query("select coalesce(sum(pages),0)::integer pages,count(*)::integer events from usage_ledger where workspace_id=$1 and created_at>=date_trunc('month',now(),'UTC')",[a.workspaceId])).rows[0];const counts=(await c.query("select count(*)::integer documents,count(*) filter(where status='needs_review')::integer needs_review,count(*) filter(where status in('processed','exported'))::integer processed,count(*) filter(where status='failed')::integer failed from documents where workspace_id=$1",[a.workspaceId])).rows[0];const cost=(await c.query("select (select coalesce(sum(cost_usd),0) from extraction_runs where workspace_id=$1 and created_at>=date_trunc('month',now(),'UTC')) extraction_cost_usd,(select coalesce(sum(cost_usd),0) from schema_suggestions where workspace_id=$1 and state='ready' and completed_at>=date_trunc('month',now(),'UTC')) suggestion_cost_usd,(select count(*)::int from schema_suggestions where workspace_id=$1 and state='ready' and completed_at>=date_trunc('month',now(),'UTC')) suggestions",[a.workspaceId])).rows[0];const ledger=(await c.query('select * from usage_ledger where workspace_id=$1 order by created_at desc limit 50',[a.workspaceId])).rows.map(camel);return {plan:workspace.plan,usage:{...camel(usage),...camel(counts),costUsd:Number(cost.extraction_cost_usd)+Number(cost.suggestion_cost_usd),extractionCostUsd:Number(cost.extraction_cost_usd),schemaSuggestionCostUsd:Number(cost.suggestion_cost_usd),schemaSuggestions:cost.suggestions},ledger,billingRule:'Each accepted page or spreadsheet sheet counts once on upload. Manual reprocessing counts again. Automatic worker retries and detected duplicates do not count again. DOCX/text/email count as one document page.'};});});
+app.get('/api/workspace/usage',async req=>{const a=await requireActor(req,{scope:'documents:read'});return withWorkspace(a.workspaceId,async c=>{const workspace=(await c.query('select * from workspaces where id=$1',[a.workspaceId])).rows[0];const usage=(await c.query("select coalesce(sum(pages),0)::integer pages,count(*)::integer events from usage_ledger where workspace_id=$1 and created_at>=date_trunc('month',now(),'UTC')",[a.workspaceId])).rows[0];const counts=(await c.query("select count(*)::integer documents,count(*) filter(where status='needs_review')::integer needs_review,count(*) filter(where status in('processed','exported'))::integer processed,count(*) filter(where status='failed')::integer failed from documents where workspace_id=$1",[a.workspaceId])).rows[0];const cost=(await c.query("select (select coalesce(sum(cost_usd),0) from extraction_runs where workspace_id=$1 and created_at>=date_trunc('month',now(),'UTC')) extraction_cost_usd,(select coalesce(sum(cost_usd),0) from schema_suggestions where workspace_id=$1 and state='ready' and completed_at>=date_trunc('month',now(),'UTC')) suggestion_cost_usd,(select count(*)::int from schema_suggestions where workspace_id=$1 and state='ready' and completed_at>=date_trunc('month',now(),'UTC')) suggestions",[a.workspaceId])).rows[0];const aiCostCoverage=await workspaceAiCostCoverage(c,a.workspaceId);const ledger=(await c.query('select * from usage_ledger where workspace_id=$1 order by created_at desc limit 50',[a.workspaceId])).rows.map(camel);return {plan:workspace.plan,usage:{...camel(usage),...camel(counts),costUsd:Number(cost.extraction_cost_usd)+Number(cost.suggestion_cost_usd),extractionCostUsd:Number(cost.extraction_cost_usd),schemaSuggestionCostUsd:Number(cost.suggestion_cost_usd),schemaSuggestions:cost.suggestions,aiCostCoverage},ledger,billingRule:'Each accepted page or spreadsheet sheet counts once on upload. Manual reprocessing counts again. Automatic worker retries and detected duplicates do not count again. DOCX/text/email count as one document page.'};});});
 app.get('/api/workspace/settings',async req=>{const a=await requireActor(req);requireSession(a);const w=(await adminPool.query('select * from workspaces where id=$1',[a.workspaceId])).rows[0];return {workspace:camel(w),role:a.role,limits:{maxBytes:config.maxBytes,maxPages:config.maxPages},authentication:{provider:'local-scrypt',emailVerification:emailVerificationStatus().available,emailVerificationRequiredForSignup:emailVerificationStatus().requiredForSignup,passwordResetEmail:accountEmailStatus().available}};});
 app.patch('/api/workspace/settings',async req=>{const a=await requireActor(req,{roles:admins});requireSession(a);const b=z.object({name:z.string().trim().min(1).max(100).optional(),retentionDays:z.number().int().min(1).max(3650).optional(),notifications:z.boolean().optional()}).parse(req.body);const w=await transaction(adminPool,async c=>{const old=(await c.query('select * from workspaces where id=$1 for update',[a.workspaceId])).rows[0];const settings={...old.settings,...(b.retentionDays===undefined?{}:{retentionDays:b.retentionDays}),...(b.notifications===undefined?{}:{notifications:b.notifications})};return (await c.query('update workspaces set name=$2,settings=$3 where id=$1 returning *',[a.workspaceId,b.name||old.name,JSON.stringify(settings)])).rows[0];});await withWorkspace(a.workspaceId,c=>audit(c,a.workspaceId,a.userId,'workspace.settings_updated',a.workspaceId,b));return {workspace:camel(w)};});
 app.get('/api/workspace/members',async req=>{const a=await requireActor(req);requireSession(a);const members=(await adminPool.query('select u.id,u.name,u.email,m.role,m.created_at from memberships m join users u on u.id=m.user_id where m.workspace_id=$1 order by m.created_at',[a.workspaceId])).rows.map(camel);return {members,invitations:await listInvitations(a),invitationEmail:invitationEmailStatus()};});

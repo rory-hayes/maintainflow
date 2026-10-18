@@ -119,6 +119,7 @@ async function security(client:pg.Client,config:BackupConfig,_owner:string){
  const policies=(await client.query("SELECT c.relname table_name,p.polname name,p.polpermissive permissive,p.polcmd command,ARRAY(SELECT CASE WHEN r=0 THEN 'PUBLIC' ELSE pg_get_userbyid(r)::text END FROM unnest(p.polroles) r ORDER BY r) roles,pg_get_expr(p.polqual,p.polrelid) using_expression,pg_get_expr(p.polwithcheck,p.polrelid) check_expression FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid WHERE c.relnamespace=$1 ORDER BY c.relname,p.polname",[oid])).rows;
  const triggers=(await client.query("SELECT c.relname table_name,t.tgname name,t.tgenabled enabled,pg_get_triggerdef(t.oid,true) definition FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace=$1 AND NOT t.tgisinternal ORDER BY c.relname,t.tgname",[oid])).rows;
  const supportedTriggers=[
+  {table_name:'ai_usage_attempts',name:'ai_usage_attempts_immutable',enabled:'O'},
   {table_name:'checkout_contract_receipts',name:'checkout_contract_receipt_immutable',enabled:'O'},
   {table_name:'checkout_contracts',name:'checkout_contract_immutable',enabled:'O'},
   {table_name:'documents',name:'document_status_journal',enabled:'O'},

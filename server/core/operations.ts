@@ -134,15 +134,21 @@ const queuesSql=queueRelations.map(q=>`select '${q.lane}' lane,
  extract(epoch from now()-min(${q.due}) filter(where (${q.waiting}) and ${q.due}<=now()))::double precision oldest_due_seconds
  from ${q.from}`).join('\nunion all\n');
 
+/** Reused zero-row capability probes; never inspect the migration journal. */
+export const operationalSchemaSql=Object.freeze({
+ administrator:'select j.config,d.mime_type,r.template_snapshot,r.normalization_context,r.bank_statement_context,a.bank_review,s.confirmed_request_id,t.revision,b.billing_mode,c.billing_mode,c.idempotency_version,c.contract_capture,u.id,u.workspace_id,u.kind,u.operation_id,u.attempt,u.created_at,u.observed_at,u.provider,u.outcome,u.model,u.request_id,u.response_id,u.http_status,u.response_status,u.usage_state,u.input_tokens,u.cached_input_tokens,u.output_tokens,u.reasoning_tokens,u.cost_usd,u.pricing_basis from jobs j,documents d,extraction_runs r,approvals a,split_suggestions s,templates t,subscriptions b,billing_checkouts c,ai_usage_attempts u where false',
+ tenant:'select d.id,d.workspace_id,b.billing_mode,c.billing_mode,c.idempotency_version,u.id,u.workspace_id,u.kind,u.operation_id,u.attempt,u.created_at,u.observed_at,u.provider,u.outcome,u.model,u.request_id,u.response_id,u.http_status,u.response_status,u.usage_state,u.input_tokens,u.cached_input_tokens,u.output_tokens,u.reasoning_tokens,u.cost_usd,u.pricing_basis from documents d,subscriptions b,billing_checkouts c,ai_usage_attempts u where false',
+});
+
 function productionServices():OperationalServices{
   return {
     database:async()=>{
       const {adminPool,appPool}=await import('./db.js');
       await Promise.all([
         // Runtime roles cannot read the migration journal. These zero-row queries verify current capabilities.
-        probeDatabase(adminPool,'select j.config,d.mime_type,r.template_snapshot,r.normalization_context,r.bank_statement_context,a.bank_review,s.confirmed_request_id,t.revision,b.billing_mode,c.billing_mode,c.idempotency_version,c.contract_capture from jobs j,documents d,extraction_runs r,approvals a,split_suggestions s,templates t,subscriptions b,billing_checkouts c where false'),
+        probeDatabase(adminPool,operationalSchemaSql.administrator),
         probeDatabase(appPool,'select a.account_key,a.revision,t.fingerprint,u.bank_locale from bank_statement_accounts a,bank_statement_transactions t,direct_uploads u where false'),
-        probeDatabase(appPool,'select d.id,d.workspace_id,b.billing_mode,c.billing_mode,c.idempotency_version from documents d,subscriptions b,billing_checkouts c where false'),
+        probeDatabase(appPool,operationalSchemaSql.tenant),
         probeDatabase(adminPool,'select c.create_params,c.params_sha256,c.policy,c.offer,c.initiated_by,r.state,r.provider_event_created_at,r.observed_at from checkout_contracts c,checkout_contract_receipts r where false'),
         probeDatabase(appPool,'select c.id,c.workspace_id,c.policy,c.offer,c.session_id,r.state,r.provider_event_created_at,r.observed_at from checkout_contracts c,checkout_contract_receipts r where false'),
         probeNormalizationPolicy(adminPool),

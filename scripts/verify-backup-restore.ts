@@ -7,6 +7,7 @@ import {randomBytes,randomUUID,createHash} from 'node:crypto';
 import {spawn,execFileSync} from 'node:child_process';
 import pg from 'pg';
 import type {BackupConfig} from './backup/types.js';
+import {seedAiUsageFixture,assertAiUsageFixture,assertAiUsagePermissions} from './backup/ai-usage-fixture.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const pgBin=process.env.FOLIO_BACKUP_QA_PG_BIN??'/opt/homebrew/opt/postgresql@17/bin';
@@ -79,6 +80,8 @@ try{
   await write('cluster-identity.json',{runId:id,run,socket,port,owner:'backup_owner',adminRole:'backup_admin',appRole:'backup_app',sourceConfig,targetConfig,backendSourceConfig:path.join(run,'backend-source.json'),backendTargetConfig:path.join(run,'backend-target.json'),normalDevelopmentDatabaseTouched:false});
   await checkpoint('NewIsolatedPostgres17ClusterRestrictedRolesAndDistinctDatabases');
   await runtime('seed',sourceConfig);
+  receipt.aiUsageFixture=await guarded('backup_source',seedAiUsageFixture);
+  await checkpoint('SyntheticAllKindsPricedUnknownAndInterruptedCostHistorySurvivesSourceDeletion');
   receipt.sourceSnapshot=await snapshot('backup_source');await checkpoint('SyntheticSourceFixtureAndEveryTableSnapshotAfterRuntimeShutdown');
   await write('prepared.json',receipt);console.log('PREPARED '+run);
   if(args.includes('--prepare-only')){running=false;process.exitCode=0;}
@@ -106,6 +109,7 @@ try{
   const manifest=JSON.parse(plaintext.subarray(prefix.length+4,offset).toString());let cursor=offset;const payloads=new Map<string,Buffer>();
   for(const item of manifest.files){const bytes=plaintext.subarray(cursor,cursor+item.bytes);assert.equal(bytes.length,item.bytes);assert.equal(hash(bytes),item.sha256);payloads.set(item.name,bytes);cursor+=item.bytes;}assert.equal(cursor,plaintext.length);
   assert.equal(manifest.database.tables.length,Object.keys(receipt.sourceSnapshot.tables).length);assert.equal(hash(payloads.get('integration-key.bin')!),hash(await fs.readFile(path.join(run,'source-key'))));
+  assert.ok(manifest.database.tables.find((table:any)=>table.name==='ai_usage_attempts')?.rows>=30);
   const bankAccounts=manifest.database.tables.find((table:any)=>table.name==='bank_statement_accounts'),bankTransactions=manifest.database.tables.find((table:any)=>table.name==='bank_statement_transactions');
   assert.equal(bankAccounts?.rows,2);assert.equal(bankTransactions?.rows,4);for(const column of ['statement_start','statement_end'])assert.equal(bankAccounts.columns.find((value:any)=>value.name===column)?.type,'date');
   const bankUploads=manifest.database.tables.find((table:any)=>table.name==='direct_uploads');assert.ok(bankUploads.rows>=1);assert.ok(bankUploads.columns.some((column:any)=>column.name==='bank_locale'&&column.type==='text'));
@@ -125,6 +129,10 @@ try{
   assert.deepEqual(await snapshot('backup_source'),receipt.sourceSnapshot);await checkpoint('MissingRequiredSourceFileRefusesCaptureWithoutDatabaseChanges');
   await cli('restore',['restore','--config',targetConfig,'--input',artifact,'--identity-file',identity]);
   assert.deepEqual(await snapshot('backup_target'),receipt.sourceSnapshot);await checkpoint('EveryTableAndSequenceExactlyRestoredBeforeRuntimeMutation');
+  await guarded('backup_target',c=>assertAiUsageFixture(c,receipt.aiUsageFixture));
+  await assertAiUsagePermissions(role=>connect('backup_target',role),receipt.aiUsageFixture);
+  assert.deepEqual(await snapshot('backup_target'),receipt.sourceSnapshot);
+  await checkpoint('ExactCostRowsNullsDecimalsSourceRetentionAndTenantReadServerWriteSurviveRestore');
   await runtime('blocked',targetConfig);assert.deepEqual(await snapshot('backup_target'),receipt.sourceSnapshot);await checkpoint('FreshApiAndWorkerRefusePendingRestoreBeforeActivation');
   await cli('activate-without-consent',['activate','--config',targetConfig,'--input',artifact,'--identity-file',identity],true).then(r=>assert.notEqual(r.code,0));
   const targetObject=path.join(run,'target-files',missingSource.key),targetOriginal=await fs.readFile(targetObject),changed=Buffer.from(targetOriginal);changed[0]^=1;
@@ -138,6 +146,7 @@ try{
   const repeated=await cli('activate-repeat',['activate','--config',targetConfig,'--input',artifact,'--identity-file',identity,'--allow-outbound']);assert.equal(JSON.parse(repeated.output).status,'restore_already_activated');assert.deepEqual(await snapshot('backup_target'),receipt.sourceSnapshot);
   await checkpoint('ActivationReceiptCrashRecoveryAndRepeatDoNotStartServicesOrChangeData');
   await runtime('verify',targetConfig);await checkpoint('FreshRestoredRuntimeLoginTenantIsolationOriginalsExportsKeyAndQueueOnce');
+  await guarded('backup_target',c=>assertAiUsageFixture(c,receipt.aiUsageFixture));
   // Every failure gets a distinct empty database and storage/key destination.
   await fs.writeFile(path.join(run,'malformed.age'),Buffer.from('not an age artifact'));
   const encrypted=await fs.readFile(artifact);await fs.writeFile(path.join(run,'truncated.age'),encrypted.subarray(0,Math.floor(encrypted.length/2)));
