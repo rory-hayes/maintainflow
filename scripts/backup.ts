@@ -14,7 +14,7 @@ import type {BackupConfig,BackupManifest,BackupPayloadFile} from './backup/types
 
 const migrationsDirectory=fileURLToPath(new URL('../migrations/',import.meta.url));
 const usage='Use keygen, create --quiesced, inspect, restore, verify, or activate --allow-outbound with explicit private files. See docs/BACKUP-RESTORE.md.';
-const options={'config':{type:'string'},'identity-file':{type:'string'},'recipient-file':{type:'string'},'input':{type:'string'},'output':{type:'string'},'quiesced':{type:'boolean'},'allow-outbound':{type:'boolean'}} as const;
+const options={'config':{type:'string'},'identity-file':{type:'string'},'recipient-file':{type:'string'},'input':{type:'string'},'output':{type:'string'},'quiesced':{type:'boolean'},'allow-outbound':{type:'boolean'},'exclude-upload-staging':{type:'boolean'}} as const;
 type Values=Partial<Record<keyof typeof options,string|boolean>>;
 function selected(values:Values,key:keyof typeof options){const value=values[key];backupAssert(typeof value==='string'&&path.isAbsolute(value)&&!value.includes('\0'),'BACKUP_ARGUMENTS',usage);return value;}
 function only(values:Values,names:Array<keyof typeof options>){backupAssert(Object.keys(values).every(name=>names.includes(name as keyof typeof options)),'BACKUP_ARGUMENTS',usage);}
@@ -25,7 +25,7 @@ async function separate(root:string,filenames:string[]){const base=await canonic
 async function freshFile(filename:string){await ensurePrivateDirectory(path.dirname(filename));backupAssert(await absent(filename),'BACKUP_EXISTS','A selected output already exists. Choose a new path.');}
 async function writePrivate(filename:string,bytes:Uint8Array|string){await fs.writeFile(filename,bytes,{mode:0o600,flag:'wx'});await syncFile(filename);}
 async function textKey(filename:string){return (await readPrivateFile(filename,16384)).toString('utf8').trim();}
-function summary(manifest:BackupManifest){return {format:manifest.format,version:manifest.version,id:manifest.id,createdAt:manifest.createdAt,capture:manifest.capture,postgresMajor:manifest.database.postgresMajor,tables:manifest.database.tables.length,rows:manifest.database.tables.reduce((n,t)=>n+t.rows,0),payloadFiles:manifest.files.length,payloadBytes:manifest.files.reduce((n,f)=>n+f.bytes,0),originals:manifest.objects.filter(o=>o.present).length,absentOptionalObjects:manifest.objects.filter(o=>!o.present).length,omittedUnreferencedObjects:manifest.omittedObjects.length,migrations:manifest.database.migrations.length};}
+function summary(manifest:BackupManifest){const excluded=manifest.version===2?manifest.excludedUploadStaging.length:0;return {format:manifest.format,version:manifest.version,id:manifest.id,createdAt:manifest.createdAt,capture:manifest.capture,postgresMajor:manifest.database.postgresMajor,tables:manifest.database.tables.length,rows:manifest.database.tables.reduce((n,t)=>n+t.rows,0),payloadFiles:manifest.files.length,payloadBytes:manifest.files.reduce((n,f)=>n+f.bytes,0),originals:manifest.objects.filter(o=>o.present).length,absentOptionalObjects:manifest.objects.filter(o=>!o.present).length-excluded,...(manifest.version===2?{excludedUploadStaging:excluded,unfinishedUploadStagingOmitted:true}:{}),omittedUnreferencedObjects:manifest.omittedObjects.length,migrations:manifest.database.migrations.length};}
 
 async function keygen(values:Values){
  only(values,['identity-file','recipient-file']);const identityFile=selected(values,'identity-file'),recipientFile=selected(values,'recipient-file');
@@ -38,9 +38,11 @@ async function keygen(values:Values){
 }
 
 async function create(values:Values){
- only(values,['config','recipient-file','output','quiesced']);backupAssert(values.quiesced===true,'BACKUP_QUIESCENCE','Stop all API, workers and storage writers, then pass --quiesced.');
+ only(values,['config','recipient-file','output','quiesced','exclude-upload-staging']);backupAssert(values.quiesced===true,'BACKUP_QUIESCENCE','Stop all API, workers and storage writers, then pass --quiesced.');
  const configFile=selected(values,'config'),recipientFile=selected(values,'recipient-file'),output=selected(values,'output');
- const config=await readConfig(configFile);await freshFile(output);
+ const config=await readConfig(configFile),excludeUploadStaging=values['exclude-upload-staging']===true;
+ backupAssert(!excludeUploadStaging||config.databaseProfile==='managed-source'&&config.sourceStorage?.kind==='supabase','BACKUP_CONFIG','Upload staging exclusion requires an explicit managed Supabase source.');
+ await freshFile(output);
  backupAssert(!config.sourceStorage||config.databaseProfile==='managed-source','BACKUP_CONFIG','Supabase capture requires explicit managed-source database checks.');
  await ensurePrivateDirectory(config.storageDir);
  const directory=await scratch();let source:Awaited<ReturnType<typeof openSourceDatabase>>|undefined;
@@ -48,11 +50,11 @@ async function create(values:Values){
  try{
   await separate(config.storageDir,[directory,configFile,recipientFile,output,config.integrationKeyFile,...[config.database.passwordFile,config.database.sslCaFile,config.sourceStorage?.serviceRoleKeyFile].filter((s):s is string=>!!s)]);
   const recipient=await textKey(recipientFile),key=await readIntegrationKey(config.integrationKeyFile);
-  source=await openSourceDatabase(config,migrationsDirectory);
+  source=await openSourceDatabase(config,migrationsDirectory,{excludeUploadStaging});
   if(config.sourceStorage){
    storageRoot=path.join(directory,'bucket-snapshot');await fs.mkdir(storageRoot,{mode:0o700});
    const credential=(await readPrivateFile(config.sourceStorage.serviceRoleKeyFile,16384)).toString('utf8').trim();
-   remote=await createSupabaseBackupSource({url:config.sourceStorage.url,serviceRoleKey:credential}).capture(storageRoot);
+   remote=await createSupabaseBackupSource({url:config.sourceStorage.url,serviceRoleKey:credential,excludedUploadStaging:source.excludedUploadStaging}).capture(storageRoot);
    await source.verifyQuiescence();
   }
   const before=await scanStorage(storageRoot),inventory=new Map(before.map(record=>[record.key,record]));
@@ -71,7 +73,7 @@ async function create(values:Values){
   }
   for(const table of source.manifest.tables){const filename=await safeDestination(directory,'tables/'+table.name+'.bin');add(await source.writeTable(table.name,filename,backupLimits.payloadBytes-totalBytes));}
   const referenced=new Set(source.objects.map(o=>o.key));
-  const manifest=validateManifest({format:'folio-backup',version:1,id:randomUUID(),createdAt:new Date().toISOString(),capture:remote?'quiesced-supabase':'quiesced-filesystem',database:source.manifest,files,objects,integrationKeySha256:sha256(key),omittedObjects:before.filter(o=>!referenced.has(o.key))});
+  const manifest=validateManifest({format:'folio-backup',...(excludeUploadStaging?{version:2,capture:'quiesced-supabase-excluding-staging',excludedUploadStaging:source.excludedUploadStaging}:{version:1,capture:remote?'quiesced-supabase':'quiesced-filesystem'}),id:randomUUID(),createdAt:new Date().toISOString(),database:source.manifest,files,objects,integrationKeySha256:sha256(key),omittedObjects:before.filter(o=>!referenced.has(o.key))});
   backupAssert(JSON.stringify(await scanStorage(storageRoot))===JSON.stringify(before)&&sha256(await readIntegrationKey(config.integrationKeyFile))===manifest.integrationKeySha256,'BACKUP_CHANGED','Storage or the integration key changed during capture. Stop all writers before retrying.');
   await remote?.verify();await source.verifyQuiescence();
   // The pending ciphertext shares the final filesystem so publication is atomic and exclusive.
@@ -125,7 +127,7 @@ async function restoreOrActivate(values:Values,operation:'restore'|'verify'|'act
   if(operation==='verify'){
    await matchingPending(markerFile,marker);
    backupAssert(await absent(receiptFile),'BACKUP_ACTIVATION','An activation receipt already exists. Inspect the interrupted activation before verifying an inactive restore.');
-   await verifyTargetFiles(config,manifest);await verifyRestoredDatabase(config,manifest.database,path.join(directory,'tables'),migrationsDirectory,manifest.objects);await verifyTargetFiles(config,manifest);
+   await verifyTargetFiles(config,manifest);await verifyRestoredDatabase(config,manifest.database,path.join(directory,'tables'),migrationsDirectory,manifest.objects,manifest.version===2?manifest.excludedUploadStaging:undefined);await verifyTargetFiles(config,manifest);
    await matchingPending(markerFile,marker);
    backupAssert(await absent(receiptFile),'BACKUP_ACTIVATION','Activation began during inactive verification. Keep services stopped and inspect the destination.');
    return {status:'restored_verified_inactive',...summary(manifest),ciphertextSha256,servicesStarted:false,pendingRetained:true};
@@ -137,7 +139,7 @@ async function restoreOrActivate(values:Values,operation:'restore'|'verify'|'act
     return {status:'restore_already_activated',...summary(manifest),servicesStarted:false};
    }
    await matchingPending(markerFile,marker);
-   await verifyTargetFiles(config,manifest);await verifyRestoredDatabase(config,manifest.database,path.join(directory,'tables'),migrationsDirectory,manifest.objects);await verifyTargetFiles(config,manifest);
+   await verifyTargetFiles(config,manifest);await verifyRestoredDatabase(config,manifest.database,path.join(directory,'tables'),migrationsDirectory,manifest.objects,manifest.version===2?manifest.excludedUploadStaging:undefined);await verifyTargetFiles(config,manifest);
    if(!recorded)await writePrivate(receiptFile,JSON.stringify({...marker,activatedAt:new Date().toISOString()})+'\n');
    await fs.unlink(markerFile);
    return {status:'restore_activated',...summary(manifest),servicesStarted:false};
@@ -152,7 +154,7 @@ async function restoreOrActivate(values:Values,operation:'restore'|'verify'|'act
    await copyFileChecked(path.join(directory,staged),path.join(config.storageDir,object.key),backupLimits.objectBytes);await syncFile(path.join(config.storageDir,object.key));
   }
   await writePrivate(config.integrationKeyFile,await fs.readFile(path.join(directory,'integration-key.bin')));
-  await restoreDatabase(config,manifest.database,path.join(directory,'tables'),migrationsDirectory,manifest.objects);
+  await restoreDatabase(config,manifest.database,path.join(directory,'tables'),migrationsDirectory,manifest.objects,manifest.version===2?manifest.excludedUploadStaging:undefined);
   await verifyTargetFiles(config,manifest);
   return {status:'restored_inactive',...summary(manifest),servicesStarted:false};
  }finally{await fs.rm(directory,{recursive:true,force:true});}

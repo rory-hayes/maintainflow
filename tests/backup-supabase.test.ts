@@ -69,3 +69,48 @@ test('declared or actual oversized object responses reject and repeated pages ca
   }});await assert.rejects(createSupabaseBackupSource({url,serviceRoleKey:credential,fetch:mock.fetch}).capture(dir));
  });
 });
+
+function mutableTransport(initial:Map<string,Buffer>,hooks:{list?:(prefix:string,offset:number,objects:Map<string,Buffer>)=>void;read?:(key:string,objects:Map<string,Buffer>)=>void}={}){
+ const objects=new Map(initial),ids=new Map<string,string>(),downloads:string[]=[],pages:Array<{prefix:string;offset:number}>=[];
+ const fetch=(async(input,init={})=>{
+  const target=new URL(String(input));assert.equal(target.origin,url);assert.equal(init.redirect,'error');assert.equal(new Headers(init.headers).get('authorization'),'Bearer '+credential);
+  if(target.pathname.endsWith('/bucket/folio-originals'))return Response.json({id:'folio-originals',public:false,file_size_limit:10485760});
+  if(target.pathname.endsWith('/object/list/folio-originals')){
+   assert.equal(init.method,'POST');const {prefix,offset,limit}=JSON.parse(String(init.body));pages.push({prefix,offset});hooks.list?.(prefix,offset,objects);
+   const items=prefix?[...objects].filter(([key])=>key.startsWith(prefix+'/')).sort(([a],[b])=>a.localeCompare(b)).map(([key,bytes])=>{if(!ids.has(key))ids.set(key,randomUUID());return {name:key.split('/')[1],id:ids.get(key),metadata:{size:bytes.length},updated_at:'2026-10-18T00:00:00Z'};}):[...new Set([...objects.keys()].map(key=>key.split('/')[0]))].sort().map(name=>({name,id:null}));
+   return Response.json(items.slice(offset,offset+limit));
+  }
+  assert.equal(init.method,'GET');const key=target.pathname.split('/folio-originals/')[1];assert.ok(objects.has(key));downloads.push(key);hooks.read?.(key,objects);return new Response(new Uint8Array(objects.get(key)!));
+ }) as typeof globalThis.fetch;
+ return {fetch,downloads,pages,objects};
+}
+const numbered=(n:number)=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0');
+const declaration=(key:string)=>({key,recordType:'direct_upload' as const,recordId:key.split('/')[1]});
+
+test('explicit staging capture tolerates late known PUTs including a new workspace folder and never reads their bytes',async()=>temp(async dir=>{
+ const stable=new Map(Array.from({length:201},(_,i)=>[workspace+'/'+numbered((i+1)*2),Buffer.from('stable-'+i)]));
+ const stage=workspace+'/'+numbered(199),newFolder=numbered(999)+'/'+numbered(1);let added=false;
+ const mock=mutableTransport(stable,{read(_key,objects){if(!added){added=true;objects.set(stage,Buffer.from('late unfinalized upload'));objects.set(newFolder,Buffer.from('another late upload'));}}});
+ const captured=await createSupabaseBackupSource({url,serviceRoleKey:credential,fetch:mock.fetch,excludedUploadStaging:[declaration(stage),declaration(newFolder)]}).capture(dir);
+ await captured.verify();assert.equal(captured.objects,201);assert.equal(mock.downloads.length,603);assert.ok(mock.downloads.every(key=>stable.has(key)));
+ for(const [key,bytes]of stable)assert.deepEqual(await fs.readFile(path.join(dir,key)),bytes);
+ for(const key of [stage,newFolder])assert.equal(await fs.stat(path.join(dir,key)).then(()=>true,()=>false),false);
+}));
+
+test('known staging insertions shifting child or root offset100/200 pages fail closed before downloads',async()=>{
+ for(const level of ['child','root'] as const)for(const boundary of [100,200])await temp(async dir=>{
+  const stable=new Map(Array.from({length:201},(_,i)=>[level==='child'?workspace+'/'+numbered((i+1)*2):numbered((i+1)*2)+'/'+numbered(1),Buffer.from('stable')]));
+  const stage=level==='child'?workspace+'/'+numbered(boundary*2-1):numbered(boundary*2-1)+'/'+numbered(1);
+  const mock=mutableTransport(stable,{list(prefix,offset,objects){if(prefix===(level==='child'?workspace:'')&&offset===boundary)objects.set(stage,Buffer.from('late'));}});
+  await assert.rejects(createSupabaseBackupSource({url,serviceRoleKey:credential,fetch:mock.fetch,excludedUploadStaging:[declaration(stage)]}).capture(dir),/repeated or changing/);
+  assert.equal(mock.downloads.length,0);assert.deepEqual(mock.pages.filter(p=>p.prefix===(level==='child'?workspace:'')).map(p=>p.offset),boundary===100?[0,100]:[0,100,200]);assert.deepEqual(await fs.readdir(dir),[]);
+ });
+});
+
+test('staging mode retains unknown object and nonexcluded content drift refusals',async()=>{
+ for(const kind of ['unknown-addition','same-size-change','removed'] as const)await temp(async dir=>{
+  const first=workspace+'/'+numbered(2),second=workspace+'/'+numbered(4),stage=workspace+'/'+numbered(6);let changed=false;
+  const mock=mutableTransport(new Map([[first,Buffer.from('aaaa')],[second,Buffer.from('bbbb')]]),{read(key,objects){if(key===second&&!changed){changed=true;if(kind==='unknown-addition')objects.set(workspace+'/'+numbered(8),Buffer.from('unknown'));else if(kind==='same-size-change')objects.set(first,Buffer.from('xxxx'));else objects.delete(first);}}});
+  await assert.rejects(createSupabaseBackupSource({url,serviceRoleKey:credential,fetch:mock.fetch,excludedUploadStaging:[declaration(stage)]}).capture(dir),/changed/);
+ });
+});

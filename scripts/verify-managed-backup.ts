@@ -17,6 +17,7 @@ import {sha256} from './backup/files.js';
 import type {BackupConfig} from './backup/types.js';
 import {canonicalSignupPolicy} from '../shared/signup-terms.js';
 import {assertStorageRestoreReady} from '../server/core/restore-state.js';
+import {verifyManagedStaging} from './backup/managed-staging-acceptance.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),exec=promisify(execFile),args=process.argv.slice(2);
 assert.deepEqual(args,['--execute'],'Pass --execute to create and clean an owned socket-only PostgreSQL17 fixture. No hosted credentials are read.');
@@ -26,29 +27,30 @@ const environment={PATH:process.env.PATH,LANG:'en_US.UTF-8',LC_ALL:'en_US.UTF-8'
 const checks:string[]=[],receipt:Record<string,unknown>={runId:id,startedAt:new Date().toISOString(),node:process.versions.node,hostedCalls:0,providerCalls:0,sharedDevelopmentDatabaseTouched:false,port,checks};
 let running=false,observer:pg.Client|undefined;
 const connection=(db:string,user='backup_owner')=>new pg.Client({host:socket,port,database:db,user,connectionTimeoutMillis:5000});
-async function sql<T>(db:string,fn:(client:pg.Client)=>Promise<T>){assert.ok(['postgres','source','target','bad_target'].includes(db));const c=connection(db);await c.connect();try{const actual=(await c.query("SELECT current_setting('unix_socket_directories') socket,current_setting('port')::int port,current_setting('server_version_num')::int version,inet_server_addr() address")).rows[0];assert.equal(actual.socket,socket);assert.equal(actual.port,port);assert.equal(actual.address,null);assert.ok(actual.version>=170000&&actual.version<180000);return await fn(c);}finally{await c.end();}}
+const databases=['source','target','bad_target','staging_target','staging_bad_target','staging_bad_identity'];
+async function sql<T>(db:string,fn:(client:pg.Client)=>Promise<T>){assert.ok(['postgres',...databases].includes(db));const c=connection(db);await c.connect();try{const actual=(await c.query("SELECT current_setting('unix_socket_directories') socket,current_setting('port')::int port,current_setting('server_version_num')::int version,inet_server_addr() address")).rows[0];assert.equal(actual.socket,socket);assert.equal(actual.port,port);assert.equal(actual.address,null);assert.ok(actual.version>=170000&&actual.version<180000);return await fn(c);}finally{await c.end();}}
 async function command(name:string,argv:string[]){const result=await exec(path.join(bin,name),argv,{env:environment,timeout:90000,maxBuffer:1024*1024});await fs.writeFile(path.join(run,name+'-'+randomUUID()+'.log'),result.stdout+result.stderr,{mode:0o600});}
 async function json(name:string,value:unknown){await fs.writeFile(path.join(run,name),JSON.stringify(value,null,2)+'\n',{mode:0o600});}
 const checkpoint=(name:string)=>{checks.push(name);console.log('PASS '+name);};
 const cfg=(database:string,managed=false):BackupConfig=>({version:1,database:{host:socket,port,database,user:'backup_owner'},schema:'folio',adminRole:'backup_admin',appRole:'backup_app',storageDir:path.join(run,database+'-files'),integrationKeyFile:path.join(run,database+'-key'),...(managed?{databaseProfile:'managed-source',sourceStorage:{kind:'supabase',url:'https://owned-managed-fixture.supabase.co',serviceRoleKeyFile:path.join(run,'storage-credential')}}:{})});
 const source=cfg('source',true),target=cfg('target'),badTarget=cfg('bad_target'),migrations=path.join(root,'migrations');
-const objects=new Map<string,Buffer>(),records=new Map<string,{id:string;updated_at:string}>();let requests=0;
+const objects=new Map<string,Buffer>(),records=new Map<string,{id:string;updated_at:string}>(),downloads:string[]=[];let requests=0;
 const termsSnapshot=(database:string)=>sql(database,async c=>({
  contracts:(await c.query('SELECT to_jsonb(c) body FROM folio.checkout_contracts c ORDER BY id')).rows,
  receipts:(await c.query('SELECT to_jsonb(r) body FROM folio.checkout_contract_receipts r ORDER BY contract_id')).rows,
  signup:(await c.query('SELECT to_jsonb(s) body FROM folio.signup_terms_acceptances s ORDER BY user_id')).rows,
 }));
-function transport(){globalThis.fetch=async(input,init={})=>{
+function transport(afterRead?:()=>void){globalThis.fetch=async(input,init={})=>{
  const url=new URL(String(input));assert.equal(url.origin,source.sourceStorage!.url);assert.equal(init.redirect,'error');assert.equal(new Headers(init.headers).get('authorization'),'Bearer owned-fixture-key');requests++;
  if(url.pathname==='/storage/v1/bucket/folio-originals'){assert.equal(init.method,'GET');return Response.json({id:'folio-originals',public:false,file_size_limit:10485760});}
- if(url.pathname==='/storage/v1/object/list/folio-originals'){assert.equal(init.method,'POST');const {prefix,offset,limit}=JSON.parse(String(init.body));const items=prefix?[...objects].filter(([k])=>k.startsWith(prefix+'/')).map(([key,bytes])=>({name:key.split('/')[1],...records.get(key),metadata:{size:bytes.length}})):[...new Set([...objects.keys()].map(k=>k.split('/')[0]))].map(name=>({name,id:null}));return Response.json(items.slice(offset,offset+limit));}
- assert.equal(init.method,'GET');assert.ok(url.pathname.startsWith('/storage/v1/object/authenticated/folio-originals/'));const key=url.pathname.split('/folio-originals/')[1],bytes=objects.get(key);assert.ok(bytes);return new Response(new Uint8Array(bytes));
+ if(url.pathname==='/storage/v1/object/list/folio-originals'){assert.equal(init.method,'POST');const {prefix,offset,limit}=JSON.parse(String(init.body));const items=prefix?[...objects].filter(([k])=>k.startsWith(prefix+'/')).map(([key,bytes])=>({name:key.split('/')[1],...records.get(key),metadata:{size:bytes.length}})):[...new Set([...objects.keys()].map(k=>k.split('/')[0]))].map(name=>({name,id:null}));items.sort((a,b)=>a.name.localeCompare(b.name));return Response.json(items.slice(offset,offset+limit));}
+ assert.equal(init.method,'GET');assert.ok(url.pathname.startsWith('/storage/v1/object/authenticated/folio-originals/'));const key=url.pathname.split('/folio-originals/')[1],bytes=objects.get(key);assert.ok(bytes);downloads.push(key);afterRead?.();return new Response(new Uint8Array(bytes));
 };}
 try{
  process.umask(0o077);await fs.mkdir(run,{recursive:true,mode:0o700});await fs.mkdir(socket,{mode:0o700});
  await command('initdb',['-D',cluster,'--username=backup_owner','--auth-local=trust','--auth-host=reject','--encoding=UTF8','--locale=C']);
  await command('pg_ctl',['-D',cluster,'-l',path.join(run,'postgres.log'),'-o',`-k ${socket} -p ${port} -c listen_addresses=''`,'-w','start']);running=true;
- await sql('postgres',async c=>{for(const name of ['backup_admin','backup_app','platform_reader'])await c.query(`CREATE ROLE ${name} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);await c.query('CREATE ROLE platform_owner NOLOGIN');for(const name of ['source','target','bad_target'])await c.query(`CREATE DATABASE ${name}`);});
+ await sql('postgres',async c=>{for(const name of ['backup_admin','backup_app','platform_reader'])await c.query(`CREATE ROLE ${name} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);await c.query('CREATE ROLE platform_owner NOLOGIN');for(const name of databases)await c.query(`CREATE DATABASE ${name}`);});
  await sql('source',async c=>{
   await c.query('CREATE SCHEMA folio');await c.query(buildMigrationSql(await readMigrations(migrations),{schema:'folio',adminRole:'backup_admin',appRole:'backup_app'}));await c.query((await backupWatchdog('folio','backup_admin','backup_app')).sql);
   await c.query('CREATE SCHEMA platform AUTHORIZATION platform_owner; CREATE TABLE platform.unrelated(value text); ALTER DEFAULT PRIVILEGES FOR ROLE platform_owner GRANT SELECT ON TABLES TO platform_reader');
@@ -139,13 +141,18 @@ try{
  const altered=path.join(run,'altered.age');await runBackup(['create','--config',path.join(run,'source.json'),'--recipient-file',recipient,'--output',altered,'--quiesced']);
  await assert.rejects(runBackup(['restore','--config',path.join(run,'bad-target.json'),'--input',altered,'--identity-file',identity]),/permissions, constraints or definitions differ/);
  await sql('bad_target',async c=>assert.equal((await c.query("SELECT count(*)::int n FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='folio'")).rows[0].n,0));assert.ok(await fs.stat(path.join(badTarget.storageDir,'.folio-restore-pending.json')));checkpoint('ArbitrarySourceAclDriftCannotRestoreAndRollbackLeavesDestinationInactive');
+ receipt.staging=await verifyManagedStaging({run,source,migrations,identity,recipient,sql,cfg,objects,records,downloads,transport,checkpoint,runtime:async(config,fixture)=>{
+  assert.equal(config.database.database,'staging_target');await json('staging-runtime.json',fixture);await fs.mkdir(path.join(run,'empty-cwd'),{mode:0o700});
+  const result=await exec(process.execPath,['--import',path.join(root,'node_modules/tsx/dist/loader.mjs'),path.join(root,'scripts/backup/managed-staging-runtime.ts'),run],{cwd:path.join(run,'empty-cwd'),env:environment,timeout:30000,maxBuffer:1024*1024});
+  await fs.writeFile(path.join(run,'staging-runtime.log'),result.stdout+result.stderr,{mode:0o600});
+ }});
  receipt.result='passed';receipt.controlledStorageRequests=requests;
 }catch(error){receipt.result='failed';receipt.failure=error instanceof Error?error.message:'Unknown controlled failure';throw error;}
 finally{
  globalThis.fetch=originalFetch;await observer?.end().catch(()=>{});
  try{if(running){await command('pg_ctl',['-D',cluster,'-m','immediate','-w','stop']);running=false;}}finally{
   receipt.finishedAt=new Date().toISOString();receipt.isolatedClusterStopped=!running;
-  if(!running){for(const name of ['cluster','source-files','target-files','bad_target-files','bad_target-key','target-key','source-key','storage-credential','identity','recipient','backup.age','altered.age','unpack','source.json','target.json','bad-target.json'])await fs.rm(path.join(run,name),{recursive:true,force:true});await fs.rm(socket,{recursive:true,force:true});receipt.ownedPlaintextKeysAndObjectsRemoved=true;}
+  if(!running){for(const name of ['cluster','source-files','target-files','bad_target-files','bad_target-key','target-key','source-key','storage-credential','identity','recipient','backup.age','altered.age','unpack','source.json','target.json','bad-target.json','staging.age','staging-unpack','staging-runtime.json','empty-cwd',...['staging_target','staging_bad_target','staging_bad_identity'].flatMap(database=>[database+'-files',database+'-key',database+'.json',database+'.age'])])await fs.rm(path.join(run,name),{recursive:true,force:true});await fs.rm(socket,{recursive:true,force:true});receipt.ownedPlaintextKeysAndObjectsRemoved=true;}
   await json('receipt.json',receipt);console.log('RECEIPT '+path.join(run,'receipt.json'));
  }
 }

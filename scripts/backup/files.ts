@@ -7,6 +7,7 @@ import {pipeline} from 'node:stream/promises';
 import {z} from 'zod';
 import {backupAssert,BackupError} from './errors.js';
 import type {BackupConfig,BackupManifest,BackupPayloadFile} from './types.js';
+import {uploadStagingDeclarations} from './staging.js';
 
 export const backupLimits={payloadBytes:20*1024**3,manifestBytes:32*1024**2,files:100_000,objectBytes:10*1024**2,headerBytes:64*1024};
 export const pendingName='.folio-restore-pending.json';
@@ -19,7 +20,12 @@ const absolute=z.string().min(1).max(4096).refine(value=>path.isAbsolute(value)&
 const configSchema=z.object({version:z.literal(1),database:z.object({host:z.string().min(1).max(1024),port:z.number().int().min(1).max(65535),database:identifier,user:identifier,passwordFile:absolute.optional(),sslCaFile:absolute.optional()}).strict(),schema:identifier,adminRole:identifier,appRole:identifier,storageDir:absolute,integrationKeyFile:absolute,databaseProfile:z.literal('managed-source').optional(),sourceStorage:z.object({kind:z.literal('supabase'),url:z.string().url().max(2048),serviceRoleKeyFile:absolute}).strict().optional()}).strict();
 const reference=z.object({key:z.string().regex(objectKey),required:z.boolean(),byteSize:z.number().int().min(0).max(backupLimits.objectBytes).optional(),sha256:digest.optional(),present:z.boolean(),bytes:z.number().int().min(0).max(backupLimits.objectBytes).optional()}).strict();
 const fileSchema=z.object({name:z.string().max(160),bytes:z.number().int().min(0).max(backupLimits.payloadBytes),sha256:digest}).strict();
-const manifestSchema=z.object({format:z.literal('folio-backup'),version:z.literal(1),id:z.string().uuid(),createdAt:z.string().datetime(),capture:z.enum(['quiesced-filesystem','quiesced-supabase']),database:z.object({schema:identifier,postgresMajor:z.literal(17),encoding:z.literal('UTF8'),sourceIdentity:digest,securitySha256:digest,watchdogSha256:digest.optional(),tables:z.array(z.object({name:identifier,columns:z.array(z.object({name:identifier,type:z.string().min(1).max(512),generated:z.string().max(1),identity:z.string().max(1)}).strict()).min(1).max(256),primaryKey:z.array(identifier).min(1).max(256),rows:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}).strict()).min(1).max(256),sequences:z.array(z.object({name:identifier,lastValue:z.string().regex(/^-?\d{1,19}$/),isCalled:z.boolean()}).strict()).max(256),migrations:z.array(z.object({name:z.string().regex(/^\d+_[a-z0-9_]+\.sql$/),sha256:digest}).strict()).min(1).max(1000)}).strict(),files:z.array(fileSchema).min(1).max(backupLimits.files),objects:z.array(reference).max(backupLimits.files),integrationKeySha256:digest,omittedObjects:z.array(z.object({key:z.string().regex(objectKey),bytes:z.number().int().min(0).max(backupLimits.objectBytes),sha256:digest}).strict()).max(backupLimits.files)}).strict();
+const manifestData={format:z.literal('folio-backup'),id:z.string().uuid(),createdAt:z.string().datetime(),database:z.object({schema:identifier,postgresMajor:z.literal(17),encoding:z.literal('UTF8'),sourceIdentity:digest,securitySha256:digest,watchdogSha256:digest.optional(),tables:z.array(z.object({name:identifier,columns:z.array(z.object({name:identifier,type:z.string().min(1).max(512),generated:z.string().max(1),identity:z.string().max(1)}).strict()).min(1).max(256),primaryKey:z.array(identifier).min(1).max(256),rows:z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}).strict()).min(1).max(256),sequences:z.array(z.object({name:identifier,lastValue:z.string().regex(/^-?\d{1,19}$/),isCalled:z.boolean()}).strict()).max(256),migrations:z.array(z.object({name:z.string().regex(/^\d+_[a-z0-9_]+\.sql$/),sha256:digest}).strict()).min(1).max(1000)}).strict(),files:z.array(fileSchema).min(1).max(backupLimits.files),objects:z.array(reference).max(backupLimits.files),integrationKeySha256:digest,omittedObjects:z.array(z.object({key:z.string().regex(objectKey),bytes:z.number().int().min(0).max(backupLimits.objectBytes),sha256:digest}).strict()).max(backupLimits.files)};
+const stagingDeclaration=z.object({key:z.string().regex(objectKey),recordType:z.enum(['direct_upload','split_suggestion']),recordId:z.string().regex(new RegExp('^'+uuid+'$'))}).strict();
+const manifestSchema=z.discriminatedUnion('version',[
+ z.object({...manifestData,version:z.literal(1),capture:z.enum(['quiesced-filesystem','quiesced-supabase'])}).strict(),
+ z.object({...manifestData,version:z.literal(2),capture:z.literal('quiesced-supabase-excluding-staging'),excludedUploadStaging:z.array(stagingDeclaration).max(backupLimits.files)}).strict(),
+]);
 
 export function sha256(bytes:Uint8Array|string){return createHash('sha256').update(bytes).digest('hex');}
 export function validPayloadName(name:string){return name==='integration-key.bin'||/^tables\/[a-z][a-z0-9_]{0,62}\.bin$/.test(name)||name.startsWith('objects/')&&objectKey.test(name.slice(8));}
@@ -44,6 +50,11 @@ export function validateManifest(value:unknown):BackupManifest{
     else backupAssert(object.bytes===undefined&&object.sha256===undefined,'BACKUP_OBJECT','An absent optional object must not declare content.');
   }
   for(const omitted of manifest.omittedObjects){backupAssert(!keys.has(omitted.key),'BACKUP_OBJECT','An omitted object overlaps another inventory entry.');keys.add(omitted.key);}
+  if(manifest.version===2){
+    const declarations=uploadStagingDeclarations(manifest.excludedUploadStaging),objects=new Map(manifest.objects.map(o=>[o.key,o]));
+    backupAssert(JSON.stringify(declarations)===JSON.stringify(manifest.excludedUploadStaging),'BACKUP_STAGING','Upload staging declarations must be in canonical order.');
+    for(const entry of declarations){const object=objects.get(entry.key);backupAssert(object&&!object.required&&!object.present&&object.byteSize===undefined&&!names.has('objects/'+entry.key),'BACKUP_STAGING','Excluded staging must be a declared absent optional object without a payload.');}
+  }
   backupAssert(names.size===expected.size&&[...expected].every(name=>names.has(name)),'BACKUP_INVENTORY','The backup payload inventory does not match its manifest.');
   const key=fileByName.get('integration-key.bin');
   backupAssert(key?.bytes===32&&key.sha256===manifest.integrationKeySha256,'BACKUP_KEY','The backup integration key is missing or inconsistent.');
