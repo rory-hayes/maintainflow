@@ -39,6 +39,12 @@ export async function seedAiUsageFixture(client:pg.Client):Promise<AiUsageFixtur
   }
   const sources=[{table:'jobs',id:operations.extraction},{table:'schema_suggestions',id:operations.schema_suggestion},{table:'split_suggestions',id:operations.split_suggestion}];
   for(const source of sources)assert.equal((await client.query(`SELECT count(*)::int n FROM folio.${source.table} WHERE id=$1`,[source.id])).rows[0].n,1);
+  // Jobs retain a non-cascading schema FK. Delete the actual operation sources
+  // first, then their parser/document; each history must survive both steps.
+  for(const source of sources){
+   await client.query(`DELETE FROM folio.${source.table} WHERE id=$1`,[source.id]);
+   assert.equal((await client.query('SELECT count(*)::int n FROM folio.ai_usage_attempts WHERE workspace_id=$1 AND operation_id=$2',[workspace,source.id])).rows[0].n,5);
+  }
   await client.query('DELETE FROM folio.parsers WHERE id=$1',[parser]);
   fixture.deletedSources.push(...sources,{table:'documents',id:document},{table:'parsers',id:parser});
  }
