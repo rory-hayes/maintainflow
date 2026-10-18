@@ -521,15 +521,20 @@ async function registerGoogleRoutes(app:FastifyInstance){
    const {tokens}=await client.getToken({code:query.code,codeVerifier:decryptSecret(state.verifier_ciphertext)});
    if(!tokens.scope?.split(' ').includes(SHEETS_SCOPE))badRequest('Google Sheets permission was not granted',400);
    if(!tokens.refresh_token)badRequest('Google did not return offline access. Reconnect with consent to allow background delivery.',400);
-   await withWorkspace(state.workspace_id,async c=>{
-    await c.query('select id from integrations where id=$1 for update',[state.integration_id]);
-    const current=await c.query('delete from oauth_states where state_hash=$1 and consumed_at is not null returning state_hash',[hashToken(query.state)]);
+   await transaction(adminPool,async c=>{
+    await c.query("select set_config('app.workspace_id',$1,true),set_config('statement_timeout','10000',true),set_config('lock_timeout','5000',true)",[state.workspace_id]);
+    // Token exchange can outlive a role change. Hold current authority through
+    // credential persistence so removal/downgrade cannot race this final commit.
+    const membership=(await c.query('select role from memberships where workspace_id=$1 and user_id=$2 for share',[state.workspace_id,actor.userId])).rows[0];
+    if(!membership||!admins.includes(membership.role))badRequest('Your workspace role no longer allows connecting Google Sheets.',403);
+    await c.query("select id from integrations where id=$1 and workspace_id=$2 and kind='google_sheets' for update",[state.integration_id,state.workspace_id]);
+    const current=await c.query('delete from oauth_states where state_hash=$1 and workspace_id=$2 and user_id=$3 and integration_id=$4 and consumed_at is not null returning state_hash',[hashToken(query.state),state.workspace_id,actor.userId,state.integration_id]);
     if(!current.rowCount)badRequest('Google authorization was superseded or the integration was disconnected. Start again.',400);
-    await c.query('update integrations set secret_ciphertext=$2,enabled=true where id=$1',[state.integration_id,encryptSecret(JSON.stringify(tokens))]);
+    await c.query("update integrations set secret_ciphertext=$3,enabled=true where id=$1 and workspace_id=$2 and kind='google_sheets'",[state.integration_id,state.workspace_id,encryptSecret(JSON.stringify(tokens))]);
     await audit(c,state.workspace_id,actor.userId,'google_sheets.connected',state.integration_id);
    });
    return reply.redirect(`${config.origin}/app/integrations?google=connected`);
-  }catch(error){if((error as {statusCode?:number}).statusCode===400)throw error;badRequest(publicProviderError('Google OAuth',error),502);}
+  }catch(error){if([400,403].includes((error as {statusCode?:number}).statusCode??0))throw error;badRequest(publicProviderError('Google OAuth',error),502);}
  });
  app.post('/api/google/:id/disconnect',async request=>{
   const actor=await sessionAdmin(request),id=uuid.parse((request.params as {id:string}).id);
