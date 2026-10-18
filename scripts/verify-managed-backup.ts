@@ -18,6 +18,7 @@ import type {BackupConfig} from './backup/types.js';
 import {canonicalSignupPolicy} from '../shared/signup-terms.js';
 import {assertStorageRestoreReady} from '../server/core/restore-state.js';
 import {verifyManagedStaging} from './backup/managed-staging-acceptance.js';
+import {seedAiUsageFixture,assertAiUsageFixture,assertAiUsagePermissions,type AiUsageFixture} from './backup/ai-usage-fixture.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),exec=promisify(execFile),args=process.argv.slice(2);
 assert.deepEqual(args,['--execute'],'Pass --execute to create and clean an owned socket-only PostgreSQL17 fixture. No hosted credentials are read.');
@@ -35,6 +36,7 @@ const checkpoint=(name:string)=>{checks.push(name);console.log('PASS '+name);};
 const cfg=(database:string,managed=false):BackupConfig=>({version:1,database:{host:socket,port,database,user:'backup_owner'},schema:'folio',adminRole:'backup_admin',appRole:'backup_app',storageDir:path.join(run,database+'-files'),integrationKeyFile:path.join(run,database+'-key'),...(managed?{databaseProfile:'managed-source',sourceStorage:{kind:'supabase',url:'https://owned-managed-fixture.supabase.co',serviceRoleKeyFile:path.join(run,'storage-credential')}}:{})});
 const source=cfg('source',true),target=cfg('target'),badTarget=cfg('bad_target'),migrations=path.join(root,'migrations');
 const objects=new Map<string,Buffer>(),records=new Map<string,{id:string;updated_at:string}>(),downloads:string[]=[];let requests=0;
+let aiUsageFixture:AiUsageFixture;
 const termsSnapshot=(database:string)=>sql(database,async c=>({
  contracts:(await c.query('SELECT to_jsonb(c) body FROM folio.checkout_contracts c ORDER BY id')).rows,
  receipts:(await c.query('SELECT to_jsonb(r) body FROM folio.checkout_contract_receipts r ORDER BY contract_id')).rows,
@@ -70,6 +72,7 @@ try{
    await c.query("INSERT INTO folio.signup_terms_acceptances(user_id,policy,accepted_at) VALUES($1,$2,'2026-09-20T00:00:00Z')",[user,JSON.stringify({...signupInput,sha256:sha256(canonicalSignupPolicy(signupInput))})]);
    if(i===0){const optional=workspace+'/'+randomUUID(),absent=workspace+'/'+randomUUID(),omitted=workspace+'/'+randomUUID();objects.set(optional,Buffer.from('Retained deletion retry'));objects.set(omitted,Buffer.from('Unreferenced physical object'));await c.query('INSERT INTO folio.file_deletions(workspace_id,storage_key) VALUES($1,$2),($1,$3)',[workspace,optional,absent]);}
   }
+  aiUsageFixture=await seedAiUsageFixture(c);receipt.aiUsageFixture=aiUsageFixture;
   await c.query("SELECT setval('folio.document_events_sequence_seq',99,false)");
  });
  const originalTerms=await termsSnapshot('source');assert.equal(originalTerms.contracts.length,2);assert.equal(originalTerms.receipts.length,2);
@@ -91,6 +94,13 @@ try{
  await assert.rejects(openSourceDatabase(source,migrations),/triggers differ/);
  await sql('source',c=>c.query('ALTER TABLE folio.signup_terms_acceptances ENABLE TRIGGER signup_terms_acceptance_immutable'));
  checkpoint('DisabledSignupTermsImmutabilityRefused');
+ await sql('source',c=>c.query('ALTER TABLE folio.ai_usage_attempts DISABLE TRIGGER ai_usage_attempts_immutable'));
+ await assert.rejects(openSourceDatabase(source,migrations),/triggers differ/);
+ await sql('source',c=>c.query('ALTER TABLE folio.ai_usage_attempts ENABLE TRIGGER ai_usage_attempts_immutable'));
+ await sql('source',c=>c.query('DROP TRIGGER ai_usage_attempts_immutable ON folio.ai_usage_attempts'));
+ await assert.rejects(openSourceDatabase(source,migrations),/triggers differ/);
+ await sql('source',c=>c.query('CREATE TRIGGER ai_usage_attempts_immutable BEFORE UPDATE ON folio.ai_usage_attempts FOR EACH ROW EXECUTE FUNCTION folio.preserve_ai_usage_attempt()'));
+ checkpoint('MissingOrDisabledAiCostHistoryImmutabilityRefused');
  await sql('source',c=>c.query('GRANT EXECUTE ON FUNCTION folio.worker_has_runnable_work() TO backup_admin'));
  await assert.rejects(openSourceDatabase(source,migrations),/only by its owner/);await sql('source',c=>c.query('REVOKE EXECUTE ON FUNCTION folio.worker_has_runnable_work() FROM backup_admin'));checkpoint('WidenedWatchdogPermissionRefused');
  await sql('source',c=>c.query("INSERT INTO folio.intake_files(id,workspace_id,storage_key) SELECT gen_random_uuid(),id,id::text||'/'||gen_random_uuid()::text FROM folio.workspaces LIMIT 1"));
@@ -119,6 +129,10 @@ try{
  });
  checkpoint('CheckoutTermsBytesBindingsReceiptsAndImmutabilitySurviveEncryptedRestore');
  checkpoint('SignupPolicyBytesDigestsAcceptanceTimesAndImmutabilitySurviveEncryptedRestore');
+ await sql('target',c=>assertAiUsageFixture(c,aiUsageFixture!));
+ await assertAiUsagePermissions(role=>connection('target',role),aiUsageFixture!);
+ await verifyInactive();
+ checkpoint('ExactAllKindsCostHistoryNullsDecimalsSourceRetentionAndRestrictedGrantsSurviveManagedRestore');
  const activated=await runBackup(['activate','--config',path.join(run,'target.json'),'--input',artifact,'--identity-file',identity,'--allow-outbound']);assert.equal(activated.status,'restore_activated');checkpoint('ActivationRechecksFullDatabaseAndObjectsWithoutStartingServices');
  await assert.rejects(verifyInactive(),(error:any)=>error.code==='BACKUP_ACTIVATION');checkpoint('InactiveVerificationCannotAcknowledgeAnAlreadyActivatedRestore');
  await sql('target',async c=>{assert.equal((await c.query('SELECT count(*)::int n FROM folio.documents')).rows[0].n,2);assert.deepEqual((await c.query('SELECT last_value::text,is_called FROM folio.document_events_sequence_seq')).rows[0],{last_value:'99',is_called:false});const r=(await c.query("SELECT has_function_privilege('backup_admin','folio.worker_has_runnable_work()','EXECUTE') admin,has_function_privilege('backup_app','folio.worker_has_runnable_work()','EXECUTE') app")).rows[0];assert.deepEqual(r,{admin:false,app:false});assert.equal((await c.query("SELECT count(*)::int n FROM pg_namespace WHERE nspname IN ('cron','vault','platform')")).rows[0].n,0);});

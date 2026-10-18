@@ -1,3 +1,4 @@
+import {startAIUsage,observeOpenAIResponse,withAIUsageId,readOpenAIErrorBody} from './openai-usage.js';
 import type { ParserSchema, SchemaField } from '../../shared/types.js';
 import type { SchemaSuggestionInput, SchemaSuggestionProvider, SchemaSuggestionResult } from '../../shared/schema-suggestions.js';
 import { schemaSuggestionLimits } from '../../shared/schema-suggestions.js';
@@ -192,10 +193,15 @@ export function createOpenAISchemaSuggestionProvider(options: ProviderOptions = 
       const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
       const configuredTimeout = options.timeoutMs ?? openAISchemaSuggestions.timeoutMs;
       const timeoutMs = Number.isFinite(configuredTimeout) ? Math.min(openAISchemaSuggestions.timeoutMs, Math.max(1, configuredTimeout)) : openAISchemaSuggestions.timeoutMs;
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let usageId:string|undefined;
+      try{usageId=await startAIUsage(input.usageObserver,signal);}catch(error){if(signal.aborted)throw cancelled();throw error;}
+      const timer = setTimeout(() => controller.abort(), timeoutMs);let response:Response|undefined;
       try {
-        const response = await abortable(request(openAISchemaSuggestions.endpoint, { method: 'POST', redirect: 'error', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal }), signal);
-        // These statuses have a clear disposition even with an unreadable body.
+        response = await abortable(request(openAISchemaSuggestions.endpoint, { method: 'POST', redirect: 'error', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal }), signal);
+        let payload:JsonObject|undefined,bodyError:unknown;
+        try{payload=response.ok?await responseBody(response,signal):await readOpenAIErrorBody(response,signal,openAISchemaSuggestions.maxResponseBytes);}catch(error){bodyError=error;}
+        finally{await observeOpenAIResponse(input.usageObserver,response,payload,{...openAISchemaSuggestions,pricingBasis:'OpenAI standard USD token rates, 2026-09-13'});}
+        // These statuses retain their disposition even with an unreadable body.
         if ([401, 403].includes(response.status)) { void response.body?.cancel().catch(() => {}); throw failed('OpenAI rejected server credentials or model access. Check the configured project.'); }
         if (response.status >= 500) { void response.body?.cancel().catch(() => {}); throw failed('OpenAI is temporarily unavailable. The worker will retry.', false); }
         if (!response.ok && response.status !== 429) {
@@ -203,16 +209,17 @@ export function createOpenAISchemaSuggestionProvider(options: ProviderOptions = 
           if (response.status === 408) throw failed('OpenAI timed out while preparing field suggestions. The worker will retry.', false);
           throw failed('OpenAI rejected the field suggestion request. Check the sample and server configuration.');
         }
-        const payload = await responseBody(response, signal);
         if (!response.ok) {
-          const code = object(payload.error) ? payload.error.code : undefined;
+          const code = object(payload?.error) ? payload.error.code : undefined;
           if (response.status === 429 && code === 'insufficient_quota') throw failed('The OpenAI project has no available API quota. Check project billing and limits.');
           if (response.status === 429 || response.status === 408) throw failed('OpenAI is temporarily unavailable or rate limited. The worker will retry.', false);
           throw failed('OpenAI rejected the field suggestion request. Check the sample and server configuration.');
         }
+        if(bodyError)throw bodyError;if(!payload)throw invalid();
         const schema = completedSchema(payload);
-        return { schema, model: openAISchemaSuggestions.model, promptVersion: openAISchemaSuggestions.promptVersion, ...usageDetails(payload) };
+        return { schema, model: openAISchemaSuggestions.model, promptVersion: openAISchemaSuggestions.promptVersion, ...withAIUsageId(usageDetails(payload),usageId) };
       } catch (error) {
+        if(response&&!response.ok&&error instanceof SchemaSuggestionProviderError)throw error;
         if (signal.aborted) throw cancelled();
         if (error instanceof SchemaSuggestionProviderError) throw error;
         throw failed('OpenAI field suggestions could not be reached. Check server connectivity and retry.', false);

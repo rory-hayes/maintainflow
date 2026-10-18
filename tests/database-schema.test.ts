@@ -1,3 +1,4 @@
+import {operationalSchemaSql,probeDatabase} from '../server/core/operations.js';
 import test,{before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomBytes,randomUUID} from 'node:crypto';
@@ -149,4 +150,34 @@ test('releasing an unfinished scoped transaction rolls it back instead of return
  client.release();
  assert.equal((await administrator.query('SELECT id FROM workspaces WHERE id=$1',[id])).rowCount,0);
  assert.equal((await administrator.query('SELECT current_schema() schema')).rows[0].schema,schema);
+});
+
+
+test('AI usage keeps tenant reads only and backend writes after repeated migration grants',async()=>{
+ for(let replay=0;replay<2;replay++){
+  await apply(migrationSql);
+  const relation=`${schema}.ai_usage_attempts`;
+  assert.deepEqual((await control.query('select relrowsecurity,relforcerowsecurity from pg_class where oid=$1::regclass',[relation])).rows[0],{relrowsecurity:true,relforcerowsecurity:true});
+  for(const privilege of ['SELECT','INSERT','UPDATE','DELETE']){
+   assert.equal((await control.query('select has_table_privilege($1,$2,$3) allowed',[appRole,relation,privilege])).rows[0].allowed,privilege==='SELECT');
+  }
+  for(const privilege of ['SELECT','INSERT','UPDATE'])assert.equal((await control.query('select has_table_privilege($1,$2,$3) allowed',[adminRole,relation,privilege])).rows[0].allowed,true);
+  await assert.rejects(tenant.query("insert into ai_usage_attempts(id,workspace_id,kind,operation_id,attempt) values(gen_random_uuid(),gen_random_uuid(),'extraction',gen_random_uuid(),1)"),/permission denied/);
+ }
+});
+
+
+test('existing runtime readiness probes reject a missing cost table or needed column under both roles',async()=>{
+ const probe=()=>Promise.all([probeDatabase(administrator,operationalSchemaSql.administrator),probeDatabase(tenant,operationalSchemaSql.tenant)]);
+ await probe();
+ await control.query(`alter table ${schema}.ai_usage_attempts rename to ai_usage_attempts_readiness_missing`);
+ try{
+  for(const [pool,sql] of [[administrator,operationalSchemaSql.administrator],[tenant,operationalSchemaSql.tenant]] as const)await assert.rejects(probeDatabase(pool,sql),{message:'Probe unavailable'});
+ }finally{await control.query(`alter table ${schema}.ai_usage_attempts_readiness_missing rename to ai_usage_attempts`);}
+ await probe();
+ await control.query(`alter table ${schema}.ai_usage_attempts rename column cost_usd to cost_usd_readiness_missing`);
+ try{
+  for(const [pool,sql] of [[administrator,operationalSchemaSql.administrator],[tenant,operationalSchemaSql.tenant]] as const)await assert.rejects(probeDatabase(pool,sql),{message:'Probe unavailable'});
+ }finally{await control.query(`alter table ${schema}.ai_usage_attempts rename column cost_usd_readiness_missing to cost_usd`);}
+ await probe();
 });

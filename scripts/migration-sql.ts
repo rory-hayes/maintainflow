@@ -144,6 +144,13 @@ BEGIN
   END IF;
  END LOOP;
 END $folio_policies$;`);
+ // Operational estimates are server-written. Reapply after every broad grant.
+ parts.push(`DO $folio_ai_usage_permissions$ BEGIN
+ IF to_regclass(${literal(`${schema}.ai_usage_attempts`)}) IS NOT NULL THEN
+  REVOKE ALL ON ${s}.ai_usage_attempts FROM PUBLIC,${u};
+  GRANT SELECT ON ${s}.ai_usage_attempts TO ${u};
+ END IF;
+END $folio_ai_usage_permissions$;`);
  // The scheduler helper is owner-only. Broad runtime function grants above must
  // not reopen it on later migration runs after the watchdog was installed.
  parts.push(`DO $folio_watchdog_permissions$ BEGIN

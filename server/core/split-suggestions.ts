@@ -1,3 +1,4 @@
+import {createAIUsageObserver} from './ai-usage.js';
 import '@fastify/multipart';
 import {createHash,randomUUID} from 'node:crypto';
 import type {FastifyInstance,FastifyReply,FastifyRequest} from 'fastify';
@@ -303,6 +304,7 @@ export async function processOneSplitSuggestion(onlyId?:string,options:{signal?:
  if(!job)return false;
  const auth=authorizationForJob(job),op=deadline(ms,options.signal);
  const checkJob=()=>liveScope(auth,job.parser_id,job.id,async(_c,row)=>{if(row.state!=='processing'||row.lease_owner!==owner||new Date(row.lease_until).getTime()<=Date.now())badRequest('This suggestion attempt is no longer current.',409);});
+ const usageObserver=createAIUsageObserver({workspaceId:job.workspace_id,kind:'split_suggestion',operationId:job.id,attempt:job.attempts},checkJob);
  try{
   const result=await op.bounded(async()=>{
    await op.bounded(checkJob);const bytes=await op.bounded(()=>readStoredObject(job.source_storage_key,splitSuggestionLimits.maxBytes));verifyBytes(bytes,job);
@@ -313,7 +315,7 @@ export async function processOneSplitSuggestion(onlyId?:string,options:{signal?:
    const visualDocument=await op.bounded(()=>prepareVisualDocument(input,{signal:op.signal,expectedSha256:job.source_sha256}));
    await op.bounded(checkJob);const active=provider;
    if(!active?.configured())throw new SplitSuggestionProviderError('AI split suggestions are unavailable. Choose ranges manually or check the AI connection.');
-   const proposed=await op.bounded(()=>active.suggest({...input,...(visualDocument?{visualDocument}:{})}));
+   const proposed=await op.bounded(()=>active.suggest({...input,usageObserver,...(visualDocument?{visualDocument}:{})}));
    const checked=validatedResult(proposed,source.pageCount);
    return {...checked,pageCount:source.pageCount,tokenUsage:visualDocument?{...checked.tokenUsage,sourceRendering:visualRenderingMetadata(visualDocument)}:checked.tokenUsage};
   });
@@ -333,7 +335,7 @@ export async function processOneSplitSuggestion(onlyId?:string,options:{signal?:
    const changed=await c.query("update split_suggestions set state=$3,lease_owner=null,lease_until=null,error=$4,available_at=clock_timestamp()+($5*interval '1 second'),updated_at=clock_timestamp() where id=$1 and state='processing' and lease_owner=$2 and lease_until>clock_timestamp() returning id",[job.id,owner,permanent?'failed':'queued',message,Math.min(60,2**job.attempts)]);
    if(changed.rowCount&&permanent)await audit(c,job.workspace_id,null,'split.suggestion_failed',job.id,{parserId:job.parser_id,reason:'processing_failed'});
   });
- }finally{op.close();}
+ }finally{op.close();await usageObserver.finish();}
  return true;
 }
 

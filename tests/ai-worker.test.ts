@@ -1,3 +1,4 @@
+import {createOpenAIProvider,openAIExtraction} from '../server/core/openai-provider.js';
 import test, { before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -358,4 +359,70 @@ test('authenticated hosted wake recovers a crashed worker from its expired durab
     assert.equal(await usageCount(item.document.id),1);
     await wake();assert.equal((await detail(item.document.id)).runs.length,1);
   }finally{await endpoint.close();}
+});
+
+
+test('failed output validation and retry retain separate response estimates without another page charge',async()=>{
+ const item=await intake('usage-retry');let calls=0;
+ setExtractionProvider(createOpenAIProvider({apiKey:'synthetic-usage-fixture',fetch:(async()=>{
+  calls++;
+  return Response.json({id:`resp_usage_${calls}`,model:openAIExtraction.model,status:calls===1?'failed':'completed',error:calls===1?{code:'server_error'}:undefined,
+   output:[{type:'message',status:'completed',content:[{type:'output_text',text:JSON.stringify({rawValues:{merchant:'Owned AI fixture',total:'24.50',currency:'EUR'},evidence:[]})}]}],usage:{input_tokens:100,output_tokens:10}});
+ }) as typeof fetch}));
+ await processOneCoreJob(item.jobId);assert.equal((await detail(item.document.id)).jobs[0].state,'queued');await makeAvailable(item.jobId);await processOneCoreJob(item.jobId);
+ const final=await detail(item.document.id);assert.equal(calls,2);assert.equal(final.runs.length,1);assert.equal(await usageCount(item.document.id),1);
+ const attempts=(await adminPool.query('select id,attempt,usage_state,response_status from ai_usage_attempts where workspace_id=$1 and operation_id=$2 order by attempt',[actor.workspaceId,item.jobId])).rows;
+ assert.deepEqual(attempts.map(row=>[row.attempt,row.usage_state,row.response_status]),[[1,'reported_priced','failed'],[2,'reported_priced','completed']]);
+ assert.equal(final.runs[0].tokenUsage.aiUsageAttemptId,attempts[1].id);
+});
+
+test('observation write failure cannot retry a successful paid extraction or erase its result fallback',async t=>{
+ t.mock.method(console,'warn',()=>{});
+ const item=await intake('usage-write-failure');let calls=0;
+ const name=`owned_usage_failure_${randomUUID().replaceAll('-','')}`;
+ await adminPool.query(`create function ${name}() returns trigger language plpgsql as $$ begin if NEW.operation_id='${item.jobId}'::uuid and NEW.outcome='response_received' then raise exception 'Synthetic usage write failure'; end if;return NEW;end $$`);
+ await adminPool.query(`create trigger ${name} before update on ai_usage_attempts for each row execute function ${name}()`);
+ try{
+  setExtractionProvider(createOpenAIProvider({apiKey:'synthetic-usage-fixture',fetch:(async()=>{calls++;return Response.json({id:'resp_usage_write_failure',model:openAIExtraction.model,status:'completed',output:[{type:'message',status:'completed',content:[{type:'output_text',text:JSON.stringify({rawValues:{merchant:'Owned AI fixture',total:'24.50',currency:'EUR'},evidence:[]})}]}],usage:{input_tokens:100,output_tokens:10}});}) as typeof fetch}));
+  await processOneCoreJob(item.jobId);assert.equal(await processOneCoreJob(item.jobId),false);
+  const final=await detail(item.document.id);assert.equal(calls,1);assert.equal(final.jobs[0].state,'completed');assert.equal(final.runs.length,1);assert.equal(await usageCount(item.document.id),1);
+  const row=(await adminPool.query('select * from ai_usage_attempts where workspace_id=$1 and operation_id=$2',[actor.workspaceId,item.jobId])).rows[0];
+  assert.equal(row.usage_state,'unknown');assert.equal(row.cost_usd,null);assert.equal(final.runs[0].tokenUsage.aiUsageAttemptId,row.id);assert.equal(final.runs[0].tokenUsage.estimatedCost,true);
+ }finally{await adminPool.query(`drop trigger if exists ${name} on ai_usage_attempts`);await adminPool.query(`drop function if exists ${name}()`);}
+});
+
+test('late response after cancellation and source deletion retains usage without reviving output or charging again',async()=>{
+ const item=await intake('usage-cancel-delete'),controller=new AbortController();
+ let enter!:()=>void,release!:(response:Response)=>void,finish!:()=>void;
+ const entered=new Promise<void>(resolve=>{enter=resolve;}),settled=new Promise<void>(resolve=>{finish=resolve;});
+ const bounded=async<T>(pending:Promise<T>)=>{let timer:ReturnType<typeof setTimeout>|undefined;try{return await Promise.race([pending,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Synthetic usage gate timed out')),5000);})]);}finally{clearTimeout(timer);}};
+ const active=createOpenAIProvider({apiKey:'synthetic-late-usage',fetch:(()=>{enter();return new Promise<Response>(resolve=>{release=resolve;});}) as typeof fetch});
+ setExtractionProvider({configured:()=>true,async extract(input){try{return await active.extract(input);}finally{finish();}}});
+ const work=processOneCoreJob(item.jobId,{signal:controller.signal});
+ await bounded(entered);controller.abort();await bounded(work);
+ const initial=(await adminPool.query('select * from ai_usage_attempts where operation_id=$1',[item.jobId])).rows[0];assert.equal(initial.outcome,'interrupted');assert.equal(initial.cost_usd,null);
+ const pagesBefore=(await adminPool.query('select count(*)::integer n from usage_ledger where workspace_id=$1',[actor.workspaceId])).rows[0].n;
+ const deleted=await app.inject({method:'DELETE',url:`/api/documents/${item.document.id}`,headers});assert.equal(deleted.statusCode,200,deleted.body);
+ release(Response.json({id:'resp_late_usage',model:openAIExtraction.model,status:'completed',output:[{type:'message',status:'completed',content:[{type:'output_text',text:JSON.stringify({rawValues:{merchant:'Owned AI fixture',total:'24.50',currency:'EUR'},evidence:[]})}]}],usage:{input_tokens:100,output_tokens:10}}));
+ await bounded(settled);
+ const final=(await adminPool.query('select * from ai_usage_attempts where id=$1',[initial.id])).rows[0];assert.equal(final.usage_state,'reported_priced');assert.equal(final.response_id,'resp_late_usage');
+ assert.equal((await adminPool.query('select id from jobs where id=$1',[item.jobId])).rowCount,0);assert.equal((await adminPool.query('select id from extraction_runs where document_id=$1',[item.document.id])).rowCount,0);
+ assert.equal((await adminPool.query('select count(*)::integer n from usage_ledger where workspace_id=$1',[actor.workspaceId])).rows[0].n,pagesBefore);
+ assert.doesNotMatch(JSON.stringify(final),/Owned AI fixture|24.50|merchant|synthetic-late-usage/);
+});
+
+test('a blocked cost write is joined after result persistence, outside the paid processing deadline',async t=>{
+ t.mock.method(console,'warn',()=>{});
+ const item=await intake('usage-slow-write');let calls=0,entered!:()=>void;
+ const started=new Promise<void>(resolve=>{entered=resolve;});let blocker:import('pg').PoolClient|undefined;
+ setExtractionProvider(createOpenAIProvider({apiKey:'synthetic-slow-usage',fetch:(async()=>{
+  calls++;blocker=await adminPool.connect();await blocker.query('BEGIN');await blocker.query('select id from ai_usage_attempts where operation_id=$1 for update',[item.jobId]);entered();
+  return Response.json({id:'resp_slow_usage',model:openAIExtraction.model,status:'completed',output:[{type:'message',status:'completed',content:[{type:'output_text',text:JSON.stringify({rawValues:{merchant:'Owned AI fixture',total:'24.50',currency:'EUR'},evidence:[]})}]}],usage:{input_tokens:100,output_tokens:10}});
+ }) as typeof fetch}));
+ const processing=processOneCoreJob(item.jobId,{providerTimeoutMs:500});
+ try{
+  await started;await new Promise(resolve=>setTimeout(resolve,650));
+  const final=await detail(item.document.id);assert.equal(final.jobs[0].state,'completed');assert.equal(final.runs.length,1);assert.equal(calls,1);assert.equal(await usageCount(item.document.id),1);
+ }finally{if(blocker){await blocker.query('ROLLBACK');blocker.release();}await processing;}
+ assert.equal(await processOneCoreJob(item.jobId),false);assert.equal(calls,1);
 });

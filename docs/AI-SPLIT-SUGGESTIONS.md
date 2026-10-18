@@ -41,7 +41,7 @@ The client saves only scoped recovery identifiers, hashes and confirmed options.
 
 Sources and signed staging continue to consume reserved bytes until physical removal succeeds. Interrupted operations retain a finite lease, and cleanup skips active leases. This is not a guarantee against arbitrarily late operations in an unbounded storage adapter. Draft metadata remains for result recovery. The backup object inventory includes immutable suggestion sources and any present staging objects; recovery metadata and receipt provenance are included in the database backup.
 
-Model token usage and estimated standard USD token cost are retained as provenance. They are not page-credit charges or a provider billing reconciliation. Free-plan settings and mock billing remain unchanged.
+Model token usage and estimated standard USD token cost are retained as provenance. Durable attempt observations are separate from ready proposals, so a failed or discarded response can retain a known usage estimate without creating split ranges. Missing or unpriced usage remains explicitly unknown. The Usage cost-coverage summary includes split suggestions alongside extraction and field suggestions; exact result links avoid double counting, and unlinked legacy successes are shown separately. Historical failed attempts are unavailable. New attempts use their start month in UTC; legacy results use their saved-result month. These estimates are not page-credit charges or a provider billing reconciliation. Free-plan settings and mock billing remain unchanged.
 
 ## Verification boundary
 
