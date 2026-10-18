@@ -3,9 +3,9 @@ import {useRef,useState} from 'react';
 
 export class ApiError extends Error {constructor(message:string,public status:number){super(message);}}
 export function workspaceId(){return sessionStorage.getItem('folio.workspace')||'';}
-export async function api<T=any>(path:string,options:RequestInit={}):Promise<T> {
+export async function api<T=any>(path:string,options:RequestInit={},selectedWorkspace=workspaceId()):Promise<T> {
   const headers=new Headers(options.headers);
-  if(workspaceId())headers.set('X-Workspace-Id',workspaceId());
+  if(selectedWorkspace)headers.set('X-Workspace-Id',selectedWorkspace);
   if(options.body&&!(options.body instanceof FormData))headers.set('Content-Type','application/json');
   const response=await fetch(path,{...options,headers,credentials:'same-origin'});
   if(!response.ok){const detail=await response.json().catch(()=>({message:'The request could not be completed.'}));throw new ApiError(detail.message||detail.error||'The request failed.',response.status);}
@@ -32,11 +32,13 @@ export function useAction(){
 }
 type UploadResult={document?:{id:string};duplicate?:boolean;name?:string;error?:string;jobId?:string|null};
 export async function uploadDocuments(parserId:string,files:File[],options:{bankLocale?:'en-IE'|'en-US'|'de-DE'}={}):Promise<UploadResult&{results:UploadResult[]}>{
-  const configuration=await api<{strategy:'signed'|'multipart';maxBytes:number}>('/api/uploads/config');
+  // Keep every application request in this batch bound to the workspace where it started.
+  const selectedWorkspace=workspaceId();
+  const configuration=await api<{strategy:'signed'|'multipart';maxBytes:number}>('/api/uploads/config',{},selectedWorkspace);
   if(configuration.strategy==='multipart'){
     const form=new FormData();files.forEach(file=>form.append('files',file));
     const query=options.bankLocale?`?bankLocale=${encodeURIComponent(options.bankLocale)}`:'';
-    return api(`/api/parsers/${parserId}/documents${query}`,{method:'POST',body:form,headers:{'Idempotency-Key':crypto.randomUUID()}});
+    return api(`/api/parsers/${parserId}/documents${query}`,{method:'POST',body:form,headers:{'Idempotency-Key':crypto.randomUUID()}},selectedWorkspace);
   }
   const results:UploadResult[]=[];
   for(const file of files){
@@ -44,13 +46,13 @@ export async function uploadDocuments(parserId:string,files:File[],options:{bank
       if(file.size<1||file.size>configuration.maxBytes)throw new Error('Each file must contain data and be 10 MB or smaller.');
       const digest=await crypto.subtle.digest('SHA-256',await file.arrayBuffer());
       const sha256=Array.from(new Uint8Array(digest),value=>value.toString(16).padStart(2,'0')).join('');
-      const reservation=await post<{uploadId:string;uploadUrl:string}>(`/api/parsers/${parserId}/uploads`,{filename:file.name,size:file.size,sha256,...(options.bankLocale?{bankLocale:options.bankLocale}:{})});
+      const reservation=await api<{uploadId:string;uploadUrl:string}>(`/api/parsers/${parserId}/uploads`,{method:'POST',body:JSON.stringify({filename:file.name,size:file.size,sha256,...(options.bankLocale?{bankLocale:options.bankLocale}:{})})},selectedWorkspace);
       const destination=new URL(reservation.uploadUrl);
       if(destination.protocol!=='https:'||!destination.hostname.endsWith('.supabase.co'))throw new Error('The private upload destination is invalid.');
       const uploaded=await fetch(destination,{method:'PUT',body:file,headers:{'Content-Type':'application/octet-stream','x-upsert':'false'},credentials:'omit',redirect:'error',referrerPolicy:'no-referrer'});
       if(!uploaded.ok)throw new Error('The file could not be uploaded. Please retry.');
       await uploaded.body?.cancel();
-      results.push(await post<UploadResult>(`/api/uploads/${reservation.uploadId}/finalize`));
+      results.push(await api<UploadResult>(`/api/uploads/${reservation.uploadId}/finalize`,{method:'POST',body:'{}'},selectedWorkspace));
     }catch(error){results.push({name:file.name,error:error instanceof Error?error.message:'Upload failed.'});}
   }
   return {...(results.length===1?results[0]:{}),results};
