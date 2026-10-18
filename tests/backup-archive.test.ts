@@ -222,3 +222,28 @@ test('preexisting extraction content and symbolic-link input are refused without
   assert.equal((await fs.lstat(link)).isSymbolicLink(), true); assert.deepEqual(await fs.readdir(empty), []);
   assert.deepEqual(await fs.readFile(f.output), bytes); await unchangedSource(f);
 });
+
+test('v2 authenticates exact omitted staging declarations while v1 retains its original round-trip shape',async t=>{
+ const f=await fixture(t),excludedUploadStaging=[{key:absentKey,recordType:'direct_upload' as const,recordId:absentKey.split('/')[1]}];
+ const manifest:BackupManifest={...f.manifest,version:2,capture:'quiesced-supabase-excluding-staging',excludedUploadStaging};
+ const destination=path.join(f.root,'v2');await fs.mkdir(destination,{mode:0o700});
+ await sealArchive(f.source,manifest,f.recipient,f.output);
+ const decoded=await openArchive(f.output,f.identity,destination);assert.deepEqual(decoded.manifest,manifest);
+ assert.equal(await fs.stat(path.join(destination,'objects',absentKey)).then(()=>true,()=>false),false);
+ for(const [name,bytes]of f.contents)assert.deepEqual(await fs.readFile(path.join(destination,name)),bytes);
+ assert.equal(f.manifest.version,1);assert.equal('excludedUploadStaging' in validateManifest(f.manifest),false);
+});
+
+test('v2 rejects mixed versions, fake or present exclusions and undeclared staging payloads before extraction',async t=>{
+ const f=await fixture(t),base:any={...f.manifest,version:2,capture:'quiesced-supabase-excluding-staging',excludedUploadStaging:[{key:absentKey,recordType:'direct_upload',recordId:absentKey.split('/')[1]}]};
+ const mutations:Array<(m:any)=>void>=[
+  m=>{m.version=1;},m=>{m.capture='quiesced-supabase';},m=>{delete m.excludedUploadStaging;},
+  m=>{m.excludedUploadStaging[0].key=liveKey;m.excludedUploadStaging[0].recordId=liveKey.split('/')[1];},
+  m=>{m.excludedUploadStaging[0].key=omittedKey;m.excludedUploadStaging[0].recordId=omittedKey.split('/')[1];},
+  m=>{m.excludedUploadStaging.push({...m.excludedUploadStaging[0]});},
+  m=>{m.excludedUploadStaging[0].recordId=liveKey.split('/')[1];},
+  m=>{m.objects[1].byteSize=0;},m=>{m.excludedUploadStaging[0].additional='untrusted';},
+  m=>{m.files.push({name:'objects/'+absentKey,bytes:0,sha256:sha256('')});},
+ ];
+ for(const [index,mutate]of mutations.entries()){const manifest=structuredClone(base);mutate(manifest);await rejectsCiphertext(f,await encrypt(f,frame(f,manifest)),'invalid-staging-'+index);}
+});

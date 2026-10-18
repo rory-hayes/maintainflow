@@ -57,3 +57,10 @@ test('inactive verification rejects altered recovered keys and original bytes be
  const changed=Buffer.from(f.original);changed[0]^=1;await fs.writeFile(path.join(f.storage,objectKey),changed);await f.rejected('BACKUP_STORAGE');assert.deepEqual(await fs.readFile(path.join(f.storage,objectKey)),changed);
  assert.equal(await fs.readFile(f.markerFile,'utf8'),f.markerBytes);assert.equal(await fs.stat(f.receiptFile).then(()=>true,()=>false),false);
 });
+
+test('staging exclusion is create-only and refuses filesystem configuration before credentials or database access',async t=>{
+ const f=await fixture(t);
+ for(const operation of ['inspect','restore','verify','activate'])await assert.rejects(runBackup([operation,'--config',f.configFile,'--input',f.input,'--identity-file',f.identityFile,'--exclude-upload-staging']),(error:any)=>error.code==='BACKUP_ARGUMENTS');
+ await assert.rejects(runBackup(['create','--config',f.configFile,'--recipient-file',path.join(f.root,'does-not-exist'),'--output',path.join(f.root,'never-created.age'),'--quiesced','--exclude-upload-staging']),(error:any)=>error.code==='BACKUP_CONFIG');
+ assert.equal(await fs.stat(path.join(f.root,'never-created.age')).then(()=>true,()=>false),false);
+});

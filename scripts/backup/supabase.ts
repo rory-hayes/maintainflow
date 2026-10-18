@@ -2,16 +2,19 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {backupAssert,BackupError} from './errors.js';
 import {backupLimits,objectKey,sha256,ensurePrivateDirectory} from './files.js';
+import {uploadStagingDeclarations} from './staging.js';
+import type {BackupUploadStaging} from './types.js';
 
 type InventoryObject={key:string;id:string;bytes:number;updatedAt:string};
 const uuid=/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const bucket='folio-originals';
 const fail=()=>new BackupError('BACKUP_STORAGE','The private Supabase bucket could not be read or changed during capture.');
 /** Read-only transport. No bucket, object, policy, signed URL or credential mutations. */
-export function createSupabaseBackupSource(options:{url:string;serviceRoleKey:string;fetch?:typeof fetch;timeoutMs?:number}){
+export function createSupabaseBackupSource(options:{url:string;serviceRoleKey:string;fetch?:typeof fetch;timeoutMs?:number;excludedUploadStaging?:BackupUploadStaging[]}){
  let url:URL;try{url=new URL(options.url);}catch{throw fail();}
  backupAssert(url.protocol==='https:'&&/^[a-z0-9-]+\.supabase\.co$/.test(url.hostname)&&!url.username&&!url.password&&!url.port&&url.pathname==='/'&&!url.search&&!url.hash,'BACKUP_STORAGE','Use the exact Supabase project HTTPS origin.');
  backupAssert(options.serviceRoleKey.length>0&&options.serviceRoleKey.length<=16384&&!/\s/.test(options.serviceRoleKey),'BACKUP_STORAGE','Use a bounded private Supabase service credential file.');
+ const excluded=new Set(uploadStagingDeclarations(options.excludedUploadStaging??[]).map(entry=>entry.key));
  const transport=options.fetch??fetch,base=url.origin+'/storage/v1',timeout=options.timeoutMs??45000;
  backupAssert(Number.isSafeInteger(timeout)&&timeout>0&&timeout<=45000,'BACKUP_STORAGE','Invalid storage request deadline.');
  async function request(route:string,body:unknown,maxBytes:number){
@@ -53,7 +56,9 @@ export function createSupabaseBackupSource(options:{url:string;serviceRoleKey:st
     if(batch.length<100)break;
    }
   }
-  await walk('');return {policy,objects:objects.sort((a,b)=>a.key.localeCompare(b.key))};
+  // Validate/count raw pages before filtering. A late insertion shifting offsets
+  // produces a duplicate and fails closed; never skip or reset the accepted baseline.
+  await walk('');return {policy,objects:objects.filter(item=>!excluded.has(item.key)).sort((a,b)=>a.key.localeCompare(b.key))};
  }
  async function download(item:InventoryObject){const bytes=await request('/object/authenticated/'+bucket+'/'+item.key,undefined,backupLimits.objectBytes);backupAssert(bytes.length===item.bytes,'BACKUP_CHANGED','A private original changed size during capture.');return bytes;}
  return {async capture(directory:string){
@@ -62,7 +67,7 @@ export function createSupabaseBackupSource(options:{url:string;serviceRoleKey:st
   for(const item of before.objects){const bytes=await download(item);hashes.set(item.key,sha256(bytes));const workspace=path.join(directory,item.key.split('/')[0]!);await fs.mkdir(workspace,{mode:0o700}).catch(error=>{if(error.code!=='EEXIST')throw error;});await ensurePrivateDirectory(workspace);await fs.writeFile(path.join(directory,item.key),bytes,{mode:0o600,flag:'wx'});}
   async function verify(){
    backupAssert(JSON.stringify(await inventory())===JSON.stringify(before),'BACKUP_CHANGED','The private bucket inventory or policy changed during capture.');
-   // Repeat actual bytes, including optional/unreferenced objects. Inventory equality alone
+   // Repeat every nonexcluded byte, including optional/unreferenced objects. Inventory equality alone
    // does not establish content identity, and neither pass replaces operator quiescence.
    for(const item of before.objects)backupAssert(sha256(await download(item))===hashes.get(item.key),'BACKUP_CHANGED','A private original changed during capture.');
    backupAssert(JSON.stringify(await inventory())===JSON.stringify(before),'BACKUP_CHANGED','The private bucket changed during content verification.');

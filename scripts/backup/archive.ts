@@ -9,6 +9,7 @@ import {backupAssert,BackupError} from './errors.js';
 import {backupLimits,ensurePrivateDirectory,safeDestination,validateManifest} from './files.js';
 import type {BackupManifest} from './types.js';
 
+// Container framing stays v1; the authenticated manifest separately versions capture semantics.
 export const backupMagic=Buffer.from('FOLIO-BACKUP\n1\n','ascii');
 
 async function* plaintext(directory:string,manifest:BackupManifest){

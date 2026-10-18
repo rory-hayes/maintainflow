@@ -9,8 +9,9 @@ import {to as copyTo,from as copyFrom} from 'pg-copy-streams';
 import {backupLimits,readPrivateFile,hashFile} from './files.js';
 import {BackupError} from './errors.js';
 import {backupWatchdog} from './watchdog.js';
+import {uploadStagingDeclarations} from './staging.js';
 import {readMigrations,buildMigrationSql,databaseIdentifier,quoteIdentifier,type Migration} from '../migration-sql.js';
-import type {BackupConfig,BackupDatabaseManifest,BackupObjectReference,BackupPayloadFile,BackupTable,BackupSequence} from './types.js';
+import type {BackupConfig,BackupDatabaseManifest,BackupObjectReference,BackupPayloadFile,BackupTable,BackupSequence,BackupUploadStaging} from './types.js';
 
 const failure=(message:string)=>new BackupError('BACKUP_DATABASE',`Backup database: ${message}`);
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
@@ -45,21 +46,21 @@ async function identity(client:pg.Client){
  const role=(await client.query('SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user')).rows[0];assert(role?.rolsuper||role?.rolbypassrls,'The backup/migration identity must bypass RLS to read every row.');
  return {postgresMajor:17,encoding:row.encoding as string,sourceIdentity:sha(`${row.system_identifier}:${row.database_oid}`),owner:row.current_user as string};
 }
-async function managedQuiescence(client:pg.Client,config:BackupConfig){
+async function managedQuiescence(client:pg.Client,config:BackupConfig,excludeUploadStaging=false){
  if(config.databaseProfile!=='managed-source')return;
  assert(config.schema!=='public','Managed capture requires a private application schema.');
  const s=quoteIdentifier(config.schema);
  const active=await client.query(`SELECT
   EXISTS(SELECT 1 FROM ${s}.jobs WHERE state='processing') OR
   EXISTS(SELECT 1 FROM ${s}.schema_suggestions WHERE state='processing') OR
-  EXISTS(SELECT 1 FROM ${s}.split_suggestions WHERE state='processing' OR write_until>clock_timestamp() OR staging_expires_at>clock_timestamp()) OR
+  EXISTS(SELECT 1 FROM ${s}.split_suggestions WHERE state='processing' OR write_until>clock_timestamp() OR (${excludeUploadStaging?'false':'staging_expires_at>clock_timestamp()'})) OR
   EXISTS(SELECT 1 FROM ${s}.provider_events WHERE status='processing') OR
   EXISTS(SELECT 1 FROM ${s}.webhook_deliveries WHERE status='delivering') OR
   EXISTS(SELECT 1 FROM ${s}.account_email_outbox WHERE state='sending') OR
   EXISTS(SELECT 1 FROM ${s}.invitation_email_outbox WHERE state='sending') OR
-  EXISTS(SELECT 1 FROM ${s}.direct_uploads WHERE state='finalizing' OR cleanup_after>clock_timestamp()) OR
+  EXISTS(SELECT 1 FROM ${s}.direct_uploads WHERE state='finalizing' OR (${excludeUploadStaging?'false':'cleanup_after>clock_timestamp()'})) OR
   EXISTS(SELECT 1 FROM ${s}.intake_files WHERE lease_expires_at>clock_timestamp()) active`);
- assert(active.rows[0]?.active===false,'Drain all in-flight work and wait for signed upload/writer capabilities to expire before managed capture.');
+ assert(active.rows[0]?.active===false,excludeUploadStaging?'Drain all in-flight work and active writer leases before managed capture.':'Drain all in-flight work and wait for signed upload/writer capabilities to expire before managed capture.');
 }
 async function roles(client:pg.Client,config:BackupConfig){
  const rows=(await client.query('SELECT oid,rolname,rolcanlogin,rolsuper,rolcreatedb,rolcreaterole,rolinherit,rolreplication,rolbypassrls FROM pg_roles WHERE rolname=ANY($1::text[])',[[config.adminRole,config.appRole]])).rows;
@@ -157,6 +158,22 @@ async function objectReferences(client:pg.Client,config:BackupConfig){
   const old=found.get(item.key);assert(!old?.required||!item.required||(old.sha256===item.sha256&&old.byteSize===item.byteSize),'Conflicting required object references exist.');if(!old||item.required)found.set(item.key,item);
  }return [...found.values()].sort((a,b)=>a.key.localeCompare(b.key));
 }
+async function uploadStaging(client:pg.Client,config:BackupConfig):Promise<BackupUploadStaging[]>{
+ const s=quoteIdentifier(config.schema);
+ const rows=(await client.query(`SELECT 'direct_upload' kind,id::text record_id,workspace_id::text workspace_id,storage_key key FROM ${s}.direct_uploads
+  UNION ALL SELECT 'split_suggestion',id::text,workspace_id::text,staging_storage_key FROM ${s}.split_suggestions WHERE staging_storage_key IS NOT NULL
+  UNION ALL SELECT 'protected',id::text,workspace_id::text,storage_key FROM ${s}.documents
+  UNION ALL SELECT 'protected',id::text,workspace_id::text,source_storage_key FROM ${s}.pdf_splits WHERE source_storage_key IS NOT NULL
+  UNION ALL SELECT 'protected',id::text,workspace_id::text,source_storage_key FROM ${s}.archive_imports WHERE source_storage_key IS NOT NULL
+  UNION ALL SELECT 'protected',id::text,workspace_id::text,source_storage_key FROM ${s}.split_suggestions WHERE source_storage_key IS NOT NULL
+  UNION ALL SELECT 'protected',id::text,workspace_id::text,original_source_key FROM ${s}.split_suggestions WHERE original_source_key IS NOT NULL
+  UNION ALL SELECT 'protected',id::text,workspace_id::text,storage_key FROM ${s}.intake_files`)).rows;
+ assert(rows.every(row=>typeof row.key==='string'&&row.key.split('/')[0]===row.workspace_id),'A staging or source reference belongs to a different workspace.');
+ return uploadStagingDeclarations(rows.filter(row=>row.kind!=='protected').map(row=>({key:row.key,recordType:row.kind,recordId:row.record_id})),rows.filter(row=>row.kind==='protected').map(row=>row.key));
+}
+async function compareUploadStaging(client:pg.Client,config:BackupConfig,expected:BackupUploadStaging[]|undefined){
+ if(expected!==undefined)assert(same(await uploadStaging(client,config),expected),'Restored upload staging declarations differ from the authenticated archive.');
+}
 function compareObjectReferences(actual:BackupObjectReference[],expected:BackupObjectReference[]){
  const canonical=(items:BackupObjectReference[])=>{
   assert(new Set(items.map(o=>o.key)).size===items.length,'The backup object inventory contains duplicate references.');
@@ -179,18 +196,20 @@ async function beginSnapshot(client:pg.Client,config:BackupConfig,names:string[]
  await client.query(`LOCK TABLE ${names.map(n=>qualified(config.schema,n)).join(',')} IN SHARE MODE NOWAIT`);
 }
 
-export async function openSourceDatabase(config:BackupConfig,migrationsDirectory:string){
+export async function openSourceDatabase(config:BackupConfig,migrationsDirectory:string,options:{excludeUploadStaging?:boolean}={}){
+ const excludeUploadStaging=options.excludeUploadStaging===true;
+ assert(!excludeUploadStaging||config.databaseProfile==='managed-source'&&config.sourceStorage?.kind==='supabase','Staging exclusion requires a managed Supabase source.');
  const client=await connection(config);let closed=false,writtenBytes=0;
  try{
   const migrations=await readMigrations(migrationsDirectory),names=migrationTables(migrations),ident=await identity(client);await roles(client,config);await noOtherClients(client,config);
   // Discover and reject unknown relations before opening the repeatable-read snapshot.
-  await catalogue(client,config,names,false);await beginSnapshot(client,config,names);await noOtherClients(client,config);await managedQuiescence(client,config);
+  await catalogue(client,config,names,false);await beginSnapshot(client,config,names);await noOtherClients(client,config);await managedQuiescence(client,config,excludeUploadStaging);
   const watchdogSha256=await installedWatchdog(client,config);
   const tables=await catalogue(client,config,names),sequence=await sequences(client,config),permissions=await security(client,config,ident.owner);
   const manifest:BackupDatabaseManifest={schema:config.schema,postgresMajor:ident.postgresMajor,encoding:ident.encoding,sourceIdentity:ident.sourceIdentity,tables,sequences:sequence,migrations:await migrationsAt(client,config,migrations),securitySha256:permissions.sha256,...(watchdogSha256?{watchdogSha256}:{})};
-  const objects=await objectReferences(client,config);
-  return {manifest,objects,async writeTable(name:string,outputPath:string,maxBytes=backupLimits.payloadBytes){assert(!closed,'The backup snapshot is closed.');const table=tables.find(t=>t.name===name);assert(table,'Unknown backup table.');try{assert(Number.isSafeInteger(maxBytes)&&maxBytes>=0,'The remaining backup byte budget is invalid.');const file=await hashCopy(client,config.schema,table,outputPath,Math.min(maxBytes,backupLimits.payloadBytes-writtenBytes));writtenBytes+=file.bytes;return file;}catch{throw failure('A table could not be copied to the private backup payload.');}},async verifyQuiescence(){assert(!closed,'The backup snapshot is closed.');await noOtherClients(client,config);await managedQuiescence(client,config);assert((await installedWatchdog(client,config))===watchdogSha256,'The watchdog changed during capture.');assert(same(await sequences(client,config),sequence),'A sequence changed while the backup snapshot was open.');},async close(){if(closed)return;closed=true;try{await client.query('ROLLBACK');}finally{await client.end();}}};
- }catch(error){await client.query('ROLLBACK').catch(()=>{});await client.end().catch(()=>{});if(error instanceof Error&&error.message.startsWith('Backup database:'))throw error;throw failure('Source preflight or snapshot failed. Verify migration privileges and the complete current schema.');}
+  const objects=await objectReferences(client,config),excludedUploadStaging=excludeUploadStaging?await uploadStaging(client,config):undefined;
+  return {manifest,objects,excludedUploadStaging,async verifyUploadStaging(expected:BackupUploadStaging[]|undefined){assert(!closed,'The backup snapshot is closed.');await compareUploadStaging(client,config,expected);},async writeTable(name:string,outputPath:string,maxBytes=backupLimits.payloadBytes){assert(!closed,'The backup snapshot is closed.');const table=tables.find(t=>t.name===name);assert(table,'Unknown backup table.');try{assert(Number.isSafeInteger(maxBytes)&&maxBytes>=0,'The remaining backup byte budget is invalid.');const file=await hashCopy(client,config.schema,table,outputPath,Math.min(maxBytes,backupLimits.payloadBytes-writtenBytes));writtenBytes+=file.bytes;return file;}catch{throw failure('A table could not be copied to the private backup payload.');}},async verifyQuiescence(){assert(!closed,'The backup snapshot is closed.');await noOtherClients(client,config);await managedQuiescence(client,config,excludeUploadStaging);assert((await installedWatchdog(client,config))===watchdogSha256,'The watchdog changed during capture.');assert(same(await sequences(client,config),sequence),'A sequence changed while the backup snapshot was open.');},async close(){if(closed)return;closed=true;try{await client.query('ROLLBACK');}finally{await client.end();}}};
+ }catch(error){await client.query('ROLLBACK').catch(()=>{});await client.end().catch(()=>{});if(error instanceof BackupError)throw error;throw failure('Source preflight or snapshot failed. Verify migration privileges and the complete current schema.');}
 }
 
 function validateManifest(config:BackupConfig,manifest:BackupDatabaseManifest,migrations:Migration[]){
@@ -216,7 +235,7 @@ async function freshTarget(client:pg.Client,config:BackupConfig){
  assert((await client.query("SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' UNION ALL SELECT 1 FROM pg_collation c JOIN pg_namespace n ON n.oid=c.collnamespace WHERE n.nspname NOT LIKE 'pg_%' AND n.nspname<>'information_schema' LIMIT 1")).rowCount===0,'Restore requires a fresh database without user types or collations.');
  assert((await client.query("SELECT 1 FROM pg_namespace WHERE nspname NOT LIKE 'pg_%' AND nspname NOT IN ('information_schema','public',$1) LIMIT 1",[config.schema])).rowCount===0,'Restore target has unexpected user schemas.');
 }
-export async function restoreDatabase(config:BackupConfig,manifest:BackupDatabaseManifest,tableDirectory:string,migrationsDirectory:string,expectedObjects?:BackupObjectReference[]):Promise<void>{
+export async function restoreDatabase(config:BackupConfig,manifest:BackupDatabaseManifest,tableDirectory:string,migrationsDirectory:string,expectedObjects?:BackupObjectReference[],excludedUploadStaging?:BackupUploadStaging[]):Promise<void>{
  assert(!config.databaseProfile&&!config.sourceStorage,'Managed-source settings are capture-only; restore requires a fresh dedicated destination.');
  const migrations=await readMigrations(migrationsDirectory);validateManifest(config,manifest,migrations);const client=await connection(config);let committed=false,commitAttempted=false;
  try{
@@ -243,13 +262,14 @@ export async function restoreDatabase(config:BackupConfig,manifest:BackupDatabas
   compareTables(await catalogue(client,config,migrationTables(migrations)),manifest.tables);assert(same(await sequences(client,config),manifest.sequences),'Restored sequence state differs from the backup.');
   assert(same(await migrationsAt(client,config,migrations),manifest.migrations),'Restored migration records differ from the backup.');assert((await security(client,config,ident.owner)).sha256===manifest.securitySha256,'Restore changed permissions, constraints or trigger behavior.');
   if(expectedObjects)compareObjectReferences(await objectReferences(client,config),expectedObjects);
+  await compareUploadStaging(client,config,excludedUploadStaging);
   await verifyPayloads(client,config,manifest,tableDirectory);await roles(client,config);await noOtherClients(client,config);commitAttempted=true;await client.query('COMMIT');committed=true;
- }catch(error){if(!committed)await client.query('ROLLBACK').catch(()=>{});if(commitAttempted&&!committed)throw new BackupError('BACKUP_COMMIT_UNCERTAIN','Backup database: Restore commit confirmation was lost. Keep the destination inactive and verify it before retrying or activating.');if(error instanceof Error&&error.message.startsWith('Backup database:'))throw error;throw failure('Restore failed; the fresh destination transaction was rolled back. Database contents are never included in diagnostics.');}finally{await client.end().catch(()=>{});}
+ }catch(error){if(!committed)await client.query('ROLLBACK').catch(()=>{});if(commitAttempted&&!committed)throw new BackupError('BACKUP_COMMIT_UNCERTAIN','Backup database: Restore commit confirmation was lost. Keep the destination inactive and verify it before retrying or activating.');if(error instanceof BackupError)throw error;throw failure('Restore failed; the fresh destination transaction was rolled back. Database contents are never included in diagnostics.');}finally{await client.end().catch(()=>{});}
 }
-export async function verifyRestoredDatabase(config:BackupConfig,manifest:BackupDatabaseManifest,tableDirectory:string,migrationsDirectory:string,expectedObjects?:BackupObjectReference[]):Promise<void>{
+export async function verifyRestoredDatabase(config:BackupConfig,manifest:BackupDatabaseManifest,tableDirectory:string,migrationsDirectory:string,expectedObjects?:BackupObjectReference[],excludedUploadStaging?:BackupUploadStaging[]):Promise<void>{
  assert(!config.databaseProfile&&!config.sourceStorage,'Managed-source settings are capture-only; verification requires a dedicated destination.');
  const migrations=await readMigrations(migrationsDirectory);validateManifest(config,manifest,migrations);const source=await openSourceDatabase(config,migrationsDirectory);
- try{if(expectedObjects)compareObjectReferences(source.objects,expectedObjects);assert(source.manifest.sourceIdentity!==manifest.sourceIdentity,'Verification destination is the source database.');compareTables(source.manifest.tables,manifest.tables);assert(source.manifest.securitySha256===manifest.securitySha256&&source.manifest.watchdogSha256===manifest.watchdogSha256&&same(source.manifest.sequences,manifest.sequences),'Restored security or sequence state differs from the backup.');
+ try{if(expectedObjects)compareObjectReferences(source.objects,expectedObjects);await source.verifyUploadStaging(excludedUploadStaging);assert(source.manifest.sourceIdentity!==manifest.sourceIdentity,'Verification destination is the source database.');compareTables(source.manifest.tables,manifest.tables);assert(source.manifest.securitySha256===manifest.securitySha256&&source.manifest.watchdogSha256===manifest.watchdogSha256&&same(source.manifest.sequences,manifest.sequences),'Restored security or sequence state differs from the backup.');
   // The snapshot holds SHARE locks while binary COPY is compared using private temporary files.
   const temp=await fs.mkdtemp(path.join(tableDirectory,'.verify-'));try{await fs.chmod(temp,0o700);for(const table of manifest.tables){const file=path.join(temp,`${table.name}.bin`),actual=await source.writeTable(table.name,file),expected=await hashFile(path.join(tableDirectory,`${table.name}.bin`));assert(actual.bytes===expected.bytes&&actual.sha256===expected.sha256,'Restored table bytes differ from the backup payload.');}}finally{await fs.rm(temp,{recursive:true,force:true});}
   await source.verifyQuiescence();

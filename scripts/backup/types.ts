@@ -7,4 +7,6 @@ export type BackupMigration={name:string;sha256:string};
 export type BackupDatabaseManifest={schema:string;postgresMajor:number;encoding:string;sourceIdentity:string;securitySha256:string;watchdogSha256?:string;tables:BackupTable[];sequences:BackupSequence[];migrations:BackupMigration[]};
 export type BackupObjectReference={key:string;required:boolean;byteSize?:number;sha256?:string};
 export type BackupPayloadFile={name:string;bytes:number;sha256:string};
-export type BackupManifest={format:'folio-backup';version:1;id:string;createdAt:string;capture:'quiesced-filesystem'|'quiesced-supabase';database:BackupDatabaseManifest;files:BackupPayloadFile[];objects:Array<BackupObjectReference&{present:boolean;bytes?:number;sha256?:string}>;integrationKeySha256:string;omittedObjects:Array<{key:string;bytes:number;sha256:string}>};
+export type BackupUploadStaging={key:string;recordType:'direct_upload'|'split_suggestion';recordId:string};
+type BackupManifestData={format:'folio-backup';id:string;createdAt:string;database:BackupDatabaseManifest;files:BackupPayloadFile[];objects:Array<BackupObjectReference&{present:boolean;bytes?:number;sha256?:string}>;integrationKeySha256:string;omittedObjects:Array<{key:string;bytes:number;sha256:string}>};
+export type BackupManifest=BackupManifestData&({version:1;capture:'quiesced-filesystem'|'quiesced-supabase'}|{version:2;capture:'quiesced-supabase-excluding-staging';excludedUploadStaging:BackupUploadStaging[]});
