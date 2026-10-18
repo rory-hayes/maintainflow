@@ -1,6 +1,20 @@
 # Provider setup
 
-## Google public-launch preparation — 26 September 2026
+## Current provider checkpoint — 18 October 2026
+
+This checkpoint supersedes the then-pending setup statements in the dated records below. It summarizes retained observations; it does not certify that every connection works today. The application remains privately released with invitations required, public signup disabled and billing mocked. See the [launch backlog](LAUNCH-BACKLOG.md#current-disposition--18-october-2026) for the release and remaining acceptance boundaries.
+
+**Google client binding is established.** On 17 October at 21:55 UTC, the public client ID from the deployed application's normal authorization start exactly matched the existing `maintain-flow` / **Maintain Flow** project's web client. The canonical callback and requested Sheets scope were observed. No account was selected or consent completed. This resolves the client/project membership question below; it does not establish client-secret correctness, token exchange, current delivery, cold-instance refresh, revocation or public OAuth approval. Retained receipt: `.local/provider-readbacks-2026-10-17/oauth-client-binding/RESULT.md`.
+
+The separate 17 October Console readback still showed **External / Testing**, one tester, incomplete Branding and empty declared-scope lists. The empty lists do not mean the runtime requests no scope. Public branding, policy, scope and verification work remains. The scoped local configuration-presence check lacked the client ID and secret needed for a local cold-instance test; it did not inspect deployed secrets or establish a deployed configuration failure. Receipts: `.local/provider-readbacks-2026-10-17/oauth/REPORT.md` and `.local/provider-readbacks-2026-10-17/google-local-runtime-presence/RESULT.md`.
+
+[PR107](https://github.com/rory-hayes/maintainflow/pull/107) privately released the callback role recheck and membership lock through credential persistence. Its actual local PostgreSQL/handler regressions used controlled Google responses. That source fix and its release do not supply hosted Google consent, refresh or revocation acceptance.
+
+**Stripe TEST setup and monitoring have progressed beyond the historical setup holds.** Approved restricted TEST credentials were used for actual local Checkout, signed-event, subscription and portal cases; hosted TEST acceptance, provider resend/out-of-order delivery, other offered payment methods and LIVE activation remain separate. The approved monitoring timer has accepted scheduled-run evidence and actual incident/recovery inbox delivery. The deferred independent missed-monitor receiver and its linked observation window remain open. The [current launch disposition](LAUNCH-BACKLOG.md#current-disposition--18-october-2026) identifies the receipts and limits; neither result establishes inbound-email intake or public launch readiness.
+
+For the remaining Google work, retain the accepted public-client match, verify outstanding API/client configuration and secure runtime handoff where needed, then complete the existing bounded delivery/refresh/revocation and public-consent criteria. A provider plan upgrade does not resolve those requirements. All sections below retain their original dates, failures and then-current instructions as history.
+
+## Historical Google public-launch preparation — 26 September 2026
 
 This section supersedes the Google setup status in the dated ledger below. It records a read-only configuration inspection and source review, **not** completed Google verification or a successful current delivery. MaintainFlow is the whole document extraction/review/export product; bank-statement conversion is one workflow, with no claim of universal bank compatibility.
 
