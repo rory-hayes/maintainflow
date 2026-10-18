@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   heartbeat:
@@ -38,6 +39,7 @@ jobs:
           node-version: '24.13.0'
       - name: Notify the independent observer of a completed scheduled monitor
         env:
+          GH_TOKEN: ${{ github.token }}
           FOLIO_MONITOR_ENABLED: ${{ vars.FOLIO_MONITOR_ENABLED }}
           FOLIO_MONITOR_EXTERNAL_TRIGGER_ENABLED: ${{ vars.FOLIO_MONITOR_EXTERNAL_TRIGGER_ENABLED }}
           FOLIO_MONITOR_TRIGGER_ACTOR_ID: ${{ vars.FOLIO_MONITOR_TRIGGER_ACTOR_ID }}

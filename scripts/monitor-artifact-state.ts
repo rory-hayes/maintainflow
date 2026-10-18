@@ -17,7 +17,7 @@ type Phase=keyof typeof phases;
 type Run={id:number;run_number:number;run_attempt:number;display_title:string;head_sha:string;head_branch:string;event:string;status:string;conclusion:string|null;repository:{full_name:string};head_repository:{full_name:string}};
 type Artifact={id:number;name:string;expired:boolean;size_in_bytes:number;workflow_run?:{id:number;head_branch:string}};
 export type ArtifactSelection={artifactId:number;runId:number;name:string};
-export type SkippedRunReason='selector_failed_before_state'|'hosted_runner_not_acquired';
+export type SkippedRunReason='selector_failed_before_state'|'hosted_runner_not_acquired'|'run_superseded_before_state';
 export type SelectionOptions={token:string;runId:number;runAttempt:number;runNumber:number;initialize?:boolean;timeoutMs?:number;onSkippedRun?:(runId:number,reason:SkippedRunReason)=>void};
 export class ArtifactStateError extends Error{readonly code:string;constructor(code:string){super(code);this.code=code;}}
 function requireValue(value:unknown,code:string):asserts value{if(!value)throw new ArtifactStateError(code);}
@@ -123,6 +123,26 @@ function failedBeforeState(value:unknown,run:Run):boolean{
   });
 }
 
+/** Provider job metadata proves whether a successful first attempt actually observed health. */
+export function completedMonitorJob(value:unknown,run:{id:number;run_attempt:number;head_sha:string}):'observed'|'superseded'|null{
+  if(run.run_attempt!==1||!object(value)||value.total_count!==1||!Array.isArray(value.jobs)||value.jobs.length!==1)return null;
+  const job=value.jobs[0];
+  if(!object(job)||!positive(job.id)||job.run_id!==run.id||job.run_attempt!==1||job.head_sha!==run.head_sha||job.name!=='monitor'||job.status!=='completed'||job.conclusion!=='success'||!Array.isArray(job.steps)||job.steps.length!==selectorOnlySteps.length)return null;
+  let previousNumber=0;
+  if(!job.steps.every((step:unknown,index:number)=>{
+    if(!object(step)||!positive(step.number)||step.number<=previousNumber||step.name!==selectorOnlySteps[index]||step.status!=='completed')return false;
+    previousNumber=step.number;
+    if(index<4||index>14)return step.conclusion==='success';
+    return step.conclusion==='success'||step.conclusion==='skipped';
+  }))return null;
+  const steps=job.steps as Array<{conclusion:string}>;
+  if(steps.slice(4,14).every(step=>step.conclusion==='skipped'))return 'superseded';
+  const resumed=steps.slice(4,8);
+  if((resumed.every(step=>step.conclusion==='success')||resumed.every(step=>step.conclusion==='skipped'))
+    &&steps.slice(8,12).every(step=>step.conclusion==='success')&&steps.slice(12,14).every(step=>step.conclusion==='skipped'))return 'observed';
+  return null;
+}
+
 
 // Empty steps or unassigned runner fields alone do not prove non-execution.
 // Accept only the provider-owned check attached to this exact attempt's single job.
@@ -159,7 +179,10 @@ const releasedWorkflowDigest='b04ebabb35917e47b0ecb7756a838596ca27747a98d4b15fab
 // proven pre-state failures available after changing this workflow/selector.
 const preExternalSelectorDigest='99055b9c9535bd229e108cfcb5cf0f74f8623bec946986961fed417dc11965bd';
 const preExternalWorkflowDigest='3a1da6395411103a5a6ef6680a41fb22275dd565c6dc0dd7ab9f5d282853342a';
-async function verifySelectorOnlySource(run:Run,token:string,transport:typeof fetch,signal:AbortSignal):Promise<void>{
+// PR113 source produced the retained 16:37 selector-only supersession failure.
+const preSupersessionSelectorDigest='e722304515a0ed48d52f744d8dc9a18dcf8ba6170d29aab992c00b05e8141ab8';
+const preSupersessionWorkflowDigest='4d0f2af8ab134ed4ca002a0606729e2689fbf68a9fe2d10ec96941e6c04e9447';
+async function verifySelectorOnlySource(run:Run,token:string,transport:typeof fetch,signal:AbortSignal,allowHistorical=true):Promise<void>{
   const paths=['.github/workflows/operations-monitor.yml','scripts/monitor-artifact-state.ts'] as const;
   const local=[await fs.readFile(new URL('../.github/workflows/operations-monitor.yml',import.meta.url)),await fs.readFile(new URL(import.meta.url))];
   for(const [index,sourcePath] of paths.entries()){
@@ -168,7 +191,7 @@ async function verifySelectorOnlySource(run:Run,token:string,transport:typeof fe
     const encoded=value.content.replace(/\n/g,'');
     requireValue(encoded.length>0&&/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded),'artifact_selector_source_untrusted');
     const source=Buffer.from(encoded,'base64'),actual=digest(source);
-    requireValue(source.byteLength<=responseLimit&&(actual===digest(local[index]!)||index===0&&(actual===releasedWorkflowDigest||actual===preExternalWorkflowDigest)||index===1&&(actual===originalSelectorDigest||actual===releasedSelectorDigest||actual===preExternalSelectorDigest)),'artifact_selector_source_untrusted');
+    requireValue(source.byteLength<=responseLimit&&(actual===digest(local[index]!)||allowHistorical&&(index===0&&(actual===releasedWorkflowDigest||actual===preExternalWorkflowDigest||actual===preSupersessionWorkflowDigest)||index===1&&(actual===originalSelectorDigest||actual===releasedSelectorDigest||actual===preExternalSelectorDigest||actual===preSupersessionSelectorDigest))),'artifact_selector_source_untrusted');
   }
 }
 
@@ -202,17 +225,20 @@ export async function selectMonitorArtifact(options:SelectionOptions,transport:t
         const artifacts=await json(`${api}/runs/${candidate.id}/artifacts?per_page=${artifactLimit}`,options.token,transport,controller.signal);
         try{return artifactResponse(artifacts,candidate,candidate.id===options.runId?maximumAttempt:candidate.run_attempt);}
         catch(error){
-          if(!(error instanceof ArtifactStateError)||error.code!=='latest_monitor_checkpoint_missing'||candidate.id===options.runId||candidate.run_attempt!==1||candidate.conclusion!=='failure')throw error;
+          if(!(error instanceof ArtifactStateError)||error.code!=='latest_monitor_checkpoint_missing'||candidate.id===options.runId||candidate.run_attempt!==1||!['failure','success'].includes(candidate.conclusion!))throw error;
           requireValue(object(artifacts)&&artifacts.total_count===0&&Array.isArray(artifacts.artifacts)&&artifacts.artifacts.length===0,'latest_monitor_checkpoint_missing');
           const jobs=await json(`${api}/runs/${candidate.id}/attempts/1/jobs?per_page=100`,options.token,transport,controller.signal);
-          const selectorFailed=failedBeforeState(jobs,candidate),checkId=selectorFailed?null:neverAcquiredCheckId(jobs,candidate);
-          requireValue(selectorFailed||checkId!==null,'latest_monitor_checkpoint_missing');
-          if(!verifiedSources.has(candidate.head_sha)){
-            await verifySelectorOnlySource(candidate,options.token,transport,controller.signal);
-            verifiedSources.add(candidate.head_sha);
+          const superseded=candidate.conclusion==='success'&&completedMonitorJob(jobs,candidate)==='superseded';
+          const selectorFailed=failedBeforeState(jobs,candidate),checkId=selectorFailed||superseded?null:neverAcquiredCheckId(jobs,candidate);
+          requireValue(superseded||selectorFailed||checkId!==null,'latest_monitor_checkpoint_missing');
+          const proofKey=`${candidate.head_sha}:${superseded?'superseded':'failure'}`;
+          if(!verifiedSources.has(proofKey)){
+            // Historical source may prove old failures, never this new success exemption.
+            await verifySelectorOnlySource(candidate,options.token,transport,controller.signal,!superseded);
+            verifiedSources.add(proofKey);
           }
-          if(!selectorFailed)requireValue(await proveNeverAcquired(checkId!,candidate,options.token,transport,controller.signal),'latest_monitor_checkpoint_missing');
-          options.onSkippedRun?.(candidate.id,selectorFailed?'selector_failed_before_state':'hosted_runner_not_acquired');
+          if(!selectorFailed&&!superseded)requireValue(await proveNeverAcquired(checkId!,candidate,options.token,transport,controller.signal),'latest_monitor_checkpoint_missing');
+          options.onSkippedRun?.(candidate.id,superseded?'run_superseded_before_state':selectorFailed?'selector_failed_before_state':'hosted_runner_not_acquired');
         }
       }
       if(seenIds.size===total){
@@ -273,7 +299,16 @@ export async function main(args=process.argv.slice(2),env=process.env){
   }
   requireValue(typeof env.GITHUB_OUTPUT==='string'&&path.isAbsolute(env.GITHUB_OUTPUT),'artifact_output_missing');
   const parse=(value:string|undefined)=>value&&/^[1-9][0-9]*$/.test(value)?Number(value):NaN;
-  const result=await selectMonitorArtifact({token:env.GH_TOKEN??'',runId:parse(env.GITHUB_RUN_ID),runAttempt:parse(env.GITHUB_RUN_ATTEMPT),runNumber:parse(env.GITHUB_RUN_NUMBER),initialize:args[0]==='--initialize',onSkippedRun:(runId,reason)=>console.error(JSON.stringify({monitorState:'checkpoint_not_created',runId,code:reason}))});
-  await fs.appendFile(env.GITHUB_OUTPUT,`artifact_id=${result?.artifactId??''}\nrun_id=${result?.runId??''}\nartifact_name=${result?.name??''}\n`);
+  let result:ArtifactSelection|null;
+  try{result=await selectMonitorArtifact({token:env.GH_TOKEN??'',runId:parse(env.GITHUB_RUN_ID),runAttempt:parse(env.GITHUB_RUN_ATTEMPT),runNumber:parse(env.GITHUB_RUN_NUMBER),initialize:args[0]==='--initialize',onSkippedRun:(runId,reason)=>console.error(JSON.stringify({monitorState:'checkpoint_not_created',runId,code:reason}))});}
+  catch(error){
+    // A first-attempt no-op cannot have a previous attempt's checkpoint to hide.
+    // Reruns retain the existing fail-closed historical-attempt policy.
+    if(!(error instanceof ArtifactStateError)||error.code!=='monitor_run_superseded'||env.GITHUB_RUN_ATTEMPT!=='1')throw error;
+    await fs.appendFile(env.GITHUB_OUTPUT,'artifact_id=\nrun_id=\nartifact_name=\nsuperseded=true\n');
+    console.log(JSON.stringify({monitorState:'superseded',code:'monitor_run_superseded'}));
+    return;
+  }
+  await fs.appendFile(env.GITHUB_OUTPUT,`artifact_id=${result?.artifactId??''}\nrun_id=${result?.runId??''}\nartifact_name=${result?.name??''}\nsuperseded=false\n`);
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)main().catch(error=>{console.error(JSON.stringify({monitorState:'unavailable',code:error instanceof ArtifactStateError?error.code:'artifact_selector_failed'}));process.exitCode=1;});
