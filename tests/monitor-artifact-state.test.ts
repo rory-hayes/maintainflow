@@ -54,6 +54,12 @@ const selectorFailedJob=(runId:number)=>({total_count:1,jobs:[{run_id:runId,run_
   ['Complete job','success'],
 ].map(([name,conclusion],index)=>({number:index<14?index+1:index+13,name,status:'completed',conclusion}))}]});
 
+const supersededJob=(runId:number)=>{
+  const value=selectorFailedJob(runId),job=value.jobs[0];
+  job.conclusion='success';job.steps[3].conclusion='success';
+  return {total_count:1,jobs:[{...job,id:1000+runId}]};
+};
+
 test('selects latest stateful main run by run number and ignores newer probes or drills',async()=>{
   const {fetcher,calls}=transport([run(28,'probe'),run(30),run(26),run(29,'delivery-drill'),run(27)], [artifact(101)]);
   assert.deepEqual(await selectMonitorArtifact(options,fetcher),{artifactId:101,runId:27,name:'folio-monitor-state-v1-1-delivered'});
@@ -98,6 +104,34 @@ test('rerun checks prior attempt conclusion so a deleted successful checkpoint c
 test('a historical rerun cannot roll back a newer stateful run',async()=>{
   const fixture=transport([run(31),run(30,'run',2)],[artifact(101)]);
   await assert.rejects(selectMonitorArtifact({...options,runAttempt:2},fixture.fetcher),/monitor_run_superseded/);assert.equal(fixture.calls.length,1);
+});
+
+test('a proven successful superseded first attempt resumes the previous untouched checkpoint',async()=>{
+  const skipped:Array<[number,string]>=[];
+  const fixture=transport([run(30),{...run(29),conclusion:'success'},{...run(28),conclusion:'success'}],[],{
+    jobs:{29:supersededJob(29)},artifactsByRun:{28:[artifact(101)]},
+  });
+  assert.deepEqual(await selectMonitorArtifact({...options,onSkippedRun:(id,reason)=>skipped.push([id,reason])},fixture.fetcher),
+    {artifactId:101,runId:28,name:'folio-monitor-state-v1-1-delivered'});
+  assert.deepEqual(skipped,[[29,'run_superseded_before_state']]);
+  assert.equal(fixture.calls.filter(url=>url.includes('/contents/')).length,2);
+});
+
+test('success without a checkpoint never bypasses state work, ambiguous metadata or a missing prior checkpoint',async()=>{
+  const mutations:Array<(value:ReturnType<typeof supersededJob>)=>void>=[
+    value=>{value.total_count=2;},value=>{value.jobs[0].run_id=28;},value=>{value.jobs[0].run_attempt=2;},
+    value=>{value.jobs[0].head_sha='a'.repeat(40);},value=>{value.jobs[0].steps[3].conclusion='skipped';},
+    value=>{value.jobs[0].steps.pop();},value=>{value.jobs[0].steps[4].name='unrecognized';},
+    ...Array.from({length:10},(_,index)=>(value:ReturnType<typeof supersededJob>)=>{value.jobs[0].steps[index+4].conclusion='success';}),
+  ];
+  for(const mutate of mutations){
+    const jobs=supersededJob(29);mutate(jobs);
+    const fixture=transport([run(30),{...run(29),conclusion:'success'},run(28)],[],{jobs:{29:jobs},artifactsByRun:{28:[artifact(101)]}});
+    await assert.rejects(selectMonitorArtifact(options,fixture.fetcher),/latest_monitor_checkpoint_missing/);
+    assert.ok(!fixture.calls.some(url=>url.includes('/runs/28/')));
+  }
+  const missing=transport([run(30),{...run(29),conclusion:'success'},{...run(28),conclusion:'success'}],[],{jobs:{29:supersededJob(29)}});
+  await assert.rejects(selectMonitorArtifact({...options,initialize:true},missing.fetcher),/latest_monitor_checkpoint_missing/);
 });
 
 test('missing latest checkpoint refuses fallback to an older run, including initialize',async()=>{
@@ -359,7 +393,7 @@ test('CLI emits only exact artifact identifiers and performs no archive download
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'folio-monitor-selector-')),output=path.join(directory,'output');const original=globalThis.fetch;
   const fixture=transport([run(30),run(29)],[artifact(101)]);globalThis.fetch=fixture.fetcher;
   const env={GH_TOKEN:options.token,GITHUB_REPOSITORY:repo,GITHUB_REF:'refs/heads/main',GITHUB_OUTPUT:output,GITHUB_RUN_ID:'30',GITHUB_RUN_NUMBER:'30',GITHUB_RUN_ATTEMPT:'1'};
-  try{await main([],env);assert.equal(await fs.readFile(output,'utf8'),'artifact_id=101\nrun_id=29\nartifact_name=folio-monitor-state-v1-1-delivered\n');assert.equal(fixture.calls.length,2);await assert.rejects(main([],{...env,GITHUB_REF:'refs/heads/foreign'}),/artifact_environment_invalid/);await assert.rejects(main(['--anything'],env),/artifact_arguments_invalid/);assert.equal(fixture.calls.length,2);}
+  try{await main([],env);assert.equal(await fs.readFile(output,'utf8'),'artifact_id=101\nrun_id=29\nartifact_name=folio-monitor-state-v1-1-delivered\nsuperseded=false\n');assert.equal(fixture.calls.length,2);await assert.rejects(main([],{...env,GITHUB_REF:'refs/heads/foreign'}),/artifact_environment_invalid/);await assert.rejects(main(['--anything'],env),/artifact_arguments_invalid/);assert.equal(fixture.calls.length,2);}
   finally{globalThis.fetch=original;await fs.rm(directory,{recursive:true,force:true});}
 });
 
@@ -367,8 +401,39 @@ test('CLI first-ever initialize emits empty identifiers without concealing missi
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'folio-monitor-initialize-')),output=path.join(directory,'output');const original=globalThis.fetch;
   globalThis.fetch=transport([run(30,'initialize')],[]).fetcher;
   const env={GH_TOKEN:options.token,GITHUB_REPOSITORY:repo,GITHUB_REF:'refs/heads/main',GITHUB_OUTPUT:output,GITHUB_RUN_ID:'30',GITHUB_RUN_NUMBER:'30',GITHUB_RUN_ATTEMPT:'1'};
-  try{await assert.rejects(main([],env),/monitor_state_missing_requires_reconciliation/);await main(['--initialize'],env);assert.equal(await fs.readFile(output,'utf8'),'artifact_id=\nrun_id=\nartifact_name=\n');}
+  try{await assert.rejects(main([],env),/monitor_state_missing_requires_reconciliation/);await main(['--initialize'],env);assert.equal(await fs.readFile(output,'utf8'),'artifact_id=\nrun_id=\nartifact_name=\nsuperseded=false\n');}
   finally{globalThis.fetch=original;await fs.rm(directory,{recursive:true,force:true});}
+});
+
+test('CLI superseded first attempt is an explicit state-free no-op while reruns and real errors still fail',async()=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'folio-monitor-superseded-')),output=path.join(directory,'output');
+  const original=globalThis.fetch,originalLog=console.log,logs:string[]=[];
+  const env={GH_TOKEN:options.token,GITHUB_REPOSITORY:repo,GITHUB_REF:'refs/heads/main',GITHUB_OUTPUT:output,GITHUB_RUN_ID:'30',GITHUB_RUN_NUMBER:'30',GITHUB_RUN_ATTEMPT:'1'};
+  console.log=(value:unknown)=>logs.push(String(value));
+  try{
+    const newer=transport([run(31),run(30)],[]);globalThis.fetch=newer.fetcher;
+    await main([],env);
+    assert.equal(await fs.readFile(output,'utf8'),'artifact_id=\nrun_id=\nartifact_name=\nsuperseded=true\n');
+    assert.deepEqual(logs.map(value=>JSON.parse(value)),[{monitorState:'superseded',code:'monitor_run_superseded'}]);
+    assert.equal(newer.calls.length,1);
+    await fs.unlink(output);globalThis.fetch=transport([run(31),run(30,'run',2)],[]).fetcher;
+    await assert.rejects(main([],{...env,GITHUB_RUN_ATTEMPT:'2'}),/monitor_run_superseded/);
+    globalThis.fetch=transport([run(30),{...run(29),conclusion:'success'}],[]).fetcher;
+    await assert.rejects(main([],env),/latest_monitor_checkpoint_missing/);
+    globalThis.fetch=transport([run(30),run(29)],[artifact(1,1,'delivered',{workflow_run:{id:28,head_branch:'main'}})]).fetcher;
+    await assert.rejects(main([],env),/artifact_scope_invalid/);
+    await assert.rejects(fs.access(output),{code:'ENOENT'});
+  }finally{globalThis.fetch=original;console.log=originalLog;await fs.rm(directory,{recursive:true,force:true});}
+});
+
+test('workflow requires an explicit non-superseded selection before every state or delivery operation',async()=>{
+  const workflow=await fs.readFile(new URL('../.github/workflows/operations-monitor.yml',import.meta.url),'utf8');
+  const steps=workflow.split('      - name: ').slice(1);
+  const stateSteps=steps.filter(step=>!step.startsWith('Select the authoritative')&&!step.startsWith('Read dependencies')&&!step.startsWith('Deliver approved test'));
+  assert.equal(stateSteps.length,8);
+  for(const step of stateSteps)assert.match(step,/\n        if: steps\.state\.outputs\.superseded == 'false' && /);
+  assert.match(workflow,/cron: '2-59\/5 \* \* \* \*'/);
+  assert.match(workflow,/group: folio-operational-monitor\s+cancel-in-progress: false/);
 });
 
 
@@ -523,6 +588,10 @@ test('released selector and workflow remain explicitly trusted after the recover
     const drift=transport([run(30),run(29),run(28)],[],{jobs:{29:neverAcquiredJob(29)},checkRuns:{1029:acquisitionCheck(29)},annotations:{1029:[acquisitionAnnotation()]},artifactsByRun:{28:[artifact(101)]},sourceOverrides:{[sourcePath]:'// unfamiliar workflow could access state before failure'}});
     await assert.rejects(selectMonitorArtifact(options,drift.fetcher),/artifact_selector_source_untrusted/);assert.ok(!drift.calls.some(url=>url.includes('/check-runs/')));assert.ok(!drift.calls.some(url=>url.includes('/runs/28/')));
   }
+  const superseded=transport([run(30),{...run(29),conclusion:'success'},run(28)],[],{jobs:{29:supersededJob(29)},artifactsByRun:{28:[artifact(101)]},sourceOverrides:{'scripts/monitor-artifact-state.ts':oldSelector,'.github/workflows/operations-monitor.yml':oldWorkflow}});
+  await assert.rejects(selectMonitorArtifact(options,superseded.fetcher),/artifact_selector_source_untrusted/);
+  assert.ok(!superseded.calls.some(url=>url.includes('/runs/28/')));
+
 });
 
 test('unacquired proof cannot bypass an expired or deleted authoritative checkpoint or authorize initialization',async()=>{
@@ -547,6 +616,6 @@ test('CLI logs provider non-acquisition accurately and exposes no annotation tex
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'folio-monitor-no-acquisition-')),output=path.join(directory,'output');const originalFetch=globalThis.fetch,originalError=console.error,logs:string[]=[];
   globalThis.fetch=acquisitionFixture().fetcher;console.error=(value:unknown)=>logs.push(String(value));
   const env={GH_TOKEN:options.token,GITHUB_REPOSITORY:repo,GITHUB_REF:'refs/heads/main',GITHUB_OUTPUT:output,GITHUB_RUN_ID:'30',GITHUB_RUN_NUMBER:'30',GITHUB_RUN_ATTEMPT:'1'};
-  try{await main([],env);assert.deepEqual(logs.map(value=>JSON.parse(value)),[{monitorState:'checkpoint_not_created',runId:29,code:'hosted_runner_not_acquired'}]);assert.equal(await fs.readFile(output,'utf8'),'artifact_id=101\nrun_id=28\nartifact_name=folio-monitor-state-v1-1-delivered\n');assert.ok(logs.every(value=>!value.includes('The job')));}
+  try{await main([],env);assert.deepEqual(logs.map(value=>JSON.parse(value)),[{monitorState:'checkpoint_not_created',runId:29,code:'hosted_runner_not_acquired'}]);assert.equal(await fs.readFile(output,'utf8'),'artifact_id=101\nrun_id=28\nartifact_name=folio-monitor-state-v1-1-delivered\nsuperseded=false\n');assert.ok(logs.every(value=>!value.includes('The job')));}
   finally{globalThis.fetch=originalFetch;console.error=originalError;await fs.rm(directory,{recursive:true,force:true});}
 });

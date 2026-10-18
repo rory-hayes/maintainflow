@@ -5,10 +5,11 @@ import {main, sendHeartbeat} from '../scripts/monitor-heartbeat.js';
 
 // Synthetic event and ping capability; every request is intercepted in memory.
 const now = new Date('2026-09-27T15:30:00Z');
+const sourceJobsUrl = 'https://api.github.com/repos/rory-hayes/maintainflow/actions/runs/123456789/attempts/1/jobs?per_page=100';
 const url = 'https://hc-ping.com/11111111-2222-4333-8444-555555555555';
 const fixture = (): NodeJS.ProcessEnv => ({
   GITHUB_EVENT_NAME: 'workflow_run', GITHUB_REPOSITORY: 'rory-hayes/maintainflow',
-  GITHUB_REF: 'refs/heads/main', GITHUB_RUN_ATTEMPT: '1', FOLIO_MONITOR_ENABLED: 'true',
+  GH_TOKEN: 'synthetic_owned_github_token', GITHUB_REF: 'refs/heads/main', GITHUB_RUN_ATTEMPT: '1', FOLIO_MONITOR_ENABLED: 'true',
   FOLIO_MONITOR_HEARTBEAT_URL: url, SOURCE_EVENT: 'schedule', SOURCE_REPOSITORY: 'rory-hayes/maintainflow',
   SOURCE_HEAD_REPOSITORY: 'rory-hayes/maintainflow', SOURCE_BRANCH: 'main',
   SOURCE_WORKFLOW: 'Operational monitoring', SOURCE_PATH: '.github/workflows/operations-monitor.yml',
@@ -16,13 +17,34 @@ const fixture = (): NodeJS.ProcessEnv => ({
   SOURCE_ATTEMPT: '1', SOURCE_RUN_ID: '123456789', SOURCE_SHA: 'a'.repeat(40),
   SOURCE_CREATED_AT: '2026-09-27T15:25:00Z', SOURCE_UPDATED_AT: '2026-09-27T15:26:00Z',
 });
-function transport(body = 'OK', status = 200, headers?: HeadersInit) {
-  const calls: {url: string; init: RequestInit | undefined}[] = [];
+const sourceJob = () => ({total_count: 1, jobs: [{id: 100, run_id: 123456789, run_attempt: 1, head_sha: 'a'.repeat(40),
+  name: 'monitor', status: 'completed', conclusion: 'success', steps: [
+    'Set up job',
+    'Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683',
+    'Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020',
+    'Select the authoritative encrypted checkpoint', 'Download exactly the selected encrypted artifact',
+    'Validate exact downloaded file shape and authenticate state', 'Preserve the resumed checkpoint before retrying pending notices',
+    'Retry previously checkpointed pending notices', 'Observe current health and prepare the next encrypted state',
+    'Commit prepared notices before sending new mail', 'Deliver newly checkpointed incident or recovery notices',
+    'Commit the delivered checkpoint', 'Read dependencies without incident state or email',
+    'Deliver approved test notices with a frozen identity and timestamp',
+    'Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020',
+    'Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683', 'Complete job',
+  ].map((name, index) => ({number: index + 1, name, status: 'completed', conclusion: index === 12 || index === 13 ? 'skipped' : 'success'}))}]});
+function transport(body = 'OK', status = 200, headers?: HeadersInit, jobs: unknown = sourceJob()) {
+  // Receiver requests remain separate from the single authenticated GitHub metadata read.
+  const calls: {url: string; init: RequestInit | undefined}[] = [], apiCalls: typeof calls = [];
   const fetcher: typeof fetch = async (input, init) => {
+    if (String(input) === sourceJobsUrl) {
+      apiCalls.push({url: String(input), init});
+      assert.equal(init?.method, 'GET'); assert.equal(init?.redirect, 'error'); assert.ok(init?.signal);
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer synthetic_owned_github_token');
+      return Response.json(jobs);
+    }
     calls.push({url: String(input), init});
     return new Response(body, {status, headers});
   };
-  return {calls, fetcher};
+  return {calls, apiCalls, fetcher};
 }
 async function rejected(patch: NodeJS.ProcessEnv, reason?: string) {
   const f = transport(); const report = await sendHeartbeat({...fixture(), ...patch}, f.fetcher, {now});
@@ -36,11 +58,47 @@ async function rejected(patch: NodeJS.ProcessEnv, reason?: string) {
 test('completed genuine schedule sends one minimal heartbeat without customer data or credentials in headers', async () => {
   const f = transport(); const report = await sendHeartbeat(fixture(), f.fetcher, {now});
   assert.deepEqual(report, {status: 'sent', reason: 'completed_schedule_accepted', requests: 1});
-  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].url, url);
+  assert.equal(f.calls.length, 1); assert.equal(f.apiCalls.length, 1); assert.equal(f.calls[0].url, url);
   const init = f.calls[0].init!;
   assert.equal(init.method, 'GET'); assert.equal(init.redirect, 'error'); assert.equal(init.body, undefined);
   assert.ok(init.signal); assert.equal(init.signal.aborted, true);
   assert.deepEqual(Object.keys(Object.fromEntries(new Headers(init.headers))).sort(), ['accept', 'user-agent']);
+});
+
+test('successful superseded monitor makes one metadata read and never refreshes the independent receiver',async()=>{
+  const job=sourceJob();for(const step of job.jobs[0].steps.slice(4,14))step.conclusion='skipped';
+  const f=transport('OK',200,undefined,job);
+  assert.deepEqual(await sendHeartbeat(fixture(),f.fetcher,{now}),{status:'inactive',reason:'source_superseded_before_state',requests:0});
+  assert.equal(f.apiCalls.length,1);assert.equal(f.calls.length,0);
+});
+
+test('missing, duplicate, skipped or unbound delivered checkpoint proof cannot ping',async()=>{
+  const mutations:Array<(value:ReturnType<typeof sourceJob>)=>void>=[
+    value=>{value.total_count=2;},value=>{value.jobs.push(structuredClone(value.jobs[0]));},
+    value=>{value.jobs[0].run_id++;},value=>{value.jobs[0].run_attempt=2;},value=>{value.jobs[0].head_sha='b'.repeat(40);},
+    value=>{value.jobs[0].steps[11].conclusion='skipped';},value=>{value.jobs[0].steps.push({...value.jobs[0].steps[11],number:18});},
+    value=>{value.jobs[0].steps[11].status='in_progress';},value=>{value.jobs[0].steps[11].name='Unknown checkpoint';},
+  ];
+  for(const mutate of mutations){
+    const job=sourceJob();mutate(job);const f=transport('OK',200,undefined,job);
+    assert.deepEqual(await sendHeartbeat(fixture(),f.fetcher,{now}),{status:'rejected',reason:'heartbeat_source_jobs_invalid',requests:0});
+    assert.equal(f.apiCalls.length,1);assert.equal(f.calls.length,0);
+  }
+  const noToken=transport();
+  assert.equal((await sendHeartbeat({...fixture(),GH_TOKEN:undefined},noToken.fetcher,{now})).reason,'heartbeat_source_token_missing');
+  assert.equal(noToken.apiCalls.length+noToken.calls.length,0);
+});
+
+test('source proof deadline and bounded parsing prevent a late receiver ping',async()=>{
+  let release!:(response:Response)=>void,calls=0;
+  const held=new Promise<Response>(resolve=>{release=resolve;});
+  const fetcher:typeof fetch=async()=>{calls++;return held;};
+  assert.equal((await sendHeartbeat(fixture(),fetcher,{now,timeoutMs:10})).reason,'heartbeat_timeout');
+  release(Response.json(sourceJob()));await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,1);
+  for(const response of [Response.json(sourceJob(),{headers:{'content-length':'1048577'}}),new Response('PRIVATE_INVALID_JSON'),new Response('X'.repeat(1048577))]){
+    let metadataCalls=0;const malformed:typeof fetch=async()=>{metadataCalls++;return response;};
+    assert.equal((await sendHeartbeat(fixture(),malformed,{now})).reason,'heartbeat_source_jobs_invalid');assert.equal(metadataCalls,1);
+  }
 });
 
 test('missing configuration and plan mode never use the network or certify activation', async () => {
@@ -49,7 +107,7 @@ test('missing configuration and plan mode never use the network or certify activ
     {status: 'inactive', reason: 'heartbeat_not_configured', requests: 0});
   for (const args of [[], ['--plan']]) assert.equal((await main(args, fixture(), f.fetcher)).report.reason, 'plan_only');
   assert.equal((await main(['--send', 'PRIVATE_ARGUMENT'], fixture(), f.fetcher)).exitCode, 2);
-  assert.equal(f.calls.length, 0);
+  assert.equal(f.calls.length, 0); assert.equal(f.apiCalls.length, 0);
 });
 
 test('manual, disabled, untrusted and rerun events cannot manufacture freshness', async () => {
@@ -119,7 +177,8 @@ test('oversized or misdeclared responses stop within bounded reads', async () =>
 });
 
 test('transport and streaming deadlines fail without leaking the ping capability', async () => {
-  const failed: typeof fetch = async () => { throw new Error(`PRIVATE ${url}`); };
+  const metadata = transport();
+  const failed: typeof fetch = async (input, init) => { if (String(input) === sourceJobsUrl) return metadata.fetcher(input, init); throw new Error(`PRIVATE ${url}`); };
   const report = await sendHeartbeat(fixture(), failed, {now});
   assert.deepEqual(report, {status: 'rejected', reason: 'heartbeat_transport_failed', requests: 1});
   const hanging: typeof fetch = async () => new Promise<Response>(() => {});
@@ -134,7 +193,7 @@ test('workflow uses trusted default-branch code and never downloads source artif
   assert.match(workflow, /ref: \$\{\{ github.sha \}\}/); assert.match(workflow, /persist-credentials: false/);
   assert.doesNotMatch(workflow, /ref:.*workflow_run|download-artifact|pull_request_target|^\s{2}workflow_dispatch:/m);
   assert.deepEqual([...workflow.matchAll(/secrets\.([A-Z_]+)/g)].map(match => match[1]), ['FOLIO_MONITOR_HEARTBEAT_URL']);
-  assert.match(workflow, /permissions:\s+contents: read/); assert.doesNotMatch(workflow, /: write/);
+  assert.match(workflow, /permissions:\s+contents: read\s+actions: read/); assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/); assert.doesNotMatch(workflow, /: write/);
   for (const key of Object.keys(fixture()).filter(key => key.startsWith('SOURCE_'))) assert.match(workflow, new RegExp(`${key}: \\$\\{\\{ github.event.workflow_run\\.`));
 });
 

@@ -2,6 +2,7 @@
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {actorId, freshExternalTick} from './monitor-trigger-contract.ts';
+import {completedMonitorJob} from './monitor-artifact-state.ts';
 
 const repository = 'rory-hayes/maintainflow';
 const maxAgeMs = 20 * 60_000;
@@ -9,6 +10,37 @@ type Report = {status: 'sent' | 'inactive' | 'rejected'; reason: string; request
 class HeartbeatError extends Error {}
 function requireValue(value: unknown, reason: string): asserts value {
   if (!value) throw new HeartbeatError(reason);
+}
+
+async function sourceObserved(env: NodeJS.ProcessEnv, transport: typeof fetch, signal: AbortSignal): Promise<boolean> {
+  requireValue(typeof env.GH_TOKEN === 'string' && env.GH_TOKEN.length >= 16, 'heartbeat_source_token_missing');
+  signal.throwIfAborted();
+  const response = await transport(`https://api.github.com/repos/${repository}/actions/runs/${env.SOURCE_RUN_ID}/attempts/1/jobs?per_page=100`, {
+    method: 'GET', redirect: 'error', signal, headers: {accept: 'application/vnd.github+json',
+      authorization: `Bearer ${env.GH_TOKEN}`, 'x-github-api-version': '2022-11-28'},
+  });
+  try {
+    signal.throwIfAborted();
+    requireValue(response.status === 200, 'heartbeat_source_jobs_invalid');
+    const length = response.headers.get('content-length');
+    requireValue(length === null || /^\d+$/.test(length) && Number(length) <= 1024 * 1024, 'heartbeat_source_jobs_invalid');
+    const reader = response.body?.getReader();
+    requireValue(reader, 'heartbeat_source_jobs_invalid');
+    let size = 0; const chunks: Uint8Array[] = [];
+    try {
+      while (true) {
+        signal.throwIfAborted(); const part = await reader.read(); signal.throwIfAborted();
+        if (part.done) break;
+        size += part.value.byteLength; requireValue(size <= 1024 * 1024, 'heartbeat_source_jobs_invalid'); chunks.push(part.value);
+      }
+    } finally { void reader.cancel().catch(() => {}); }
+    let value: unknown;
+    try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+    catch { throw new HeartbeatError('heartbeat_source_jobs_invalid'); }
+    const result = completedMonitorJob(value, {id: Number(env.SOURCE_RUN_ID), run_attempt: 1, head_sha: env.SOURCE_SHA!});
+    requireValue(result !== null, 'heartbeat_source_jobs_invalid');
+    return result === 'observed';
+  } finally { if (!response.bodyUsed) void response.body?.cancel().catch(() => {}); }
 }
 
 /** Values are supplied by GitHub's workflow_run context, never by source artifacts. */
@@ -51,6 +83,11 @@ export async function sendHeartbeat(env: NodeJS.ProcessEnv, transport: typeof fe
     const timeoutMs = options.timeoutMs ?? 10_000;
     requireValue(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 10_000, 'heartbeat_timeout_invalid');
     const work = (async () => {
+      // workflow_run success alone also includes a superseded, state-free no-op.
+      if (!await sourceObserved(env, transport, controller.signal)) return {status: 'inactive' as const,
+        reason: 'source_superseded_before_state', requests};
+      controller.signal.throwIfAborted();
+      validateCompletedSchedule(env, options.now ?? new Date());
       requests++;
       const response = await transport(url, {method: 'GET', redirect: 'error', signal: controller.signal,
         headers: {'Accept': 'text/plain', 'User-Agent': 'MaintainFlow-monitor-heartbeat'}});

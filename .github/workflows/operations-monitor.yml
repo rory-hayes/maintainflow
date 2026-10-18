@@ -85,7 +85,7 @@ jobs:
             *) exit 1 ;;
           esac
       - name: Download exactly the selected encrypted artifact
-        if: steps.state.outputs.artifact_id != ''
+        if: steps.state.outputs.superseded == 'false' && steps.state.outputs.artifact_id != ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ steps.state.outputs.artifact_id }}
@@ -95,12 +95,12 @@ jobs:
           path: .monitor
           merge-multiple: true
       - name: Validate exact downloaded file shape and authenticate state
-        if: steps.state.outputs.artifact_id != ''
+        if: steps.state.outputs.superseded == 'false' && steps.state.outputs.artifact_id != ''
         run: node scripts/operations-monitor.ts --validate-state
       # Carry forward the prior immutable outbox before any uncertain resend.
       # If delivery fails, this run still has an authoritative checkpoint.
       - name: Preserve the resumed checkpoint before retrying pending notices
-        if: steps.state.outputs.artifact_id != ''
+        if: steps.state.outputs.superseded == 'false' && steps.state.outputs.artifact_id != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: folio-monitor-state-v1-${{ github.run_attempt }}-resumed
@@ -110,10 +110,10 @@ jobs:
           compression-level: 0
           retention-days: 90
       - name: Retry previously checkpointed pending notices
-        if: steps.state.outputs.artifact_id != ''
+        if: steps.state.outputs.superseded == 'false' && steps.state.outputs.artifact_id != ''
         run: node scripts/operations-monitor.ts --deliver
       - name: Observe current health and prepare the next encrypted state
-        if: inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
+        if: steps.state.outputs.superseded == 'false' && inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
         env:
           MONITOR_MODE: ${{ inputs.mode || 'run' }}
           SELECTED_ARTIFACT_ID: ${{ steps.state.outputs.artifact_id }}
@@ -125,7 +125,7 @@ jobs:
             node scripts/operations-monitor.ts --prepare
           fi
       - name: Commit prepared notices before sending new mail
-        if: inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
+        if: steps.state.outputs.superseded == 'false' && inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: folio-monitor-state-v1-${{ github.run_attempt }}-prepared
@@ -135,10 +135,10 @@ jobs:
           compression-level: 0
           retention-days: 90
       - name: Deliver newly checkpointed incident or recovery notices
-        if: inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
+        if: steps.state.outputs.superseded == 'false' && inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
         run: node scripts/operations-monitor.ts --deliver
       - name: Commit the delivered checkpoint
-        if: inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
+        if: steps.state.outputs.superseded == 'false' && inputs.mode != 'probe' && inputs.mode != 'delivery-drill'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: folio-monitor-state-v1-${{ github.run_attempt }}-delivered
