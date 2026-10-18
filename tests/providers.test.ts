@@ -182,6 +182,84 @@ test('Google OAuth states are hashed, tied to the user, expiring, single-use, an
  assert.equal((await request('GET',`/api/google/callback?state=${encodeURIComponent(finalState)}&error=access_denied`)).statusCode,400);
 });
 
+// Explicit local fixtures, never invitations or hosted identities. Only Google
+// transport is controlled; authentication, membership routes and SQL are real.
+async function oauthRoleFixture(label:string,role:'owner'|'admin'='admin',existingCredential=true){
+ const owner=await signup(`oauth-${label}-owner`),member=role==='owner'?owner:await signup(`oauth-${label}-admin`);
+ if(role==='admin'){
+  await adminPool.query("insert into memberships(workspace_id,user_id,role) values($1,$2,'admin')",[owner.workspace.id,member.user.id]);
+  const selected=await request('POST',`/api/workspaces/${owner.workspace.id}/select`,{},member);assert.equal(selected.statusCode,200,selected.body);
+ }
+ const made=await request('POST','/api/parsers',{name:'Synthetic OAuth role boundary',useCase:'invoice'},owner);assert.equal(made.statusCode,201,made.body);
+ const started=await request('POST','/api/google/start',{parserId:made.json().parser.id,name:'Synthetic OAuth role boundary',spreadsheetId:mapping.spreadsheetId,sheetName:'Folio'},member);assert.equal(started.statusCode,200,started.body);
+ const {integrationId,authorizationUrl}=started.json(),state=new URL(authorizationUrl).searchParams.get('state')!;
+ if(existingCredential)await adminPool.query('update integrations set secret_ciphertext=$2,enabled=true where id=$1',[integrationId,encryptSecret(JSON.stringify({refresh_token:'SYNTHETIC_OLD_ROLE_BOUNDARY'}))]);
+ const integration=async()=>(await adminPool.query('select to_jsonb(i) row from integrations i where id=$1',[integrationId])).rows[0].row;
+ const connected=async()=>(await adminPool.query("select id from audit_events where workspace_id=$1 and entity_id=$2 and action='google_sheets.connected'",[owner.workspace.id,integrationId])).rows;
+ return {owner,member,integrationId,state,integration,connected,before:await integration()};
+}
+const oauthRoleTokens={scope:'https://www.googleapis.com/auth/spreadsheets',refresh_token:'SYNTHETIC_NEW_ROLE_BOUNDARY'};
+function heldOAuthTokens(){
+ let entered!:()=>void,release!:()=>void;
+ const started=new Promise<void>(resolve=>{entered=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});let calls=0;
+ const getToken=(async()=>{calls++;entered();await gate;return {tokens:oauthRoleTokens,res:null};}) as OAuth2Client['getToken'];
+ return {started,release,getToken,calls:()=>calls};
+}
+async function oauthFixtureWait(pending:Promise<unknown>){
+ let timer:ReturnType<typeof setTimeout>|undefined;
+ try{await Promise.race([pending,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Synthetic OAuth fixture barrier timed out')),5000);})]);}finally{clearTimeout(timer);}
+}
+
+test('Google OAuth controlled role loss during exchange cannot persist credentials after downgrade or removal',{timeout:20000},async context=>{
+ for(const change of ['downgrade','removal'] as const){
+  const f=await oauthRoleFixture(change),held=heldOAuthTokens(),mock=context.mock.method(OAuth2Client.prototype,'getToken',held.getToken);
+  const callback=request('GET',`/api/google/callback?state=${encodeURIComponent(f.state)}&code=SYNTHETIC_ROLE_BOUNDARY`,undefined,f.member);
+  try{
+   await oauthFixtureWait(held.started);
+   const changed=await request(change==='downgrade'?'PATCH':'DELETE',`/api/workspace/members/${f.member.user.id}`,change==='downgrade'?{role:'editor'}:undefined,f.owner);assert.equal(changed.statusCode,200,changed.body);
+   held.release();const response=await callback;assert.equal(response.statusCode,403,response.body);assert.match(response.json().error,/role|access/i);
+   assert.deepEqual(await f.integration(),f.before);assert.deepEqual(await f.connected(),[]);
+   const state=(await adminPool.query('select consumed_at from oauth_states where state_hash=$1',[hashToken(f.state)])).rows[0];assert.ok(state?.consumed_at);
+   const replay=await request('GET',`/api/google/callback?state=${encodeURIComponent(f.state)}&code=SYNTHETIC_ROLE_BOUNDARY`,undefined,f.member);assert.equal(replay.statusCode,change==='downgrade'?400:401);assert.equal(held.calls(),1);
+  }finally{held.release();await callback;mock.mock.restore();}
+ }
+});
+
+test('Google OAuth controlled unchanged owner and admin can commit the same bound authorization',async context=>{
+ context.mock.method(OAuth2Client.prototype,'getToken',(async()=>({tokens:oauthRoleTokens,res:null})) as OAuth2Client['getToken']);
+ for(const role of ['owner','admin'] as const){
+  const f=await oauthRoleFixture(`unchanged-${role}`,role),response=await request('GET',`/api/google/callback?state=${encodeURIComponent(f.state)}&code=SYNTHETIC_ROLE_BOUNDARY`,undefined,f.member);assert.equal(response.statusCode,302,response.body);assert.equal(response.headers.location,`${config.origin}/app/integrations?google=connected`);
+  const actual=await f.integration();assert.deepEqual({...actual,secret_ciphertext:f.before.secret_ciphertext},f.before);assert.equal(actual.enabled,true);assert.deepEqual(JSON.parse(decryptSecret(actual.secret_ciphertext)),oauthRoleTokens);assert.equal((await f.connected()).length,1);assert.equal((await adminPool.query('select 1 from oauth_states where state_hash=$1',[hashToken(f.state)])).rowCount,0);
+ }
+});
+
+test('Google OAuth controlled final persistence holds current membership until its transaction commits',{timeout:20000},async context=>{
+ const f=await oauthRoleFixture('commit-lock'),blocker=await adminPool.connect();let callback:ReturnType<typeof request>|undefined,changed:ReturnType<typeof request>|undefined,released=false;
+ context.mock.method(OAuth2Client.prototype,'getToken',(async()=>({tokens:oauthRoleTokens,res:null})) as OAuth2Client['getToken']);
+ try{
+  await blocker.query('begin');await blocker.query('select id from integrations where id=$1 for update',[f.integrationId]);
+  callback=request('GET',`/api/google/callback?state=${encodeURIComponent(f.state)}&code=SYNTHETIC_ROLE_BOUNDARY`,undefined,f.member);
+  // Probe the actual row lock while credential persistence waits on the integration.
+  let locked=false;const end=Date.now()+5000;
+  while(!locked&&Date.now()<end){await blocker.query('savepoint role_probe');try{await blocker.query('select role from memberships where workspace_id=$1 and user_id=$2 for update nowait',[f.owner.workspace.id,f.member.user.id]);}catch(error){if((error as {code?:string}).code!=='55P03')throw error;locked=true;}finally{await blocker.query('rollback to savepoint role_probe');await blocker.query('release savepoint role_probe');}if(!locked)await new Promise(resolve=>setTimeout(resolve,10));}
+  assert.equal(locked,true,'OAuth must hold the current membership row through credential persistence');
+  changed=request('PATCH',`/api/workspace/members/${f.member.user.id}`,{role:'editor'},f.owner);
+  await blocker.query('rollback');blocker.release();released=true;
+  assert.equal((await callback).statusCode,302);assert.equal((await changed).statusCode,200);assert.equal((await f.connected()).length,1);assert.equal((await adminPool.query('select role from memberships where workspace_id=$1 and user_id=$2',[f.owner.workspace.id,f.member.user.id])).rows[0].role,'editor');
+ }finally{if(!released){await blocker.query('rollback').catch(()=>{});blocker.release();}await callback;await changed;}
+});
+
+test('Google OAuth controlled exchange cannot undo a completed disconnect or newer authorization',async context=>{
+ for(const change of ['disconnect','supersede'] as const){
+  const f=await oauthRoleFixture(change,'owner',false),held=heldOAuthTokens(),mock=context.mock.method(OAuth2Client.prototype,'getToken',held.getToken);
+  const callback=request('GET',`/api/google/callback?state=${encodeURIComponent(f.state)}&code=SYNTHETIC_ROLE_BOUNDARY`,undefined,f.member);
+  try{
+   await oauthFixtureWait(held.started);const changed=change==='disconnect'?await request('POST',`/api/google/${f.integrationId}/disconnect`,{},f.owner):await request('POST','/api/google/start',{integrationId:f.integrationId},f.owner);assert.equal(changed.statusCode,200,changed.body);const after=await f.integration();
+   held.release();assert.equal((await callback).statusCode,400);assert.deepEqual(await f.integration(),after);assert.deepEqual(await f.connected(),[]);assert.equal(held.calls(),1);
+  }finally{held.release();await callback;mock.mock.restore();}
+ }
+});
+
 test('Google disconnect returns the committed state for unreadable credentials and failed provider revocation',async()=>{
  const original=OAuth2Client.prototype.revokeToken;let revokeCalls=0;
  try{
