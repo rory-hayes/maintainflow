@@ -19,7 +19,8 @@ type Artifact={id:number;name:string;expired:boolean;size_in_bytes:number;workfl
 export type ArtifactSelection={artifactId:number;runId:number;name:string};
 export type SkippedRunReason='selector_failed_before_state'|'hosted_runner_not_acquired'|'run_superseded_before_state';
 export type SelectionOptions={token:string;runId:number;runAttempt:number;runNumber:number;initialize?:boolean;timeoutMs?:number;onSkippedRun?:(runId:number,reason:SkippedRunReason)=>void};
-export class ArtifactStateError extends Error{readonly code:string;constructor(code:string){super(code);this.code=code;}}
+type PriorRunDiagnostic={priorRunId:number;priorRunAttempt:number;priorRunStatus:string};
+export class ArtifactStateError extends Error{readonly code:string;readonly priorRun?:PriorRunDiagnostic;constructor(code:string,priorRun?:PriorRunDiagnostic){super(code);this.code=code;this.priorRun=priorRun;}}
 function requireValue(value:unknown,code:string):asserts value{if(!value)throw new ArtifactStateError(code);}
 const positive=(value:unknown):value is number=>Number.isSafeInteger(value)&&Number(value)>0;
 const count=(value:unknown):value is number=>Number.isSafeInteger(value)&&Number(value)>=0;
@@ -50,6 +51,19 @@ function runsResponse(value:unknown):{runs:Run[];total:number}{
   });
   requireValue(new Set(runs.map(run=>run.id)).size===runs.length&&new Set(runs.map(run=>run.run_number)).size===runs.length,'artifact_runs_ambiguous');
   return {runs,total:value.total_count};
+}
+async function refreshPriorRun(run:Run,token:string,transport:typeof fetch,signal:AbortSignal):Promise<Run>{
+  const value=await json(`${api}/runs/${run.id}/attempts/${run.run_attempt}`,token,transport,signal);
+  const fresh=runsResponse({total_count:1,workflow_runs:[value]}).runs[0]!;
+  requireValue(fresh.id===run.id&&fresh.run_number===run.run_number&&fresh.run_attempt===run.run_attempt
+    &&fresh.head_sha===run.head_sha&&fresh.head_branch===run.head_branch&&fresh.display_title===run.display_title&&fresh.event===run.event
+    &&fresh.repository.full_name===run.repository.full_name&&fresh.head_repository.full_name===run.head_repository.full_name,'artifact_run_refresh_conflict');
+  return fresh;
+}
+function requireCompletedPriorRun(run:Run):void{
+  if(run.status==='completed'&&run.conclusion!==null)return;
+  const knownStatus=['queued','in_progress','waiting','pending','requested','completed'].includes(run.status)?run.status:'unrecognized';
+  throw new ArtifactStateError('prior_monitor_run_incomplete',{priorRunId:run.id,priorRunAttempt:run.run_attempt,priorRunStatus:knownStatus});
 }
 function isStateful(run:Run):boolean{
   // The workflow derives "disabled" from the same predicate that skips its only job.
@@ -182,6 +196,9 @@ const preExternalWorkflowDigest='3a1da6395411103a5a6ef6680a41fb22275dd565c6dc0dd
 // PR113 source produced the retained 16:37 selector-only supersession failure.
 const preSupersessionSelectorDigest='e722304515a0ed48d52f744d8dc9a18dcf8ba6170d29aab992c00b05e8141ab8';
 const preSupersessionWorkflowDigest='4d0f2af8ab134ed4ca002a0606729e2689fbf68a9fe2d10ec96941e6c04e9447';
+// PR114 produced proven pre-state failures when list status was incomplete.
+// Its source may recover those failures, never establish a successful no-op.
+const preStatusRefreshSelectorDigest='cd15e5ff042095c7143dea1d9e283bd02a814a79644c91d0f18281b087f05937';
 async function verifySelectorOnlySource(run:Run,token:string,transport:typeof fetch,signal:AbortSignal,allowHistorical=true):Promise<void>{
   const paths=['.github/workflows/operations-monitor.yml','scripts/monitor-artifact-state.ts'] as const;
   const local=[await fs.readFile(new URL('../.github/workflows/operations-monitor.yml',import.meta.url)),await fs.readFile(new URL(import.meta.url))];
@@ -191,7 +208,7 @@ async function verifySelectorOnlySource(run:Run,token:string,transport:typeof fe
     const encoded=value.content.replace(/\n/g,'');
     requireValue(encoded.length>0&&/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded),'artifact_selector_source_untrusted');
     const source=Buffer.from(encoded,'base64'),actual=digest(source);
-    requireValue(source.byteLength<=responseLimit&&(actual===digest(local[index]!)||allowHistorical&&(index===0&&(actual===releasedWorkflowDigest||actual===preExternalWorkflowDigest||actual===preSupersessionWorkflowDigest)||index===1&&(actual===originalSelectorDigest||actual===releasedSelectorDigest||actual===preExternalSelectorDigest||actual===preSupersessionSelectorDigest))),'artifact_selector_source_untrusted');
+    requireValue(source.byteLength<=responseLimit&&(actual===digest(local[index]!)||allowHistorical&&(index===0&&(actual===releasedWorkflowDigest||actual===preExternalWorkflowDigest||actual===preSupersessionWorkflowDigest)||index===1&&(actual===originalSelectorDigest||actual===releasedSelectorDigest||actual===preExternalSelectorDigest||actual===preSupersessionSelectorDigest||actual===preStatusRefreshSelectorDigest))),'artifact_selector_source_untrusted');
   }
 }
 
@@ -218,10 +235,14 @@ export async function selectMonitorArtifact(options:SelectionOptions,transport:t
     let candidates=selected?[selected]:previous,page=1,oldest=Math.min(...runs.map(run=>run.run_number)),sawStateful=false;
     const verifiedSources=new Set<string>(),seenIds=new Set(runs.map(run=>run.id)),seenNumbers=new Set(runs.map(run=>run.run_number));
     for(;;){
-      for(const candidate of candidates){
+      for(const listed of candidates){
+        let candidate=listed;
         if(!isStateful(candidate))continue;
         sawStateful=true;
-        requireValue(candidate.status==='completed'&&candidate.conclusion!==null,'prior_monitor_run_incomplete');
+        // List metadata can lag a completed first attempt. Refresh its exact
+        // identity once; a live run still blocks all checkpoint access.
+        if(candidate.id!==options.runId&&candidate.run_attempt===1&&(candidate.status!=='completed'||candidate.conclusion===null))candidate=await refreshPriorRun(candidate,options.token,transport,controller.signal);
+        requireCompletedPriorRun(candidate);
         const artifacts=await json(`${api}/runs/${candidate.id}/artifacts?per_page=${artifactLimit}`,options.token,transport,controller.signal);
         try{return artifactResponse(artifacts,candidate,candidate.id===options.runId?maximumAttempt:candidate.run_attempt);}
         catch(error){
@@ -311,4 +332,4 @@ export async function main(args=process.argv.slice(2),env=process.env){
   }
   await fs.appendFile(env.GITHUB_OUTPUT,`artifact_id=${result?.artifactId??''}\nrun_id=${result?.runId??''}\nartifact_name=${result?.name??''}\nsuperseded=false\n`);
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)main().catch(error=>{console.error(JSON.stringify({monitorState:'unavailable',code:error instanceof ArtifactStateError?error.code:'artifact_selector_failed'}));process.exitCode=1;});
+if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)main().catch(error=>{console.error(JSON.stringify({monitorState:'unavailable',code:error instanceof ArtifactStateError?error.code:'artifact_selector_failed',...(error instanceof ArtifactStateError?error.priorRun:{})}));process.exitCode=1;});
