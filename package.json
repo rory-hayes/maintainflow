@@ -57,7 +57,7 @@
     "sharp": "^0.35.5",
     "stripe": "^22.6.1",
     "svix": "^2.3.0",
-    "zod": "^4.5.4"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/mailparser": "^3.4.6",
